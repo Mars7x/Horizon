@@ -38,3 +38,5 @@ high-contrast modes use the original solid `Theme.focus` brush.
 
 - Phase 4.1.2 tones the effect back to a 42% white mix, narrows the highlight plateau, and uses a 4.0-second cycle. This is the preferred balance: still visible on red and other saturated accents, but less dominant than the Phase 4.1.1 contrast pass.
 - Phase 4.1.3 reduces only the white mix from 42% to 38%; highlight width and the 4.0-second cycle remain unchanged for a slightly calmer result.
+
+- Phase 4.1.5 reduces the white mix to 34% while retaining the narrow highlight plateau and 4.0-second cycle. This is the current focus-sweep baseline.

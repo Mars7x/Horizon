@@ -7,7 +7,12 @@ export { GameCardData }
 import { AppRouteView } from "models/navigation.slint";
 export { AppRouteView }
 
+import { TopNavigation } from "components/top-navigation.slint";
+import { Footer } from "components/footer.slint";
 import { HomePage } from "pages/home.slint";
+import { LibraryPage } from "pages/library.slint";
+import { ActivityPage } from "pages/activity.slint";
+import { SettingsPage } from "pages/settings.slint";
 
 export component AppWindow inherits Window {
     title: "Horizon";
@@ -31,8 +36,8 @@ export component AppWindow inherits Window {
     private property <length> logical-width: root.width / root.ui-scale;
     private property <length> logical-height: root.height / root.ui-scale;
 
-    // Rust owns route history/policy. Phase 4.1 publishes the active route
-    // now; Phase 4.2 will use it to switch the central page content.
+    // Rust owns route history/policy. Slint only chooses which page component
+    // to render from the published presentation enum.
     in property <AppRouteView> current-route: AppRouteView.home;
 
     in property <[GameCardData]> games;
@@ -72,16 +77,76 @@ export component AppWindow inherits Window {
                 }
             }
 
-            HomePage {
+            // Phase 4.2 makes header/footer true shell chrome. The routed page
+            // occupies only the central content region; Home compensates for
+            // the shell inset internally so its established scene geometry is
+            // pixel-identical to the Phase 4.1 layout.
+            page-host := Rectangle {
+                x: 0px;
+                y: Metrics.top-chrome-height;
                 width: parent.width;
-                height: parent.height;
-                games: root.games;
-                selected-index: root.selected-index;
-                selected-title: root.selected-title;
+                height: parent.height - Metrics.top-chrome-height - Metrics.footer-height;
+                background: Theme.background;
+                clip: true;
+
+                if root.current-route == AppRouteView.home : HomePage {
+                    width: parent.width;
+                    height: parent.height;
+                    games: root.games;
+                    selected-index: root.selected-index;
+                    selected-title: root.selected-title;
+                    select-game(index) => { root.select-game(index); }
+                }
+
+                if root.current-route == AppRouteView.library : LibraryPage {
+                    width: parent.width;
+                    height: parent.height;
+                }
+
+                if root.current-route == AppRouteView.activity : ActivityPage {
+                    width: parent.width;
+                    height: parent.height;
+                }
+
+                if root.current-route == AppRouteView.settings : SettingsPage {
+                    width: parent.width;
+                    height: parent.height;
+                }
+            }
+
+            // Persistent top chrome lives outside every page. Later Phase 4
+            // passes can add focus/activation without duplicating this shell.
+            Rectangle {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: Metrics.top-chrome-height;
+                background: Theme.surface.with-alpha(Theme.is-dark ? 0.78 : 0.92);
+
+                Rectangle {
+                    x: 0px;
+                    y: parent.height - 1px;
+                    width: parent.width;
+                    height: 1px;
+                    background: Theme.divider.with-alpha(0.55);
+                }
+            }
+
+            TopNavigation {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: Metrics.top-chrome-height;
+            }
+
+            Footer {
+                x: 0px;
+                y: parent.height - Metrics.footer-height;
+                width: parent.width;
+                height: Metrics.footer-height;
                 connected-controller-count: root.connected-controller-count;
                 clock-time: root.clock-time;
                 clock-suffix: root.clock-suffix;
-                select-game(index) => { root.select-game(index); }
             }
         }
     }

@@ -1,0 +1,44 @@
+import { Theme, Metrics, Typography } from "../theme/theme.slint";
+
+// Deliberately presentation-only placeholder used while Phase 4 establishes
+// routing. Real Library/Activity/Settings content arrives in later phases.
+export component PagePlaceholder inherits Rectangle {
+    in property <string> title;
+    in property <string> description;
+
+    background: Theme.background;
+
+    Rectangle {
+        x: Metrics.page-margin;
+        y: (parent.height - self.height) / 2 - 14px;
+        width: parent.width - Metrics.page-margin * 2;
+        height: 112px;
+        background: transparent;
+
+        Text {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: 48px;
+            text: root.title;
+            color: Theme.foreground;
+            font-size: Typography.title-size;
+            font-weight: Typography.title-weight;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        Text {
+            x: 0px;
+            y: 56px;
+            width: parent.width;
+            height: 40px;
+            text: root.description;
+            color: Theme.secondary-foreground;
+            font-size: Typography.body-size;
+            font-weight: Typography.body-weight;
+            horizontal-alignment: center;
+            vertical-alignment: top;
+        }
+    }
+}

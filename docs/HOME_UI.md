@@ -220,3 +220,8 @@ The focus sweep keeps the accent-to-white approach so saturated accents remain r
 ## Phase 4.1.3 focus sweep balance
 
 The white mix is reduced slightly from 42% to 38%. Highlight width and the 4.0-second cycle are unchanged. Reduced Motion and High Contrast remain static.
+
+
+## Phase 4.1.5 focus sweep balance
+
+The white mix is reduced to 34%. Highlight width and the 4.0-second cycle remain unchanged. This is the current focus-sweep baseline. Reduced Motion and High Contrast remain static.

@@ -34,8 +34,8 @@ impl NavigationController {
         self.navigator.borrow().current()
     }
 
-    /// Entry point for future page/header callbacks. Phase 4.1 establishes the
-    /// route model and publication boundary; Phase 4.2 will render each route.
+    /// Entry point for shell/header callbacks. Route policy and history remain
+    /// Rust-owned while Slint renders the published active route.
     pub fn navigate_to(&self, ui: &AppWindow, route: AppRoute) {
         let from = self.current_route();
         if self.navigator.borrow_mut().navigate_to(route) {
@@ -81,7 +81,7 @@ impl NavigationController {
                     ?route,
                     action = ?event.action,
                     repeated = event.repeated,
-                    "page action deferred until its Phase 4 view exists"
+                    "page-local action deferred until its controller is introduced"
                 );
             }
         }

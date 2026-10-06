@@ -221,7 +221,7 @@ Use an Architecture Decision Record when a change introduces or reverses a signi
 
 ## Current phase boundary
 
-The repository currently contains work through **Phase 4.1**.
+The repository currently contains work through **Phase 4.2**.
 
 Implemented:
 
@@ -253,10 +253,12 @@ Implemented:
 - explicit back-stack and global Home reset semantics
 - `NavigationController` between semantic input and page controllers
 - active route published to Slint as presentation state
+- persistent app-level top/footer chrome
+- route-driven central page host for Home, Library, Activity, and Settings
+- presentation-only placeholder pages for Library, Activity, and Settings
 
 Not yet implemented:
 
-- visible multi-page shell/page switching
 - focus-region navigation
 - page transitions
 - SQLite library
@@ -269,7 +271,7 @@ Do not prematurely implement later-phase behavior as a shortcut while working on
 
 ## Phase 4 target
 
-Phase 4 should establish the application navigation shell without adding persistence or real game sources. **Phase 4.1 is complete for items 1 and the route/action boundary of item 3; later Phase 4 passes continue the remaining work:**
+Phase 4 should establish the application navigation shell without adding persistence or real game sources. **Phase 4.2 is complete for the route model, route/action boundary, and visible shell composition; later Phase 4 passes continue the remaining work:**
 
 1. Define Rust-owned navigation state for Home, Library, Activity, and Settings.
 2. Define focus regions so Up/Down/Left/Right have deterministic screen-level behavior.
@@ -320,7 +322,7 @@ offline, locked Cargo build as described in `flatpak/README.md` and ADR 0006.
 Horizon intentionally does not enable Slint's `backend-default` feature. The
 application must call `platform::slint_backend::initialize()` before
 `slint::set_xdg_app_id()`, creating `AppWindow`, or invoking another
-platform-dependent Slint API. The selected stack is Winit + FemtoVG. Do not fix
+platform-dependent Slint API. The selected stack is Winit + Skia. Do not fix
 backend failures by enabling Qt or setting a Flatpak-only `SLINT_BACKEND`
 environment variable. See ADR 0007.
 
@@ -505,17 +507,20 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
 ## Phase 3.14.16 font/focus invariants
 - LINE Seed JP development packaging downloads the four canonical static TTFs from Google Fonts commit `874ec71eac706dd23900d1305449abed6767b7df`; do not return to heuristic selection from a multi-subset archive.
 - Validate downloaded font payloads as SFNT data before installing them. Release packaging must eventually promote the same immutable files to SHA-256-pinned flatpak-builder sources.
-- The focus accent sweep is a brush change on the existing single bracket layer, not an extra glow/halo. Keep it calm and restrained, derive the highlight from the current accent, and disable it for reduced-motion and high-contrast modes. The Phase 3.14.17 baseline is a 4.2 s cycle with a modestly brighter/wider highlight; do not turn it into a rainbow, glow, or second layer.
+- The focus accent sweep is a brush change on the existing single bracket layer, not an extra glow/halo. Keep it calm and restrained, derive the highlight from the current accent, and disable it for reduced-motion and high-contrast modes. The current Phase 4.1.5 baseline is a 4.0 s cycle with a 34% white mix and narrow highlight plateau; do not turn it into a rainbow, glow, or second layer.
 
 
-## Phase 4.1 navigation invariants
+## Phase 4.2 navigation/shell invariants
 
 - Top-level route history is Rust-owned in `src/navigation/`; Slint must never push/pop history.
 - `AppRoute` currently contains Home, Library, Activity, and Settings only. Do not force Friends/Album/Web into top-level routes before their later utility-navigation design is decided.
 - `InputManager`, keyboard mapping, and SDL mapping remain screen-agnostic and emit only semantic `UiActionEvent` values.
 - `presentation::NavigationController` is the screen-level input boundary: global Back/Home are handled there and remaining actions are forwarded to the active page controller.
 - Global Home clears the back stack and establishes Home as the root; Back after Home must not return to the abandoned page.
-- Phase 4.1 publishes `AppWindow.current-route` but intentionally leaves Home as the only rendered page. Page switching belongs to Phase 4.2.
+- `AppWindow.current-route` drives exactly one component in the central page host; route history/policy still belongs to Rust.
+- `TopNavigation` and `Footer` are persistent app-shell chrome and must not be duplicated back into route pages.
+- Home subtracts `Metrics.top-chrome-height` from its internal scene origin so moving it into the central host does not change established screen-space geometry.
+- Library, Activity, and Settings are presentation-only placeholders in Phase 4.2; do not add persistence/source behavior to make them look complete.
 - Keep route-state tests independent of Slint rendering and controller hardware. See `docs/NAVIGATION.md` and ADR 0028.
 
 
@@ -526,8 +531,8 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
 - Reduced Motion and High Contrast must use the static solid focus color.
 
 
-## Phase 4.1.3 focus sweep baseline
+## Phase 4.1.5 focus sweep baseline
 
-- Keep the focus sweep visible but restrained: 38% white mix, narrow central highlight, 4.0 s cycle.
+- Keep the focus sweep visible but restrained: 34% white mix, narrow central highlight, 4.0 s cycle.
 - Do not increase the highlight back to the Phase 4.1.1 62% white mix without explicit visual direction.
 - Preserve the single-layer/no-halo invariant and static Reduced Motion / High Contrast behavior.

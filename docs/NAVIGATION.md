@@ -1,10 +1,10 @@
-# Phase 4 navigation architecture
+# Phase 4 navigation shell
 
-Phase 4 turns Horizon's single-screen prototype into an application shell. Phase 4.1 establishes the route model and action-routing boundary without replacing the current Home view yet.
+Phase 4 turns Horizon's single-screen prototype into an application shell. Phase 4.1 established the Rust-owned route model and action-routing boundary. Phase 4.2 makes that route state control real page composition while keeping shell chrome persistent.
 
 ## Ownership
 
-Top-level navigation is Rust-owned.
+Top-level navigation remains Rust-owned.
 
 ```text
 keyboard / SDL3
@@ -19,6 +19,9 @@ NavigationController ──────────────► active page c
   Navigator                          HomeController
       │                                  │
       └────────────► Slint presentation state
+                         │
+                         ▼
+                   routed page shell
 ```
 
 `src/navigation/` is pure Rust and has no Slint, SDL, Flatpak, portal, or persistence dependency. It owns the active route and back stack.
@@ -32,7 +35,7 @@ NavigationController ──────────────► active page c
 
 Slint never pushes or pops navigation history.
 
-## Phase 4.1 routes
+## Routes
 
 The top-level route type contains:
 
@@ -41,7 +44,7 @@ The top-level route type contains:
 - `Activity`
 - `Settings`
 
-Friends, Album, and Web are not added as top-level routes by Phase 4.1. Their final page/overlay behavior belongs to the later utility-navigation pass.
+Friends, Album, and Web are not top-level routes yet. Their final page/overlay behavior belongs to the utility-navigation pass.
 
 ## History semantics
 
@@ -51,11 +54,30 @@ Friends, Album, and Web are not added as top-level routes by Phase 4.1. Their fi
 
 `Navigator::go_home()` is intentionally different from normal navigation: it makes Home the root and clears the back stack. Pressing Back after the global Home action must not return to the page that Home just left.
 
-## Phase 4.1 UI behavior
+## Phase 4.2 shell composition
 
-The visual shell remains the existing Home screen. The active route is already published to `AppWindow.current-route`, but `ui/app.slint` does not switch page components until Phase 4.2.
+`AppWindow` now owns three persistent layers:
 
-This is deliberate. Phase 4.1 proves the navigation policy and input boundary independently before page composition, focus regions, or transition animation are added.
+1. top chrome (`TopNavigation` and its surface);
+2. one routed central page host;
+3. the footer (`Footer`).
+
+Only the central page host changes with `AppWindow.current-route`. Header status, clock, controller state, and footer controls are no longer duplicated by individual pages.
+
+The central host instantiates exactly one of:
+
+- `HomePage`
+- `LibraryPage`
+- `ActivityPage`
+- `SettingsPage`
+
+The non-Home pages are intentionally presentation-only placeholders. Phase 4.2 does not add persistence, source imports, activity data, or settings behavior.
+
+### Home geometry preservation
+
+Before Phase 4.2, `HomePage` occupied the entire design surface and also contained the header/footer. The routed content host now begins below `Metrics.top-chrome-height`, so `HomePage` subtracts that inset from the carousel's established Y coordinate. This keeps the title, connector, shelf, cards, and focus indicator in the same screen-space positions as Phase 4.1.
+
+Do not move the Home scene merely because it is now a child of the central host.
 
 ## Input invariants
 
@@ -64,7 +86,8 @@ This is deliberate. Phase 4.1 proves the navigation policy and input boundary in
 - Other actions are forwarded to the active page controller.
 - Repeated activation/global actions remain filtered by the input adapters; the navigation controller also refuses repeated Back/Home defensively.
 - The existing Home carousel selection and fresh-edge wrapping behavior remain owned by `HomeController`.
+- Placeholder Library/Activity/Settings pages intentionally have no page-local input behavior yet.
 
 ## Next pass
 
-Phase 4.2 will turn the published route into a real page shell while keeping the header/footer and existing Home composition intact. It should not introduce SQLite, source imports, or launching.
+Phase 4.3 should make the utility/header navigation actionable and introduce deterministic focus movement into and out of the top utility region. It should use the existing Rust route API rather than moving route policy into Slint.

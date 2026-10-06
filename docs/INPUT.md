@@ -83,15 +83,16 @@ The Slint `FocusScope` forwards a logical key string and repeat flag to Rust. Ru
 
 Unrecognized keys are rejected so they are not silently claimed by Horizon.
 
-## Presentation behavior after Phase 4.1
+## Presentation behavior after Phase 4.2
 
-The Home game carousel remains the only fully rendered page target, but Phase 4.1 now inserts the Rust `NavigationController` above page controllers:
+The Rust `NavigationController` remains above page controllers while `AppWindow` now renders the published active route inside a persistent shell:
 
-- Left / Right forwarded to `HomeController` move the selected game
+- Left / Right forwarded to `HomeController` move the selected game when Home is active
 - pointer clicks still select through the same `HomeController`
 - Accept is recognized but intentionally does not launch anything yet
 - Back is interpreted at the navigation layer and restores route history when available
 - Home resets top-level history to the Home root
+- Library, Activity, and Settings currently render presentation-only placeholders and intentionally ignore page-local actions
 - Up / Down / Menu / bumpers remain semantic and gain additional screen-level behavior in later Phase 4 passes
 
 The input adapters themselves are unchanged: they never inspect or choose application routes. See `NAVIGATION.md`.

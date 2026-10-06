@@ -96,3 +96,16 @@ Phase 4.1 introduces the top-level navigation model without changing the visible
 - unit tests for route/history behavior without rendering or SDL hardware.
 
 The active route is published to Slint, but Phase 4.1 still renders the existing Home page only. Actual page composition belongs to Phase 4.2. See `NAVIGATION.md` and ADR 0028.
+
+## Phase 4.2 boundary
+
+Phase 4.2 turns the published route into visible shell composition:
+
+- `AppWindow` owns persistent top and bottom chrome;
+- a central clipped page host renders exactly one route component;
+- Home is now a real routed page rather than the entire application surface;
+- Library, Activity, and Settings have presentation-only placeholder pages;
+- Home's established scene geometry is preserved across the shell refactor;
+- page switching is driven only by Rust-published `AppRouteView` state.
+
+Phase 4.2 does not add utility focus navigation, page transitions, persistence, imports, launching, or production Activity/Settings behavior. See `NAVIGATION.md` and ADR 0029.
