@@ -7,8 +7,9 @@ use crate::{
     AppRouteView, AppWindow, UtilityOverlayView,
     input::{UiAction, UiActionEvent},
     navigation::{
-        AppRoute, Navigator, ShellFocus, ShellFocusRegion, TopUtility, UtilityDestination,
-        UtilityOverlay, nearest_game_for_x, nearest_utility_for_x, utility_center_x,
+        AppRoute, Navigator, RouteFocusMemory, ShellFocus, ShellFocusRegion, TopUtility,
+        UtilityDestination, UtilityOverlay, nearest_game_for_x, nearest_utility_for_x,
+        utility_center_x,
     },
 };
 
@@ -22,6 +23,7 @@ use super::home::HomeController;
 pub struct NavigationController {
     navigator: RefCell<Navigator>,
     focus: RefCell<ShellFocus>,
+    focus_memory: RefCell<RouteFocusMemory>,
     overlay: RefCell<Option<UtilityOverlay>>,
     home: Rc<HomeController>,
 }
@@ -31,6 +33,7 @@ impl NavigationController {
         let controller = Rc::new(Self {
             navigator: RefCell::new(Navigator::default()),
             focus: RefCell::new(ShellFocus::default()),
+            focus_memory: RefCell::new(RouteFocusMemory::default()),
             overlay: RefCell::new(None),
             home,
         });
@@ -45,14 +48,20 @@ impl NavigationController {
         self.navigator.borrow().current()
     }
 
-    /// Entry point for shell/header callbacks. Route policy and history remain
-    /// Rust-owned while Slint renders the published active route.
+    /// Entry point for shell/header callbacks. Route policy, history, and
+    /// route-local shell-focus restoration remain Rust-owned.
     pub fn navigate_to(&self, ui: &AppWindow, route: AppRoute) {
         self.close_overlay(ui);
         let from = self.current_route();
+        if route == from {
+            return;
+        }
+
+        self.remember_focus_for_route(from);
         if self.navigator.borrow_mut().navigate_to(route) {
             debug!(?from, to = ?route, "top-level route changed");
             self.publish_route(ui);
+            self.restore_focus_for_route(ui, route);
         }
     }
 
@@ -136,10 +145,12 @@ impl NavigationController {
         }
 
         let from = self.current_route();
+        self.remember_focus_for_route(from);
         if self.navigator.borrow_mut().go_back() {
             let to = self.current_route();
-            debug!(?from, ?to, "Back restored previous top-level route");
+            debug!(?from, ?to, "Back restored previous top-level route and focus");
             self.publish_route(ui);
+            self.restore_focus_for_route(ui, to);
         } else {
             debug!(route = ?from, "Back ignored at navigation root");
         }
@@ -147,12 +158,27 @@ impl NavigationController {
 
     fn handle_home(&self, ui: &AppWindow) {
         self.close_overlay(ui);
-        self.focus.borrow_mut().leave_utilities();
-        self.publish_focus(ui);
 
         let from = self.current_route();
+        self.remember_focus_for_route(from);
+
+        let home_snapshot = self
+            .focus_memory
+            .borrow()
+            .recall(AppRoute::Home)
+            .as_content();
+        self.focus.borrow_mut().restore(home_snapshot);
+        self.focus_memory
+            .borrow_mut()
+            .remember(AppRoute::Home, home_snapshot);
+        self.publish_focus(ui);
+
         if self.navigator.borrow_mut().go_home() {
-            debug!(?from, to = ?AppRoute::Home, "Home reset top-level navigation");
+            debug!(
+                ?from,
+                to = ?AppRoute::Home,
+                "Home reset top-level navigation and content focus"
+            );
             self.publish_route(ui);
         }
     }
@@ -222,11 +248,10 @@ impl NavigationController {
     fn activate_utility(&self, ui: &AppWindow, utility: TopUtility) {
         match utility.destination() {
             UtilityDestination::Route(route) => {
-                self.close_overlay(ui);
                 let from = self.current_route();
-                if self.navigator.borrow_mut().navigate_to(route) {
+                self.navigate_to(ui, route);
+                if self.current_route() != from {
                     debug!(?from, to = ?route, ?utility, "utility opened top-level route");
-                    self.publish_route(ui);
                 }
             }
             UtilityDestination::Overlay(overlay) => {
@@ -258,6 +283,17 @@ impl NavigationController {
                 );
             }
         }
+    }
+
+    fn remember_focus_for_route(&self, route: AppRoute) {
+        let snapshot = self.focus.borrow().snapshot();
+        self.focus_memory.borrow_mut().remember(route, snapshot);
+    }
+
+    fn restore_focus_for_route(&self, ui: &AppWindow, route: AppRoute) {
+        let snapshot = self.focus_memory.borrow().recall(route);
+        self.focus.borrow_mut().restore(snapshot);
+        self.publish_focus(ui);
     }
 
     fn publish_route(&self, ui: &AppWindow) {

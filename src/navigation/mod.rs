@@ -14,6 +14,19 @@ pub enum AppRoute {
     Settings,
 }
 
+impl AppRoute {
+    const COUNT: usize = 4;
+
+    const fn index(self) -> usize {
+        match self {
+            Self::Home => 0,
+            Self::Library => 1,
+            Self::Activity => 2,
+            Self::Settings => 3,
+        }
+    }
+}
+
 /// The two screen-level focus regions currently available in the shell.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum ShellFocusRegion {
@@ -82,6 +95,78 @@ pub enum UtilityDestination {
     Overlay(UtilityOverlay),
 }
 
+/// Stable shell-focus state remembered independently for each top-level route.
+///
+/// Only durable route-local state is captured here. Temporary reciprocal
+/// Home↔utility transfer anchors are intentionally excluded so they cannot leak
+/// across route changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FocusSnapshot {
+    region: ShellFocusRegion,
+    utility: TopUtility,
+}
+
+impl FocusSnapshot {
+    pub const fn for_route(route: AppRoute) -> Self {
+        let utility = match route {
+            AppRoute::Settings => TopUtility::Settings,
+            AppRoute::Home | AppRoute::Library | AppRoute::Activity => TopUtility::Activity,
+        };
+
+        Self {
+            region: ShellFocusRegion::Content,
+            utility,
+        }
+    }
+
+    pub const fn region(self) -> ShellFocusRegion {
+        self.region
+    }
+
+    pub const fn utility(self) -> TopUtility {
+        self.utility
+    }
+
+    pub const fn as_content(self) -> Self {
+        Self {
+            region: ShellFocusRegion::Content,
+            utility: self.utility,
+        }
+    }
+}
+
+/// Last durable shell-focus state for every routed page.
+///
+/// Route history answers where Back/Home go. This memory independently answers
+/// what owned focus the last time each route was active.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RouteFocusMemory {
+    snapshots: [FocusSnapshot; AppRoute::COUNT],
+}
+
+impl Default for RouteFocusMemory {
+    fn default() -> Self {
+        Self {
+            snapshots: [
+                FocusSnapshot::for_route(AppRoute::Home),
+                FocusSnapshot::for_route(AppRoute::Library),
+                FocusSnapshot::for_route(AppRoute::Activity),
+                FocusSnapshot::for_route(AppRoute::Settings),
+            ],
+        }
+    }
+}
+
+impl RouteFocusMemory {
+    pub fn remember(&mut self, route: AppRoute, snapshot: FocusSnapshot) {
+        self.snapshots[route.index()] = snapshot;
+    }
+
+    pub fn recall(&self, route: AppRoute) -> FocusSnapshot {
+        self.snapshots[route.index()]
+    }
+}
+
 /// Pure Rust focus state for the persistent shell.
 ///
 /// Vertical Home↔header transfer keeps a temporary reciprocal anchor. If the
@@ -106,6 +191,23 @@ impl ShellFocus {
 
     pub const fn utility(self) -> TopUtility {
         self.utility
+    }
+
+    pub const fn snapshot(self) -> FocusSnapshot {
+        FocusSnapshot {
+            region: self.region,
+            utility: self.utility,
+        }
+    }
+
+    /// Restore durable route-local focus and clear all temporary transfer state.
+    pub fn restore(&mut self, snapshot: FocusSnapshot) {
+        self.region = snapshot.region();
+        self.utility = snapshot.utility();
+        self.content_anchor_index = None;
+        self.utility_moved_since_entry = false;
+        self.content_return_utility = None;
+        self.content_return_game_index = None;
     }
 
     pub fn content_anchor_index(self) -> Option<i32> {
@@ -338,8 +440,9 @@ impl Navigator {
 #[cfg(test)]
 mod tests {
     use super::{
-        AppRoute, Navigator, ShellFocus, ShellFocusRegion, TopUtility, UtilityDestination,
-        UtilityOverlay, nearest_game_for_x, nearest_utility_for_x, utility_center_x,
+        AppRoute, FocusSnapshot, Navigator, RouteFocusMemory, ShellFocus, ShellFocusRegion,
+        TopUtility, UtilityDestination, UtilityOverlay, nearest_game_for_x, nearest_utility_for_x,
+        utility_center_x,
     };
 
     #[test]
@@ -506,6 +609,64 @@ mod tests {
 
         assert_eq!(focus.anchored_utility_for_content(5), None);
         assert_eq!(focus.anchored_utility_for_content(4), None);
+    }
+
+    #[test]
+    fn route_focus_memory_has_route_appropriate_defaults() {
+        let memory = RouteFocusMemory::default();
+
+        assert_eq!(
+            memory.recall(AppRoute::Home),
+            FocusSnapshot::for_route(AppRoute::Home)
+        );
+        assert_eq!(
+            memory.recall(AppRoute::Activity).utility(),
+            TopUtility::Activity
+        );
+        assert_eq!(
+            memory.recall(AppRoute::Settings).utility(),
+            TopUtility::Settings
+        );
+        assert_eq!(
+            memory.recall(AppRoute::Settings).region(),
+            ShellFocusRegion::Content
+        );
+    }
+
+    #[test]
+    fn route_focus_memory_keeps_routes_independent() {
+        let mut memory = RouteFocusMemory::default();
+        let mut focus = ShellFocus::default();
+
+        focus.enter_utilities_from_content(TopUtility::Web, 2);
+        memory.remember(AppRoute::Home, focus.snapshot());
+
+        focus.restore(FocusSnapshot::for_route(AppRoute::Settings));
+        focus.enter_utilities();
+        memory.remember(AppRoute::Settings, focus.snapshot());
+
+        assert_eq!(memory.recall(AppRoute::Home).utility(), TopUtility::Web);
+        assert_eq!(
+            memory.recall(AppRoute::Home).region(),
+            ShellFocusRegion::TopUtilities
+        );
+        assert_eq!(
+            memory.recall(AppRoute::Settings).utility(),
+            TopUtility::Settings
+        );
+    }
+
+    #[test]
+    fn restoring_route_focus_drops_temporary_transfer_anchors() {
+        let mut focus = ShellFocus::default();
+        focus.enter_utilities_from_content(TopUtility::Album, 3);
+        let snapshot = focus.snapshot();
+
+        focus.restore(snapshot);
+
+        assert_eq!(focus.region(), ShellFocusRegion::TopUtilities);
+        assert_eq!(focus.utility(), TopUtility::Album);
+        assert_eq!(focus.content_anchor_index(), None);
     }
 
     #[test]

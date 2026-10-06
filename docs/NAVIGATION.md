@@ -98,9 +98,17 @@ Only the region that owns focus may render selection chrome. While the utility r
 
 Activity and Settings activate normal top-level routes. Friends, Album, and Web open transient presentation-only overlays so auxiliary tools do not pollute route history. Back closes an overlay before popping route history; global Home closes overlays, restores content focus, and resets the route stack to Home. Pointer clicks on the header enter the same Rust-owned activation path.
 
+## Phase 4.4 route-local focus restoration
+
+Each top-level route now owns an independent durable shell-focus snapshot. Leaving a route saves whether content or the top utility row owned focus plus that route's last selected utility. Entering or returning to a route restores that snapshot. First visits default to content focus; Activity's default utility is Activity and Settings' default utility is Settings.
+
+This fixes route transitions that previously leaked the source page's utility focus into the destination page. For example, opening Settings from the Home utility row now opens Settings with content focus. Pressing Back restores Home with the utility focus state it had before the transition.
+
+Temporary Home carousel transfer anchors are intentionally not persisted. They exist only while moving directly between a Home game and a utility within the same route. Utility overlays remain modal and do not disturb route focus memory. Global Home still has stronger semantics than Back: it clears route history and always returns Home to content focus.
+
 ## Next pass
 
-Phase 4.4 should expand focus-region behavior where pages gain additional regions and make focus restoration explicit per routed page. It should preserve the input and shell boundaries established here.
+Phase 4.5 should formalize global Back/Home/Menu behavior and controller/keyboard mappings on top of the now-stable route and focus restoration model.
 
 
 Phase 4.3.3's geometry/anchor behavior is recorded in ADR 0031.

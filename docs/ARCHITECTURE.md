@@ -113,3 +113,11 @@ Phase 4.2 does not add utility focus navigation, page transitions, persistence, 
 ## Phase 4.3 shell focus boundary
 
 The navigation layer also owns screen-level focus between page content and persistent header utilities. Pure Rust types in `src/navigation/` describe the focus region, selected utility, and whether a utility maps to a route or transient overlay. `presentation::NavigationController` publishes those decisions to Slint. Slint may emit a utility activation callback for pointer input, but it must not choose routes, mutate history, or decide overlay policy.
+
+## Phase 4.4 route-focus boundary
+
+Route history and shell focus remain separate concerns but are coordinated by the presentation navigation controller. `RouteFocusMemory` in `src/navigation/` stores one durable `FocusSnapshot` per `AppRoute`. A snapshot contains only the owning shell region and selected utility; temporary Home spatial-transfer anchors are deliberately excluded.
+
+Before a top-level route change, `NavigationController` saves the source route's snapshot. After the route changes it restores the destination route's snapshot before further input is dispatched. Back therefore restores both route and route-local shell focus. Global Home resets Home to content focus while clearing route history. Slint continues to render only the published state and does not own restoration policy.
+
+See ADR 0032.

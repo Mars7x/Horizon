@@ -551,3 +551,13 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
 - Exactly one focus region should present selection chrome at a time. When top utilities own focus, Home game focus brackets, selected-game title pill, connector line, and connector dot must all be hidden. Slint may report rendered geometry, but Rust owns the shortest-distance/return-anchor focus decision. See ADR 0031.
 
 - Utility-row focus uses a compact fixed-size accent orb/ring treatment with a restrained 2px icon lift. Utility icons never scale on focus. Do not add utility text labels. The 40x40 utility layout cells stay fixed so spatial center calculations remain stable; only the visual treatment may extend outside them.
+
+## Phase 4.4 focus restoration invariants
+
+- Every top-level route remembers its own durable shell-focus snapshot: content vs top utilities and the last selected utility for that route.
+- Route changes must save the source route's shell focus before switching and restore the destination route's saved focus afterward.
+- First visits default to content focus. Activity defaults its remembered utility to Activity; Settings defaults to Settings.
+- Temporary reciprocal Home↔utility anchors are never persisted across route changes.
+- Back restores the destination route's remembered focus. Global Home always lands on Home content focus while preserving Home's remembered utility identity for future use.
+- Utility overlays do not alter route focus memory; closing an overlay returns to the same utility focus.
+

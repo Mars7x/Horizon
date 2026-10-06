@@ -140,3 +140,7 @@ Input adapters preserve a `repeated` bit alongside each semantic action. A fresh
 ## Phase 4.3 shell focus routing
 
 Directional input remains semantic before it reaches screen logic. `NavigationController` interprets Up/Down when crossing between page content and the persistent top utility row, while Left/Right move the selected utility whenever that row owns focus. On Home, fresh vertical transfers use the shortest rendered center-to-center horizontal distance. The resulting utility↔game pair is sticky in both directions: immediately reversing direction returns to the exact element the user came from, while horizontal movement in the destination region invalidates that pair and restores nearest-center behavior. Slint reports geometry only; Rust owns the focus decision. SDL3 and keyboard adapters remain unaware of focus regions, routes, utility names, or geometry math. Held Left/Right repeats naturally through the existing semantic repeat pipeline and clamps at the ends of the utility strip.
+
+## Phase 4.4 route-local focus restoration
+
+Focus ownership is remembered per top-level route above the input-adapter layer. SDL3 and keyboard still emit only `UiActionEvent`. When navigation changes routes, Rust saves the source route's shell focus and restores the destination route's saved focus. Back therefore restores the focus region that belonged to the previous page, while global Home always returns Home to content focus. Temporary spatial pairing anchors are route-local and are discarded during route restoration.
