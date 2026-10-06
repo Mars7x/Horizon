@@ -221,7 +221,7 @@ Use an Architecture Decision Record when a change introduces or reverses a signi
 
 ## Current phase boundary
 
-The repository currently contains work through **Phase 4.3**.
+The repository currently contains work through **Phase 4.5**.
 
 Implemented:
 
@@ -256,6 +256,9 @@ Implemented:
 - persistent app-level top/footer chrome
 - route-driven central page host for Home, Library, Activity, and Settings
 - presentation-only placeholder pages for Library, Activity, and Settings
+- route-local shell-focus restoration for Home, Library, Activity, and Settings
+- explicit global Back/Menu/Home policy with modal shell Menu state
+- tested keyboard/controller mappings for global shell actions
 
 Not yet implemented:
 
@@ -270,7 +273,7 @@ Do not prematurely implement later-phase behavior as a shortcut while working on
 
 ## Phase 4 target
 
-Phase 4 should establish the application navigation shell without adding persistence or real game sources. **Phase 4.3 is complete for the route model, visible shell composition, and top-utility focus/activation; later Phase 4 passes continue the remaining work:**
+Phase 4 should establish the application navigation shell without adding persistence or real game sources. **Phase 4.5 is complete for route/focus restoration and global action policy; later Phase 4 passes continue the remaining work:**
 
 1. Define Rust-owned navigation state for Home, Library, Activity, and Settings.
 2. Define focus regions so Up/Down/Left/Right have deterministic screen-level behavior.
@@ -558,6 +561,16 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
 - Route changes must save the source route's shell focus before switching and restore the destination route's saved focus afterward.
 - First visits default to content focus. Activity defaults its remembered utility to Activity; Settings defaults to Settings.
 - Temporary reciprocal Home↔utility anchors are never persisted across route changes.
-- Back restores the destination route's remembered focus. Global Home always lands on Home content focus while preserving Home's remembered utility identity for future use.
+- Back restores the destination route's remembered focus. Global Home always lands on Home content focus and the first Home game while preserving Home's remembered utility identity for future use.
 - Utility overlays do not alter route focus memory; closing an overlay returns to the same utility focus.
+
+## Phase 4.5 global action invariants
+
+- `Back`, `Menu`, and `Home` are global shell actions. Input adapters only map hardware/keys to these semantic actions; they never implement navigation policy.
+- Global actions are fresh-press only. Repeated global actions must be rejected by adapters and defensively ignored by `NavigationController`.
+- Back priority is: shell menu → utility overlay → top-level route history → no-op at the root.
+- Menu toggles the global shell menu when no utility overlay is open. Utility overlays remain modal and block Menu rather than stacking modals.
+- Home closes every modal surface, clears top-level history, returns Home to content focus, and selects the first Home game. Global Home never restores the previously selected Home game.
+- Opening/closing the shell menu must not mutate route history or route-local focus memory.
+- Controller mapping remains South=Accept, East=Back, Start=Menu, Guide=Home. Keyboard mapping remains Return/Space=Accept, Escape/Back=Back, Menu=Menu, Home=Home.
 

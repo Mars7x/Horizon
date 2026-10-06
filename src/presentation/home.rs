@@ -22,6 +22,10 @@ impl HomeState {
         self.selected_index
     }
 
+    fn reset_for_global_home(&mut self, game_count: usize) -> i32 {
+        self.select(0, game_count)
+    }
+
     fn move_by(&mut self, delta: i32, game_count: usize, allow_wrap: bool) -> i32 {
         if game_count == 0 {
             self.selected_index = 0;
@@ -88,6 +92,15 @@ impl HomeController {
 
     pub fn selected_index(&self) -> i32 {
         self.state.borrow().selected_index
+    }
+
+    /// Reset Home to its canonical global-Home destination: the first game.
+    pub fn reset_for_global_home(&self, ui: &AppWindow) {
+        let selected_index = self
+            .state
+            .borrow_mut()
+            .reset_for_global_home(self.titles.len());
+        self.publish_selection(ui, selected_index);
     }
 
     /// Select a game from shell-level spatial focus transfer. Pointer and page
@@ -259,6 +272,13 @@ mod tests {
         titles.sort_unstable();
         titles.dedup();
         assert_eq!(titles.len(), games.len());
+    }
+
+    #[test]
+    fn global_home_reset_selects_first_game() {
+        let mut state = HomeState::default();
+        assert_eq!(state.select(6, 8), 6);
+        assert_eq!(state.reset_for_global_home(8), 0);
     }
 
     #[test]

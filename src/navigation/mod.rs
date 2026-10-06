@@ -384,6 +384,43 @@ pub fn nearest_game_for_x(
         .clamp(0.0, game_count.saturating_sub(1) as f32) as i32
 }
 
+/// Global shell-menu state.
+///
+/// The menu is modal presentation state rather than a route: opening it must
+/// not modify top-level history or route-local focus memory. Menu and Back can
+/// close it; Home also closes it before resetting navigation.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ShellMenuState {
+    open: bool,
+}
+
+impl ShellMenuState {
+    pub const fn is_open(self) -> bool {
+        self.open
+    }
+
+    pub fn open(&mut self) -> bool {
+        if self.open {
+            return false;
+        }
+        self.open = true;
+        true
+    }
+
+    pub fn close(&mut self) -> bool {
+        if !self.open {
+            return false;
+        }
+        self.open = false;
+        true
+    }
+
+    pub fn toggle(&mut self) -> bool {
+        self.open = !self.open;
+        self.open
+    }
+}
+
 /// Pure Rust navigation state for Horizon's top-level shell.
 ///
 /// `navigate_to` behaves like pushing a destination onto a back stack. The
@@ -441,8 +478,8 @@ impl Navigator {
 mod tests {
     use super::{
         AppRoute, FocusSnapshot, Navigator, RouteFocusMemory, ShellFocus, ShellFocusRegion,
-        TopUtility, UtilityDestination, UtilityOverlay, nearest_game_for_x, nearest_utility_for_x,
-        utility_center_x,
+        ShellMenuState, TopUtility, UtilityDestination, UtilityOverlay, nearest_game_for_x,
+        nearest_utility_for_x, utility_center_x,
     };
 
     #[test]
@@ -609,6 +646,22 @@ mod tests {
 
         assert_eq!(focus.anchored_utility_for_content(5), None);
         assert_eq!(focus.anchored_utility_for_content(4), None);
+    }
+
+    #[test]
+    fn shell_menu_toggle_and_close_are_history_independent_state() {
+        let mut menu = ShellMenuState::default();
+
+        assert!(!menu.is_open());
+        assert!(menu.open());
+        assert!(menu.is_open());
+        assert!(!menu.open());
+        assert!(!menu.toggle());
+        assert!(!menu.is_open());
+        assert!(menu.toggle());
+        assert!(menu.close());
+        assert!(!menu.is_open());
+        assert!(!menu.close());
     }
 
     #[test]

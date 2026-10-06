@@ -1,0 +1,74 @@
+import { Theme, Metrics, Typography } from "../theme/theme.slint";
+
+// Phase 4.5 presentation-only shell menu. Rust owns modal state and global
+// Back/Menu/Home semantics. Page-specific actions arrive in later phases.
+export component ShellMenuOverlay inherits Rectangle {
+    in property <bool> open: false;
+
+    visible: root.open;
+    background: Theme.background.with-alpha(Theme.is-dark ? 0.76 : 0.62);
+
+    // Keep the modal truly modal for pointer users as well. Keyboard/controller
+    // policy still lives in Rust.
+    TouchArea {
+        width: parent.width;
+        height: parent.height;
+        clicked => {}
+    }
+
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: parent.width - Metrics.page-margin * 2 < 500px
+            ? parent.width - Metrics.page-margin * 2
+            : 500px;
+        height: 188px;
+        border-radius: 30px;
+        background: Theme.surface-raised;
+        border-width: 1px;
+        border-color: Theme.divider.with-alpha(0.72);
+        drop-shadow-offset-y: 14px;
+        drop-shadow-blur: 36px;
+        drop-shadow-color: Theme.shadow;
+
+        Text {
+            x: Metrics.spacing-xl;
+            y: 34px;
+            width: parent.width - Metrics.spacing-xl * 2;
+            height: 44px;
+            text: "Menu";
+            color: Theme.foreground;
+            font-size: Typography.title-size;
+            font-weight: Typography.title-weight;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        Text {
+            x: Metrics.spacing-xl;
+            y: 88px;
+            width: parent.width - Metrics.spacing-xl * 2;
+            height: 34px;
+            text: "Context actions will appear here as Horizon's pages are completed.";
+            color: Theme.secondary-foreground;
+            font-size: Typography.body-size;
+            font-weight: Typography.body-weight;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            wrap: word-wrap;
+        }
+
+        Text {
+            x: Metrics.spacing-xl;
+            y: parent.height - 42px;
+            width: parent.width - Metrics.spacing-xl * 2;
+            height: 24px;
+            text: "B  Back    •    Menu  Close";
+            color: Theme.secondary-foreground;
+            font-size: Typography.caption-size;
+            font-weight: Typography.emphasis-weight;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}

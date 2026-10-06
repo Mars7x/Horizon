@@ -7,8 +7,8 @@ use crate::{
     AppRouteView, AppWindow, UtilityOverlayView,
     input::{UiAction, UiActionEvent},
     navigation::{
-        AppRoute, Navigator, RouteFocusMemory, ShellFocus, ShellFocusRegion, TopUtility,
-        UtilityDestination, UtilityOverlay, nearest_game_for_x, nearest_utility_for_x,
+        AppRoute, Navigator, RouteFocusMemory, ShellFocus, ShellFocusRegion, ShellMenuState,
+        TopUtility, UtilityDestination, UtilityOverlay, nearest_game_for_x, nearest_utility_for_x,
         utility_center_x,
     },
 };
@@ -24,6 +24,7 @@ pub struct NavigationController {
     navigator: RefCell<Navigator>,
     focus: RefCell<ShellFocus>,
     focus_memory: RefCell<RouteFocusMemory>,
+    shell_menu: RefCell<ShellMenuState>,
     overlay: RefCell<Option<UtilityOverlay>>,
     home: Rc<HomeController>,
 }
@@ -34,11 +35,13 @@ impl NavigationController {
             navigator: RefCell::new(Navigator::default()),
             focus: RefCell::new(ShellFocus::default()),
             focus_memory: RefCell::new(RouteFocusMemory::default()),
+            shell_menu: RefCell::new(ShellMenuState::default()),
             overlay: RefCell::new(None),
             home,
         });
         controller.publish_route(ui);
         controller.publish_focus(ui);
+        controller.publish_shell_menu(ui);
         controller.publish_overlay(ui);
         controller.bind_ui_callbacks(ui);
         controller
@@ -51,6 +54,7 @@ impl NavigationController {
     /// Entry point for shell/header callbacks. Route policy, history, and
     /// route-local shell-focus restoration remain Rust-owned.
     pub fn navigate_to(&self, ui: &AppWindow, route: AppRoute) {
+        self.close_shell_menu(ui);
         self.close_overlay(ui);
         let from = self.current_route();
         if route == from {
@@ -67,14 +71,21 @@ impl NavigationController {
 
     pub fn handle_action(&self, ui: &AppWindow, event: UiActionEvent) {
         match event.action {
-            UiAction::Back if event.repeated => {
-                debug!("repeated Back ignored by navigation layer");
-            }
-            UiAction::Home if event.repeated => {
-                debug!("repeated Home ignored by navigation layer");
+            action if event.repeated && action.is_global() => {
+                debug!(?action, "repeated global action ignored by navigation layer");
             }
             UiAction::Back => self.handle_back(ui),
             UiAction::Home => self.handle_home(ui),
+            UiAction::Menu if self.overlay.borrow().is_some() => {
+                debug!("Menu ignored while utility overlay is modal");
+            }
+            UiAction::Menu => self.handle_menu(ui),
+            _ if self.shell_menu.borrow().is_open() => {
+                debug!(
+                    action = ?event.action,
+                    "shell menu is modal; action ignored until Back/Menu/Home"
+                );
+            }
             _ if self.overlay.borrow().is_some() => {
                 debug!(
                     action = ?event.action,
@@ -139,6 +150,11 @@ impl NavigationController {
     }
 
     fn handle_back(&self, ui: &AppWindow) {
+        if self.close_shell_menu(ui) {
+            debug!("Back closed shell menu");
+            return;
+        }
+
         if self.close_overlay(ui) {
             debug!("Back closed utility overlay");
             return;
@@ -157,6 +173,7 @@ impl NavigationController {
     }
 
     fn handle_home(&self, ui: &AppWindow) {
+        self.close_shell_menu(ui);
         self.close_overlay(ui);
 
         let from = self.current_route();
@@ -171,16 +188,23 @@ impl NavigationController {
         self.focus_memory
             .borrow_mut()
             .remember(AppRoute::Home, home_snapshot);
+        self.home.reset_for_global_home(ui);
         self.publish_focus(ui);
 
         if self.navigator.borrow_mut().go_home() {
             debug!(
                 ?from,
                 to = ?AppRoute::Home,
-                "Home reset top-level navigation and content focus"
+                "Home reset top-level navigation, content focus, and first-game selection"
             );
             self.publish_route(ui);
         }
+    }
+
+    fn handle_menu(&self, ui: &AppWindow) {
+        let open = self.shell_menu.borrow_mut().toggle();
+        debug!(open, route = ?self.current_route(), "global shell menu toggled");
+        self.publish_shell_menu(ui);
     }
 
     fn handle_utility_action(&self, ui: &AppWindow, event: UiActionEvent) {
@@ -232,7 +256,6 @@ impl NavigationController {
             }
             UiAction::Up
             | UiAction::Accept
-            | UiAction::Menu
             | UiAction::LeftBumper
             | UiAction::RightBumper => {
                 debug!(
@@ -241,7 +264,9 @@ impl NavigationController {
                     "action has no top-utility behavior"
                 );
             }
-            UiAction::Back | UiAction::Home => unreachable!("global actions handled first"),
+            UiAction::Back | UiAction::Menu | UiAction::Home => {
+                unreachable!("global actions handled first")
+            }
         }
     }
 
@@ -260,6 +285,14 @@ impl NavigationController {
                 self.publish_overlay(ui);
             }
         }
+    }
+
+    fn close_shell_menu(&self, ui: &AppWindow) -> bool {
+        if !self.shell_menu.borrow_mut().close() {
+            return false;
+        }
+        self.publish_shell_menu(ui);
+        true
     }
 
     fn close_overlay(&self, ui: &AppWindow) -> bool {
@@ -304,6 +337,10 @@ impl NavigationController {
         let focus = *self.focus.borrow();
         ui.set_top_utilities_focused(focus.region() == ShellFocusRegion::TopUtilities);
         ui.set_focused_utility_index(focus.utility().index());
+    }
+
+    fn publish_shell_menu(&self, ui: &AppWindow) {
+        ui.set_shell_menu_open(self.shell_menu.borrow().is_open());
     }
 
     fn publish_overlay(&self, ui: &AppWindow) {

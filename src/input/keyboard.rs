@@ -62,6 +62,29 @@ mod tests {
     }
 
     #[test]
+    fn shell_actions_have_keyboard_equivalents() {
+        assert_eq!(
+            action_for_key(encoded(Key::Escape).as_str(), false),
+            Some(UiAction::Back)
+        );
+        assert_eq!(
+            action_for_key(encoded(Key::Menu).as_str(), false),
+            Some(UiAction::Menu)
+        );
+        assert_eq!(
+            action_for_key(encoded(Key::Home).as_str(), false),
+            Some(UiAction::Home)
+        );
+    }
+
+    #[test]
+    fn repeated_shell_actions_are_rejected() {
+        for key in [Key::Escape, Key::Menu, Key::Home] {
+            assert_eq!(action_for_key(encoded(key).as_str(), true), None);
+        }
+    }
+
+    #[test]
     fn held_accept_is_not_repeated() {
         assert_eq!(
             action_for_key(encoded(Key::Return).as_str(), true),

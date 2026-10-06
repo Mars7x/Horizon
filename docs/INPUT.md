@@ -27,7 +27,7 @@ Keyboard event from Slint/Winit        SDL3 gamepad event
                             ▼
                NavigationController
                     │               │
-          global Back/Home          └────► active page controller
+          global Back/Menu/Home          └────► active page controller
                     │                            │
                     ▼                            ▼
                  Navigator                   HomeController
@@ -143,4 +143,20 @@ Directional input remains semantic before it reaches screen logic. `NavigationCo
 
 ## Phase 4.4 route-local focus restoration
 
-Focus ownership is remembered per top-level route above the input-adapter layer. SDL3 and keyboard still emit only `UiActionEvent`. When navigation changes routes, Rust saves the source route's shell focus and restores the destination route's saved focus. Back therefore restores the focus region that belonged to the previous page, while global Home always returns Home to content focus. Temporary spatial pairing anchors are route-local and are discarded during route restoration.
+Focus ownership is remembered per top-level route above the input-adapter layer. SDL3 and keyboard still emit only `UiActionEvent`. When navigation changes routes, Rust saves the source route's shell focus and restores the destination route's saved focus. Back therefore restores the focus region that belonged to the previous page, while global Home always returns Home to content focus and the first Home game. Temporary spatial pairing anchors are route-local and are discarded during route restoration.
+
+## Phase 4.5 canonical global actions
+
+The shell now treats `Back`, `Menu`, and `Home` as an explicit global-action set. They are handled before focus-region or page-local input and never auto-repeat.
+
+Canonical mappings:
+
+| Semantic action | Keyboard | SDL3 gamepad |
+| --- | --- | --- |
+| Accept | Return / Space | South face button |
+| Back | Escape / Back | East face button |
+| Menu | Menu key | Start |
+| Home | Home key | Guide |
+
+The adapters only produce `UiAction`; `NavigationController` owns meaning. Back closes the topmost modal surface before route history. Menu toggles Horizon's shell menu when no utility overlay is active. Home closes modals and resets navigation to Home content focus with the first Home game selected. Unit tests cover both keyboard and SDL mappings so the two input paths cannot silently drift.
+

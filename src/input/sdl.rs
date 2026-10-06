@@ -451,6 +451,20 @@ mod tests {
     }
 
     #[test]
+    fn shell_buttons_map_to_global_actions() {
+        assert_eq!(action_for_button(Button::Start), Some(UiAction::Menu));
+        assert_eq!(action_for_button(Button::Guide), Some(UiAction::Home));
+        assert_eq!(
+            action_for_button(Button::LeftShoulder),
+            Some(UiAction::LeftBumper)
+        );
+        assert_eq!(
+            action_for_button(Button::RightShoulder),
+            Some(UiAction::RightBumper)
+        );
+    }
+
+    #[test]
     fn left_stick_enters_direction_only_beyond_deadzone() {
         let now = Instant::now();
         let mut navigation = AnalogNavigation::default();

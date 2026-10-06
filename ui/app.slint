@@ -9,6 +9,7 @@ export { AppRouteView, UtilityOverlayView }
 
 import { TopNavigation } from "components/top-navigation.slint";
 import { UtilityOverlay } from "components/utility-overlay.slint";
+import { ShellMenuOverlay } from "components/shell-menu-overlay.slint";
 import { Footer } from "components/footer.slint";
 import { HomePage } from "pages/home.slint";
 import { LibraryPage } from "pages/library.slint";
@@ -43,6 +44,7 @@ export component AppWindow inherits Window {
     in property <bool> top-utilities-focused: false;
     in property <int> focused-utility-index: 2;
     in property <UtilityOverlayView> utility-overlay: UtilityOverlayView.closed;
+    in property <bool> shell-menu-open: false;
 
     // Read-only geometry telemetry for Rust-owned spatial focus transfer.
     // Slint reports where the presentation actually rendered things; Rust
@@ -176,6 +178,17 @@ export component AppWindow inherits Window {
                 connected-controller-count: root.connected-controller-count;
                 clock-time: root.clock-time;
                 clock-suffix: root.clock-suffix;
+            }
+
+            // Global Menu is a modal shell surface, not a route. It sits above
+            // page content and persistent chrome while Rust keeps the source
+            // route/focus untouched underneath.
+            ShellMenuOverlay {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                open: root.shell-menu-open;
             }
         }
     }

@@ -40,6 +40,14 @@ impl UiActionEvent {
 }
 
 impl UiAction {
+    /// Actions interpreted by the application shell before page-local input.
+    ///
+    /// Accept remains contextual: the active focus region/page decides what it
+    /// activates. Back, Menu, and Home are always shell-level actions.
+    pub const fn is_global(self) -> bool {
+        matches!(self, Self::Back | Self::Menu | Self::Home)
+    }
+
     /// Only directional navigation is repeated when a keyboard key is held.
     /// Actions that activate or leave a screen require a fresh press.
     pub const fn repeatable(self) -> bool {
@@ -67,5 +75,14 @@ mod tests {
         assert!(!UiAction::Back.repeatable());
         assert!(!UiAction::Menu.repeatable());
         assert!(!UiAction::Home.repeatable());
+    }
+
+    #[test]
+    fn global_actions_are_explicit() {
+        assert!(UiAction::Back.is_global());
+        assert!(UiAction::Menu.is_global());
+        assert!(UiAction::Home.is_global());
+        assert!(!UiAction::Accept.is_global());
+        assert!(!UiAction::Left.is_global());
     }
 }

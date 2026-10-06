@@ -118,6 +118,15 @@ The navigation layer also owns screen-level focus between page content and persi
 
 Route history and shell focus remain separate concerns but are coordinated by the presentation navigation controller. `RouteFocusMemory` in `src/navigation/` stores one durable `FocusSnapshot` per `AppRoute`. A snapshot contains only the owning shell region and selected utility; temporary Home spatial-transfer anchors are deliberately excluded.
 
-Before a top-level route change, `NavigationController` saves the source route's snapshot. After the route changes it restores the destination route's snapshot before further input is dispatched. Back therefore restores both route and route-local shell focus. Global Home resets Home to content focus while clearing route history. Slint continues to render only the published state and does not own restoration policy.
+Before a top-level route change, `NavigationController` saves the source route's snapshot. After the route changes it restores the destination route's snapshot before further input is dispatched. Back therefore restores both route and route-local shell focus. Global Home resets Home to content focus and the first Home game while clearing route history. Slint continues to render only the published state and does not own restoration policy.
 
 See ADR 0032.
+
+## Phase 4.5 global-action boundary
+
+`UiAction::Back`, `UiAction::Menu`, and `UiAction::Home` are classified as global shell actions in the input model, but their behavior remains in `NavigationController`. Keyboard and SDL adapters only normalize physical input.
+
+The global shell menu is modal presentation state (`ShellMenuState`), not an `AppRoute`. Opening it therefore does not push navigation history or alter route-local focus memory. `NavigationController` publishes only a boolean to Slint, which renders `ShellMenuOverlay`. Back/Menu/Home determine modal lifetime in Rust; global Home additionally resets the Home selection to the first game through `HomeController`.
+
+See ADR 0033.
+

@@ -104,11 +104,23 @@ Each top-level route now owns an independent durable shell-focus snapshot. Leavi
 
 This fixes route transitions that previously leaked the source page's utility focus into the destination page. For example, opening Settings from the Home utility row now opens Settings with content focus. Pressing Back restores Home with the utility focus state it had before the transition.
 
-Temporary Home carousel transfer anchors are intentionally not persisted. They exist only while moving directly between a Home game and a utility within the same route. Utility overlays remain modal and do not disturb route focus memory. Global Home still has stronger semantics than Back: it clears route history and always returns Home to content focus.
+Temporary Home carousel transfer anchors are intentionally not persisted. They exist only while moving directly between a Home game and a utility within the same route. Utility overlays remain modal and do not disturb route focus memory. Global Home still has stronger semantics than Back: it clears route history, always returns Home to content focus, and resets the Home carousel selection to the first game.
+
+## Phase 4.5 global Back/Home/Menu policy
+
+Back, Menu, and Home are now explicit global shell actions handled before utility-region or page-local dispatch.
+
+Back uses deterministic modal/history priority: it closes the global shell menu first, then a transient utility overlay, then pops top-level route history. At the Home root with no modal surface, Back is a no-op.
+
+Menu toggles a presentation-only global shell menu without changing the active route, route history, selected Home game, or route-local focus snapshot. The shell menu is modal: while open, page and utility actions are ignored. A utility overlay already owns modal focus, so Menu is ignored rather than stacking one modal over another.
+
+Home has the strongest semantics. It closes the shell menu and any utility overlay, clears route history, activates Home, forces Home content focus, and selects the first game while retaining Home's remembered utility identity.
+
+All three global actions are fresh-press only. Input adapters reject repeated keyboard/controller activation actions and `NavigationController` defensively rejects repeated global events too.
 
 ## Next pass
 
-Phase 4.5 should formalize global Back/Home/Menu behavior and controller/keyboard mappings on top of the now-stable route and focus restoration model.
+Phase 4.6 should add restrained route/page transitions using design-system motion tokens while preserving Reduced Motion behavior.
 
 
 Phase 4.3.3's geometry/anchor behavior is recorded in ADR 0031.
