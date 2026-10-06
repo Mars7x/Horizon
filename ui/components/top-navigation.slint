@@ -1,0 +1,170 @@
+import { Theme, Metrics } from "../theme/theme.slint";
+import { FriendsIcon, AlbumIcon, ActivityIcon, WebIcon, SettingsIcon } from "utility-icons.slint";
+
+component Separator inherits Rectangle {
+    width: 1px;
+    height: 30px;
+    background: Theme.divider.with-alpha(0.78);
+}
+
+component WifiIndicator inherits Rectangle {
+    width: 30px;
+    height: 28px;
+    background: transparent;
+
+    Path {
+        x: 1px;
+        y: 2px;
+        width: 28px;
+        height: 24px;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: "M 2 8 C 7 3 17 3 22 8 M 5 12 C 9 8 15 8 19 12 M 8.5 16 C 10.5 14 13.5 14 15.5 16 M 12 20 L 12.01 20";
+        fill: transparent;
+        stroke: Theme.foreground;
+        stroke-width: 2.15px;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+    }
+}
+
+component BatteryIndicator inherits Rectangle {
+    width: 35px;
+    height: 24px;
+    background: transparent;
+
+    Path {
+        x: 0px;
+        y: 1px;
+        width: 34px;
+        height: 22px;
+        viewbox-width: 30;
+        viewbox-height: 20;
+        commands: "M 3 4 H 23 Q 26 4 26 7 V 13 Q 26 16 23 16 H 3 Q 1 16 1 13 V 7 Q 1 4 3 4 M 28 8 V 12";
+        fill: transparent;
+        stroke: Theme.foreground;
+        stroke-width: 1.8px;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+    }
+
+    Rectangle {
+        x: 5px;
+        y: 8px;
+        width: 18px;
+        height: 8px;
+        border-radius: 2px;
+        background: Theme.foreground;
+    }
+}
+
+component StatusCluster inherits Rectangle {
+    width: 113px;
+    height: 30px;
+    background: transparent;
+
+    Separator {
+        x: 0px;
+        y: (parent.height - self.height) / 2;
+    }
+
+    WifiIndicator {
+        x: 28px;
+        y: (parent.height - self.height) / 2;
+    }
+
+    BatteryIndicator {
+        x: parent.width - self.width;
+        y: (parent.height - self.height) / 2;
+    }
+}
+
+export component TopNavigation inherits Rectangle {
+    background: transparent;
+    private property <length> content-center-y: root.height / 2;
+
+    Rectangle {
+        x: Metrics.top-edge-inset;
+        y: root.content-center-y - self.height / 2;
+        width: 50px;
+        height: 50px;
+        border-radius: 25px;
+        background: @linear-gradient(145deg, Theme.accent 0%, Theme.accent-hover 100%);
+        border-width: 3px;
+        border-color: Theme.surface-raised;
+        drop-shadow-offset-y: 3px;
+        drop-shadow-blur: 10px;
+        drop-shadow-color: Theme.shadow;
+
+        Text {
+            text: "H";
+            color: Theme.accent-foreground;
+            font-size: 23px;
+            font-weight: 700;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        Rectangle {
+            x: parent.width - 7px;
+            y: 1px;
+            width: 10px;
+            height: 10px;
+            border-radius: 5px;
+            background: Theme.accent;
+            border-width: 2px;
+            border-color: Theme.surface-raised;
+        }
+    }
+
+    Separator {
+        x: Metrics.top-edge-inset + 74px;
+        y: root.content-center-y - self.height / 2;
+    }
+
+    // Placeholder utilities use direct vector Path geometry derived from the
+    // supplied symbolic SVGs. This keeps them crisp and theme-colored at any scale.
+    HorizontalLayout {
+        x: (parent.width - self.width) / 2;
+        y: root.content-center-y - self.height / 2;
+        width: 296px;
+        height: 40px;
+        spacing: 24px;
+
+        Rectangle {
+            width: 40px; height: 40px; background: transparent;
+            FriendsIcon {
+                x: 6px; y: 6px; width: 28px; height: 28px;
+            }
+        }
+        Rectangle {
+            width: 40px; height: 40px; background: transparent;
+            AlbumIcon {
+                x: 6px; y: 6px; width: 28px; height: 28px;
+            }
+        }
+        Rectangle {
+            width: 40px; height: 40px; background: transparent;
+            ActivityIcon {
+                x: 6px; y: 6px; width: 28px; height: 28px;
+            }
+        }
+        Rectangle {
+            width: 40px; height: 40px; background: transparent;
+            WebIcon {
+                x: 6px; y: 6px; width: 28px; height: 28px;
+            }
+        }
+        Rectangle {
+            width: 40px; height: 40px; background: transparent;
+            SettingsIcon {
+                x: 6px; y: 6px; width: 28px; height: 28px;
+            }
+        }
+    }
+
+    StatusCluster {
+        x: parent.width - Metrics.top-edge-inset - self.width;
+        y: root.content-center-y - self.height / 2;
+    }
+}

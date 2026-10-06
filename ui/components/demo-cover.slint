@@ -1,0 +1,68 @@
+import { Metrics, Typography } from "../theme/theme.slint";
+import { GameCardData } from "../models/game-card.slint";
+
+// Phase 3 uses procedural/vector demo artwork, so it is resolution-independent.
+// Real imported cover artwork should prefer >=1024px square sources; see
+// docs/ARTWORK.md. Selection scales the complete GameTile as one visual unit,
+// so fallback text/details do not independently re-layout during focus changes.
+export component DemoCover inherits Rectangle {
+    in property <GameCardData> game;
+
+    background: @linear-gradient(135deg,
+        root.game.cover-primary 0%,
+        root.game.cover-secondary 70%,
+        root.game.cover-highlight 100%);
+    border-radius: Metrics.cover-radius;
+    clip: true;
+
+    Rectangle {
+        x: parent.width * 0.58;
+        y: -parent.height * 0.16;
+        width: parent.width * 0.72;
+        height: parent.height * 0.72;
+        border-radius: self.width / 2;
+        background: root.game.cover-highlight.with-alpha(0.28);
+    }
+
+    Rectangle {
+        x: -parent.width * 0.20;
+        y: parent.height * 0.56;
+        width: parent.width * 0.78;
+        height: parent.height * 0.78;
+        border-radius: self.width / 2;
+        background: root.game.cover-primary.with-alpha(0.34);
+    }
+
+    Rectangle {
+        x: parent.width * 0.10;
+        y: parent.height * 0.11;
+        width: parent.width * 0.30;
+        height: 5px;
+        border-radius: 3px;
+        background: #ffffffb8;
+    }
+
+    Text {
+        x: parent.width * 0.10;
+        y: parent.height * 0.23;
+        width: parent.width * 0.80;
+        height: parent.height * 0.40;
+        text: root.game.monogram;
+        color: #ffffff;
+        font-size: Typography.cover-mark-size;
+        font-weight: Typography.title-weight;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+
+    Text {
+        x: parent.width * 0.10;
+        y: parent.height * 0.76;
+        width: parent.width * 0.80;
+        text: root.game.platform;
+        color: #ffffffe0;
+        font-size: Typography.cover-caption-size;
+        font-weight: Typography.emphasis-weight;
+        horizontal-alignment: center;
+    }
+}

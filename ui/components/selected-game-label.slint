@@ -1,0 +1,31 @@
+import { Theme, Metrics, Typography } from "../theme/theme.slint";
+
+export component SelectedGameLabel inherits Rectangle {
+    in property <string> title;
+
+    width: Metrics.selected-label-width;
+    height: Metrics.selected-label-height;
+    background: Theme.surface-raised;
+    border-radius: 21px;
+    border-width: Theme.high-contrast ? 2px : 1px;
+    border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.42);
+    drop-shadow-offset-y: 3px;
+    drop-shadow-blur: 12px;
+    drop-shadow-color: Theme.shadow;
+
+    // The title is intentionally the only content in the pill. It is centered
+    // on the selected tile axis by HomePage and centered within the pill here.
+    Text {
+        x: 12px;
+        width: parent.width - 24px;
+        height: parent.height;
+        text: root.title;
+        color: Theme.accent;
+        font-family: Typography.game-title-family;
+        font-size: Typography.body-size;
+        font-weight: Typography.game-title-weight;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}

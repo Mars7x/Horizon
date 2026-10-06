@@ -1,0 +1,80 @@
+import { Metrics, Motion, Theme } from "../theme/theme.slint";
+
+// One crisp focus layer. The quarter-circle elbow uses the same visual radius
+// family as the outer game shell. A restrained accent-derived highlight sweeps
+// through the existing stroke; there is still no halo or duplicate under-stroke.
+export component FocusFrame inherits Rectangle {
+    in property <float> scale-factor: 1.0;
+    in property <bool> active: true;
+    background: transparent;
+
+    // Keep the sweep visible on saturated accents without letting it dominate the card.
+    // Reduced-motion and high-contrast modes deliberately fall back to the stable
+    // solid focus color.
+    private property <bool> sweep-enabled:
+        root.active && !Motion.reduced-motion && !Theme.high-contrast;
+    private property <float> sweep-progress: root.sweep-enabled
+        ? mod(animation-tick(), 4000ms) / 4000ms
+        : 0;
+    private property <angle> sweep-angle: 30deg + root.sweep-progress * 360deg;
+    private property <brush> focus-brush: root.sweep-enabled
+        ? @linear-gradient(
+            root.sweep-angle,
+            Theme.focus 0%,
+            Theme.focus 27%,
+            Theme.focus-highlight 48%,
+            Theme.focus-highlight 52%,
+            Theme.focus 73%,
+            Theme.focus 100%
+        )
+        : Theme.focus;
+
+    Path {
+        x: 0px; y: 0px;
+        width: Metrics.focus-arm * root.scale-factor;
+        height: Metrics.focus-arm * root.scale-factor;
+        viewbox-width: 58; viewbox-height: 58;
+        commands: "M 52 6 H 32 A 26 26 0 0 0 6 32 V 52";
+        fill: transparent;
+        stroke: root.focus-brush;
+        stroke-width: Metrics.focus-stroke * root.scale-factor;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+    }
+    Path {
+        x: parent.width - self.width; y: 0px;
+        width: Metrics.focus-arm * root.scale-factor;
+        height: Metrics.focus-arm * root.scale-factor;
+        viewbox-width: 58; viewbox-height: 58;
+        commands: "M 6 6 H 26 A 26 26 0 0 1 52 32 V 52";
+        fill: transparent;
+        stroke: root.focus-brush;
+        stroke-width: Metrics.focus-stroke * root.scale-factor;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+    }
+    Path {
+        x: 0px; y: parent.height - self.height;
+        width: Metrics.focus-arm * root.scale-factor;
+        height: Metrics.focus-arm * root.scale-factor;
+        viewbox-width: 58; viewbox-height: 58;
+        commands: "M 6 6 V 26 A 26 26 0 0 0 32 52 H 52";
+        fill: transparent;
+        stroke: root.focus-brush;
+        stroke-width: Metrics.focus-stroke * root.scale-factor;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+    }
+    Path {
+        x: parent.width - self.width; y: parent.height - self.height;
+        width: Metrics.focus-arm * root.scale-factor;
+        height: Metrics.focus-arm * root.scale-factor;
+        viewbox-width: 58; viewbox-height: 58;
+        commands: "M 52 6 V 26 A 26 26 0 0 1 26 52 H 6";
+        fill: transparent;
+        stroke: root.focus-brush;
+        stroke-width: Metrics.focus-stroke * root.scale-factor;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+    }
+}

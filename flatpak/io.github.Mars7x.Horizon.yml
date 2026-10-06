@@ -1,0 +1,75 @@
+app-id: io.github.Mars7x.Horizon
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: horizon
+
+# GNOME Builder stops before the main module and invokes Cargo inside the SDK.
+# Keep the Rust extension path and development network access at manifest scope
+# so Builder's Cargo invocation sees both. Runtime network access is NOT granted.
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  build-args:
+    - --share=network
+
+finish-args:
+  - --require-version=1.16.0
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # Horizon needs evdev/input access for controller navigation.
+  # Do not broaden this to --device=all.
+  - --device=input
+
+modules:
+  # Install the four canonical Google Fonts LINE Seed JP TTFs from one immutable
+  # Google Fonts commit. This avoids the upstream Python/fontmake dependency stack
+  # and avoids Fontsource's subset-oriented archive layout. Before release/Flathub,
+  # move these URLs into checksum-pinned flatpak-builder sources.
+  - name: line-seed-jp
+    buildsystem: simple
+    build-commands:
+      - python3 install-line-seed-jp.py --prefix /app
+    sources:
+      - type: file
+        path: ../scripts/install-line-seed-jp.py
+
+  - name: SDL3
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DSDL_SHARED=ON
+      - -DSDL_STATIC=OFF
+      - -DSDL_TEST_LIBRARY=OFF
+      - -DSDL_TESTS=OFF
+    sources:
+      - type: archive
+        url: https://github.com/libsdl-org/SDL/releases/download/release-3.4.18/SDL3-3.4.18.tar.gz
+        sha256: 9c75cf16330322c217dedd2e0609f1124f1b54b8633e763467b4684d0f4334a3
+
+  - name: horizon
+    buildsystem: simple
+    build-options:
+      env:
+        CARGO_HOME: /run/build/horizon/cargo
+    build-commands:
+      # Phase 3 development builds intentionally allow Cargo to resolve/fetch
+      # dependencies. Before Flathub/release packaging, commit Cargo.lock,
+      # generate cargo-sources.json, and switch this back to --offline --locked.
+      - cargo build --release
+      - install -Dm0755 target/release/horizon /app/bin/horizon
+      - install -Dm0644 data/io.github.Mars7x.Horizon.desktop /app/share/applications/io.github.Mars7x.Horizon.desktop
+      - install -Dm0644 data/io.github.Mars7x.Horizon.metainfo.xml /app/share/metainfo/io.github.Mars7x.Horizon.metainfo.xml
+      - install -Dm0644 data/io.github.Mars7x.Horizon.svg /app/share/icons/hicolor/scalable/apps/io.github.Mars7x.Horizon.svg
+      - install -Dm0644 LICENSE /app/share/licenses/horizon/LICENSE
+      - install -Dm0644 THIRD_PARTY_NOTICES.md /app/share/doc/horizon/THIRD_PARTY_NOTICES.md
+      - install -Dm0644 LICENSES/CC0-1.0.txt /app/share/licenses/horizon/CC0-1.0.txt
+      - install -Dm0644 LICENSES/CC-BY-SA-3.0-US.txt /app/share/licenses/horizon/CC-BY-SA-3.0-US.txt
+      - install -Dm0644 LICENSES/GPL-2.0-or-later.txt /app/share/licenses/horizon/GPL-2.0-or-later.txt
+      - install -Dm0644 LICENSES/GPL-3.0-or-later.txt /app/share/licenses/horizon/GPL-3.0-or-later.txt
+      - install -Dm0644 LICENSES/OFL-1.1.txt /app/share/licenses/horizon/OFL-1.1.txt
+    sources:
+      - type: dir
+        path: ..

@@ -1,0 +1,147 @@
+import { Theme, Metrics, Motion } from "../theme/theme.slint";
+import { GameCardData } from "../models/game-card.slint";
+import { GameTile } from "game-tile.slint";
+import { SelectedGameLabel } from "selected-game-label.slint";
+
+// The home carousel is modeled as a camera looking onto one larger scene.
+// The rounded shelf, title/connector, game row, and focus frame all share the
+// same world-space camera offset. Focus can move freely through a safe zone;
+// only when it reaches a camera threshold does the complete scene pan.
+export component GameCarousel inherits Rectangle {
+    in property <[GameCardData]> games;
+    in property <int> selected-index: 0;
+    in property <string> selected-title;
+    callback game-selected(int);
+
+    private property <length> camera-offset: 0px;
+    private property <length> content-width: root.games.length * Metrics.game-stride;
+    private property <length> shelf-width:
+        root.content-width + Metrics.carousel-content-padding * 2;
+    private property <length> selected-center-world-x:
+        Metrics.carousel-shelf-left
+        + Metrics.carousel-content-padding
+        + root.selected-index * Metrics.game-stride
+        + Metrics.game-stride / 2;
+    private property <length> shelf-right-world-x:
+        Metrics.carousel-shelf-left + root.shelf-width;
+    private property <length> local-shelf-y:
+        Metrics.carousel-shelf-y - Metrics.selected-label-y;
+
+    background: transparent;
+
+    // This is the camera viewport. The shelf itself does not clip its games;
+    // the entire scene is clipped only at the screen/view boundaries so the
+    // title, connector, shelf, and tiles enter/leave together.
+    clip: true;
+
+    function ensure-selection-in-camera-zone() {
+        if root.games.length == 0 {
+            root.camera-offset = 0px;
+            return;
+        }
+
+        let selected-screen-x = root.selected-center-world-x - root.camera-offset;
+        let left-bound = Metrics.carousel-camera-edge-zone;
+        let right-bound = root.width - Metrics.carousel-camera-edge-zone;
+
+        if selected-screen-x < left-bound {
+            root.camera-offset -= left-bound - selected-screen-x;
+        } else if selected-screen-x > right-bound {
+            root.camera-offset += selected-screen-x - right-bound;
+        }
+
+        // At the start, the shelf's left rounded end sits at the standard
+        // inset. At the end, the right rounded end resolves to the same inset.
+        let maximum-camera = root.shelf-right-world-x
+            - (root.width - Metrics.carousel-shelf-left);
+
+        if maximum-camera <= 0px {
+            root.camera-offset = 0px;
+        } else {
+            if root.camera-offset < 0px {
+                root.camera-offset = 0px;
+            }
+            if root.camera-offset > maximum-camera {
+                root.camera-offset = maximum-camera;
+            }
+        }
+    }
+
+    init => { root.ensure-selection-in-camera-zone(); }
+    changed selected-index => { root.ensure-selection-in-camera-zone(); }
+    changed width => { root.ensure-selection-in-camera-zone(); }
+    changed games => { root.ensure-selection-in-camera-zone(); }
+
+    scene := Rectangle {
+        x: -root.camera-offset;
+        y: 0px;
+        width: Metrics.carousel-shelf-left
+            + root.shelf-width
+            + Metrics.carousel-shelf-left;
+        height: root.height;
+        background: transparent;
+
+        animate x {
+            duration: Motion.carousel-duration;
+            easing: ease-out;
+        }
+
+        // The backdrop is world geometry, not a fixed viewport. Render it
+        // before the connector so the connector color stays visually constant
+        // where it meets the shelf instead of being tinted by the translucent
+        // shelf surface.
+        Rectangle {
+            x: Metrics.carousel-shelf-left;
+            y: root.local-shelf-y;
+            width: root.shelf-width;
+            height: Metrics.carousel-shelf-height;
+            background: Theme.surface.with-alpha(Theme.is-dark ? 0.60 : 0.88);
+            border-radius: Metrics.carousel-shelf-radius;
+            border-width: Theme.high-contrast ? 2px : 1px;
+            border-color: Theme.divider.with-alpha(0.32);
+        }
+
+        SelectedGameLabel {
+            x: root.selected-center-world-x - self.width / 2;
+            y: 0px;
+            title: root.selected-title;
+        }
+
+        // Connector and endpoint sit above the shelf. Both use one exact color
+        // from end to end, including at the backdrop boundary.
+        Rectangle {
+            x: root.selected-center-world-x - 1px;
+            y: Metrics.selected-label-height;
+            width: 2px;
+            height: root.local-shelf-y - Metrics.selected-label-height + 6px;
+            background: Theme.divider;
+
+            Rectangle {
+                x: -3px;
+                y: parent.height - 2px;
+                width: 8px;
+                height: 8px;
+                border-radius: 4px;
+                background: Theme.divider;
+            }
+        }
+
+        track := Rectangle {
+            x: Metrics.carousel-shelf-left + Metrics.carousel-content-padding;
+            y: root.local-shelf-y
+                + (Metrics.carousel-shelf-height - Metrics.game-slot-height) / 2;
+            width: root.content-width;
+            height: Metrics.game-slot-height;
+            background: transparent;
+
+            for game[index] in root.games : GameTile {
+                x: index * Metrics.game-stride;
+                y: 0px;
+                game: game;
+                item-index: index;
+                selected: index == root.selected-index;
+                activated(index) => { root.game-selected(index); }
+            }
+        }
+    }
+}

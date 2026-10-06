@@ -1,0 +1,67 @@
+import { Theme, Metrics } from "../theme/theme.slint";
+import { GameCardData } from "../models/game-card.slint";
+import { TopNavigation } from "../components/top-navigation.slint";
+import { GameCarousel } from "../components/game-carousel.slint";
+import { Footer } from "../components/footer.slint";
+
+export component HomePage inherits Rectangle {
+    in property <[GameCardData]> games;
+    in property <int> selected-index: 0;
+    in property <string> selected-title;
+    in property <int> connected-controller-count: 0;
+    in property <string> clock-time: "";
+    in property <string> clock-suffix: "";
+    callback select-game(int);
+
+    background: Theme.background;
+
+    Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: Metrics.top-chrome-height;
+        background: Theme.surface.with-alpha(Theme.is-dark ? 0.78 : 0.92);
+
+        Rectangle {
+            x: 0px;
+            y: parent.height - 1px;
+            width: parent.width;
+            height: 1px;
+            background: Theme.divider.with-alpha(0.55);
+        }
+    }
+
+    // TopNavigation now spans the actual chrome height. Profile, center nav,
+    // Wi-Fi, and battery therefore resolve from the exact same vertical axis.
+    TopNavigation {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: Metrics.top-chrome-height;
+    }
+
+    // The carousel owns one world-space scene. HomePage supplies only the
+    // camera viewport; title/connector/backdrop/tiles pan together inside it.
+    GameCarousel {
+        x: 0px;
+        y: Metrics.selected-label-y;
+        width: parent.width;
+        height: Metrics.carousel-shelf-y
+            + Metrics.carousel-shelf-height
+            - Metrics.selected-label-y;
+        games: root.games;
+        selected-index: root.selected-index;
+        selected-title: root.selected-title;
+        game-selected(index) => { root.select-game(index); }
+    }
+
+    Footer {
+        x: 0px;
+        y: parent.height - Metrics.footer-height;
+        width: parent.width;
+        height: Metrics.footer-height;
+        connected-controller-count: root.connected-controller-count;
+        clock-time: root.clock-time;
+        clock-suffix: root.clock-suffix;
+    }
+}

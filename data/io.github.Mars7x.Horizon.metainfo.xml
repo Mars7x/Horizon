@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.Mars7x.Horizon</id>
+  <name>Horizon</name>
+  <summary>A console-style game library for Linux</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <description>
+    <p>Horizon is an early-development console-style library for launching games through their existing Linux applications.</p>
+  </description>
+  <launchable type="desktop-id">io.github.Mars7x.Horizon.desktop</launchable>
+  <provides>
+    <binary>horizon</binary>
+  </provides>
+</component>

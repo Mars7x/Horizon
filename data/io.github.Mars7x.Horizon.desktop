@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Horizon
+Comment=Console-style game library for Linux
+Exec=horizon
+Icon=io.github.Mars7x.Horizon
+Terminal=false
+Type=Application
+Categories=Game;
+StartupNotify=true

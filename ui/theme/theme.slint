@@ -1,0 +1,119 @@
+export global Theme {
+    in-out property <bool> is-dark: false;
+    in-out property <bool> high-contrast: false;
+
+    in-out property <color> background: #ffffff;
+    in-out property <color> surface: #f5f5f7;
+    in-out property <color> surface-raised: #ffffff;
+    in-out property <color> foreground: #18181b;
+    in-out property <color> secondary-foreground: #63636b;
+    in-out property <color> divider: #dadae0;
+    in-out property <color> shadow: #00000026;
+
+    in-out property <color> accent: #3584e4;
+    in-out property <color> accent-hover: #317acb;
+    in-out property <color> accent-pressed: #2d70b8;
+    in-out property <color> accent-subtle: #e4effc;
+    in-out property <color> accent-foreground: #ffffff;
+    in-out property <color> focus: #3584e4;
+    in-out property <color> focus-highlight: #62a0ea;
+
+    // Placeholder utility icon colors. Components consume these semantic
+    // tokens; the SVG assets themselves remain untouched and are colorized at render time.
+    out property <color> nav-friends: #f2994a;
+    out property <color> nav-album: #4d91df;
+    out property <color> nav-browser: #75d66d;
+    out property <color> nav-activity: #39b8c4;
+    out property <color> nav-settings: is-dark ? #c6cad2 : #767c86;
+}
+
+export global Metrics {
+    out property <length> spacing-xs: 4px;
+    out property <length> spacing-sm: 8px;
+    out property <length> spacing-md: 16px;
+    out property <length> spacing-lg: 24px;
+    out property <length> spacing-xl: 32px;
+    out property <length> spacing-xxl: 48px;
+
+    out property <length> radius-sm: 8px;
+    out property <length> radius-md: 12px;
+    out property <length> radius-lg: 18px;
+
+    out property <length> page-margin: 40px;
+    out property <length> design-width: 1280px;
+    out property <length> design-height: 720px;
+    out property <length> top-edge-inset: 28px;
+
+    // One reference-style focus layer. The frame sits deliberately outside
+    // the game shell with a visible air gap while keeping the same radius
+    // language. `focus-offset` is the world-space separation from the shell.
+    out property <length> focus-stroke: 10px;
+    out property <length> focus-arm: 58px;
+    out property <length> focus-offset: 9px;
+
+    // Home shell geometry. Phase 3.14.13 brings the main scene closer to
+    // the reference proportions: title nearer the top chrome, a larger shelf,
+    // and larger game cards that occupy more of the central view.
+    out property <length> top-chrome-height: 86px;
+    out property <length> selected-label-y: 112px;
+    out property <length> selected-label-width: 220px;
+    out property <length> selected-label-height: 42px;
+    out property <length> carousel-shelf-y: 190px;
+    out property <length> carousel-shelf-height: 360px;
+    out property <length> carousel-shelf-left: 46px;
+    out property <length> carousel-shelf-radius: 38px;
+    out property <length> carousel-content-padding: 18px;
+    out property <length> carousel-camera-edge-zone: 190px;
+
+    // Phase 3.13 trims only the footer; the top chrome intentionally remains
+    // unchanged. Footer contents sit on the true vertical midpoint.
+    out property <length> footer-height: 92px;
+    out property <length> footer-content-lift: 0px;
+
+    // Larger reference-density cards. The shell/art proportions stay intact while
+    // the carousel occupies more of the vertical and horizontal main view.
+    out property <length> game-tile-size: 220px;
+    out property <length> game-stride: 250px;
+    out property <length> game-slot-height: 320px;
+    out property <float> game-selected-scale: 1.10;
+    out property <length> game-shell-radius: 30px;
+    out property <length> game-art-inset: 20px;
+    out property <length> cover-radius: 18px;
+}
+
+export global Typography {
+    // LINE Seed JP is Horizon's bundled application typeface. The Flatpak
+    // builds the pinned upstream font sources and installs the family into
+    // /app/share/fonts so Slint/fontconfig always resolves this exact family.
+    out property <string> family: "LINE Seed JP";
+    out property <string> clock-family: "LINE Seed JP";
+    out property <string> game-title-family: "LINE Seed JP";
+
+    out property <length> title-size: 32px;
+    out property <length> heading-size: 22px;
+    out property <length> body-size: 16px;
+    out property <length> caption-size: 13px;
+    out property <length> clock-size: 49px;
+    out property <length> clock-suffix-size: 12px;
+    out property <length> cover-mark-size: 36px;
+    out property <length> cover-caption-size: 10px;
+
+    out property <int> title-weight: 700;
+    out property <int> heading-weight: 700;
+    out property <int> body-weight: 400;
+    out property <int> emphasis-weight: 700;
+    // LINE Seed JP has four static weights. Clock uses ExtraBold while
+    // emphasized labels/game titles use Bold.
+    out property <int> clock-weight: 800;
+    out property <int> clock-suffix-weight: 700;
+    out property <int> game-title-weight: 700;
+}
+
+export global Motion {
+    in-out property <bool> reduced-motion: false;
+
+    out property <duration> focus-duration: reduced-motion ? 0ms : 140ms;
+    out property <duration> carousel-duration: reduced-motion ? 0ms : 190ms;
+    out property <duration> page-duration: reduced-motion ? 0ms : 220ms;
+    out property <duration> hover-duration: reduced-motion ? 0ms : 100ms;
+}

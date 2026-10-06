@@ -1,0 +1,32 @@
+import { Metrics, Theme, Typography } from "../theme/theme.slint";
+
+export component ColorChip inherits Rectangle {
+    in property <string> label;
+    in property <color> swatch;
+
+    background: Theme.surface;
+    border-color: Theme.divider;
+    border-width: 1px;
+    border-radius: Metrics.radius-md;
+    height: 72px;
+
+    HorizontalLayout {
+        padding: Metrics.spacing-md;
+        spacing: Metrics.spacing-md;
+
+        Rectangle {
+            width: 36px;
+            height: 36px;
+            border-radius: 18px;
+            background: root.swatch;
+        }
+
+        Text {
+            text: root.label;
+            color: Theme.foreground;
+            font-size: Typography.body-size;
+            font-weight: Typography.emphasis-weight;
+            vertical-alignment: center;
+        }
+    }
+}

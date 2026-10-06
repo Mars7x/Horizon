@@ -1,0 +1,88 @@
+import { Theme, Metrics, Typography, Motion } from "theme/theme.slint";
+export { Theme, Metrics, Typography, Motion }
+
+import { GameCardData } from "models/game-card.slint";
+export { GameCardData }
+
+import { AppRouteView } from "models/navigation.slint";
+export { AppRouteView }
+
+import { HomePage } from "pages/home.slint";
+
+export component AppWindow inherits Window {
+    title: "Horizon";
+    preferred-width: Metrics.design-width;
+    preferred-height: Metrics.design-height;
+    min-width: 800px;
+    min-height: 450px;
+    background: Theme.background;
+    default-font-family: Typography.family;
+    forward-focus: input-scope;
+
+    // Horizon keeps one uniform visual scale, but the logical viewport itself
+    // grows with the native window. This preserves square tiles/type/icon
+    // proportions while allowing 16:9, 16:10, 21:9 and fullscreen windows to
+    // use every available pixel instead of letterboxing a fixed 1280×720 box.
+    private property <float> width-scale: root.width / Metrics.design-width;
+    private property <float> height-scale: root.height / Metrics.design-height;
+    private property <float> ui-scale: root.width-scale < root.height-scale
+        ? root.width-scale
+        : root.height-scale;
+    private property <length> logical-width: root.width / root.ui-scale;
+    private property <length> logical-height: root.height / root.ui-scale;
+
+    // Rust owns route history/policy. Phase 4.1 publishes the active route
+    // now; Phase 4.2 will use it to switch the central page content.
+    in property <AppRouteView> current-route: AppRouteView.home;
+
+    in property <[GameCardData]> games;
+    in-out property <int> selected-index: 0;
+    in property <string> selected-title: "";
+    in property <int> connected-controller-count: 0;
+    in property <string> clock-time: "";
+    in property <string> clock-suffix: "";
+
+    callback select-game(int);
+    callback raw-key-input(string, bool) -> bool;
+
+    design-surface := Rectangle {
+        x: 0px;
+        y: 0px;
+        width: root.logical-width;
+        height: root.logical-height;
+        background: Theme.background;
+        clip: true;
+        transform-origin: { x: 0px, y: 0px };
+        transform-scale: root.ui-scale;
+
+        input-scope := FocusScope {
+            width: parent.width;
+            height: parent.height;
+            focus-on-click: false;
+            focus-on-tab-navigation: false;
+
+            key-pressed(event) => {
+                if (event.text == Key.F11 && !event.repeat) {
+                    root.full-screen = !root.full-screen;
+                    accept
+                } else if (root.raw-key-input(event.text, event.repeat)) {
+                    accept
+                } else {
+                    reject
+                }
+            }
+
+            HomePage {
+                width: parent.width;
+                height: parent.height;
+                games: root.games;
+                selected-index: root.selected-index;
+                selected-title: root.selected-title;
+                connected-controller-count: root.connected-controller-count;
+                clock-time: root.clock-time;
+                clock-suffix: root.clock-suffix;
+                select-game(index) => { root.select-game(index); }
+            }
+        }
+    }
+}
