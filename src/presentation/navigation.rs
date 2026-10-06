@@ -1,22 +1,28 @@
 use std::{cell::RefCell, rc::Rc};
 
+use slint::ComponentHandle;
 use tracing::debug;
 
 use crate::{
-    AppRouteView, AppWindow,
+    AppRouteView, AppWindow, UtilityOverlayView,
     input::{UiAction, UiActionEvent},
-    navigation::{AppRoute, Navigator},
+    navigation::{
+        AppRoute, Navigator, ShellFocus, ShellFocusRegion, TopUtility, UtilityDestination,
+        UtilityOverlay,
+    },
 };
 
 use super::home::HomeController;
 
-/// Bridges pure Rust navigation state to Slint presentation state.
+/// Bridges pure Rust navigation/focus state to Slint presentation state.
 ///
 /// Device adapters remain screen-agnostic. They emit `UiActionEvent`; this
-/// controller decides whether an action is global navigation or belongs to the
-/// active page controller.
+/// controller decides whether an action is global navigation, shell focus, or
+/// page-local behavior.
 pub struct NavigationController {
     navigator: RefCell<Navigator>,
+    focus: RefCell<ShellFocus>,
+    overlay: RefCell<Option<UtilityOverlay>>,
     home: Rc<HomeController>,
 }
 
@@ -24,9 +30,14 @@ impl NavigationController {
     pub fn new(ui: &AppWindow, home: Rc<HomeController>) -> Rc<Self> {
         let controller = Rc::new(Self {
             navigator: RefCell::new(Navigator::default()),
+            focus: RefCell::new(ShellFocus::default()),
+            overlay: RefCell::new(None),
             home,
         });
         controller.publish_route(ui);
+        controller.publish_focus(ui);
+        controller.publish_overlay(ui);
+        controller.bind_ui_callbacks(ui);
         controller
     }
 
@@ -37,6 +48,7 @@ impl NavigationController {
     /// Entry point for shell/header callbacks. Route policy and history remain
     /// Rust-owned while Slint renders the published active route.
     pub fn navigate_to(&self, ui: &AppWindow, route: AppRoute) {
+        self.close_overlay(ui);
         let from = self.current_route();
         if self.navigator.borrow_mut().navigate_to(route) {
             debug!(?from, to = ?route, "top-level route changed");
@@ -52,25 +64,150 @@ impl NavigationController {
             UiAction::Home if event.repeated => {
                 debug!("repeated Home ignored by navigation layer");
             }
-            UiAction::Back => {
-                let from = self.current_route();
-                if self.navigator.borrow_mut().go_back() {
-                    let to = self.current_route();
-                    debug!(?from, ?to, "Back restored previous top-level route");
-                    self.publish_route(ui);
-                } else {
-                    debug!(route = ?from, "Back ignored at navigation root");
-                }
+            UiAction::Back => self.handle_back(ui),
+            UiAction::Home => self.handle_home(ui),
+            _ if self.overlay.borrow().is_some() => {
+                debug!(
+                    action = ?event.action,
+                    "utility overlay is modal; action ignored until Back/Home"
+                );
             }
-            UiAction::Home => {
-                let from = self.current_route();
-                if self.navigator.borrow_mut().go_home() {
-                    debug!(?from, to = ?AppRoute::Home, "Home reset top-level navigation");
-                    self.publish_route(ui);
+            _ if self.focus.borrow().region() == ShellFocusRegion::TopUtilities => {
+                self.handle_utility_action(ui, event)
+            }
+            UiAction::Up => {
+                let changed = if self.current_route() == AppRoute::Home {
+                    let utility = TopUtility::for_game_index(
+                        self.home.selected_index(),
+                        self.home.game_count(),
+                    );
+                    self.focus.borrow_mut().select_utility(utility)
+                } else {
+                    self.focus.borrow_mut().enter_utilities()
+                };
+
+                if changed {
+                    debug!(utility = ?self.focus.borrow().utility(), "focus entered top utilities");
+                    self.publish_focus(ui);
                 }
             }
             _ => self.dispatch_to_active_page(ui, event),
         }
+    }
+
+    fn bind_ui_callbacks(self: &Rc<Self>, ui: &AppWindow) {
+        let ui_weak = ui.as_weak();
+        let controller = Rc::clone(self);
+        ui.on_activate_utility(move |index| {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            let Some(utility) = TopUtility::from_index(index) else {
+                return;
+            };
+
+            controller.focus.borrow_mut().select_utility(utility);
+            controller.publish_focus(&ui);
+            controller.activate_utility(&ui, utility);
+        });
+    }
+
+    fn handle_back(&self, ui: &AppWindow) {
+        if self.close_overlay(ui) {
+            debug!("Back closed utility overlay");
+            return;
+        }
+
+        let from = self.current_route();
+        if self.navigator.borrow_mut().go_back() {
+            let to = self.current_route();
+            debug!(?from, ?to, "Back restored previous top-level route");
+            self.publish_route(ui);
+        } else {
+            debug!(route = ?from, "Back ignored at navigation root");
+        }
+    }
+
+    fn handle_home(&self, ui: &AppWindow) {
+        self.close_overlay(ui);
+        self.focus.borrow_mut().leave_utilities();
+        self.publish_focus(ui);
+
+        let from = self.current_route();
+        if self.navigator.borrow_mut().go_home() {
+            debug!(?from, to = ?AppRoute::Home, "Home reset top-level navigation");
+            self.publish_route(ui);
+        }
+    }
+
+    fn handle_utility_action(&self, ui: &AppWindow, event: UiActionEvent) {
+        match event.action {
+            UiAction::Left | UiAction::Right => {
+                let delta = if event.action == UiAction::Left { -1 } else { 1 };
+                if self.focus.borrow_mut().move_utility(delta) {
+                    debug!(utility = ?self.focus.borrow().utility(), "top utility focus moved");
+                    self.publish_focus(ui);
+                }
+            }
+            UiAction::Down => {
+                if self.current_route() == AppRoute::Home {
+                    let game_index = self
+                        .focus
+                        .borrow()
+                        .utility()
+                        .paired_game_index(self.home.game_count());
+                    self.home.select_from_shell(ui, game_index);
+                }
+
+                if self.focus.borrow_mut().leave_utilities() {
+                    debug!("focus returned to page content with spatial pairing");
+                    self.publish_focus(ui);
+                }
+            }
+            UiAction::Accept if !event.repeated => {
+                let utility = self.focus.borrow().utility();
+                self.activate_utility(ui, utility);
+            }
+            UiAction::Up
+            | UiAction::Accept
+            | UiAction::Menu
+            | UiAction::LeftBumper
+            | UiAction::RightBumper => {
+                debug!(
+                    action = ?event.action,
+                    repeated = event.repeated,
+                    "action has no top-utility behavior"
+                );
+            }
+            UiAction::Back | UiAction::Home => unreachable!("global actions handled first"),
+        }
+    }
+
+    fn activate_utility(&self, ui: &AppWindow, utility: TopUtility) {
+        match utility.destination() {
+            UtilityDestination::Route(route) => {
+                self.close_overlay(ui);
+                let from = self.current_route();
+                if self.navigator.borrow_mut().navigate_to(route) {
+                    debug!(?from, to = ?route, ?utility, "utility opened top-level route");
+                    self.publish_route(ui);
+                }
+            }
+            UtilityDestination::Overlay(overlay) => {
+                *self.overlay.borrow_mut() = Some(overlay);
+                debug!(?overlay, ?utility, "utility overlay opened");
+                self.publish_overlay(ui);
+            }
+        }
+    }
+
+    fn close_overlay(&self, ui: &AppWindow) -> bool {
+        if self.overlay.borrow().is_none() {
+            return false;
+        }
+        *self.overlay.borrow_mut() = None;
+        self.publish_overlay(ui);
+        true
     }
 
     fn dispatch_to_active_page(&self, ui: &AppWindow, event: UiActionEvent) {
@@ -89,6 +226,22 @@ impl NavigationController {
 
     fn publish_route(&self, ui: &AppWindow) {
         ui.set_current_route(route_view(self.current_route()));
+    }
+
+    fn publish_focus(&self, ui: &AppWindow) {
+        let focus = *self.focus.borrow();
+        ui.set_top_utilities_focused(focus.region() == ShellFocusRegion::TopUtilities);
+        ui.set_focused_utility_index(focus.utility().index());
+    }
+
+    fn publish_overlay(&self, ui: &AppWindow) {
+        let overlay = match *self.overlay.borrow() {
+            None => UtilityOverlayView::Closed,
+            Some(UtilityOverlay::Friends) => UtilityOverlayView::Friends,
+            Some(UtilityOverlay::Album) => UtilityOverlayView::Album,
+            Some(UtilityOverlay::Web) => UtilityOverlayView::Web,
+        };
+        ui.set_utility_overlay(overlay);
     }
 }
 

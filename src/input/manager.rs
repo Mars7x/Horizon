@@ -3,7 +3,7 @@ use std::rc::Rc;
 use tracing::warn;
 
 use super::{
-    actions::{UiAction, UiActionEvent},
+    actions::UiActionEvent,
     keyboard,
     sdl::{ControllerStatus, SdlGamepadInput},
 };

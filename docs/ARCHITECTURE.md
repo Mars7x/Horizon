@@ -109,3 +109,7 @@ Phase 4.2 turns the published route into visible shell composition:
 - page switching is driven only by Rust-published `AppRouteView` state.
 
 Phase 4.2 does not add utility focus navigation, page transitions, persistence, imports, launching, or production Activity/Settings behavior. See `NAVIGATION.md` and ADR 0029.
+
+## Phase 4.3 shell focus boundary
+
+The navigation layer also owns screen-level focus between page content and persistent header utilities. Pure Rust types in `src/navigation/` describe the focus region, selected utility, and whether a utility maps to a route or transient overlay. `presentation::NavigationController` publishes those decisions to Slint. Slint may emit a utility activation callback for pointer input, but it must not choose routes, mutate history, or decide overlay policy.

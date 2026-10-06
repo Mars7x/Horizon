@@ -1,6 +1,6 @@
 # Phase 4 navigation shell
 
-Phase 4 turns Horizon's single-screen prototype into an application shell. Phase 4.1 established the Rust-owned route model and action-routing boundary. Phase 4.2 makes that route state control real page composition while keeping shell chrome persistent.
+Phase 4 turns Horizon's single-screen prototype into an application shell. Phase 4.1 established the Rust-owned route model and action-routing boundary. Phase 4.2 made that route state control real page composition while keeping shell chrome persistent. Phase 4.3 adds Rust-owned focus movement into the persistent utility row and activates its five items.
 
 ## Ownership
 
@@ -44,7 +44,7 @@ The top-level route type contains:
 - `Activity`
 - `Settings`
 
-Friends, Album, and Web are not top-level routes yet. Their final page/overlay behavior belongs to the utility-navigation pass.
+Friends, Album, and Web are intentionally not top-level routes. Phase 4.3 presents them as transient shell overlays, while Activity and Settings activate their existing routes.
 
 ## History semantics
 
@@ -88,6 +88,14 @@ Do not move the Home scene merely because it is now a child of the central host.
 - The existing Home carousel selection and fresh-edge wrapping behavior remain owned by `HomeController`.
 - Placeholder Library/Activity/Settings pages intentionally have no page-local input behavior yet.
 
+## Phase 4.3 utility focus
+
+The shell now has two Rust-owned focus regions: page content and the top utility row. Up enters the utility row, Down returns to page content, and Left/Right move across Friends, Album, Activity, Web, and Settings. The strip clamps at its ends. On Home, vertical focus transfer uses spatial-order pairing: the selected game maps to the nearest proportional utility position on Up, and the focused utility maps back to the corresponding game on Down. With eight demo games, Friends/Album/Activity/Web/Settings pair with games 0/2/4/5/7. Other routed pages retain the last selected utility.
+
+Only the region that owns focus may render its focus indicator. The Home game brackets disappear while the utility row owns focus and return on the spatially paired game when focus moves back down. The selected game itself remains selected; only its focus affordance is suppressed.
+
+Activity and Settings activate normal top-level routes. Friends, Album, and Web open transient presentation-only overlays so auxiliary tools do not pollute route history. Back closes an overlay before popping route history; global Home closes overlays, restores content focus, and resets the route stack to Home. Pointer clicks on the header enter the same Rust-owned activation path.
+
 ## Next pass
 
-Phase 4.3 should make the utility/header navigation actionable and introduce deterministic focus movement into and out of the top utility region. It should use the existing Rust route API rather than moving route policy into Slint.
+Phase 4.4 should expand focus-region behavior where pages gain additional regions and make focus restoration explicit per routed page. It should preserve the input and shell boundaries established here.

@@ -6,6 +6,7 @@ import { GameCardData } from "../models/game-card.slint";
 export component GameTile inherits Rectangle {
     in property <GameCardData> game;
     in property <bool> selected: false;
+    in property <bool> focus-visible: true;
     in property <int> item-index: 0;
     callback activated(int);
 
@@ -60,12 +61,12 @@ export component GameTile inherits Rectangle {
         }
 
         focus := FocusFrame {
-            active: root.selected;
+            active: root.selected && root.focus-visible;
             x: -Metrics.focus-offset;
             y: -Metrics.focus-offset;
             width: parent.width + Metrics.focus-offset * 2;
             height: parent.height + Metrics.focus-offset * 2;
-            opacity: root.selected ? 1 : 0;
+            opacity: root.selected && root.focus-visible ? 1 : 0;
 
             animate opacity {
                 duration: Motion.focus-duration;

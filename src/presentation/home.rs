@@ -86,6 +86,16 @@ impl HomeController {
         self.games.row_count()
     }
 
+    pub fn selected_index(&self) -> i32 {
+        self.state.borrow().selected_index
+    }
+
+    /// Select a game from shell-level spatial focus transfer. Pointer and page
+    /// navigation still converge on the same Rust-owned selection state.
+    pub fn select_from_shell(&self, ui: &AppWindow, requested_index: i32) {
+        self.select_index(ui, requested_index);
+    }
+
     pub fn handle_action(&self, ui: &AppWindow, event: UiActionEvent) {
         match event.action {
             UiAction::Left => self.move_selection(ui, -1, !event.repeated),

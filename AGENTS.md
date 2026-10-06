@@ -221,7 +221,7 @@ Use an Architecture Decision Record when a change introduces or reverses a signi
 
 ## Current phase boundary
 
-The repository currently contains work through **Phase 4.2**.
+The repository currently contains work through **Phase 4.3**.
 
 Implemented:
 
@@ -259,7 +259,6 @@ Implemented:
 
 Not yet implemented:
 
-- focus-region navigation
 - page transitions
 - SQLite library
 - real game importers
@@ -271,7 +270,7 @@ Do not prematurely implement later-phase behavior as a shortcut while working on
 
 ## Phase 4 target
 
-Phase 4 should establish the application navigation shell without adding persistence or real game sources. **Phase 4.2 is complete for the route model, route/action boundary, and visible shell composition; later Phase 4 passes continue the remaining work:**
+Phase 4 should establish the application navigation shell without adding persistence or real game sources. **Phase 4.3 is complete for the route model, visible shell composition, and top-utility focus/activation; later Phase 4 passes continue the remaining work:**
 
 1. Define Rust-owned navigation state for Home, Library, Activity, and Settings.
 2. Define focus regions so Up/Down/Left/Right have deterministic screen-level behavior.
@@ -536,3 +535,16 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
 - Keep the focus sweep visible but restrained: 34% white mix, narrow central highlight, 4.0 s cycle.
 - Do not increase the highlight back to the Phase 4.1.1 62% white mix without explicit visual direction.
 - Preserve the single-layer/no-halo invariant and static Reduced Motion / High Contrast behavior.
+
+## Phase 4.3 top-utility invariants
+
+- Shell focus is Rust-owned. Slint may render the current focus region and selected utility, but it must not decide Up/Down/Left/Right navigation policy.
+- Up from page content enters the top utility row; Down returns to page content. The last selected utility is preserved across that transition.
+- Left/Right within the top utility row clamp at Friends/Settings; they do not wrap. Held directional repeat still comes only from the input adapters.
+- Activity and Settings activate their existing top-level routes. Friends, Album, and Web are transient utility overlays and must not be added to `AppRoute` merely to render placeholders.
+- Back closes an open transient utility overlay before changing route history. Global Home closes overlays, restores content focus, and resets Home as the route root.
+- Pointer activation of a utility must enter the same Rust `NavigationController` path as Accept; do not duplicate route/overlay policy in Slint.
+- The utility focus treatment is a compact rounded surface around the existing icon. Do not alter the credited utility SVG source assets or their semantic colors to indicate focus.
+- Phase 4.3 overlays are presentation placeholders only; do not add social, screenshot, browser, persistence, or launching behavior yet. See ADR 0030.
+
+- Exactly one focus region should present a focus indicator at a time. When top utilities own focus, Home game focus brackets must be hidden. Vertical Home↔utility transitions preserve horizontal intent using spatial-order pairing rather than jumping to an unrelated item.

@@ -1,0 +1,79 @@
+import { Theme, Metrics, Typography } from "../theme/theme.slint";
+import { UtilityOverlayView } from "../models/navigation.slint";
+
+// Presentation-only shell overlay for utilities that are not top-level routes.
+// Rust owns open/close policy. Back/Home are handled by NavigationController.
+export component UtilityOverlay inherits Rectangle {
+    in property <UtilityOverlayView> kind: UtilityOverlayView.closed;
+
+    visible: root.kind != UtilityOverlayView.closed;
+    background: Theme.background.with-alpha(Theme.is-dark ? 0.82 : 0.72);
+
+    private property <string> overlay-title:
+        root.kind == UtilityOverlayView.friends ? "Friends" :
+        root.kind == UtilityOverlayView.album ? "Album" :
+        root.kind == UtilityOverlayView.web ? "Web" : "";
+    private property <string> overlay-description:
+        root.kind == UtilityOverlayView.friends
+            ? "Friends and social activity will appear here." :
+        root.kind == UtilityOverlayView.album
+            ? "Screenshots and captured media will appear here." :
+        root.kind == UtilityOverlayView.web
+            ? "Web access will be connected here in a later phase." : "";
+
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2 - 10px;
+        width: parent.width - Metrics.page-margin * 2 < 620px
+            ? parent.width - Metrics.page-margin * 2
+            : 620px;
+        height: 210px;
+        border-radius: 28px;
+        background: Theme.surface-raised;
+        border-width: 1px;
+        border-color: Theme.divider.with-alpha(0.72);
+        drop-shadow-offset-y: 12px;
+        drop-shadow-blur: 34px;
+        drop-shadow-color: Theme.shadow;
+
+        Text {
+            x: Metrics.spacing-xl;
+            y: 34px;
+            width: parent.width - Metrics.spacing-xl * 2;
+            height: 46px;
+            text: root.overlay-title;
+            color: Theme.foreground;
+            font-size: Typography.title-size;
+            font-weight: Typography.title-weight;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        Text {
+            x: Metrics.spacing-xl;
+            y: 94px;
+            width: parent.width - Metrics.spacing-xl * 2;
+            height: 48px;
+            text: root.overlay-description;
+            color: Theme.secondary-foreground;
+            font-size: Typography.body-size;
+            font-weight: Typography.body-weight;
+            horizontal-alignment: center;
+            vertical-alignment: top;
+            wrap: word-wrap;
+        }
+
+        Text {
+            x: Metrics.spacing-xl;
+            y: parent.height - 42px;
+            width: parent.width - Metrics.spacing-xl * 2;
+            height: 24px;
+            text: "B  Back";
+            color: Theme.secondary-foreground;
+            font-size: Typography.caption-size;
+            font-weight: Typography.emphasis-weight;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}

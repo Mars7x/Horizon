@@ -4,10 +4,11 @@ export { Theme, Metrics, Typography, Motion }
 import { GameCardData } from "models/game-card.slint";
 export { GameCardData }
 
-import { AppRouteView } from "models/navigation.slint";
-export { AppRouteView }
+import { AppRouteView, UtilityOverlayView } from "models/navigation.slint";
+export { AppRouteView, UtilityOverlayView }
 
 import { TopNavigation } from "components/top-navigation.slint";
+import { UtilityOverlay } from "components/utility-overlay.slint";
 import { Footer } from "components/footer.slint";
 import { HomePage } from "pages/home.slint";
 import { LibraryPage } from "pages/library.slint";
@@ -39,6 +40,9 @@ export component AppWindow inherits Window {
     // Rust owns route history/policy. Slint only chooses which page component
     // to render from the published presentation enum.
     in property <AppRouteView> current-route: AppRouteView.home;
+    in property <bool> top-utilities-focused: false;
+    in property <int> focused-utility-index: 2;
+    in property <UtilityOverlayView> utility-overlay: UtilityOverlayView.closed;
 
     in property <[GameCardData]> games;
     in-out property <int> selected-index: 0;
@@ -48,6 +52,7 @@ export component AppWindow inherits Window {
     in property <string> clock-suffix: "";
 
     callback select-game(int);
+    callback activate-utility(int);
     callback raw-key-input(string, bool) -> bool;
 
     design-surface := Rectangle {
@@ -95,6 +100,7 @@ export component AppWindow inherits Window {
                     games: root.games;
                     selected-index: root.selected-index;
                     selected-title: root.selected-title;
+                    focus-visible: !root.top-utilities-focused;
                     select-game(index) => { root.select-game(index); }
                 }
 
@@ -111,6 +117,12 @@ export component AppWindow inherits Window {
                 if root.current-route == AppRouteView.settings : SettingsPage {
                     width: parent.width;
                     height: parent.height;
+                }
+
+                UtilityOverlay {
+                    width: parent.width;
+                    height: parent.height;
+                    kind: root.utility-overlay;
                 }
             }
 
@@ -137,6 +149,9 @@ export component AppWindow inherits Window {
                 y: 0px;
                 width: parent.width;
                 height: Metrics.top-chrome-height;
+                utility-focus-visible: root.top-utilities-focused;
+                focused-utility-index: root.focused-utility-index;
+                utility-activated(index) => { root.activate-utility(index); }
             }
 
             Footer {

@@ -9,6 +9,7 @@ export component HomePage inherits Rectangle {
     in property <[GameCardData]> games;
     in property <int> selected-index: 0;
     in property <string> selected-title;
+    in property <bool> focus-visible: true;
     callback select-game(int);
 
     background: Theme.background;
@@ -23,6 +24,7 @@ export component HomePage inherits Rectangle {
         games: root.games;
         selected-index: root.selected-index;
         selected-title: root.selected-title;
+        focus-visible: root.focus-visible;
         game-selected(index) => { root.select-game(index); }
     }
 }

@@ -136,3 +136,7 @@ stick. Non-directional buttons remain single-fire.
 
 ## Fresh vs repeated navigation
 Input adapters preserve a `repeated` bit alongside each semantic action. A fresh Left/Right event at the first or last game may wrap to the opposite end. Auto-repeat from a held keyboard key, D-pad, or analog stick never wraps; it stops at the boundary until the user releases and makes a new directional input.
+
+## Phase 4.3 shell focus routing
+
+Directional input remains semantic before it reaches screen logic. `NavigationController` interprets Up/Down when crossing between page content and the persistent top utility row, while Left/Right move the selected utility whenever that row owns focus. On Home, those vertical transitions preserve horizontal intent through proportional spatial-order pairing between the game row and the five utility positions. SDL3 and keyboard adapters are unchanged and remain unaware of focus regions, routes, utility names, or pairing math. Held Left/Right repeats naturally through the existing semantic repeat pipeline and clamps at the ends of the utility strip.

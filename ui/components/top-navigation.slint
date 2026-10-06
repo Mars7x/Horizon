@@ -1,4 +1,4 @@
-import { Theme, Metrics } from "../theme/theme.slint";
+import { Theme, Metrics, Motion } from "../theme/theme.slint";
 import { FriendsIcon, AlbumIcon, ActivityIcon, WebIcon, SettingsIcon } from "utility-icons.slint";
 
 component Separator inherits Rectangle {
@@ -79,7 +79,22 @@ component StatusCluster inherits Rectangle {
     }
 }
 
+component UtilityFocusSurface inherits Rectangle {
+    in property <bool> focused: false;
+    background: root.focused ? Theme.accent-subtle.with-alpha(Theme.is-dark ? 0.48 : 0.72) : transparent;
+    border-width: root.focused ? 2px : 0px;
+    border-color: Theme.focus;
+    border-radius: 20px;
+
+    animate background { duration: Motion.focus-duration; easing: ease-out; }
+    animate border-width { duration: Motion.focus-duration; easing: ease-out; }
+}
+
 export component TopNavigation inherits Rectangle {
+    in property <bool> utility-focus-visible: false;
+    in property <int> focused-utility-index: 2;
+    callback utility-activated(int);
+
     background: transparent;
     private property <length> content-center-y: root.height / 2;
 
@@ -122,8 +137,8 @@ export component TopNavigation inherits Rectangle {
         y: root.content-center-y - self.height / 2;
     }
 
-    // Placeholder utilities use direct vector Path geometry derived from the
-    // supplied symbolic SVGs. This keeps them crisp and theme-colored at any scale.
+    // The entire utility row is one screen-level focus region. Rust owns which
+    // item is focused; these cells only visualize state and emit activation.
     HorizontalLayout {
         x: (parent.width - self.width) / 2;
         y: root.content-center-y - self.height / 2;
@@ -131,35 +146,35 @@ export component TopNavigation inherits Rectangle {
         height: 40px;
         spacing: 24px;
 
-        Rectangle {
-            width: 40px; height: 40px; background: transparent;
-            FriendsIcon {
-                x: 6px; y: 6px; width: 28px; height: 28px;
-            }
+        UtilityFocusSurface {
+            width: 40px; height: 40px;
+            focused: root.utility-focus-visible && root.focused-utility-index == 0;
+            FriendsIcon { x: 6px; y: 6px; width: 28px; height: 28px; }
+            TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(0); } }
         }
-        Rectangle {
-            width: 40px; height: 40px; background: transparent;
-            AlbumIcon {
-                x: 6px; y: 6px; width: 28px; height: 28px;
-            }
+        UtilityFocusSurface {
+            width: 40px; height: 40px;
+            focused: root.utility-focus-visible && root.focused-utility-index == 1;
+            AlbumIcon { x: 6px; y: 6px; width: 28px; height: 28px; }
+            TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(1); } }
         }
-        Rectangle {
-            width: 40px; height: 40px; background: transparent;
-            ActivityIcon {
-                x: 6px; y: 6px; width: 28px; height: 28px;
-            }
+        UtilityFocusSurface {
+            width: 40px; height: 40px;
+            focused: root.utility-focus-visible && root.focused-utility-index == 2;
+            ActivityIcon { x: 6px; y: 6px; width: 28px; height: 28px; }
+            TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(2); } }
         }
-        Rectangle {
-            width: 40px; height: 40px; background: transparent;
-            WebIcon {
-                x: 6px; y: 6px; width: 28px; height: 28px;
-            }
+        UtilityFocusSurface {
+            width: 40px; height: 40px;
+            focused: root.utility-focus-visible && root.focused-utility-index == 3;
+            WebIcon { x: 6px; y: 6px; width: 28px; height: 28px; }
+            TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(3); } }
         }
-        Rectangle {
-            width: 40px; height: 40px; background: transparent;
-            SettingsIcon {
-                x: 6px; y: 6px; width: 28px; height: 28px;
-            }
+        UtilityFocusSurface {
+            width: 40px; height: 40px;
+            focused: root.utility-focus-visible && root.focused-utility-index == 4;
+            SettingsIcon { x: 6px; y: 6px; width: 28px; height: 28px; }
+            TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(4); } }
         }
     }
 
