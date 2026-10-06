@@ -44,6 +44,17 @@ export component AppWindow inherits Window {
     in property <int> focused-utility-index: 2;
     in property <UtilityOverlayView> utility-overlay: UtilityOverlayView.closed;
 
+    // Read-only geometry telemetry for Rust-owned spatial focus transfer.
+    // Slint reports where the presentation actually rendered things; Rust
+    // still decides which item receives focus.
+    out property <float> logical-viewport-width-px: root.logical-width / 1px;
+    out property <float> utility-center-step-px: Metrics.utility-center-step / 1px;
+    out property <float> home-game-stride-px: Metrics.game-stride / 1px;
+    in-out property <float> home-first-game-center-x-px:
+        (Metrics.carousel-shelf-left
+            + Metrics.carousel-content-padding
+            + Metrics.game-stride / 2) / 1px;
+
     in property <[GameCardData]> games;
     in-out property <int> selected-index: 0;
     in property <string> selected-title: "";
@@ -102,6 +113,9 @@ export component AppWindow inherits Window {
                     selected-title: root.selected-title;
                     focus-visible: !root.top-utilities-focused;
                     select-game(index) => { root.select-game(index); }
+                    carousel-geometry-changed(first-game-center-x-px) => {
+                        root.home-first-game-center-x-px = first-game-center-x-px;
+                    }
                 }
 
                 if root.current-route == AppRouteView.library : LibraryPage {

@@ -44,6 +44,14 @@ export global Metrics {
     out property <length> design-height: 720px;
     out property <length> top-edge-inset: 28px;
 
+    // Persistent top-utility geometry. Navigation uses these same values when
+    // comparing rendered center-to-center distances across focus regions.
+    out property <length> utility-cell-size: 40px;
+    out property <length> utility-spacing: 24px;
+    out property <length> utility-center-step: utility-cell-size + utility-spacing;
+    out property <length> utility-row-width:
+        utility-cell-size * 5 + utility-spacing * 4;
+
     // One reference-style focus layer. The frame sits deliberately outside
     // the game shell with a visible air gap while keeping the same radius
     // language. `focus-offset` is the world-space separation from the shell.

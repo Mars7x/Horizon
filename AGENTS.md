@@ -539,7 +539,8 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
 ## Phase 4.3 top-utility invariants
 
 - Shell focus is Rust-owned. Slint may render the current focus region and selected utility, but it must not decide Up/Down/Left/Right navigation policy.
-- Up from page content enters the top utility row; Down returns to page content. The last selected utility is preserved across that transition.
+- When top utilities own focus on Home, the selected game remains logical state only: its focus brackets, title/connector, scale-up, raised z-order, and selected shadow must all be hidden. Returning focus to content restores the selection visuals.
+- Fresh Home↔utility transfers choose the shortest rendered center-to-center path. The resulting game↔utility pair is reciprocal: reversing vertical direction without horizontal movement returns to the exact source element. Horizontal movement in the destination region invalidates that pair and the next transfer uses nearest-center geometry. Other pages may preserve the last utility.
 - Left/Right within the top utility row clamp at Friends/Settings; they do not wrap. Held directional repeat still comes only from the input adapters.
 - Activity and Settings activate their existing top-level routes. Friends, Album, and Web are transient utility overlays and must not be added to `AppRoute` merely to render placeholders.
 - Back closes an open transient utility overlay before changing route history. Global Home closes overlays, restores content focus, and resets Home as the route root.
@@ -547,4 +548,6 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
 - The utility focus treatment is a compact rounded surface around the existing icon. Do not alter the credited utility SVG source assets or their semantic colors to indicate focus.
 - Phase 4.3 overlays are presentation placeholders only; do not add social, screenshot, browser, persistence, or launching behavior yet. See ADR 0030.
 
-- Exactly one focus region should present a focus indicator at a time. When top utilities own focus, Home game focus brackets must be hidden. Vertical Home↔utility transitions preserve horizontal intent using spatial-order pairing rather than jumping to an unrelated item.
+- Exactly one focus region should present selection chrome at a time. When top utilities own focus, Home game focus brackets, selected-game title pill, connector line, and connector dot must all be hidden. Slint may report rendered geometry, but Rust owns the shortest-distance/return-anchor focus decision. See ADR 0031.
+
+- Utility-row focus uses a compact fixed-size accent orb/ring treatment with a restrained 2px icon lift. Utility icons never scale on focus. Do not add utility text labels. The 40x40 utility layout cells stay fixed so spatial center calculations remain stable; only the visual treatment may extend outside them.

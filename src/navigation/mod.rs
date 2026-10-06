@@ -66,22 +66,6 @@ impl TopUtility {
             Self::Settings => UtilityDestination::Route(AppRoute::Settings),
         }
     }
-
-    /// Return the utility whose horizontal order most closely matches a game.
-    ///
-    /// This preserves spatial intent when focus moves vertically between the
-    /// Home carousel and the five fixed utility positions. Endpoints pair with
-    /// endpoints and intermediate positions are distributed proportionally.
-    pub fn for_game_index(game_index: i32, game_count: usize) -> Self {
-        let index = spatial_pair_index(game_index, game_count, Self::COUNT as usize);
-        Self::from_index(index).unwrap_or_default()
-    }
-
-    /// Return the Home game whose horizontal order most closely matches this
-    /// utility. This is the inverse-direction companion to `for_game_index`.
-    pub fn paired_game_index(self, game_count: usize) -> i32 {
-        spatial_pair_index(self.index(), Self::COUNT as usize, game_count)
-    }
 }
 
 /// Transient utility surfaces are deliberately separate from top-level routes.
@@ -100,12 +84,19 @@ pub enum UtilityDestination {
 
 /// Pure Rust focus state for the persistent shell.
 ///
-/// The last selected utility is preserved when returning to page content so an
-/// Up press later re-enters the same header item instead of jumping around.
+/// Vertical Home↔header transfer keeps a temporary reciprocal anchor. If the
+/// user reverses direction without moving horizontally in the destination region,
+/// focus returns to the exact element it came from. Once horizontal selection
+/// actually changes, the next vertical transfer falls back to live rendered
+/// center-distance geometry.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ShellFocus {
     region: ShellFocusRegion,
     utility: TopUtility,
+    content_anchor_index: Option<i32>,
+    utility_moved_since_entry: bool,
+    content_return_utility: Option<TopUtility>,
+    content_return_game_index: Option<i32>,
 }
 
 impl ShellFocus {
@@ -117,11 +108,71 @@ impl ShellFocus {
         self.utility
     }
 
+    pub fn content_anchor_index(self) -> Option<i32> {
+        if self.region == ShellFocusRegion::TopUtilities && !self.utility_moved_since_entry {
+            self.content_anchor_index
+        } else {
+            None
+        }
+    }
+
     pub fn enter_utilities(&mut self) -> bool {
         if self.region == ShellFocusRegion::TopUtilities {
             return false;
         }
         self.region = ShellFocusRegion::TopUtilities;
+        self.content_anchor_index = None;
+        self.utility_moved_since_entry = false;
+        self.content_return_utility = None;
+        self.content_return_game_index = None;
+        true
+    }
+
+    pub fn enter_utilities_from_content(
+        &mut self,
+        utility: TopUtility,
+        content_anchor_index: i32,
+    ) -> bool {
+        let changed = self.region != ShellFocusRegion::TopUtilities || self.utility != utility;
+        self.region = ShellFocusRegion::TopUtilities;
+        self.utility = utility;
+        self.content_anchor_index = Some(content_anchor_index);
+        self.utility_moved_since_entry = false;
+        self.content_return_utility = None;
+        self.content_return_game_index = None;
+        changed
+    }
+
+    /// Return the utility paired with the currently selected Home game when the
+    /// previous vertical transfer came from the utility row. The anchor is
+    /// invalidated as soon as a different game is selected.
+    pub fn anchored_utility_for_content(&mut self, content_index: i32) -> Option<TopUtility> {
+        if self.region != ShellFocusRegion::Content {
+            return None;
+        }
+
+        if self.content_return_game_index == Some(content_index) {
+            self.content_return_utility
+        } else {
+            self.content_return_utility = None;
+            self.content_return_game_index = None;
+            None
+        }
+    }
+
+    /// Leave the utility row for a concrete Home game and remember that exact
+    /// utility↔game pair. An immediate Up from the same game returns to the
+    /// originating utility even if carousel motion changes rendered geometry.
+    pub fn leave_utilities_to_content(&mut self, content_index: i32) -> bool {
+        if self.region == ShellFocusRegion::Content {
+            return false;
+        }
+
+        self.region = ShellFocusRegion::Content;
+        self.content_anchor_index = None;
+        self.utility_moved_since_entry = false;
+        self.content_return_utility = Some(self.utility);
+        self.content_return_game_index = Some(content_index);
         true
     }
 
@@ -130,6 +181,10 @@ impl ShellFocus {
             return false;
         }
         self.region = ShellFocusRegion::Content;
+        self.content_anchor_index = None;
+        self.utility_moved_since_entry = false;
+        self.content_return_utility = None;
+        self.content_return_game_index = None;
         true
     }
 
@@ -137,11 +192,16 @@ impl ShellFocus {
         let changed = self.utility != utility || self.region != ShellFocusRegion::TopUtilities;
         self.utility = utility;
         self.region = ShellFocusRegion::TopUtilities;
+        self.content_anchor_index = None;
+        self.utility_moved_since_entry = false;
+        self.content_return_utility = None;
+        self.content_return_game_index = None;
         changed
     }
 
     /// Move horizontally inside the utility strip. Header navigation clamps at
-    /// the ends; unlike the game carousel, it never wraps.
+    /// the ends; unlike the game carousel, it never wraps. Any actual utility
+    /// move invalidates the exact return anchor from the originating game.
     pub fn move_utility(&mut self, delta: i32) -> bool {
         if self.region != ShellFocusRegion::TopUtilities || delta == 0 {
             return false;
@@ -158,29 +218,68 @@ impl ShellFocus {
         if next == self.utility {
             return false;
         }
+
         self.utility = next;
+        self.utility_moved_since_entry = true;
         true
     }
 }
 
-
-/// Map one ordered horizontal position into another ordered collection.
+/// Return the utility whose rendered center is horizontally closest to `x`.
 ///
-/// Integer rounding keeps this deterministic and framework-independent. With
-/// five utilities and eight games the mapping is 0→0, 1→2, 2→4, 3→5, 4→7.
-fn spatial_pair_index(source_index: i32, source_count: usize, target_count: usize) -> i32 {
-    if target_count == 0 {
-        return 0;
+/// All utility cells share the same vertical center, so minimizing horizontal
+/// center distance is equivalent to choosing the shortest center-to-center
+/// transfer path.
+pub fn nearest_utility_for_x(
+    x: f32,
+    viewport_width: f32,
+    utility_center_step: f32,
+) -> TopUtility {
+    if !x.is_finite()
+        || !viewport_width.is_finite()
+        || !utility_center_step.is_finite()
+        || utility_center_step <= 0.0
+    {
+        return TopUtility::default();
     }
-    if source_count <= 1 || target_count == 1 {
+
+    let middle_index = (TopUtility::COUNT - 1) as f32 / 2.0;
+    let raw_index = middle_index + (x - viewport_width / 2.0) / utility_center_step;
+    let index = raw_index.round().clamp(0.0, (TopUtility::COUNT - 1) as f32) as i32;
+
+    TopUtility::from_index(index).unwrap_or_default()
+}
+
+/// Return the rendered horizontal center of a utility icon.
+pub fn utility_center_x(
+    utility: TopUtility,
+    viewport_width: f32,
+    utility_center_step: f32,
+) -> f32 {
+    let middle_index = (TopUtility::COUNT - 1) as f32 / 2.0;
+    viewport_width / 2.0 + (utility.index() as f32 - middle_index) * utility_center_step
+}
+
+/// Return the Home game whose rendered center is closest to `x`.
+pub fn nearest_game_for_x(
+    x: f32,
+    first_game_center_x: f32,
+    game_stride: f32,
+    game_count: usize,
+) -> i32 {
+    if game_count == 0
+        || !x.is_finite()
+        || !first_game_center_x.is_finite()
+        || !game_stride.is_finite()
+        || game_stride <= 0.0
+    {
         return 0;
     }
 
-    let source_max = source_count.saturating_sub(1) as i64;
-    let target_max = target_count.saturating_sub(1) as i64;
-    let source = i64::from(source_index).clamp(0, source_max);
-    let numerator = source * target_max;
-    ((numerator + source_max / 2) / source_max) as i32
+    let raw_index = (x - first_game_center_x) / game_stride;
+    raw_index
+        .round()
+        .clamp(0.0, game_count.saturating_sub(1) as f32) as i32
 }
 
 /// Pure Rust navigation state for Horizon's top-level shell.
@@ -240,7 +339,7 @@ impl Navigator {
 mod tests {
     use super::{
         AppRoute, Navigator, ShellFocus, ShellFocusRegion, TopUtility, UtilityDestination,
-        UtilityOverlay,
+        UtilityOverlay, nearest_game_for_x, nearest_utility_for_x, utility_center_x,
     };
 
     #[test]
@@ -360,20 +459,73 @@ mod tests {
     }
 
     #[test]
-    fn utilities_pair_spatially_with_home_games() {
-        assert_eq!(TopUtility::Friends.paired_game_index(8), 0);
-        assert_eq!(TopUtility::Album.paired_game_index(8), 2);
-        assert_eq!(TopUtility::Activity.paired_game_index(8), 4);
-        assert_eq!(TopUtility::Web.paired_game_index(8), 5);
-        assert_eq!(TopUtility::Settings.paired_game_index(8), 7);
+    fn untouched_vertical_transfer_restores_exact_origin_game() {
+        let mut focus = ShellFocus::default();
+
+        assert!(focus.enter_utilities_from_content(TopUtility::Album, 3));
+        assert_eq!(focus.content_anchor_index(), Some(3));
+
+        assert!(focus.leave_utilities());
+        assert_eq!(focus.content_anchor_index(), None);
     }
 
     #[test]
-    fn games_pair_spatially_with_nearest_utility_order() {
-        assert_eq!(TopUtility::for_game_index(0, 8), TopUtility::Friends);
-        assert_eq!(TopUtility::for_game_index(2, 8), TopUtility::Album);
-        assert_eq!(TopUtility::for_game_index(4, 8), TopUtility::Activity);
-        assert_eq!(TopUtility::for_game_index(5, 8), TopUtility::Web);
-        assert_eq!(TopUtility::for_game_index(7, 8), TopUtility::Settings);
+    fn moving_to_another_utility_invalidates_exact_origin_anchor() {
+        let mut focus = ShellFocus::default();
+
+        assert!(focus.enter_utilities_from_content(TopUtility::Album, 3));
+        assert!(focus.move_utility(1));
+        assert_eq!(focus.utility(), TopUtility::Activity);
+        assert_eq!(focus.content_anchor_index(), None);
+    }
+
+    #[test]
+    fn utility_to_game_round_trip_restores_exact_origin_utility() {
+        let mut focus = ShellFocus::default();
+
+        assert!(focus.enter_utilities_from_content(TopUtility::Album, 3));
+        assert!(focus.move_utility(1));
+        assert_eq!(focus.utility(), TopUtility::Activity);
+
+        assert!(focus.leave_utilities_to_content(5));
+        assert_eq!(
+            focus.anchored_utility_for_content(5),
+            Some(TopUtility::Activity)
+        );
+
+        assert!(focus.enter_utilities_from_content(TopUtility::Activity, 5));
+        assert_eq!(focus.content_anchor_index(), Some(5));
+    }
+
+    #[test]
+    fn changing_game_invalidates_utility_return_anchor() {
+        let mut focus = ShellFocus::default();
+
+        assert!(focus.enter_utilities_from_content(TopUtility::Web, 4));
+        assert!(focus.leave_utilities_to_content(4));
+
+        assert_eq!(focus.anchored_utility_for_content(5), None);
+        assert_eq!(focus.anchored_utility_for_content(4), None);
+    }
+
+    #[test]
+    fn nearest_utility_uses_rendered_center_distance() {
+        let viewport_width = 1280.0;
+        let step = 64.0;
+
+        assert_eq!(nearest_utility_for_x(512.0, viewport_width, step), TopUtility::Friends);
+        assert_eq!(nearest_utility_for_x(575.0, viewport_width, step), TopUtility::Album);
+        assert_eq!(nearest_utility_for_x(640.0, viewport_width, step), TopUtility::Activity);
+        assert_eq!(nearest_utility_for_x(704.0, viewport_width, step), TopUtility::Web);
+        assert_eq!(nearest_utility_for_x(768.0, viewport_width, step), TopUtility::Settings);
+    }
+
+    #[test]
+    fn utility_and_game_center_helpers_support_reverse_spatial_transfer() {
+        let activity_x = utility_center_x(TopUtility::Activity, 1280.0, 64.0);
+        assert_eq!(activity_x, 640.0);
+
+        assert_eq!(nearest_game_for_x(activity_x, 439.0, 250.0, 8), 1);
+        assert_eq!(nearest_game_for_x(768.0, 439.0, 250.0, 8), 1);
     }
 }

@@ -13,6 +13,7 @@ export component GameCarousel inherits Rectangle {
     in property <string> selected-title;
     in property <bool> focus-visible: true;
     callback game-selected(int);
+    callback geometry-changed(float);
 
     private property <length> camera-offset: 0px;
     private property <length> content-width: root.games.length * Metrics.game-stride;
@@ -27,6 +28,11 @@ export component GameCarousel inherits Rectangle {
         Metrics.carousel-shelf-left + root.shelf-width;
     private property <length> local-shelf-y:
         Metrics.carousel-shelf-y - Metrics.selected-label-y;
+    out property <float> first-game-center-x-px:
+        (Metrics.carousel-shelf-left
+            + Metrics.carousel-content-padding
+            + Metrics.game-stride / 2
+            - root.camera-offset) / 1px;
 
     background: transparent;
 
@@ -68,10 +74,23 @@ export component GameCarousel inherits Rectangle {
         }
     }
 
-    init => { root.ensure-selection-in-camera-zone(); }
-    changed selected-index => { root.ensure-selection-in-camera-zone(); }
-    changed width => { root.ensure-selection-in-camera-zone(); }
-    changed games => { root.ensure-selection-in-camera-zone(); }
+    init => {
+        root.ensure-selection-in-camera-zone();
+        root.geometry-changed(root.first-game-center-x-px);
+    }
+    changed selected-index => {
+        root.ensure-selection-in-camera-zone();
+        root.geometry-changed(root.first-game-center-x-px);
+    }
+    changed width => {
+        root.ensure-selection-in-camera-zone();
+        root.geometry-changed(root.first-game-center-x-px);
+    }
+    changed games => {
+        root.ensure-selection-in-camera-zone();
+        root.geometry-changed(root.first-game-center-x-px);
+    }
+    changed camera-offset => { root.geometry-changed(root.first-game-center-x-px); }
 
     scene := Rectangle {
         x: -root.camera-offset;
@@ -106,6 +125,7 @@ export component GameCarousel inherits Rectangle {
             x: root.selected-center-world-x - self.width / 2;
             y: 0px;
             title: root.selected-title;
+            visible: root.focus-visible;
         }
 
         // Connector and endpoint sit above the shelf. Both use one exact color
@@ -114,6 +134,7 @@ export component GameCarousel inherits Rectangle {
             x: root.selected-center-world-x - 1px;
             y: Metrics.selected-label-height;
             width: 2px;
+            visible: root.focus-visible;
             height: root.local-shelf-y - Metrics.selected-label-height + 6px;
             background: Theme.divider;
 
@@ -140,7 +161,10 @@ export component GameCarousel inherits Rectangle {
                 y: 0px;
                 game: game;
                 item-index: index;
-                selected: index == root.selected-index;
+                // Keep the logical selected index while content focus is away,
+                // but remove every game-selection visual when the utility row owns focus.
+                // This prevents the previously selected game from staying enlarged.
+                selected: root.focus-visible && index == root.selected-index;
                 focus-visible: root.focus-visible;
                 activated(index) => { root.game-selected(index); }
             }

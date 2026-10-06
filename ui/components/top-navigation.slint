@@ -81,13 +81,48 @@ component StatusCluster inherits Rectangle {
 
 component UtilityFocusSurface inherits Rectangle {
     in property <bool> focused: false;
-    background: root.focused ? Theme.accent-subtle.with-alpha(Theme.is-dark ? 0.48 : 0.72) : transparent;
-    border-width: root.focused ? 2px : 0px;
-    border-color: Theme.focus;
-    border-radius: 20px;
+    background: transparent;
+    z: root.focused ? 2 : 0;
 
-    animate background { duration: Motion.focus-duration; easing: ease-out; }
-    animate border-width { duration: Motion.focus-duration; easing: ease-out; }
+    // Keep utility focus visually related to the game focus without copying
+    // the game's chunky corner-bracket language. The 40x40 cell itself never
+    // changes size, so Rust's spatial center geometry remains stable.
+    private property <bool> sweep-enabled:
+        root.focused && !Motion.reduced-motion && !Theme.high-contrast;
+    private property <float> sweep-progress: root.sweep-enabled
+        ? mod(animation-tick(), 4000ms) / 4000ms
+        : 0;
+    private property <angle> sweep-angle: 35deg + root.sweep-progress * 360deg;
+    private property <brush> ring-brush: root.sweep-enabled
+        ? @linear-gradient(
+            root.sweep-angle,
+            Theme.focus 0%,
+            Theme.focus 28%,
+            Theme.focus-highlight 47%,
+            Theme.focus-highlight 53%,
+            Theme.focus 72%,
+            Theme.focus 100%
+        )
+        : Theme.focus;
+
+    Rectangle {
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2
+            + (root.focused && !Motion.reduced-motion ? -2px : 0px);
+        width: 48px;
+        height: 48px;
+        border-radius: 24px;
+        opacity: root.focused ? 1 : 0;
+        background: Theme.accent-subtle.with-alpha(Theme.is-dark ? 0.40 : 0.58);
+        border-width: 2px;
+        border-color: root.ring-brush;
+        drop-shadow-offset-y: 2px;
+        drop-shadow-blur: 10px;
+        drop-shadow-color: Theme.focus.with-alpha(0.16);
+
+        animate y { duration: Motion.focus-duration; easing: ease-out; }
+        animate opacity { duration: Motion.focus-duration; easing: ease-out; }
+    }
 }
 
 export component TopNavigation inherits Rectangle {
@@ -149,31 +184,66 @@ export component TopNavigation inherits Rectangle {
         UtilityFocusSurface {
             width: 40px; height: 40px;
             focused: root.utility-focus-visible && root.focused-utility-index == 0;
-            FriendsIcon { x: 6px; y: 6px; width: 28px; height: 28px; }
+            FriendsIcon {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2
+                    + (parent.focused && !Motion.reduced-motion ? -2px : 0px);
+                width: 28px;
+                height: 28px;
+                animate y { duration: Motion.focus-duration; easing: ease-out; }
+            }
             TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(0); } }
         }
         UtilityFocusSurface {
             width: 40px; height: 40px;
             focused: root.utility-focus-visible && root.focused-utility-index == 1;
-            AlbumIcon { x: 6px; y: 6px; width: 28px; height: 28px; }
+            AlbumIcon {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2
+                    + (parent.focused && !Motion.reduced-motion ? -2px : 0px);
+                width: 28px;
+                height: 28px;
+                animate y { duration: Motion.focus-duration; easing: ease-out; }
+            }
             TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(1); } }
         }
         UtilityFocusSurface {
             width: 40px; height: 40px;
             focused: root.utility-focus-visible && root.focused-utility-index == 2;
-            ActivityIcon { x: 6px; y: 6px; width: 28px; height: 28px; }
+            ActivityIcon {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2
+                    + (parent.focused && !Motion.reduced-motion ? -2px : 0px);
+                width: 28px;
+                height: 28px;
+                animate y { duration: Motion.focus-duration; easing: ease-out; }
+            }
             TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(2); } }
         }
         UtilityFocusSurface {
             width: 40px; height: 40px;
             focused: root.utility-focus-visible && root.focused-utility-index == 3;
-            WebIcon { x: 6px; y: 6px; width: 28px; height: 28px; }
+            WebIcon {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2
+                    + (parent.focused && !Motion.reduced-motion ? -2px : 0px);
+                width: 28px;
+                height: 28px;
+                animate y { duration: Motion.focus-duration; easing: ease-out; }
+            }
             TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(3); } }
         }
         UtilityFocusSurface {
             width: 40px; height: 40px;
             focused: root.utility-focus-visible && root.focused-utility-index == 4;
-            SettingsIcon { x: 6px; y: 6px; width: 28px; height: 28px; }
+            SettingsIcon {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2
+                    + (parent.focused && !Motion.reduced-motion ? -2px : 0px);
+                width: 28px;
+                height: 28px;
+                animate y { duration: Motion.focus-duration; easing: ease-out; }
+            }
             TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(4); } }
         }
     }

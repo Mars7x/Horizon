@@ -11,6 +11,7 @@ export component HomePage inherits Rectangle {
     in property <string> selected-title;
     in property <bool> focus-visible: true;
     callback select-game(int);
+    callback carousel-geometry-changed(float);
 
     background: Theme.background;
 
@@ -26,5 +27,8 @@ export component HomePage inherits Rectangle {
         selected-title: root.selected-title;
         focus-visible: root.focus-visible;
         game-selected(index) => { root.select-game(index); }
+        geometry-changed(first-game-center-x-px) => {
+            root.carousel-geometry-changed(first-game-center-x-px);
+        }
     }
 }

@@ -8,7 +8,7 @@ use crate::{
     input::{UiAction, UiActionEvent},
     navigation::{
         AppRoute, Navigator, ShellFocus, ShellFocusRegion, TopUtility, UtilityDestination,
-        UtilityOverlay,
+        UtilityOverlay, nearest_game_for_x, nearest_utility_for_x, utility_center_x,
     },
 };
 
@@ -77,17 +77,34 @@ impl NavigationController {
             }
             UiAction::Up => {
                 let changed = if self.current_route() == AppRoute::Home {
-                    let utility = TopUtility::for_game_index(
-                        self.home.selected_index(),
-                        self.home.game_count(),
-                    );
-                    self.focus.borrow_mut().select_utility(utility)
+                    let selected_index = self.home.selected_index();
+                    let anchored_utility = self
+                        .focus
+                        .borrow_mut()
+                        .anchored_utility_for_content(selected_index);
+
+                    let utility = anchored_utility.unwrap_or_else(|| {
+                        let game_center_x = ui.get_home_first_game_center_x_px()
+                            + selected_index as f32 * ui.get_home_game_stride_px();
+                        nearest_utility_for_x(
+                            game_center_x,
+                            ui.get_logical_viewport_width_px(),
+                            ui.get_utility_center_step_px(),
+                        )
+                    });
+
+                    self.focus
+                        .borrow_mut()
+                        .enter_utilities_from_content(utility, selected_index)
                 } else {
                     self.focus.borrow_mut().enter_utilities()
                 };
 
                 if changed {
-                    debug!(utility = ?self.focus.borrow().utility(), "focus entered top utilities");
+                    debug!(
+                        utility = ?self.focus.borrow().utility(),
+                        "focus entered top utilities by reciprocal anchor or shortest center distance"
+                    );
                     self.publish_focus(ui);
                 }
             }
@@ -150,17 +167,36 @@ impl NavigationController {
                 }
             }
             UiAction::Down => {
-                if self.current_route() == AppRoute::Home {
-                    let game_index = self
-                        .focus
-                        .borrow()
-                        .utility()
-                        .paired_game_index(self.home.game_count());
-                    self.home.select_from_shell(ui, game_index);
-                }
+                let changed = if self.current_route() == AppRoute::Home {
+                    let (utility, exact_return_index) = {
+                        let focus = self.focus.borrow();
+                        (focus.utility(), focus.content_anchor_index())
+                    };
 
-                if self.focus.borrow_mut().leave_utilities() {
-                    debug!("focus returned to page content with spatial pairing");
+                    let game_index = exact_return_index.unwrap_or_else(|| {
+                        let utility_x = utility_center_x(
+                            utility,
+                            ui.get_logical_viewport_width_px(),
+                            ui.get_utility_center_step_px(),
+                        );
+                        nearest_game_for_x(
+                            utility_x,
+                            ui.get_home_first_game_center_x_px(),
+                            ui.get_home_game_stride_px(),
+                            self.home.game_count(),
+                        )
+                    });
+
+                    self.home.select_from_shell(ui, game_index);
+                    self.focus
+                        .borrow_mut()
+                        .leave_utilities_to_content(game_index)
+                } else {
+                    self.focus.borrow_mut().leave_utilities()
+                };
+
+                if changed {
+                    debug!("focus returned to page content with reciprocal anchor or spatial transfer");
                     self.publish_focus(ui);
                 }
             }

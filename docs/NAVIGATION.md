@@ -90,12 +90,21 @@ Do not move the Home scene merely because it is now a child of the central host.
 
 ## Phase 4.3 utility focus
 
-The shell now has two Rust-owned focus regions: page content and the top utility row. Up enters the utility row, Down returns to page content, and Left/Right move across Friends, Album, Activity, Web, and Settings. The strip clamps at its ends. On Home, vertical focus transfer uses spatial-order pairing: the selected game maps to the nearest proportional utility position on Up, and the focused utility maps back to the corresponding game on Down. With eight demo games, Friends/Album/Activity/Web/Settings pair with games 0/2/4/5/7. Other routed pages retain the last selected utility.
+The shell now has two Rust-owned focus regions: page content and the top utility row. Up enters the utility row, Down returns to page content, and Left/Right move across Friends, Album, Activity, Web, and Settings. The strip clamps at its ends.
 
-Only the region that owns focus may render its focus indicator. The Home game brackets disappear while the utility row owns focus and return on the spatially paired game when focus moves back down. The selected game itself remains selected; only its focus affordance is suppressed.
+Home uses live rendered geometry rather than proportional index pairing. For a fresh vertical transfer, Rust compares element centers and chooses the shortest center-to-center path: game center → utility center on Up, or utility center → game center on Down. Vertical transfer is also reciprocally sticky. If game A transfers to utility B and the user immediately reverses direction, focus returns to game A. Likewise, if utility B transfers to game A and the user immediately presses Up without changing games, focus returns to utility B. Horizontal movement in the destination region invalidates that exact pair, after which the next vertical move is resolved from the current rendered centers.
+
+Only the region that owns focus may render selection chrome. While the utility row owns focus, the Home game brackets, selected-game title pill, connector line, and connector dot are hidden. The game remains selected internally so focus can restore cleanly when returning to content.
 
 Activity and Settings activate normal top-level routes. Friends, Album, and Web open transient presentation-only overlays so auxiliary tools do not pollute route history. Back closes an overlay before popping route history; global Home closes overlays, restores content focus, and resets the route stack to Home. Pointer clicks on the header enter the same Rust-owned activation path.
 
 ## Next pass
 
 Phase 4.4 should expand focus-region behavior where pages gain additional regions and make focus restoration explicit per routed page. It should preserve the input and shell boundaries established here.
+
+
+Phase 4.3.3's geometry/anchor behavior is recorded in ADR 0031.
+
+While the utility row owns focus, Home retains the selected game index for navigation state, but renders no game-selection treatment: no scale-up, focus brackets, title/connector, raised z-order, or selected shadow. Those visuals return only when focus comes back to content.
+
+Utility focus uses a compact translucent accent orb, thin animated accent ring, subtle shadow, and restrained 2px icon lift. The icon and orb do not scale; the fixed-size orb fades in/out instead. No utility title is shown. The underlying 40x40 utility cells never resize, so the center coordinates used by spatial navigation remain stable.
