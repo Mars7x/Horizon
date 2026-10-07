@@ -210,11 +210,13 @@ Do not weaken linting or tests merely to merge a feature.
 Keep these documents current when their area changes:
 
 - `docs/ARCHITECTURE.md`
+- `docs/ACTIVITY.md`
 - `docs/APPEARANCE.md`
 - `docs/HOME_UI.md`
 - `docs/INPUT.md`
 - `docs/NAVIGATION.md`
 - `docs/SOURCES.md`
+- `docs/MANAGED_SESSIONS.md`
 - `docs/STEAM.md`
 - `docs/CLOCK.md`
 - `docs/adr/`
@@ -223,7 +225,7 @@ Use an Architecture Decision Record when a change introduces or reverses a signi
 
 ## Current phase boundary
 
-The repository currently contains work through **Phase 7.0.5**.
+The repository currently contains work through **Phase 9.5.0**.
 
 Implemented:
 
@@ -257,7 +259,7 @@ Implemented:
 - active route published to Slint as presentation state
 - app-level top/footer chrome on Home and Library, suppressed by full-shell utility destinations
 - retained route layers with central Home/Library bounds and full-shell Friends/Album/Activity/Web/Settings bounds
-- presentation-only placeholder pages for Library and all five utility submenus
+- presentation-only placeholder pages for Library, Friends, Album, Web, and Settings; Activity is now production-backed
 - route-local shell-focus restoration for Home, Library, and all five utility submenu routes
 - explicit global Back/Menu/Home policy with modal shell Menu state
 - tested keyboard/controller mappings for global shell actions
@@ -297,13 +299,34 @@ Implemented:
 - authoritative source-membership reconciliation removes stale/uninstalled source refs only after complete scans; partial scans remain additive
 - readable Steam libraries prefer actual appmanifest membership over cached declarations
 - source-neutral Home launch feedback provides a press-in animation plus `Launching…`/failure status and blocks duplicate launch presses while pending
+- schema v2 `play_sessions` + `source_lifetime_playtime` tables with explicit separation of observed vs provider-reported playtime
+- source-neutral `ActivityService` session lifecycle over a generic `ActivityRepository` boundary
+- `ForegroundHandoff` tracking that starts only after a Horizon-dispatched launch yields OS window activation and ends when Horizon becomes active again
+- crash/startup recovery that marks open sessions interrupted without inventing duration
+- persisted Activity overview with observed total time, completed sessions, games played, recent sessions, and most-played games
+- historical activity retention for uninstalled games without returning those games to the active Home library
+- production Lutris source adapter using read-only `pga.db` installed rows and `lutris:` URI launching
+- production Bottles source adapter using persisted `External_Programs` from standard `bottle.yml` files and `bottles:` URI launching
+- production Heroic source adapter for installed Epic/Legendary entries using local JSON metadata and `heroic:` URI launching
+- shared source-layer host-XDG/path-dedup/URI-component helpers without leaking provider paths into services/platform presentation
+- source-scoped native/Flatpak identities where upstream IDs are installation-local
+- read-only provider-scoped Flatpak permissions for Lutris, Bottles, and Heroic without home/host access
+- generic `SourceCapability::ManagedSession` and source-owned managed launch targets without provider checks in services/UI
+- optional same-user `horizon-session-helper` D-Bus broker for host-installed Gamescope
+- narrow Flatpak `--talk-name=io.github.Mars7x.Horizon.Session1` permission without `flatpak-spawn --host`
+- Bottles managed-session pilot using its documented direct CLI launch path under host Gamescope
+- normal portal launch fallback when the helper/Gamescope/provider-managed target is unavailable
+- schema v3 `managed_session` activity tracking for managed session lifecycle
+- bounded managed-session polling and interruption handling without host process-name scans
 
 Not yet implemented:
 
-- additional provider adapters (Heroic, Lutris, Bottles)
+- Heroic GOG/Amazon/sideload runner discovery beyond the Phase 9 Epic/Legendary slice
+- Bottles automatic shortcut discovery beyond explicitly persisted `External_Programs`
 - production source artwork retrieval/cache
-- playtime/session tracking
-- utility submenu production pages
+- exact/managed lifecycle support for URI-only Steam/Lutris/Heroic sources
+- source-reported Steam lifetime playtime ingestion
+- production Friends/Album/Web/Settings submenu pages
 
 Do not prematurely implement later-phase behavior as a shortcut while working on the current phase.
 
@@ -378,6 +401,60 @@ Phase 7 is the first real source vertical slice and must prove the Phase 5/6 bou
 14. Launch acknowledgement is source-neutral presentation state owned by `HomeController`; do not add Steam-specific loading UI or infer process lifetime in Slint.
 
 See `docs/STEAM.md`, `docs/SOURCES.md`, and ADR 0039. Phase 8 adds Activity + Playtime on top of this source-backed library.
+
+## Phase 8 target
+
+Phase 8 adds real activity/history while preserving uncertainty honestly:
+
+1. Keep Horizon-observed sessions separate from source-reported lifetime playtime in both domain and schema.
+2. Every observed session stores its tracking method. The initial `ForegroundHandoff` method is approximate and must never be relabeled as exact process lifetime.
+3. A successful source-neutral launch dispatch only arms a pending session. Timing starts when Horizon loses OS window activation and ends when Horizon becomes active again.
+4. Unrelated app deactivation without a pending Horizon launch creates no session.
+5. Startup recovery marks leftover open sessions `interrupted` without assigning an end timestamp or duration.
+6. Activity SQL remains in `src/persistence/`; `ActivityService` consumes an `ActivityRepository` boundary and Slint receives presentation models only.
+7. Preserve logical game rows that own historical activity/source-lifetime records after uninstall, but active library queries must still require a current source reference.
+8. The Activity route is a production full-shell page backed by persisted aggregates and recent sessions. Friends/Album/Web/Settings remain separate placeholders.
+9. Source-reported lifetime values may be persisted through the generic Activity boundary, but no source may advertise/report them until it can provide a reliable value.
+10. Do not add process-name polling, Steam-specific timers, or fabricated session end times as shortcuts for exact tracking.
+
+See `docs/ACTIVITY.md` and ADR 0044. Phase 9 adds more source adapters on top of these contracts.
+
+
+## Phase 9 target
+
+Phase 9 expands Horizon to multiple real launcher providers without weakening the Phase 6 source abstraction:
+
+1. Lutris, Bottles, and Heroic provider formats/paths live only in their modules under `src/sources/`.
+2. Register providers through `SourceRegistry`; generic import, persistence, launch, Home, and Activity code must not match source-name strings.
+3. Discover local installed state only. Do not add account login, provider web APIs, runtime network access, or credential parsing.
+4. Use durable provider-owned IDs, with native/Flatpak scope included when the upstream identifier is installation-local. Never deduplicate by title.
+5. Complete provider scans may use authoritative membership; any detected unreadable/externally inaccessible root must degrade the provider snapshot to partial rather than pruning from incomplete evidence.
+6. Launch through provider URI handlers returned as `SourceLaunchTarget::Uri` and executed by the existing XDG OpenURI platform boundary. Do not spawn launcher binaries or call `flatpak run`.
+7. Keep Flatpak permissions read-only and provider-scoped. Do not grant `home`, `host`, or arbitrary external bottle/library mounts for discovery completeness.
+8. Heroic Phase 9 initially covers installed Epic/Legendary entries. Namespace Heroic external IDs by runner so GOG/Amazon can be added later without breaking identity.
+9. Bottles Phase 9 imports explicitly persisted `External_Programs`; do not guess automatically discovered Windows shortcuts with an ad-hoc parser.
+10. Keep managed Gamescope sessions out of Phase 9. URI handoff remains compatible with the existing launch/activity path; managed sessions are a later generic launch capability.
+
+See `docs/SOURCES.md`, `docs/LUTRIS.md`, `docs/BOTTLES.md`, `docs/HEROIC.md`, and ADR 0045.
+
+## Phase 9.5 target
+
+Phase 9.5 introduces optional managed game sessions without turning the Flatpak
+into a generic host-command launcher:
+
+1. `SourceCapability::ManagedSession` is independent of normal `Launch`. Sources opt in only when they can produce a real direct managed target.
+2. The Flatpak talks only to `io.github.Mars7x.Horizon.Session1`. Do not add `org.freedesktop.Flatpak`, `flatpak-spawn --host`, or a generic command-execution method.
+3. The application sends source/game identity to the helper; the helper re-resolves the registered source and managed target on the host.
+4. The host helper runs as the current user, never root, and uses host-installed Gamescope.
+5. `GameLaunchService` prefers a managed launch when available but always preserves the existing source-neutral external launch fallback.
+6. Bottles is the initial managed provider. Steam/Lutris/Heroic must not advertise managed sessions until their actual game lifecycle can be guaranteed under Gamescope.
+7. Managed activity uses `SessionTrackingMethod::ManagedSession`; it begins after the helper starts the managed session and ends from helper lifecycle, not Horizon window focus.
+8. Unknown/failed helper lifecycle interrupts the associated activity row without fabricating duration.
+9. Poll only Horizon-owned managed session IDs. Do not scan `/proc`, process names, or launcher children heuristically.
+10. Phase 9.5 does not add an in-game overlay, Gamescope tuning UI, HDR/VRR policy, or game-session shell. Those belong to later console-polish work.
+11. The development helper installer writes only to the user's home systemd/libexec paths. Production immutable-system packaging remains a Phase 12 concern.
+
+See `docs/MANAGED_SESSIONS.md` and ADR 0046.
 
 ## Coding style
 
@@ -618,7 +695,7 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
 - `AppWindow.current-route` selects the active retained route layer; route history/policy still belongs to Rust. Home/Library use central shell bounds while every utility submenu uses the full logical surface.
 - `TopNavigation` and `Footer` are app-shell chrome and must not be duplicated back into route pages. They are visible on Home/Library and intentionally hidden for every utility submenu route.
 - Home subtracts `Metrics.top-chrome-height` from its internal scene origin so moving it into the central host does not change established screen-space geometry.
-- Library and utility submenu content are presentation-only placeholders during Phase 4; do not add persistence/source behavior merely to make them look complete.
+- Library and utility submenu content were presentation-only placeholders during Phase 4. Later phases may replace an individual placeholder through its owning service/presentation boundary; Activity is the first production utility page in Phase 8.
 - Keep route-state tests independent of Slint rendering and controller hardware. See `docs/NAVIGATION.md`, ADR 0028, and ADR 0035.
 
 
@@ -673,7 +750,7 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
 
 - Route history and route selection remain Rust-owned. Slint may animate the already-published `AppRouteView`, but it must not infer or mutate navigation history.
 - Route pages use one reusable `PageTransitionLayer` per retained route. Home/Library keep the central shell content bounds; Friends/Album/Activity/Web/Settings use the full logical surface. The active page crossfades to full opacity and settles upward by the centralized `Metrics.page-transition-offset`; inactive pages perform the inverse.
-- All five utility routes share the reusable presentation-only `UtilitySubmenuPage` component during Phase 4; do not fork five slightly different placeholder shells.
+- During Phase 4 all five utility routes shared `UtilitySubmenuPage`. Phase 8 legitimately replaces Activity with `ActivityPage` while preserving the same route/full-shell semantics; do not duplicate navigation policy in the production page.
 - Page transition timing must use `Motion.page-duration`. Do not add route-specific hard-coded durations or offsets.
 - Reduced Motion makes `Motion.page-duration` zero, so route changes become immediate while preserving the exact same route/focus/history semantics.
 - Top navigation, footer chrome, and the global shell Menu do not participate in route motion. Route content alone transitions. Every utility submenu suppresses top/footer chrome while active; chrome visibility changes immediately and is not part of the route animation.
@@ -701,7 +778,7 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
 - `game_sources` is intentionally relational so a logical game can support multiple source references later without source-name branching in the domain.
 - XDG data path resolution belongs to `src/platform/data_paths.rs`; no source or presentation code should construct host paths.
 - Phase 5 startup may initialize/migrate the database, but the demo Home model remains until the source-backed vertical slice. Do not read SQLite directly into Slint.
-- Source-reported lifetime playtime and future Horizon-observed sessions must remain separate persistence concepts.
+- Source-reported lifetime playtime and Horizon-observed sessions are separate persistence concepts. Never collapse or sum them into one ambiguous value.
 - `rusqlite` uses the `bundled` feature in the current development baseline; preserve the dependency provenance in `THIRD_PARTY_NOTICES.md` and include it in the final lockfile-derived license report. See ADR 0037.
 
 
@@ -726,7 +803,7 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
 - Flatpak Steam metadata permissions stay read-only and provider-scoped. Native Steam uses the narrow XDG roots; Flatpak Steam receives `~/.var/app/com.valvesoftware.Steam:ro` because its canonical metadata may resolve across child directories inside that app sandbox. Do not broaden this to home/host/external-library access.
 - Home is source-backed from persisted `LibraryGame` values. Do not reintroduce a fake/demo catalog when the durable library is empty. A zero-game model must render the dedicated empty state, not any carousel/title/focus geometry.
 - `FallbackCover` is the source-neutral missing-artwork path. Do not make it Steam-branded or key visual behavior from `SourceId`.
-- A complete Steam scan publishes authoritative game membership; persistence atomically removes Steam references absent from that set and deletes only orphaned logical games. If any detected Steam root fails, the snapshot is partial and must not prune prior entries. See ADR 0042.
+- A complete Steam scan publishes authoritative game membership; persistence atomically removes Steam references absent from that set. Since Phase 8, a logical game with historical activity/lifetime data is retained for history even after its final active source ref disappears; active-library queries still require `game_sources`. If any detected Steam root fails, the snapshot is partial and must not prune prior entries. See ADR 0042 and ADR 0044.
 - For a readable library, actual `appmanifest_<appid>.acf` files are the primary installed-membership record. Use `libraryfolders.vdf` `apps` only when the library path itself is outside Horizon's readable sandbox.
 - `steam-vdf-parser` provenance and Apache-2.0 OR MIT licensing must remain recorded in `THIRD_PARTY_NOTICES.md`, `docs/LICENSING.md`, and `LICENSES/`. See ADR 0039.
 
@@ -746,3 +823,41 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
 - Steam membership must come from installed-library metadata, not the full appinfo catalog. Readable libraries prefer actual appmanifest filenames; inaccessible external libraries may use Steam's `libraryfolders.vdf` installed `apps` map.
 - A fresh Home Accept publishes generic launch feedback before dispatch. While pending, duplicate Accept and carousel Left/Right are suppressed. The selected card uses real width/height press-in geometry and the fixed title pill adds `Launching…`; Reduced Motion makes only the interpolation immediate.
 - A synchronous launch failure may publish `Launch failed`. Pending feedback clears when Horizon loses window activation; do not claim process-running state from OpenURI success. Keep feedback source-neutral and separate from ADR 0041 controller ownership. See ADR 0043.
+
+
+## Phase 8 activity/playtime invariants
+
+- `play_sessions` is Horizon-observed history. `source_lifetime_playtime` is provider-reported cumulative data. Never add one to the other.
+- `SessionTrackingMethod::ForegroundHandoff` means exactly: pending Horizon launch → Horizon deactivation starts timing → Horizon activation ends timing. It is approximate foreground ownership, not proven game-process lifetime.
+- Only a successful source-neutral launch dispatch may arm a pending session. Cancelling the pending Home launch state must cancel that pending activity handoff so a later unrelated alt-tab cannot fabricate playtime.
+- The root activation callback must let `ActivityService` consume deactivation before Home clears launch feedback. Do not move this ordering into Steam/source code.
+- Open sessions surviving a crash/exit become `interrupted` on startup with no end timestamp. Interrupted rows never contribute duration to observed totals.
+- Historical game rows may outlive current `game_sources` solely to preserve activity/lifetime history. `list_games()`/`game_count()` represent the active source-backed library and must not surface those historical-only rows.
+- The Activity Slint page renders Rust-published summary/recent/top-game models only. It must never query SQLite, infer duration, or inspect source IDs.
+- Future exact process/session tracking must add a new explicit tracking-method variant; never silently change the semantics of existing `ForegroundHandoff` rows. See ADR 0044.
+
+
+## Phase 9 multi-provider invariants
+
+- Lutris, Bottles, Heroic, and Steam are peers behind `GameSource`. Generic services/persistence/presentation must never gain `if source == ...` behavior.
+- Shared provider utilities in `src/sources/support.rs` may resolve host XDG roots, deduplicate candidate paths, and percent-encode URI components only; they must not become a cross-provider business-logic dumping ground.
+- Lutris discovery opens `pga.db` read-only and only imports rows marked installed with a usable config ID. Its local numeric IDs are scoped as native/Flatpak before persistence.
+- Bottles discovery imports persisted `External_Programs` only. Standard bottle roots may be authoritative; an external-location `placeholder.yml` makes the snapshot partial unless that external location is deliberately supported later. Do not add broad filesystem grants to chase it.
+- Heroic external IDs include their runner namespace. Phase 9 supports `legendary:<app-name>` only; future `gog:`/`nile:` additions stay inside the same adapter and must preserve existing IDs.
+- Lutris launches with `lutris:rungameid/<id>`, Bottles with `bottles:run/<bottle>/<program>`, and Heroic with its documented `heroic://launch?...` form. URI construction belongs to each adapter; OpenURI dispatch remains platform-owned.
+- Phase 9 source metadata access is local-only and read-only. No credentials, provider APIs, host command execution, `flatpak-spawn --host`, `--filesystem=home`, or `--filesystem=host`.
+- Serde/JSON/YAML dependency provenance must remain documented and covered by the final lockfile-derived release inventory. See ADR 0045.
+
+
+## Phase 9.5 managed-session invariants
+
+- A managed session is a generic launch capability, not a Bottles special case in services or presentation.
+- The Flatpak-side D-Bus client may transmit only source/game identity and session-control IDs. Never expand the helper protocol into arbitrary host command execution.
+- Host helper source resolution must use the same `GameSource` adapter boundary as the app.
+- Gamescope absence, helper absence, or unsupported provider state must fall back to the normal launch path rather than making game launch fail solely because managed sessions are unavailable.
+- `ManagedSession` activity is driven by the managed session lifecycle. Window activation must not complete it.
+- `ForegroundHandoff` remains unchanged for external URI launches.
+- Bottles is the only Phase 9.5 managed provider. Do not claim Steam/Lutris/Heroic are managed merely because a launcher URI can be invoked from inside Gamescope.
+- The host helper is same-user and unprivileged. Do not require root, broad filesystem access, or `flatpak-spawn --host`.
+- Keep managed-session polling bounded to active Horizon session IDs and clear terminal helper records after observation.
+- See ADR 0046.

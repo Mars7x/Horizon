@@ -1,10 +1,266 @@
-import { PagePlaceholder } from "../components/page-placeholder.slint";
+import { Theme, Metrics, Typography } from "../theme/theme.slint";
+import { ActivitySessionData, ActivityGameData } from "../models/activity.slint";
+
+component SummaryCard inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+
+    background: Theme.surface;
+    border-radius: Metrics.radius-lg;
+    border-width: Theme.high-contrast ? 2px : 1px;
+    border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.55);
+
+    Text {
+        x: 22px;
+        y: 18px;
+        width: parent.width - 44px;
+        height: 26px;
+        text: root.label;
+        color: Theme.secondary-foreground;
+        font-size: Typography.caption-size;
+        font-weight: Typography.emphasis-weight;
+        vertical-alignment: center;
+    }
+
+    Text {
+        x: 22px;
+        y: 47px;
+        width: parent.width - 44px;
+        height: parent.height - 60px;
+        text: root.value;
+        color: Theme.foreground;
+        font-size: 30px;
+        font-weight: Typography.title-weight;
+        vertical-alignment: top;
+        overflow: elide;
+    }
+}
 
 export component ActivityPage inherits Rectangle {
-    PagePlaceholder {
-        width: parent.width;
-        height: parent.height;
-        title: "Activity";
-        description: "Play history and session activity will appear here.";
+    in property <string> total-playtime: "0 min";
+    in property <string> session-count: "0";
+    in property <string> game-count: "0";
+    in property <[ActivitySessionData]> recent-sessions;
+    in property <[ActivityGameData]> top-games;
+
+    background: Theme.background;
+
+    Text {
+        x: Metrics.page-margin;
+        y: 34px;
+        width: parent.width - Metrics.page-margin * 2;
+        height: 44px;
+        text: "Activity";
+        color: Theme.foreground;
+        font-size: Typography.title-size;
+        font-weight: Typography.title-weight;
+        vertical-alignment: center;
+    }
+
+    Text {
+        x: Metrics.page-margin;
+        y: 78px;
+        width: parent.width - Metrics.page-margin * 2;
+        height: 28px;
+        text: "Horizon-observed sessions";
+        color: Theme.secondary-foreground;
+        font-size: Typography.body-size;
+        font-weight: Typography.body-weight;
+        vertical-alignment: center;
+    }
+
+    private property <length> summary-gap: 16px;
+    private property <length> summary-width:
+        (root.width - Metrics.page-margin * 2 - root.summary-gap * 2) / 3;
+
+    SummaryCard {
+        x: Metrics.page-margin;
+        y: 122px;
+        width: root.summary-width;
+        height: 104px;
+        label: "Observed playtime";
+        value: root.total-playtime;
+    }
+
+    SummaryCard {
+        x: Metrics.page-margin + root.summary-width + root.summary-gap;
+        y: 122px;
+        width: root.summary-width;
+        height: 104px;
+        label: "Completed sessions";
+        value: root.session-count;
+    }
+
+    SummaryCard {
+        x: Metrics.page-margin + (root.summary-width + root.summary-gap) * 2;
+        y: 122px;
+        width: root.summary-width;
+        height: 104px;
+        label: "Games played";
+        value: root.game-count;
+    }
+
+    private property <length> content-top: 264px;
+    private property <length> content-bottom: 36px;
+    private property <length> column-gap: 24px;
+    private property <length> left-width:
+        (root.width - Metrics.page-margin * 2 - root.column-gap) * 0.62;
+    private property <length> right-width:
+        root.width - Metrics.page-margin * 2 - root.column-gap - root.left-width;
+
+    Rectangle {
+        x: Metrics.page-margin;
+        y: root.content-top;
+        width: root.left-width;
+        height: parent.height - root.content-top - root.content-bottom;
+        background: Theme.surface;
+        border-radius: Metrics.radius-lg;
+        border-width: Theme.high-contrast ? 2px : 1px;
+        border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.55);
+        clip: true;
+
+        Text {
+            x: 22px;
+            y: 14px;
+            width: parent.width - 44px;
+            height: 34px;
+            text: "Recent sessions";
+            color: Theme.foreground;
+            font-size: Typography.heading-size;
+            font-weight: Typography.heading-weight;
+            vertical-alignment: center;
+        }
+
+        if root.recent-sessions.length == 0 : Text {
+            x: 22px;
+            y: 70px;
+            width: parent.width - 44px;
+            height: 54px;
+            text: "Play a game from Home and your observed sessions will appear here.";
+            color: Theme.secondary-foreground;
+            font-size: Typography.body-size;
+            font-weight: Typography.body-weight;
+            wrap: word-wrap;
+        }
+
+        for session[index] in root.recent-sessions : Rectangle {
+            x: 18px;
+            y: 58px + index * 58px;
+            width: parent.width - 36px;
+            height: 54px;
+            background: Math.mod(index, 2) == 0 ? Theme.surface-raised.with-alpha(0.72) : transparent;
+            border-radius: Metrics.radius-sm;
+
+            Text {
+                x: 12px;
+                y: 5px;
+                width: parent.width * 0.48;
+                height: 24px;
+                text: session.title;
+                color: Theme.foreground;
+                font-size: Typography.body-size;
+                font-weight: Typography.emphasis-weight;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+
+            Text {
+                x: 12px;
+                y: 29px;
+                width: parent.width * 0.58;
+                height: 19px;
+                text: session.when + " · " + session.method;
+                color: Theme.secondary-foreground;
+                font-size: Typography.caption-size;
+                font-weight: Typography.body-weight;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+
+            Text {
+                x: parent.width - 144px;
+                y: 0px;
+                width: 128px;
+                height: parent.height;
+                text: session.duration;
+                color: Theme.accent;
+                font-size: Typography.body-size;
+                font-weight: Typography.emphasis-weight;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+    }
+
+    Rectangle {
+        x: Metrics.page-margin + root.left-width + root.column-gap;
+        y: root.content-top;
+        width: root.right-width;
+        height: parent.height - root.content-top - root.content-bottom;
+        background: Theme.surface;
+        border-radius: Metrics.radius-lg;
+        border-width: Theme.high-contrast ? 2px : 1px;
+        border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.55);
+        clip: true;
+
+        Text {
+            x: 22px;
+            y: 14px;
+            width: parent.width - 44px;
+            height: 34px;
+            text: "Most played";
+            color: Theme.foreground;
+            font-size: Typography.heading-size;
+            font-weight: Typography.heading-weight;
+            vertical-alignment: center;
+        }
+
+        if root.top-games.length == 0 : Text {
+            x: 22px;
+            y: 70px;
+            width: parent.width - 44px;
+            height: 54px;
+            text: "No completed sessions yet.";
+            color: Theme.secondary-foreground;
+            font-size: Typography.body-size;
+            font-weight: Typography.body-weight;
+            wrap: word-wrap;
+        }
+
+        for game[index] in root.top-games : Rectangle {
+            x: 18px;
+            y: 58px + index * 72px;
+            width: parent.width - 36px;
+            height: 66px;
+            background: index == 0 ? Theme.accent-subtle.with-alpha(0.72) : transparent;
+            border-radius: Metrics.radius-sm;
+
+            Text {
+                x: 12px;
+                y: 7px;
+                width: parent.width - 24px;
+                height: 24px;
+                text: game.title;
+                color: Theme.foreground;
+                font-size: Typography.body-size;
+                font-weight: Typography.emphasis-weight;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+
+            Text {
+                x: 12px;
+                y: 33px;
+                width: parent.width - 24px;
+                height: 22px;
+                text: game.playtime + " · " + game.sessions;
+                color: Theme.secondary-foreground;
+                font-size: Typography.caption-size;
+                font-weight: Typography.body-weight;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+        }
     }
 }

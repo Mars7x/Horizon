@@ -92,7 +92,7 @@ The Rust `NavigationController` remains above page controllers while `AppWindow`
 - Accept is recognized but intentionally does not launch anything yet
 - Back is interpreted at the navigation layer and restores route history when available
 - Home resets route history to the Home root
-- Library, Activity, and Settings currently render presentation-only placeholders and intentionally ignore page-local actions
+- Library, Friends, Album, Web, and Settings currently have no page-local navigation policy; Activity renders persisted read-only statistics and likewise requires no page-local directional actions yet
 - Up / Down / Menu / bumpers remain semantic and gain additional screen-level behavior in later Phase 4 passes
 
 The input adapters themselves are unchanged: they never inspect or choose application routes. See `NAVIGATION.md`.
@@ -186,3 +186,16 @@ This rule is source-neutral and game-neutral. Launch services do not guess proce
 ## Phase 7.0.5 launch-pending input policy
 
 The input layer does not learn about launch state. It continues to emit semantic actions while Horizon owns the active window. `HomeController` alone suppresses duplicate Accept and Left/Right carousel actions while a source-neutral launch handoff is pending. This keeps device normalization independent from launch/services and avoids a Steam-specific input mode. See ADR 0043.
+
+
+## Phase 8 activation sharing
+
+The root window-activation signal now serves two independent application concerns: controller input ownership and approximate launch-session observation. `InputManager` still owns only controller enable/disable. `ActivityService` separately consumes the activation transition after a source-neutral launch dispatch to start/end a `ForegroundHandoff` session.
+
+Do not merge these into one input/session state machine. Activity tracking must not teach SDL about games, and controller ownership must not depend on SQLite success. See ADR 0044.
+
+## Phase 9.5 managed-session input ownership
+
+Managed Gamescope sessions do not introduce a second controller-routing path. Horizon still consumes SDL navigation only while its own window is active. When Gamescope/the game owns foreground activation, Horizon suppresses semantic controller actions exactly as it does for an external launch. Bringing Horizon intentionally back to the foreground restores Horizon UI input even if the managed session is still running.
+
+Session lifecycle and input ownership remain independent: the host helper reports managed-session state to the launch/activity services, while `InputManager` continues to depend only on Horizon window activation.

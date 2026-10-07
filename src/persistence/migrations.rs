@@ -8,13 +8,25 @@ struct Migration {
     sql: &'static str,
 }
 
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "initial_library",
-    sql: include_str!("migrations/0001_initial_library.sql"),
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "initial_library",
+        sql: include_str!("migrations/0001_initial_library.sql"),
+    },
+    Migration {
+        version: 2,
+        name: "activity_sessions",
+        sql: include_str!("migrations/0002_activity_sessions.sql"),
+    },
+    Migration {
+        version: 3,
+        name: "managed_session_tracking",
+        sql: include_str!("migrations/0003_managed_session_tracking.sql"),
+    },
+];
 
-pub(crate) const LATEST_SCHEMA_VERSION: i64 = 1;
+pub(crate) const LATEST_SCHEMA_VERSION: i64 = 3;
 
 const MIGRATION_LEDGER_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -97,6 +109,38 @@ mod tests {
             current_schema_version(&connection).expect("schema version"),
             LATEST_SCHEMA_VERSION
         );
+    }
+
+    #[test]
+    fn latest_schema_accepts_managed_session_activity_rows() {
+        let mut connection = Connection::open_in_memory().expect("in-memory database");
+        migrate(&mut connection).expect("migrate");
+
+        connection
+            .execute(
+                "INSERT INTO games(id, title, created_at, updated_at) VALUES (1, 'Game', 0, 0)",
+                [],
+            )
+            .expect("game");
+        connection
+            .execute(
+                r#"
+                INSERT INTO play_sessions(
+                    id, game_id, source_id, started_at, ended_at, tracking_method, state
+                ) VALUES (1, 1, 'bottles', 10, 20, 'managed_session', 'completed')
+                "#,
+                [],
+            )
+            .expect("managed session row");
+
+        let method = connection
+            .query_row(
+                "SELECT tracking_method FROM play_sessions WHERE id = 1",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .expect("tracking method");
+        assert_eq!(method, "managed_session");
     }
 
     #[test]

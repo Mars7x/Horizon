@@ -1,6 +1,6 @@
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc, time::Duration};
 
-use slint::ComponentHandle;
+use slint::{ComponentHandle, Timer, TimerMode};
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
@@ -9,17 +9,22 @@ use crate::{
     error::AppError,
     input::{ControllerStatus, InputManager, UiActionEvent},
     persistence::SqliteLibraryRepository,
-    platform::{data_paths, launcher::PortalLaunchExecutor, slint_backend},
+    platform::{
+        data_paths, launcher::PortalLaunchExecutor, session_helper::DbusManagedSessionExecutor,
+        slint_backend,
+    },
     presentation::{
-        appearance::AppearanceController, clock::ClockController, home::HomeController,
-        navigation::NavigationController,
+        activity::ActivityController, appearance::AppearanceController, clock::ClockController,
+        home::HomeController, navigation::NavigationController,
     },
     services::{
+        activity::{ActivityService, ActivitySessionTransition, LaunchActivitySink},
         import::{SourceImportOutcome, SourceImportService},
         launch::GameLaunchService,
         library::LibraryService,
+        session::{ManagedSessionExecutor, ManagedSessionTerminalState},
     },
-    sources::{SourceRegistry, steam::SteamSource},
+    sources::production_source_registry,
 };
 
 const APP_ID: &str = "io.github.Mars7x.Horizon";
@@ -32,7 +37,7 @@ pub fn run() -> Result<(), AppError> {
         )
         .init();
 
-    info!("starting Horizon phase 7.0.5");
+    info!("starting Horizon phase 9.5.0");
 
     let database_path = data_paths::library_database_path()?;
     let repository = SqliteLibraryRepository::open(&database_path)?;
@@ -45,8 +50,7 @@ pub fn run() -> Result<(), AppError> {
         "persistent library initialized"
     );
 
-    let mut registry = SourceRegistry::new();
-    registry.register(SteamSource::new()?)?;
+    let registry = production_source_registry()?;
 
     let import_summary = SourceImportService::import_all(&registry, &mut library)?;
     for report in import_summary.reports() {
@@ -81,6 +85,20 @@ pub fn run() -> Result<(), AppError> {
         warn!("no source-backed games are currently available; Home will show its empty state");
     }
 
+    // Discovery owns the repository exclusively during startup. After the
+    // import pass is complete, share that same repository with the runtime
+    // Activity service so library and play-history writes stay in one database
+    // connection without leaking SQLite into presentation code.
+    let runtime_repository = Rc::new(RefCell::new(library.into_repository()));
+    let activity_service = Rc::new(ActivityService::new(Rc::clone(&runtime_repository)));
+    let interrupted_sessions = activity_service.recover_interrupted_sessions()?;
+    if interrupted_sessions > 0 {
+        warn!(
+            interrupted_sessions,
+            "recovered unfinished activity sessions without inventing playtime"
+        );
+    }
+
     // Backend selection must happen before set_xdg_app_id(), AppWindow::new(),
     // or any other Slint operation that needs the platform.
     slint_backend::initialize()?;
@@ -105,12 +123,47 @@ pub fn run() -> Result<(), AppError> {
         }
     };
 
+    let activity_overview = activity_service.overview(
+        ActivityController::recent_session_limit(),
+        ActivityController::top_game_limit(),
+    )?;
+    ActivityController::publish(&ui, &activity_overview);
+    info!(
+        observed_seconds = activity_overview.observed_playtime().get(),
+        sessions = activity_overview.completed_sessions(),
+        "persisted Activity overview initialized"
+    );
+
     let registry = Rc::new(registry);
-    let launch_service = Rc::new(GameLaunchService::new(
+    let mut launch_service = GameLaunchService::new(
         Rc::clone(&registry),
         Rc::new(PortalLaunchExecutor),
-    ));
-    let home = HomeController::new(&ui, library_games, launch_service);
+    );
+    match DbusManagedSessionExecutor::new() {
+        Ok(executor) => {
+            let available = executor.probe();
+            info!(
+                available,
+                "optional managed-session host helper probe completed"
+            );
+            let executor: Rc<dyn ManagedSessionExecutor> = Rc::new(executor);
+            launch_service = launch_service.with_managed_executor(executor);
+        }
+        Err(error) => {
+            warn!(
+                %error,
+                "managed-session D-Bus client could not initialize; normal launch remains available"
+            );
+        }
+    }
+    let launch_service = Rc::new(launch_service);
+    let launch_activity: Rc<dyn LaunchActivitySink> = activity_service.clone();
+    let home = HomeController::new(
+        &ui,
+        library_games,
+        Rc::clone(&launch_service),
+        launch_activity,
+    );
     info!(games = home.game_count(), "source-backed Home library initialized");
 
     let navigation = NavigationController::new(&ui, Rc::clone(&home));
@@ -144,11 +197,91 @@ pub fn run() -> Result<(), AppError> {
     // background Horizon shell.
     let activation_input = Rc::clone(&input);
     let activation_home = Rc::clone(&home);
+    let activation_activity = Rc::clone(&activity_service);
     let activation_ui = ui.as_weak();
     ui.on_application_active_changed(move |active| {
         activation_input.set_ui_input_enabled(active);
+
+        // Activity observes the same OS activation boundary that owns
+        // controller input. Handle the activity transition before Home clears
+        // its launch feedback so a pending launch can become a real observed
+        // foreground session on deactivation.
+        let activity_transition =
+            match activation_activity.handle_application_active_changed(active) {
+                Ok(transition) => transition,
+                Err(error) => {
+                    warn!(%error, active, "activity session transition could not be persisted");
+                    ActivitySessionTransition::None
+                }
+            };
+
         if let Some(ui) = activation_ui.upgrade() {
             activation_home.handle_application_active_changed(&ui, active);
+
+            if matches!(activity_transition, ActivitySessionTransition::Completed(_)) {
+                match activation_activity.overview(
+                    ActivityController::recent_session_limit(),
+                    ActivityController::top_game_limit(),
+                ) {
+                    Ok(overview) => ActivityController::publish(&ui, &overview),
+                    Err(error) => warn!(%error, "Activity overview could not be refreshed"),
+                }
+            }
+        }
+    });
+
+    let managed_session_timer = Timer::default();
+    let managed_launch_service = Rc::clone(&launch_service);
+    let managed_activity = Rc::clone(&activity_service);
+    let managed_home = Rc::clone(&home);
+    let managed_ui = ui.as_weak();
+    managed_session_timer.start(TimerMode::Repeated, Duration::from_millis(500), move || {
+        let completions = managed_launch_service.poll_managed_sessions();
+        if completions.is_empty() {
+            return;
+        }
+
+        let Some(ui) = managed_ui.upgrade() else {
+            return;
+        };
+        let mut refresh_activity = false;
+
+        for completion in completions {
+            let failed = !matches!(
+                completion.terminal(),
+                ManagedSessionTerminalState::Exited { .. }
+            );
+            managed_home.handle_managed_session_completion(
+                &ui,
+                completion.session_id(),
+                failed,
+            );
+
+            match managed_activity.handle_managed_session_terminal(
+                completion.session_id(),
+                completion.terminal(),
+            ) {
+                Ok(transition) => {
+                    refresh_activity |= transition.changed();
+                }
+                Err(error) => {
+                    warn!(
+                        session_id = completion.session_id().get(),
+                        %error,
+                        "managed activity session transition could not be persisted"
+                    );
+                }
+            }
+        }
+
+        if refresh_activity {
+            match managed_activity.overview(
+                ActivityController::recent_session_limit(),
+                ActivityController::top_game_limit(),
+            ) {
+                Ok(overview) => ActivityController::publish(&ui, &overview),
+                Err(error) => warn!(%error, "Activity overview could not be refreshed"),
+            }
         }
     });
 
@@ -158,11 +291,13 @@ pub fn run() -> Result<(), AppError> {
     });
 
     // Keep services/timers/input managers alive for the full UI event loop.
-    let _library = library;
+    let _runtime_repository = runtime_repository;
+    let _activity_service = activity_service;
     let _source_registry = registry;
     let _clock = clock;
     let _navigation = navigation;
     let _input = input;
+    let _managed_session_timer = managed_session_timer;
 
     ui.run()?;
 

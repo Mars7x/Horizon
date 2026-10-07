@@ -95,3 +95,7 @@ Source-removal reconciliation is intentionally conservative in this phase: disco
 Steam's successful complete scan publishes authoritative source membership. `SourceImportService` passes that through the generic Phase 6/7 repository contract; SQLite removes Steam references that are no longer in the installed membership and deletes a logical game only when it has no remaining source references. This also cleans stale Steam rows created by earlier builds without requiring the user to recreate the database.
 
 If any detected Steam root fails, the merged snapshot is deliberately partial and persistence remains additive for that pass. This prevents a permission or parse problem from being mistaken for an uninstall. See ADR 0042.
+
+## Phase 9.5 managed-session status
+
+Steam remains an external URI launch in Phase 9.5. The adapter does not advertise `ManagedSession`: invoking `steam://` from inside Gamescope would not prove that an already-running Steam client launches the actual game into that compositor. Steam will opt in only when Horizon can guarantee the real game session is managed rather than merely wrapping URI dispatch.

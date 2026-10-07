@@ -23,6 +23,10 @@ finish-args:
   # Horizon needs evdev/input access for controller navigation.
   # Do not broaden this to --device=all.
   - --device=input
+  # Optional host-side managed-session broker. This grants access only to
+  # Horizon's narrow session D-Bus API; it does not expose flatpak-spawn or
+  # arbitrary host command execution.
+  - --talk-name=io.github.Mars7x.Horizon.Session1
   # Read only Steam-owned metadata locations. Native Steam stays limited to
   # its XDG data roots. Flatpak Steam needs its app-data root exposed as one
   # read-only subtree because real installations may resolve Steam metadata
@@ -31,6 +35,16 @@ finish-args:
   - --filesystem=xdg-data/Steam:ro
   - --filesystem=xdg-data/steam:ro
   - --filesystem=~/.var/app/com.valvesoftware.Steam:ro
+  # Additional provider metadata is read-only and scoped to each launcher's
+  # own native XDG tree or Flatpak app-data tree. Do not replace these with
+  # broad home/host access.
+  - --filesystem=xdg-data/lutris:ro
+  - --filesystem=~/.var/app/net.lutris.Lutris:ro
+  - --filesystem=xdg-data/bottles:ro
+  - --filesystem=~/.var/app/com.usebottles.bottles:ro
+  - --filesystem=xdg-config/heroic:ro
+  - --filesystem=xdg-config/legendary:ro
+  - --filesystem=~/.var/app/com.heroicgameslauncher.hgl:ro
 
 modules:
   # Install the four canonical Google Fonts LINE Seed JP TTFs from one immutable

@@ -202,3 +202,65 @@ The Flatpak grants narrow read-only access to Steam's own conventional metadata 
 The source framework now separates normalized discovered games from authoritative installed membership. Sources remain conservative by default; a complete source scan may publish an authoritative external-ID set. `SourceImportService` chooses additive import or source synchronization from that generic snapshot contract, and `SqliteLibraryRepository` performs reconciliation atomically. Provider-specific code never issues deletes or SQL. See ADR 0042.
 
 Launch acknowledgement remains presentation/application state rather than source state. `HomeController` publishes only a pending game index and human-readable launch status around the existing source-neutral `GameLaunchService`. Slint renders the press/status feedback but does not decide launch policy. OS window deactivation clears the transient handoff state while ADR 0041 independently suspends controller UI input. See ADR 0043.
+
+
+## Phase 8 activity boundary
+
+Activity follows the existing one-way architecture. `src/services/activity.rs` coordinates launch handoff/session lifecycle through an `ActivityRepository` boundary. `src/persistence/sqlite.rs` owns the SQL, while `src/presentation/activity.rs` formats an `ActivityOverview` into Slint models. The Activity page never reads SQLite directly.
+
+`HomeController` knows only the small source-neutral `LaunchActivitySink` hook. A successful launch dispatch arms the next foreground handoff with Horizon `GameId` + `SourceId`; Steam does not own session lifecycle. The root OS-window activation signal is shared conceptually with controller ownership, but input and activity remain separate services.
+
+The runtime repository is shared behind `Rc<RefCell<_>>` only after startup discovery/import has finished. This allows one SQLite connection to back runtime activity writes without moving persistence into presentation. See `ACTIVITY.md` and ADR 0044.
+
+## Phase 9 multi-source boundary
+
+Phase 9 expands the concrete adapter set without changing the inward dependency direction established by Phases 5–7:
+
+- `src/sources/lutris.rs` owns Lutris `pga.db` paths/schema details and the `lutris:` launch URI;
+- `src/sources/bottles.rs` owns Bottles `bottle.yml`/`External_Programs` details and the `bottles:` launch URI;
+- `src/sources/heroic.rs` owns Heroic/Legendary local metadata and the `heroic:` launch URI;
+- `src/sources/support.rs` contains only source-layer helpers shared by adapters, such as host XDG resolution and URI-component encoding;
+- startup registers every provider through `SourceRegistry`; `SourceImportService`, `LibraryService`, SQLite, Home, Activity, and the platform launcher remain unchanged and provider-neutral.
+
+Provider-specific installation scopes are encoded only when the upstream identifier is installation-local. Lutris database IDs and Bottles program identities are therefore namespaced by native/Flatpak scope. Heroic's store runner is part of its external identity so additional Heroic stores can be implemented later without breaking persisted Epic identities.
+
+Phase 9 retains URI-based external handoff. It does not add host executable spawning, `flatpak run`, Gamescope, process ownership, or managed sessions. Those belong to the planned managed-session phase and should extend the generic launch capability rather than replace the source boundary.
+
+See `SOURCES.md`, `LUTRIS.md`, `BOTTLES.md`, `HEROIC.md`, and ADR 0045.
+
+
+## Phase 9.5 managed-session boundary
+
+Managed sessions add one optional host boundary without reversing Horizon's
+dependency direction:
+
+```text
+Slint / presentation
+        |
+GameLaunchService + ActivityService
+        |
+SourceRegistry / GameSource
+        |
+ManagedSessionExecutor (platform boundary)
+        |
+user D-Bus
+        |
+horizon-session-helper (host)
+        |
+Gamescope
+```
+
+The application-side service knows only `ManagedSessionExecutor`. The D-Bus
+implementation is in `src/platform/session_helper.rs`. The host broker is
+`src/session_helper.rs`.
+
+The D-Bus request carries source/game identity, not a command. The host helper
+uses the source registry again to resolve an adapter-owned
+`SourceManagedLaunchTarget`. This intentionally prevents the broker from
+becoming a generic `flatpak-spawn --host` equivalent.
+
+Managed sessions are optional. The launch service falls back to the existing
+`LaunchExecutor`/OpenURI route if the capability, helper, Gamescope, or managed
+target is unavailable.
+
+See `docs/MANAGED_SESSIONS.md` and ADR 0046.

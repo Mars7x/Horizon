@@ -4,7 +4,7 @@ use crate::{
     persistence::PersistenceError,
     platform::data_paths::DataPathError,
     services::import::SourceImportError,
-    sources::{SourceRegistryError, steam::SteamSourceInitError},
+    sources::SourceRegistryBuildError,
 };
 
 #[derive(Debug, Error)]
@@ -16,9 +16,7 @@ pub enum AppError {
     #[error(transparent)]
     Persistence(#[from] PersistenceError),
     #[error(transparent)]
-    SteamSource(#[from] SteamSourceInitError),
-    #[error(transparent)]
-    SourceRegistry(#[from] SourceRegistryError),
+    SourceRegistryBuild(#[from] SourceRegistryBuildError),
     #[error(transparent)]
     SourceImport(#[from] SourceImportError<PersistenceError>),
 }

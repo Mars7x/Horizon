@@ -1,6 +1,6 @@
 # Source framework
 
-Phase 6 defined the provider boundary that Steam, Heroic, Lutris, Bottles, and other adapters plug into. Phase 7 now exercises that boundary with the first production adapter: Steam. The generic contracts remain provider-neutral.
+Phase 6 defined the provider boundary that launcher adapters plug into. Phase 7 exercised it with Steam; Phase 9 expands the same unchanged generic contracts to Lutris, Bottles, and Heroic.
 
 ## Boundary
 
@@ -43,7 +43,7 @@ Phase 6 defines capability vocabulary for:
 - artwork;
 - source-reported lifetime playtime.
 
-Capability metadata describes behavior exposed through generic contracts. Phase 7 adds the first concrete consumer of `Launch`: a source-neutral launch target/service plus a platform executor. Artwork and lifetime-playtime contracts remain deferred until a real slice needs them.
+Capability metadata describes behavior exposed through generic contracts. Phase 7 adds the first concrete consumer of `Launch`: a source-neutral launch target/service plus a platform executor. Phase 8 establishes separate domain/service/persistence storage for provider-reported lifetime playtime, but Steam does not advertise `LifetimePlaytime` until the adapter has a reliable local value to publish. Artwork remains deferred.
 
 ## Registry
 
@@ -76,10 +76,49 @@ Snapshots are conservative by default. A source must opt into authoritative memb
 
 Source discovery failures are isolated. Persistence failures are different: the import pass stops and returns the failing `SourceId`, because continuing after a database write failure could hide a broken durable state assumption.
 
-A successful source snapshot is persisted as one repository batch. The SQLite adapter wraps that batch in one transaction, so a failed write cannot leave only part of a source snapshot committed. Partial snapshots are additive. Authoritative snapshots additionally reconcile source membership in that same transaction: references absent from the complete membership set are removed and only truly orphaned logical games are deleted. See ADR 0042.
+A successful source snapshot is persisted as one repository batch. The SQLite adapter wraps that batch in one transaction, so a failed write cannot leave only part of a source snapshot committed. Partial snapshots are additive. Authoritative snapshots additionally reconcile source membership in that same transaction. References absent from the complete membership set are removed. Since Phase 8, a logical game row is deleted only when it has no current source references and no retained activity/source-lifetime history; active-library queries still require a current source reference. See ADR 0042 and ADR 0044.
 
-## Phase 7 concrete consumer
+## Concrete adapters
 
-Steam lives in `src/sources/steam.rs` and is the first concrete `GameSource`. It reads only Steam-owned local metadata, emits normalized `SourceGame` values, and prepares a generic URI launch target. `SourceImportService`, SQLite persistence, `GameLaunchService`, and Home presentation remain source-neutral. See `STEAM.md` and ADR 0039.
+All production providers use the same registry/import/persistence/launch path:
 
-Phase 7 still does not add Heroic/Lutris/Bottles adapters, source-reported playtime, Horizon-observed sessions, or a production artwork cache. Those later features must extend the same contracts rather than introducing source-name checks.
+- **Steam** — local VDF/app manifests and `steam://rungameid/<appid>`; see `STEAM.md` and ADR 0039.
+- **Lutris** — read-only `pga.db` installed rows and `lutris:rungameid/<id>`; see `LUTRIS.md`.
+- **Bottles** — persisted `External_Programs` from `bottle.yml` and `bottles:run/<bottle>/<program>`; see `BOTTLES.md`.
+- **Heroic** — Phase 9 imports installed Epic/Legendary entries from local Heroic/Legendary metadata and launches with the Heroic protocol; see `HEROIC.md`.
+
+ADR 0045 records the multi-provider decisions. The adapters may use different local schemas and identity namespaces, but `SourceImportService`, SQLite persistence, `GameLaunchService`, Home presentation, launch feedback, and Activity remain provider-neutral.
+
+Phase 8's source-reported lifetime-playtime boundary is unchanged. None of the Phase 9 adapters advertises `LifetimePlaytime` until a reliable provider value is deliberately implemented. Production artwork retrieval also remains deferred.
+
+## Phase 9 local-only rule
+
+Phase 9 does not log in to launcher accounts or call provider web APIs. Discovery uses only launcher-owned local metadata already present on the machine. Expected absence remains `Unavailable`; malformed/unreadable detected metadata remains a source failure and is isolated from other providers.
+
+Flatpak filesystem access is read-only and provider-scoped. Horizon may read the conventional native XDG subtree and each launcher's own Flatpak app-data tree, but must not add broad `home`, `host`, or arbitrary external-library permissions to increase discovery coverage.
+
+The same authoritative-membership contract from ADR 0042 applies. A provider may prune stale source references only after a complete scan. If any detected root is unreadable, or a Bottles placeholder points outside the readable standard tree, that provider publishes a partial snapshot instead.
+
+
+## Phase 9.5 managed-session capability
+
+Normal provider launch and managed session launch are separate capabilities.
+
+```text
+GameSource
+  ├─ Launch          -> SourceLaunchTarget (portal/external)
+  └─ ManagedSession  -> SourceManagedLaunchTarget (host helper only)
+```
+
+`GameLaunchService` does not check provider names. It asks the registered
+descriptor which capabilities exist. If the optional managed-session executor
+cannot start a session, the service falls back to the source's normal `Launch`
+target.
+
+The Flatpak does not receive arbitrary host execution. It sends only
+`(SourceId, ExternalGameId)` to `io.github.Mars7x.Horizon.Session1`; the host
+helper re-resolves the source adapter and target independently.
+
+Bottles is the initial managed provider. Steam, Lutris, and Heroic remain
+external URI launches until their actual game process/session can be guaranteed
+inside the managed compositor. See `MANAGED_SESSIONS.md` and ADR 0046.

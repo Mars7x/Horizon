@@ -11,18 +11,57 @@ use std::{
 
 use thiserror::Error;
 
-use crate::domain::{ExternalGameId, GameTitle, SourceId};
+use crate::domain::{DomainValidationError, ExternalGameId, GameTitle, SourceId};
 
+pub mod bottles;
+pub mod heroic;
+pub mod lutris;
 pub mod steam;
+mod support;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceLaunchTarget {
     Uri(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum SourceManagedLaunchTargetError {
+    #[error("managed launch program must not be empty")]
+    EmptyProgram,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceManagedLaunchTarget {
+    program: String,
+    args: Vec<String>,
+}
+
+impl SourceManagedLaunchTarget {
+    pub fn new(
+        program: impl Into<String>,
+        args: Vec<String>,
+    ) -> Result<Self, SourceManagedLaunchTargetError> {
+        let program = program.into();
+        if program.trim().is_empty() {
+            return Err(SourceManagedLaunchTargetError::EmptyProgram);
+        }
+
+        Ok(Self { program, args })
+    }
+
+    pub fn program(&self) -> &str {
+        &self.program
+    }
+
+    pub fn args(&self) -> &[String] {
+        &self.args
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SourceCapability {
     Launch,
+    ManagedSession,
     Artwork,
     LifetimePlaytime,
 }
@@ -31,6 +70,14 @@ pub enum SourceCapability {
 pub enum SourceDescriptorError {
     #[error("source display name must not be empty")]
     EmptyDisplayName,
+}
+
+#[derive(Debug, Error)]
+pub enum SourceInitializationError {
+    #[error(transparent)]
+    Domain(#[from] DomainValidationError),
+    #[error(transparent)]
+    Descriptor(#[from] SourceDescriptorError),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -262,12 +309,43 @@ pub trait GameSource: Send + Sync {
     ) -> Result<Option<SourceLaunchTarget>, SourceError> {
         Ok(None)
     }
+
+    /// Prepare a direct host-side launch recipe that can be wrapped by a
+    /// managed compositor session. The recipe is resolved again by the host
+    /// helper; it is never sent across D-Bus as an arbitrary command.
+    fn managed_launch_target(
+        &self,
+        _external_id: &ExternalGameId,
+    ) -> Result<Option<SourceManagedLaunchTarget>, SourceError> {
+        Ok(None)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum SourceRegistryError {
     #[error("source id {0} is already registered")]
     DuplicateSourceId(SourceId),
+}
+
+#[derive(Debug, Error)]
+pub enum SourceRegistryBuildError {
+    #[error(transparent)]
+    Initialization(#[from] SourceInitializationError),
+    #[error(transparent)]
+    Registry(#[from] SourceRegistryError),
+}
+
+/// Build the production source registry used by every Horizon process.
+///
+/// Keeping this composition in the source layer prevents the application and
+/// host helper from drifting to different provider sets/capabilities.
+pub fn production_source_registry() -> Result<SourceRegistry, SourceRegistryBuildError> {
+    let mut registry = SourceRegistry::new();
+    registry.register(steam::SteamSource::new()?)?;
+    registry.register(lutris::LutrisSource::new()?)?;
+    registry.register(bottles::BottlesSource::new()?)?;
+    registry.register(heroic::HeroicSource::new()?)?;
+    Ok(registry)
 }
 
 #[derive(Default)]
@@ -351,6 +429,14 @@ mod tests {
     }
 
     #[test]
+    fn managed_launch_target_rejects_an_empty_program() {
+        assert_eq!(
+            SourceManagedLaunchTarget::new("   ", vec![]).expect_err("empty program must fail"),
+            SourceManagedLaunchTargetError::EmptyProgram
+        );
+    }
+
+    #[test]
     fn descriptor_normalizes_capabilities_without_source_name_checks() {
         let descriptor = SourceDescriptor::new(
             source_id("example"),
@@ -366,6 +452,7 @@ mod tests {
         assert_eq!(descriptor.display_name(), "Example Store");
         assert!(descriptor.supports(SourceCapability::Launch));
         assert!(descriptor.supports(SourceCapability::Artwork));
+        assert!(!descriptor.supports(SourceCapability::ManagedSession));
         assert!(!descriptor.supports(SourceCapability::LifetimePlaytime));
         assert_eq!(descriptor.capabilities().len(), 2);
     }

@@ -13,21 +13,15 @@ use tracing::{debug, warn};
 use crate::domain::{DomainValidationError, ExternalGameId, GameTitle, SourceId};
 
 use super::{
-    GameSource, SourceCapability, SourceDescriptor, SourceDescriptorError, SourceDiscovery,
-    SourceError, SourceGame, SourceLaunchTarget, SourceSnapshot, SourceSnapshotError,
+    GameSource, SourceCapability, SourceDescriptor, SourceDiscovery, SourceError, SourceGame,
+    SourceInitializationError, SourceLaunchTarget, SourceSnapshot, SourceSnapshotError,
     SourceUnavailableReason,
 };
 
 const STEAM_SOURCE_ID: &str = "steam";
 const STEAM_DISPLAY_NAME: &str = "Steam";
 
-#[derive(Debug, Error)]
-pub enum SteamSourceInitError {
-    #[error(transparent)]
-    Domain(#[from] DomainValidationError),
-    #[error(transparent)]
-    Descriptor(#[from] SourceDescriptorError),
-}
+pub type SteamSourceInitError = SourceInitializationError;
 
 #[derive(Debug, Error)]
 enum SteamDiscoveryError {

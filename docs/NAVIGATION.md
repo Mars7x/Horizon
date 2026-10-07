@@ -59,7 +59,7 @@ This is a real navigation model, not a presentation workaround. Every top utilit
 - Home and Library render inside the central bounds between the top navigation and footer.
 - Friends, Album, Activity, Web, and Settings render across the full logical surface.
 - Any utility submenu route hides both top navigation and footer immediately.
-- All five utility routes use the same reusable `UtilitySubmenuPage` presentation component during Phase 4.
+- Phase 4 initially used the reusable `UtilitySubmenuPage` placeholder for all five utility routes. Phase 8 replaces only Activity with its production `ActivityPage`; route/history/focus behavior remains unchanged.
 - The global shell Menu remains a separate modal surface above routes.
 
 Header status, clock, controller state, and footer controls remain shell-owned; utility pages do not duplicate them.

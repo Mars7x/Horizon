@@ -32,3 +32,27 @@ Persistence re-validates values read from SQLite. Corrupt or incompatible stored
 - `LibraryService` coordinates those operations without importing SQLite types.
 
 Phase 6 adds the provider boundary without changing domain identity. Source adapters emit `SourceGame` values containing only `ExternalGameId` and `GameTitle`; `SourceImportService` attaches the registered adapter's `SourceId` to create `DiscoveredGame`. This keeps provider-specific parsing outside the domain and prevents adapter output from selecting a different source identity. See `SOURCES.md` and ADR 0038.
+
+
+## Phase 8 activity domain
+
+`src/domain/activity.rs` adds typed activity concepts without introducing SQLite or UI dependencies:
+
+- `PlaySessionId` identifies one persisted observed session;
+- `PlaytimeSeconds` rejects negative duration/playtime values;
+- `SessionTrackingMethod` records how a session was observed;
+- `PlaySessionState` distinguishes open, completed, and interrupted sessions;
+- `PlaySession` validates state/end-time consistency;
+- `SourceLifetimePlaytime` represents a provider-reported cumulative value separately from observed sessions.
+
+The initial `ForegroundHandoff` tracking method is explicitly approximate. Its semantics are stable historical data and must not later be reinterpreted as exact child-process lifetime. See `ACTIVITY.md` and ADR 0044.
+
+
+## Managed session tracking method
+
+`SessionTrackingMethod::ManagedSession` represents an activity interval whose
+lifecycle comes from Horizon's managed-session broker/Gamescope child rather
+than application focus.
+
+It is deliberately distinct from `ForegroundHandoff`. Adding the new enum
+variant preserves the historical semantics of all Phase 8 rows.

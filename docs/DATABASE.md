@@ -22,10 +22,11 @@ Inside the Flatpak, `XDG_DATA_HOME` already points at Horizon's per-application 
 
 Every application-schema change is a numbered SQL migration under `src/persistence/migrations/`. `schema_migrations` is the bootstrap ledger used to record applied versions.
 
-Phase 5 starts with:
+The current migration sequence is:
 
 ```text
 0001_initial_library.sql
+0002_activity_sessions.sql
 ```
 
 Startup applies missing migrations in one transaction per migration. Migration history must be contiguous. A database from a newer Horizon schema is rejected instead of being opened with older code.
@@ -55,15 +56,26 @@ Source discovery and registry logic remain outside persistence. SQLite receives 
 
 ## Phase 7 authoritative source reconciliation
 
-An additive import cannot remove games that a source no longer reports. Phase 7.0.5 adds an explicit authoritative-membership operation to the repository boundary. When a source proves that a scan represents complete installed membership, SQLite upserts the normalized games, removes source references absent from that membership, and deletes only `games` rows left with zero source references. The entire reconciliation is one transaction.
+An additive import cannot remove games that a source no longer reports. Phase 7.0.5 adds an explicit authoritative-membership operation to the repository boundary. When a source proves that a scan represents complete installed membership, SQLite upserts the normalized games and removes source references absent from that membership in one transaction.
+
+Beginning with schema version 2, a logical `games` row whose final source reference disappears is deleted only when it also has no historical `play_sessions` and no `source_lifetime_playtime`. Active-library queries still require `game_sources`, so preserving history does not make an uninstalled title visible on Home.
 
 Partial/degraded snapshots continue to use additive upsert and never remove existing source references. No schema migration is required because this is repository behavior over the existing version-1 relational schema. See ADR 0042.
 
+## Schema version 2: Activity
+
+`0002_activity_sessions.sql` adds two intentionally separate tables:
+
+- `play_sessions`: Horizon-observed sessions with game/source identity, start/end timestamps, an explicit tracking method, and `open`/`completed`/`interrupted` state;
+- `source_lifetime_playtime`: provider-reported cumulative playtime keyed by `(game_id, source_id)`.
+
+Only completed sessions have an end timestamp. Startup recovery changes leftover `open` rows to `interrupted` without inventing an end time, so they contribute no fabricated duration.
+
+Source-reported lifetime values are never summed into Horizon-observed totals. See `ACTIVITY.md` and ADR 0044.
+
 ## Future schema areas
 
-Phase 5 intentionally does not pre-create columns for launching, source-specific metadata, user library UX, or activity. Those features get migrations when their owning phases are implemented.
-
-In particular, future source-reported lifetime playtime and Horizon-observed sessions must remain separate data. They must never be collapsed into one ambiguous counter.
+Launching metadata, user library UX, and richer provider metadata get migrations when their owning phases require them. Released migrations remain append-only.
 
 ## Tests
 
@@ -75,4 +87,21 @@ The persistence tests use in-memory SQLite and cover:
 - stable identity on rediscovery;
 - title refresh on rediscovery;
 - no unsafe title-based deduplication;
-- deterministic stable-ID ordering without embedding presentation sorting policy in persistence.
+- deterministic stable-ID ordering without embedding presentation sorting policy in persistence;
+- observed session start/completion and aggregate activity;
+- interruption recovery without fabricated duration;
+- lifetime-playtime separation;
+- preservation of historical activity after a source game is uninstalled.
+
+
+## Schema v3: managed session tracking
+
+Migration `0003_managed_session_tracking.sql` preserves all existing activity
+rows while widening the `play_sessions.tracking_method` constraint to accept:
+
+- `foreground_handoff`
+- `managed_session`
+
+No existing Phase 8 row changes meaning during migration. Managed sessions still
+use the same `play_sessions` table because they are Horizon-observed sessions;
+provider lifetime totals remain separate.

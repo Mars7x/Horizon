@@ -83,3 +83,43 @@ External Steam library mount points are not granted automatically. Modern `libra
 Do not replace these Steam-scoped rules with `--filesystem=home` or `--filesystem=host` as a convenience fix.
 
 Launching does not require access to `/usr/bin/steam` or the Flatpak Steam command. Horizon passes `steam://rungameid/<appid>` to `org.freedesktop.portal.OpenURI` through `ashpd`; the host session resolves the URI handler.
+
+## Phase 9 provider metadata access
+
+Lutris, Bottles, and Heroic follow the same Flatpak rule as Steam: Horizon receives only read-only access to launcher-owned metadata roots needed for local discovery.
+
+```text
+--filesystem=xdg-data/lutris:ro
+--filesystem=~/.var/app/net.lutris.Lutris:ro
+--filesystem=xdg-data/bottles:ro
+--filesystem=~/.var/app/com.usebottles.bottles:ro
+--filesystem=xdg-config/heroic:ro
+--filesystem=xdg-config/legendary:ro
+--filesystem=~/.var/app/com.heroicgameslauncher.hgl:ro
+```
+
+Do not replace these with `--filesystem=home` or `--filesystem=host`. Bottles external-location placeholders may intentionally remain unreadable; that degrades the Bottles snapshot to partial rather than expanding Horizon's sandbox.
+
+Lutris/Bottles/Heroic launch through their registered URI schemes via the existing XDG OpenURI portal. The Flatpak does not need access to host launcher binaries and must not gain `flatpak-spawn --host` merely to launch Phase 9 sources.
+
+## Managed-session host helper
+
+Phase 9.5 keeps the Horizon application sandboxed while allowing an optional
+host-side Gamescope session broker. The Flatpak receives only
+`--talk-name=io.github.Mars7x.Horizon.Session1`; it does **not** receive
+`org.freedesktop.Flatpak`, `flatpak-spawn --host`, `--filesystem=home`, or
+`--filesystem=host`.
+
+The helper is a separate host process because an already-installed host
+Gamescope is intentionally outside `/app`. During development, build the
+`horizon-session-helper` binary in a compatible host/toolbox environment and
+install it with:
+
+```bash
+./scripts/install-session-helper-dev.sh /path/to/horizon-session-helper
+```
+
+The script installs only into the current user's `~/.local/libexec` and
+`~/.config/systemd/user`. Phase 12 release hardening owns distro/image packaging
+for the helper; the Flatpak remains fully usable without it and falls back to
+the existing portal launch path.

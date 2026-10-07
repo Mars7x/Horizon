@@ -7,7 +7,11 @@ use crate::{
     AppWindow, GameCardData,
     domain::LibraryGame,
     input::{UiAction, UiActionEvent},
-    services::launch::GameLaunchService,
+    services::{
+        activity::LaunchActivitySink,
+        launch::{GameLaunchMode, GameLaunchService},
+        session::ManagedSessionId,
+    },
 };
 
 #[derive(Debug, Default)]
@@ -57,7 +61,10 @@ impl HomeState {
 enum LaunchFeedbackState {
     #[default]
     Idle,
-    Launching { index: i32 },
+    Launching {
+        index: i32,
+        managed_session: Option<ManagedSessionId>,
+    },
     Failed,
 }
 
@@ -68,7 +75,7 @@ impl LaunchFeedbackState {
 
     fn launching_index(self) -> i32 {
         match self {
-            Self::Launching { index } => index,
+            Self::Launching { index, .. } => index,
             Self::Idle | Self::Failed => -1,
         }
     }
@@ -91,6 +98,7 @@ pub struct HomeController {
     library_games: Vec<LibraryGame>,
     titles: Vec<SharedString>,
     launch_service: Rc<GameLaunchService>,
+    launch_activity: Rc<dyn LaunchActivitySink>,
     state: RefCell<HomeState>,
     launch_feedback: RefCell<LaunchFeedbackState>,
 }
@@ -100,6 +108,7 @@ impl HomeController {
         ui: &AppWindow,
         library_games: Vec<LibraryGame>,
         launch_service: Rc<GameLaunchService>,
+        launch_activity: Rc<dyn LaunchActivitySink>,
     ) -> Rc<Self> {
         let card_data = library_games
             .iter()
@@ -114,6 +123,7 @@ impl HomeController {
             library_games,
             titles,
             launch_service,
+            launch_activity,
             state: RefCell::new(HomeState::default()),
             launch_feedback: RefCell::new(LaunchFeedbackState::default()),
         });
@@ -165,6 +175,36 @@ impl HomeController {
         }
     }
 
+    /// Resolve launch feedback for a managed session that terminates before or
+    /// after the normal foreground handoff. The managed session itself remains
+    /// owned by the launch/activity services; Home only owns transient feedback.
+    pub fn handle_managed_session_completion(
+        &self,
+        ui: &AppWindow,
+        session_id: ManagedSessionId,
+        failed: bool,
+    ) {
+        let matches_session = matches!(
+            *self.launch_feedback.borrow(),
+            LaunchFeedbackState::Launching {
+                managed_session: Some(current),
+                ..
+            } if current == session_id
+        );
+        if !matches_session {
+            return;
+        }
+
+        self.set_launch_feedback(
+            ui,
+            if failed {
+                LaunchFeedbackState::Failed
+            } else {
+                LaunchFeedbackState::Idle
+            },
+        );
+    }
+
     pub fn handle_action(&self, ui: &AppWindow, event: UiActionEvent) {
         if self.launch_feedback.borrow().is_launching()
             && matches!(event.action, UiAction::Left | UiAction::Right | UiAction::Accept)
@@ -203,16 +243,49 @@ impl HomeController {
             return;
         };
 
-        self.set_launch_feedback(ui, LaunchFeedbackState::Launching { index });
+        self.set_launch_feedback(
+            ui,
+            LaunchFeedbackState::Launching {
+                index,
+                managed_session: None,
+            },
+        );
 
         match self.launch_service.launch_game(game) {
-            Ok(source_id) => {
-                debug!(
-                    game_id = game.game().id().get(),
-                    title = %game.game().title().as_str(),
-                    source = %source_id,
-                    "game launch dispatched; waiting for foreground handoff"
-                );
+            Ok(receipt) => {
+                match receipt.mode() {
+                    GameLaunchMode::External => {
+                        self.launch_activity
+                            .launch_dispatched(game.game().id(), receipt.source_id().clone());
+                        debug!(
+                            game_id = game.game().id().get(),
+                            title = %game.game().title().as_str(),
+                            source = %receipt.source_id(),
+                            "external game launch dispatched; waiting for foreground handoff"
+                        );
+                    }
+                    GameLaunchMode::Managed(session_id) => {
+                        self.set_launch_feedback(
+                            ui,
+                            LaunchFeedbackState::Launching {
+                                index,
+                                managed_session: Some(session_id),
+                            },
+                        );
+                        self.launch_activity.managed_session_started(
+                            session_id,
+                            game.game().id(),
+                            receipt.source_id().clone(),
+                        );
+                        debug!(
+                            game_id = game.game().id().get(),
+                            title = %game.game().title().as_str(),
+                            source = %receipt.source_id(),
+                            session_id = session_id.get(),
+                            "managed game session started"
+                        );
+                    }
+                }
             }
             Err(error) => {
                 self.set_launch_feedback(ui, LaunchFeedbackState::Failed);
@@ -235,6 +308,9 @@ impl HomeController {
     fn clear_launch_feedback(&self, ui: &AppWindow) {
         if *self.launch_feedback.borrow() == LaunchFeedbackState::Idle {
             return;
+        }
+        if self.launch_feedback.borrow().is_launching() {
+            self.launch_activity.cancel_pending_launch();
         }
         self.set_launch_feedback(ui, LaunchFeedbackState::Idle);
     }
@@ -354,7 +430,10 @@ mod tests {
 
     #[test]
     fn launch_feedback_distinguishes_pending_and_failed_states_without_source_details() {
-        let launching = LaunchFeedbackState::Launching { index: 3 };
+        let launching = LaunchFeedbackState::Launching {
+            index: 3,
+            managed_session: None,
+        };
         assert!(launching.is_launching());
         assert_eq!(launching.launching_index(), 3);
         assert_eq!(launching.status_text(), "Launching…");

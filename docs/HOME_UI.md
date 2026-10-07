@@ -263,3 +263,16 @@ A zero-game library uses a dedicated Home empty state. `GameCarousel` is instant
 A fresh Accept on a source-backed Home game immediately enters source-neutral launch feedback before `GameLaunchService` dispatch. The selected title pill keeps the same fixed geometry and shows a second-line `Launching…` status. The selected card performs a restrained press-in by changing its real target width/height from the normal selected scale to `Metrics.game-launch-pressed-scale`; it does not transform-scale an already rasterized subtree.
 
 While launch handoff is pending, Home suppresses duplicate Accept and Left/Right carousel actions. A synchronous dispatch error changes the status to `Launch failed`. Pending feedback clears when Horizon loses OS window activation to the launched game/another application. `Motion.launch-press-duration` respects Reduced Motion. See ADR 0043.
+
+
+## Phase 8 launch-to-activity handoff
+
+A successful generic launch dispatch now also arms the source-neutral Activity service with the selected Horizon `GameId` and owning `SourceId`. This does not start playtime immediately. The observed session begins only if Horizon subsequently loses OS window activation.
+
+If launch feedback is cancelled before that handoff (for example by abandoning the pending Home launch state), the pending activity handoff is cancelled as well so an unrelated later alt-tab cannot fabricate a game session. Steam-specific state is never exposed to Home.
+
+## Phase 9.5 managed launch feedback
+
+Home keeps the existing source-neutral `Launching…` acknowledgement for both external and managed launches. A managed receipt adds only an opaque `ManagedSessionId` to Rust launch feedback so an unusually early helper/session failure can clear or fail that acknowledgement; no helper, Gamescope, or provider command detail enters Slint.
+
+Once the game takes foreground activation, Home clears the transient launch acknowledgement as before. The managed session itself continues independently in `GameLaunchService`/`ActivityService` until the host helper reports it terminal.

@@ -70,3 +70,35 @@ The exact resolved Cargo dependency-license inventory remains a release gate and
   - Modification: none; consumed as a Cargo dependency.
 
 The Apache-2.0 and MIT license texts are included as `LICENSES/Apache-2.0.txt` and `LICENSES/MIT.txt`. The exact resolved Cargo dependency-license inventory remains a release gate and will be generated from the committed `Cargo.lock` before public release.
+
+### Phase 9 metadata format dependencies
+
+- **serde 1.x / serde_json 1.x**
+  - Upstream: https://github.com/serde-rs/serde and https://github.com/serde-rs/json
+  - License: Apache-2.0 OR MIT
+  - Use in Horizon: deserialize provider-owned local metadata for the Heroic and Bottles adapters.
+  - Modification: none; consumed as Cargo dependencies.
+- **yaml_serde 0.10**
+  - Upstream: https://github.com/yaml/yaml-serde
+  - Maintainer: YAML Organization; actively maintained fork of serde-yaml.
+  - License: Apache-2.0 OR MIT
+  - Use in Horizon: deserialize Bottles `bottle.yml` metadata inside the Bottles adapter.
+  - Modification: none; consumed as a Cargo dependency.
+
+The existing Apache-2.0 and MIT license texts cover these dual-licensed dependencies. The exact resolved Cargo dependency-license inventory remains a release gate and will be generated from the committed `Cargo.lock` before public release.
+
+
+### Phase 9.5 D-Bus dependency
+
+- **zbus 5.x**
+  - Upstream: https://github.com/z-galaxy/zbus
+  - License: MIT
+  - Use in Horizon: narrow user-session D-Bus transport between the Flatpak and
+    the optional same-user `horizon-session-helper`.
+  - Modification: none; consumed as a Cargo dependency.
+
+The existing MIT license text is included as `LICENSES/MIT.txt`.
+
+**Gamescope is not bundled by Horizon.** Phase 9.5 may use an independently
+installed host Gamescope executable through the optional helper. Horizon neither
+redistributes Gamescope nor copies its source in this phase.

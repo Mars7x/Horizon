@@ -3,6 +3,8 @@ export { Theme, Metrics, Typography, Motion }
 
 import { GameCardData } from "models/game-card.slint";
 export { GameCardData }
+import { ActivitySessionData, ActivityGameData } from "models/activity.slint";
+export { ActivitySessionData, ActivityGameData }
 
 import { AppRouteView } from "models/navigation.slint";
 export { AppRouteView }
@@ -13,6 +15,7 @@ import { PageTransitionLayer } from "components/page-transition-layer.slint";
 import { Footer } from "components/footer.slint";
 import { HomePage } from "pages/home.slint";
 import { LibraryPage } from "pages/library.slint";
+import { ActivityPage } from "pages/activity.slint";
 import { UtilitySubmenuPage } from "pages/utility.slint";
 
 export component AppWindow inherits Window {
@@ -85,6 +88,15 @@ export component AppWindow inherits Window {
     in property <string> selected-title: "";
     in-out property <int> launching-game-index: -1;
     in-out property <string> launch-feedback-text: "";
+
+    // Activity is persisted/application-owned data. The Activity page only
+    // formats and renders these models; it never queries SQLite directly.
+    in property <string> activity-total-playtime: "0 min";
+    in property <string> activity-session-count: "0";
+    in property <string> activity-game-count: "0";
+    in property <[ActivitySessionData]> activity-recent-sessions;
+    in property <[ActivityGameData]> activity-top-games;
+
     in property <int> connected-controller-count: 0;
     in property <string> clock-time: "";
     in property <string> clock-suffix: "";
@@ -225,11 +237,14 @@ export component AppWindow inherits Window {
                 outgoing: root.current-route != AppRouteView.activity
                     && root.transition-from-route == AppRouteView.activity;
 
-                UtilitySubmenuPage {
+                ActivityPage {
                     width: parent.width;
                     height: parent.height;
-                    title: "Activity";
-                    description: "Play history and session activity will appear here.";
+                    total-playtime: root.activity-total-playtime;
+                    session-count: root.activity-session-count;
+                    game-count: root.activity-game-count;
+                    recent-sessions: root.activity-recent-sessions;
+                    top-games: root.activity-top-games;
                 }
             }
 
