@@ -216,7 +216,6 @@ Keep these documents current when their area changes:
 - `docs/INPUT.md`
 - `docs/NAVIGATION.md`
 - `docs/SOURCES.md`
-- `docs/MANAGED_SESSIONS.md`
 - `docs/STEAM.md`
 - `docs/CLOCK.md`
 - `docs/adr/`
@@ -225,7 +224,7 @@ Use an Architecture Decision Record when a change introduces or reverses a signi
 
 ## Current phase boundary
 
-The repository currently contains work through **Phase 9.5.0**.
+The repository currently contains work through **Phase 8.0.0**.
 
 Implemented:
 
@@ -305,26 +304,12 @@ Implemented:
 - crash/startup recovery that marks open sessions interrupted without inventing duration
 - persisted Activity overview with observed total time, completed sessions, games played, recent sessions, and most-played games
 - historical activity retention for uninstalled games without returning those games to the active Home library
-- production Lutris source adapter using read-only `pga.db` installed rows and `lutris:` URI launching
-- production Bottles source adapter using persisted `External_Programs` from standard `bottle.yml` files and `bottles:` URI launching
-- production Heroic source adapter for installed Epic/Legendary entries using local JSON metadata and `heroic:` URI launching
-- shared source-layer host-XDG/path-dedup/URI-component helpers without leaking provider paths into services/platform presentation
-- source-scoped native/Flatpak identities where upstream IDs are installation-local
-- read-only provider-scoped Flatpak permissions for Lutris, Bottles, and Heroic without home/host access
-- generic `SourceCapability::ManagedSession` and source-owned managed launch targets without provider checks in services/UI
-- optional same-user `horizon-session-helper` D-Bus broker for host-installed Gamescope
-- narrow Flatpak `--talk-name=io.github.Mars7x.Horizon.Session1` permission without `flatpak-spawn --host`
-- Bottles managed-session pilot using its documented direct CLI launch path under host Gamescope
-- normal portal launch fallback when the helper/Gamescope/provider-managed target is unavailable
-- schema v3 `managed_session` activity tracking for managed session lifecycle
-- bounded managed-session polling and interruption handling without host process-name scans
 
 Not yet implemented:
 
-- Heroic GOG/Amazon/sideload runner discovery beyond the Phase 9 Epic/Legendary slice
-- Bottles automatic shortcut discovery beyond explicitly persisted `External_Programs`
+- additional provider adapters (Heroic, Lutris, Bottles)
 - production source artwork retrieval/cache
-- exact/managed lifecycle support for URI-only Steam/Lutris/Heroic sources
+- exact process-lifetime tracking for URI-launched sources
 - source-reported Steam lifetime playtime ingestion
 - production Friends/Album/Web/Settings submenu pages
 
@@ -418,43 +403,6 @@ Phase 8 adds real activity/history while preserving uncertainty honestly:
 10. Do not add process-name polling, Steam-specific timers, or fabricated session end times as shortcuts for exact tracking.
 
 See `docs/ACTIVITY.md` and ADR 0044. Phase 9 adds more source adapters on top of these contracts.
-
-
-## Phase 9 target
-
-Phase 9 expands Horizon to multiple real launcher providers without weakening the Phase 6 source abstraction:
-
-1. Lutris, Bottles, and Heroic provider formats/paths live only in their modules under `src/sources/`.
-2. Register providers through `SourceRegistry`; generic import, persistence, launch, Home, and Activity code must not match source-name strings.
-3. Discover local installed state only. Do not add account login, provider web APIs, runtime network access, or credential parsing.
-4. Use durable provider-owned IDs, with native/Flatpak scope included when the upstream identifier is installation-local. Never deduplicate by title.
-5. Complete provider scans may use authoritative membership; any detected unreadable/externally inaccessible root must degrade the provider snapshot to partial rather than pruning from incomplete evidence.
-6. Launch through provider URI handlers returned as `SourceLaunchTarget::Uri` and executed by the existing XDG OpenURI platform boundary. Do not spawn launcher binaries or call `flatpak run`.
-7. Keep Flatpak permissions read-only and provider-scoped. Do not grant `home`, `host`, or arbitrary external bottle/library mounts for discovery completeness.
-8. Heroic Phase 9 initially covers installed Epic/Legendary entries. Namespace Heroic external IDs by runner so GOG/Amazon can be added later without breaking identity.
-9. Bottles Phase 9 imports explicitly persisted `External_Programs`; do not guess automatically discovered Windows shortcuts with an ad-hoc parser.
-10. Keep managed Gamescope sessions out of Phase 9. URI handoff remains compatible with the existing launch/activity path; managed sessions are a later generic launch capability.
-
-See `docs/SOURCES.md`, `docs/LUTRIS.md`, `docs/BOTTLES.md`, `docs/HEROIC.md`, and ADR 0045.
-
-## Phase 9.5 target
-
-Phase 9.5 introduces optional managed game sessions without turning the Flatpak
-into a generic host-command launcher:
-
-1. `SourceCapability::ManagedSession` is independent of normal `Launch`. Sources opt in only when they can produce a real direct managed target.
-2. The Flatpak talks only to `io.github.Mars7x.Horizon.Session1`. Do not add `org.freedesktop.Flatpak`, `flatpak-spawn --host`, or a generic command-execution method.
-3. The application sends source/game identity to the helper; the helper re-resolves the registered source and managed target on the host.
-4. The host helper runs as the current user, never root, and uses host-installed Gamescope.
-5. `GameLaunchService` prefers a managed launch when available but always preserves the existing source-neutral external launch fallback.
-6. Bottles is the initial managed provider. Steam/Lutris/Heroic must not advertise managed sessions until their actual game lifecycle can be guaranteed under Gamescope.
-7. Managed activity uses `SessionTrackingMethod::ManagedSession`; it begins after the helper starts the managed session and ends from helper lifecycle, not Horizon window focus.
-8. Unknown/failed helper lifecycle interrupts the associated activity row without fabricating duration.
-9. Poll only Horizon-owned managed session IDs. Do not scan `/proc`, process names, or launcher children heuristically.
-10. Phase 9.5 does not add an in-game overlay, Gamescope tuning UI, HDR/VRR policy, or game-session shell. Those belong to later console-polish work.
-11. The development helper installer writes only to the user's home systemd/libexec paths. Production immutable-system packaging remains a Phase 12 concern.
-
-See `docs/MANAGED_SESSIONS.md` and ADR 0046.
 
 ## Coding style
 
@@ -836,28 +784,12 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
 - The Activity Slint page renders Rust-published summary/recent/top-game models only. It must never query SQLite, infer duration, or inspect source IDs.
 - Future exact process/session tracking must add a new explicit tracking-method variant; never silently change the semantics of existing `ForegroundHandoff` rows. See ADR 0044.
 
+## Phase 9.5.22 marquee rendering invariant
 
-## Phase 9 multi-provider invariants
-
-- Lutris, Bottles, Heroic, and Steam are peers behind `GameSource`. Generic services/persistence/presentation must never gain `if source == ...` behavior.
-- Shared provider utilities in `src/sources/support.rs` may resolve host XDG roots, deduplicate candidate paths, and percent-encode URI components only; they must not become a cross-provider business-logic dumping ground.
-- Lutris discovery opens `pga.db` read-only and only imports rows marked installed with a usable config ID. Its local numeric IDs are scoped as native/Flatpak before persistence.
-- Bottles discovery imports persisted `External_Programs` only. Standard bottle roots may be authoritative; an external-location `placeholder.yml` makes the snapshot partial unless that external location is deliberately supported later. Do not add broad filesystem grants to chase it.
-- Heroic external IDs include their runner namespace. Phase 9 supports `legendary:<app-name>` only; future `gog:`/`nile:` additions stay inside the same adapter and must preserve existing IDs.
-- Lutris launches with `lutris:rungameid/<id>`, Bottles with `bottles:run/<bottle>/<program>`, and Heroic with its documented `heroic://launch?...` form. URI construction belongs to each adapter; OpenURI dispatch remains platform-owned.
-- Phase 9 source metadata access is local-only and read-only. No credentials, provider APIs, host command execution, `flatpak-spawn --host`, `--filesystem=home`, or `--filesystem=host`.
-- Serde/JSON/YAML dependency provenance must remain documented and covered by the final lockfile-derived release inventory. See ADR 0045.
-
-
-## Phase 9.5 managed-session invariants
-
-- A managed session is a generic launch capability, not a Bottles special case in services or presentation.
-- The Flatpak-side D-Bus client may transmit only source/game identity and session-control IDs. Never expand the helper protocol into arbitrary host command execution.
-- Host helper source resolution must use the same `GameSource` adapter boundary as the app.
-- Gamescope absence, helper absence, or unsupported provider state must fall back to the normal launch path rather than making game launch fail solely because managed sessions are unavailable.
-- `ManagedSession` activity is driven by the managed session lifecycle. Window activation must not complete it.
-- `ForegroundHandoff` remains unchanged for external URI launches.
-- Bottles is the only Phase 9.5 managed provider. Do not claim Steam/Lutris/Heroic are managed merely because a launcher URI can be invoked from inside Gamescope.
-- The host helper is same-user and unprivileged. Do not require root, broad filesystem access, or `flatpak-spawn --host`.
-- Keep managed-session polling bounded to active Horizon session IDs and clear terminal helper records after observation.
-- See ADR 0046.
+- The selected-game pill marquee must keep text as native Slint text rather
+  than rasterizing it into an intermediate image. Crisp title rendering and
+  smooth subpixel marquee motion take priority over future blur-friendly mask
+  experiments unless Slint later gains a higher-quality compositing path.
+- Edge cueing for overflow should remain a presentation-layer surface-overlay
+  effect local to `SelectedGameLabel`; Rust must not synthesize title images or
+  measure text just to supply a fade mask.

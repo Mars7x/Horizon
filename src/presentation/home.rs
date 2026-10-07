@@ -151,6 +151,7 @@ impl HomeController {
         self.state.borrow().selected_index
     }
 
+
     /// Reset Home to its canonical global-Home destination: the first game.
     pub fn reset_for_global_home(&self, ui: &AppWindow) {
         self.clear_launch_feedback(ui);
@@ -344,9 +345,10 @@ impl HomeController {
             .and_then(|index| self.titles.get(index))
             .cloned()
             .unwrap_or_default();
-        ui.set_selected_title(title);
+        ui.set_selected_title(title.clone());
     }
 }
+
 
 fn game_card(game: &LibraryGame) -> GameCardData {
     let title = game.game().title().as_str();

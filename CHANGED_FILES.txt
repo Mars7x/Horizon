@@ -1,1 +1,7 @@
-ui/pages/activity.slint
+src/presentation/home.rs
+ui/app.slint
+ui/pages/home.slint
+ui/components/game-carousel.slint
+ui/components/selected-game-label.slint
+docs/HOME_UI.md
+AGENTS.md

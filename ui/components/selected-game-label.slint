@@ -1,9 +1,37 @@
-import { Theme, Metrics, Typography } from "../theme/theme.slint";
+import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 
 export component SelectedGameLabel inherits Rectangle {
     in property <string> title;
     in property <string> status: "";
     private property <bool> has-status: root.status != "";
+    private property <bool> reduced-motion: Motion.reduced-motion;
+    private property <length> title-viewport-width: root.width - 24px;
+    private property <length> title-natural-width: title-measure.preferred-width;
+    private property <bool> title-overflows:
+        root.title-natural-width > root.title-viewport-width;
+
+    // Keep the reveal proportional to the amount of hidden text. A very small
+    // end gutter makes the final glyph feel fully exposed without turning a
+    // short overflow into an exaggerated jump.
+    private property <length> marquee-distance:
+        root.title-overflows
+            ? root.title-natural-width - root.title-viewport-width + 4px
+            : 0px;
+    private property <duration> marquee-travel-duration:
+        root.marquee-distance <= 16px ? 650ms :
+        root.marquee-distance <= 32px ? 850ms :
+        root.marquee-distance <= 56px ? 1100ms :
+        root.marquee-distance <= 90px ? 1450ms :
+        root.marquee-distance <= 140px ? 1900ms :
+        root.marquee-distance <= 200px ? 2500ms : 3100ms;
+    private property <length> marquee-offset: 0px;
+    private property <bool> marquee-animate: false;
+    private property <float> marquee-text-opacity: 1.0;
+    private property <bool> marquee-opacity-animate: false;
+    private property <length> right-fade-width: 22px;
+    private property <length> left-fade-width: 22px;
+    private property <length> fade-y-inset: root.has-status ? 1px : 3px;
+    private property <length> fade-height: root.has-status ? title-viewport.height - 2px : title-viewport.height - 6px;
 
     width: Metrics.selected-label-width;
     height: Metrics.selected-label-height;
@@ -15,21 +43,210 @@ export component SelectedGameLabel inherits Rectangle {
     drop-shadow-blur: 12px;
     drop-shadow-color: Theme.shadow;
 
-    // Keep title and launch feedback inside the existing pill so launch state
-    // never changes carousel geometry or connector placement.
-    Text {
-        x: 12px;
-        y: root.has-status ? 2px : 0px;
-        width: parent.width - 24px;
-        height: root.has-status ? 22px : parent.height;
+    function restart-marquee() {
+        delay-timer.stop();
+        travel-timer.stop();
+        end-pause-timer.stop();
+        reset-fade-out-timer.stop();
+        reset-fade-in-timer.stop();
+        root.marquee-animate = false;
+        root.marquee-opacity-animate = false;
+        root.marquee-text-opacity = 1.0;
+        root.marquee-offset = 0px;
+
+        if root.visible && root.title-overflows && !root.reduced-motion {
+            delay-timer.start();
+        }
+    }
+
+    init => { root.restart-marquee(); }
+    changed title => { root.restart-marquee(); }
+    changed status => { root.restart-marquee(); }
+    changed visible => { root.restart-marquee(); }
+    changed reduced-motion => { root.restart-marquee(); }
+
+    // Measure the current title using the exact typography used by the visible
+    // title. The item is transparent rather than width-constrained so its
+    // preferred width remains the natural single-line text width.
+    title-measure := Text {
         text: root.title;
-        color: Theme.accent;
         font-family: Typography.game-title-family;
         font-size: root.has-status ? Typography.caption-size : Typography.body-size;
         font-weight: Typography.game-title-weight;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-        overflow: elide;
+        opacity: 0;
+    }
+
+    // Keep title and launch feedback inside the existing pill so launch state
+    // never changes carousel geometry or connector placement. Short titles keep
+    // the established centered treatment. Long titles are clipped without an
+    // ellipsis and use a delayed, repeating, one-way reveal.
+    title-viewport := Rectangle {
+        x: 12px;
+        y: root.has-status ? 2px : 0px;
+        width: root.title-viewport-width;
+        height: root.has-status ? 22px : root.height;
+        background: transparent;
+        clip: true;
+
+        title-text := Text {
+            x: root.title-overflows ? -root.marquee-offset : 0px;
+            y: 0px;
+            width: root.title-overflows ? root.title-natural-width : parent.width;
+            height: parent.height;
+            text: root.title;
+            color: Theme.accent;
+            font-family: Typography.game-title-family;
+            font-size: root.has-status ? Typography.caption-size : Typography.body-size;
+            font-weight: Typography.game-title-weight;
+            horizontal-alignment: root.title-overflows ? left : center;
+            vertical-alignment: center;
+            overflow: clip;
+            opacity: root.marquee-text-opacity;
+
+            animate x {
+                enabled: root.marquee-animate && !root.reduced-motion;
+                duration: root.marquee-travel-duration;
+                easing: linear;
+            }
+
+            animate opacity {
+                enabled: root.marquee-opacity-animate && !root.reduced-motion;
+                duration: root.marquee-text-opacity < 0.5 ? 140ms : 180ms;
+                easing: ease-in-out;
+            }
+        }
+
+        // Fully hide the physical right clipping boundary, then taper the
+        // surface overlay inward with a nonlinear falloff. This prevents the
+        // last visible glyph from looking chopped both at rest and while the
+        // title is travelling, without making the whole edge look foggy.
+        right-overflow-fade := Rectangle {
+            x: parent.width - self.width;
+            y: root.fade-y-inset;
+            width: root.right-fade-width;
+            height: root.fade-height;
+            background: @linear-gradient(
+                90deg,
+                Theme.surface-raised.with-alpha(0) 0%,
+                Theme.surface-raised.with-alpha(0.26) 24%,
+                Theme.surface-raised.with-alpha(0.58) 45%,
+                Theme.surface-raised.with-alpha(0.86) 68%,
+                Theme.surface-raised 86%,
+                Theme.surface-raised 100%
+            );
+            opacity: root.title-overflows && title-text.x > -root.marquee-distance + 3px
+                ? 1.0
+                : 0.0;
+
+            animate opacity {
+                // Selection/reset must publish the continuation cue immediately.
+                // Only animate fade changes while the marquee itself is moving;
+                // otherwise a newly selected overflowing title visibly flashes
+                // unmasked for the first ~120 ms.
+                enabled: root.marquee-animate && !root.reduced-motion;
+                duration: 120ms;
+                easing: ease-in-out;
+            }
+        }
+
+        // Once the marquee has moved, fully hide the physical clipping edge,
+        // then taper the mask gradually across a wider band. The first part is
+        // opaque so partial glyph fragments never expose the hard clip, while
+        // the nonlinear falloff keeps the rest of the title from looking hazy.
+        // The fades reach the
+        // text viewport edges horizontally, but remain vertically inset from
+        // the pill endcaps so they cannot distort the rounded silhouette. The
+        // fade surface itself stays rectangular so tall/descending glyphs keep
+        // full coverage at the clipping edge.
+        left-overflow-fade := Rectangle {
+            x: 0px;
+            y: root.fade-y-inset;
+            width: root.left-fade-width;
+            height: root.fade-height;
+            background: @linear-gradient(
+                90deg,
+                Theme.surface-raised 0%,
+                Theme.surface-raised 14%,
+                Theme.surface-raised.with-alpha(0.86) 32%,
+                Theme.surface-raised.with-alpha(0.58) 55%,
+                Theme.surface-raised.with-alpha(0.26) 76%,
+                Theme.surface-raised.with-alpha(0) 100%
+            );
+            opacity: root.title-overflows && title-text.x < -3px ? 1.0 : 0.0;
+
+            animate opacity {
+                enabled: root.marquee-animate && !root.reduced-motion;
+                duration: 120ms;
+                easing: ease-in-out;
+            }
+        }
+    }
+
+    // One-way reveal cycle:
+    //   rest -> scroll left -> end pause -> fade out -> invisible reset
+    //   -> fade in at the beginning -> rest -> repeat.
+    // The fade-through reset avoids both a pendulum return and a visible snap.
+    delay-timer := Timer {
+        interval: 2s;
+        running: false;
+        triggered => {
+            self.stop();
+            if root.visible && root.title-overflows && !root.reduced-motion {
+                root.marquee-animate = true;
+                root.marquee-offset = root.marquee-distance;
+                travel-timer.start();
+            }
+        }
+    }
+
+    travel-timer := Timer {
+        interval: root.marquee-travel-duration;
+        running: false;
+        triggered => {
+            self.stop();
+            end-pause-timer.start();
+        }
+    }
+
+    end-pause-timer := Timer {
+        interval: 2.4s;
+        running: false;
+        triggered => {
+            self.stop();
+            if root.visible && root.title-overflows && !root.reduced-motion {
+                root.marquee-opacity-animate = true;
+                root.marquee-text-opacity = 0.0;
+                reset-fade-out-timer.start();
+            }
+        }
+    }
+
+    reset-fade-out-timer := Timer {
+        interval: 140ms;
+        running: false;
+        triggered => {
+            self.stop();
+
+            // Reset position only while the title is fully hidden, then reveal
+            // the beginning again. There is no visible rightward travel.
+            root.marquee-animate = false;
+            root.marquee-offset = 0px;
+            root.marquee-text-opacity = 1.0;
+            reset-fade-in-timer.start();
+        }
+    }
+
+    reset-fade-in-timer := Timer {
+        interval: 180ms;
+        running: false;
+        triggered => {
+            self.stop();
+            root.marquee-opacity-animate = false;
+
+            if root.visible && root.title-overflows && !root.reduced-motion {
+                delay-timer.start();
+            }
+        }
     }
 
     if root.has-status : Text {
