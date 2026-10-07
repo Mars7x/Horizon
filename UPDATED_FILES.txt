@@ -1,19 +1,31 @@
-Phase 4.7 updated/new files
+Horizon Phase 5.0 - changed/new files relative to Phase 4.7.0
 
 AGENTS.md
-docs/APPEARANCE.md
+Cargo.toml
+THIRD_PARTY_NOTICES.md
 docs/ARCHITECTURE.md
-docs/HOME_UI.md
-docs/INPUT.md
-docs/NAVIGATION.md
-docs/SHELL_HARDENING.md (new)
-docs/adr/0034-reduced-motion-page-transitions.md
-docs/adr/0036-shell-hardening.md (new)
+docs/DATABASE.md
+docs/DOMAIN.md
+docs/LICENSING.md
+docs/adr/0037-domain-library-and-sqlite-persistence.md
+scripts/check-third-party.sh
 src/app.rs
-src/input/sdl.rs
-src/navigation/mod.rs
-src/presentation/navigation.rs
-ui/app.slint
-ui/components/page-transition-layer.slint
+src/domain/library.rs
+src/domain/mod.rs
+src/error.rs
+src/lib.rs
+src/persistence/mod.rs
+src/persistence/migrations.rs
+src/persistence/migrations/0001_initial_library.sql
+src/persistence/sqlite.rs
+src/platform/data_paths.rs
+src/platform/mod.rs
+src/services/library.rs
+src/services/mod.rs
 
-Deleted files: none.
+Deleted files: none
+
+Verification performed in this environment:
+- scripts/check-third-party.sh: PASS
+- SQLite migration/schema smoke test using Python sqlite3: PASS
+- scripts/check.sh: NOT RUN TO COMPLETION (cargo is not installed in this container)

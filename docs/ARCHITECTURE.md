@@ -152,3 +152,16 @@ Phase 4.7 does not add a new application layer. It strengthens existing boundari
 - `AppWindow` keeps responsive sizing presentation-only and guards transient zero-sized surfaces without changing the 1280×720 reference-space contract.
 
 Stress coverage stays framework-independent where possible: deep route/back-stack churn, global Home reset, focus normalization, spatial helper bounds, and input latch resets are pure Rust tests. See ADR 0036 and `SHELL_HARDENING.md`.
+
+
+## Phase 5 domain/persistence boundary
+
+Phase 5 introduces the durable library without coupling it to presentation or source-specific formats:
+
+- `src/domain/` owns validated `GameId`, `GameTitle`, `SourceId`, `ExternalGameId`, `SourceGameRef`, and `LibraryGame` concepts;
+- `src/services/library.rs` owns the source-neutral `DiscoveredGame` input and `LibraryRepository` boundary;
+- `src/persistence/` is the only layer that knows SQLite or SQL;
+- `src/platform/data_paths.rs` resolves the XDG application-data location, then passes the resulting path inward;
+- the app initializes/migrates the database at startup but Phase 5 intentionally leaves the demo Home presentation in place.
+
+The stable rediscovery key is `(SourceId, ExternalGameId)`. Equal game titles are not sufficient evidence for cross-source deduplication. Schema evolution begins at `0001_initial_library.sql` and all later changes must be new numbered migrations. See `DOMAIN.md`, `DATABASE.md`, and ADR 0037.

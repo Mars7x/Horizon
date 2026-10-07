@@ -8,11 +8,13 @@ use crate::{
     AppWindow,
     error::AppError,
     input::{ControllerStatus, InputManager, UiActionEvent},
-    platform::slint_backend,
+    persistence::SqliteLibraryRepository,
+    platform::{data_paths, slint_backend},
     presentation::{
         appearance::AppearanceController, clock::ClockController, home::HomeController,
         navigation::NavigationController,
     },
+    services::library::LibraryService,
 };
 
 const APP_ID: &str = "io.github.Mars7x.Horizon";
@@ -25,7 +27,19 @@ pub fn run() -> Result<(), AppError> {
         )
         .init();
 
-    info!("starting Horizon phase 4.7");
+    info!("starting Horizon phase 5.0");
+
+    let database_path = data_paths::library_database_path()?;
+    let repository = SqliteLibraryRepository::open(&database_path)?;
+    let schema_version = repository.schema_version()?;
+    let library = LibraryService::new(repository);
+    let persisted_game_count = library.game_count()?;
+    info!(
+        path = %database_path.display(),
+        schema_version,
+        games = persisted_game_count,
+        "persistent library initialized"
+    );
 
     // Backend selection must happen before set_xdg_app_id(), AppWindow::new(),
     // or any other Slint operation that needs the platform.
@@ -51,6 +65,9 @@ pub fn run() -> Result<(), AppError> {
         }
     };
 
+    // Phase 5 deliberately keeps the existing demo Home presentation while the
+    // persistent library foundation settles. Phase 7 replaces this with the
+    // first real source-backed vertical slice.
     let home = HomeController::new(&ui);
     info!(games = home.game_count(), "demo home library initialized");
 
@@ -83,7 +100,8 @@ pub fn run() -> Result<(), AppError> {
         keyboard_input.handle_keyboard(text.as_str(), repeated)
     });
 
-    // Keep timers/input managers alive for the full UI event loop.
+    // Keep services/timers/input managers alive for the full UI event loop.
+    let _library = library;
     let _clock = clock;
     let _navigation = navigation;
     let _input = input;

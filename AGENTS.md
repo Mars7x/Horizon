@@ -13,7 +13,7 @@ Horizon is **not** an emulator manager. Do not add emulator configuration, firmw
 - Rust for application/backend logic
 - Slint for presentation only
 - SDL3 for controller input beginning in Phase 3
-- SQLite + `rusqlite` for persistence when the database phase begins
+- SQLite + `rusqlite` for persistence
 - `ashpd` for XDG Desktop Portal integration
 - `zbus` only where portal APIs are insufficient
 - Flatpak as the primary distribution target
@@ -221,7 +221,7 @@ Use an Architecture Decision Record when a change introduces or reverses a signi
 
 ## Current phase boundary
 
-The repository currently contains work through **Phase 4.7**.
+The repository currently contains work through **Phase 5.0**.
 
 Implemented:
 
@@ -266,10 +266,15 @@ Implemented:
 - route focus memory enforces route-valid focus snapshots at its own boundary
 - responsive shell math guards transient zero-sized surfaces while preserving windowed/fullscreen/ultrawide fill behavior
 - deep route/back-stack, focus-normalization, spatial-boundary, and input-reset stress tests
+- pure domain library identity types for games and source-owned identities
+- source-neutral `LibraryRepository` and `LibraryService` boundaries
+- SQLite persistence through `rusqlite` with numbered schema migrations
+- XDG application-data database path resolution without broad Flatpak filesystem access
+- schema v1 `games` + `game_sources` tables with stable `(source_id, external_id)` rediscovery identity
+- startup database initialization/migration and pure/in-memory persistence tests
 
 Not yet implemented:
 
-- SQLite library
 - real game importers
 - launching
 - playtime/session tracking
@@ -291,6 +296,23 @@ Phase 4 establishes the application navigation shell without adding persistence 
 8. Preserve the current home carousel and pointer behavior through the same Rust controllers.
 
 If implementing Phase 4 requires SQLite, source importing, or game launching, stop: those belong to later phases.
+
+
+## Phase 5 target
+
+Phase 5 establishes the durable library/domain foundation while deliberately keeping source adapters and production library UI out of scope:
+
+1. Keep game/source identity pure in `src/domain/`; no SQLite, Slint, SDL, portal, or provider-specific types may leak in.
+2. Future source adapters feed normalized `DiscoveredGame` values through the service boundary; they never issue SQL.
+3. `src/persistence/` is the only layer allowed to use `rusqlite` or SQL.
+4. Every schema change is a new numbered migration. Released migrations are immutable.
+5. Rediscovery identity is `(SourceId, ExternalGameId)`. Never merge games merely because titles match.
+6. Platform-specific XDG path resolution stays in `src/platform/`; persistence receives a resolved path.
+7. Corrupt/invalid persisted values produce typed errors rather than fabricated domain objects.
+8. Keep source-reported lifetime playtime separate from future Horizon-observed sessions; Phase 5 does not add either yet.
+9. The existing demo Home cards remain presentation-only until the Phase 7 source-backed vertical slice.
+
+If Phase 5 work requires Steam parsing, launch commands, activity/session rows, or production Library/Home replacement, stop: those belong to later phases. See `docs/DOMAIN.md`, `docs/DATABASE.md`, and ADR 0037.
 
 ## Coding style
 
@@ -601,3 +623,15 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
 - The back stack remains independent of animation state. Rapid navigation and Back must be deterministic even when visual transitions are still in flight. Global Home remains a hard reset of history, Home content focus, and first-title selection.
 - Responsive sizing keeps one uniform visual scale and an expanded logical viewport. Guard transient zero-sized compositor surfaces and non-negative content bounds; do not solve resize/fullscreen issues with fixed root dimensions, letterboxing, or non-uniform tile scaling.
 - Phase 4.7 stress behavior is documented in `docs/SHELL_HARDENING.md` and ADR 0036.
+
+
+## Phase 5 domain/database invariants
+
+- SQL terminates in `src/persistence/`; UI, presentation, services, domain, and future source adapters must not issue SQL directly.
+- The source-owned identity key is `(SourceId, ExternalGameId)`. Equal titles never imply equal games.
+- Schema files under `src/persistence/migrations/` are append-only after release. Add a new numbered migration rather than rewriting a shipped migration.
+- `game_sources` is intentionally relational so a logical game can support multiple source references later without source-name branching in the domain.
+- XDG data path resolution belongs to `src/platform/data_paths.rs`; no source or presentation code should construct host paths.
+- Phase 5 startup may initialize/migrate the database, but the demo Home model remains until the source-backed vertical slice. Do not read SQLite directly into Slint.
+- Source-reported lifetime playtime and future Horizon-observed sessions must remain separate persistence concepts.
+- `rusqlite` uses the `bundled` feature in the current development baseline; preserve the dependency provenance in `THIRD_PARTY_NOTICES.md` and include it in the final lockfile-derived license report. See ADR 0037.

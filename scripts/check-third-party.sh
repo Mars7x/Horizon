@@ -28,6 +28,8 @@ done
 
 grep -Fq "LINE Seed JP" "$notice" || { echo "LINE Seed JP missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
 grep -Fq "© LY Corporation" "$notice" || { echo "LINE Seed JP copyright missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
+grep -Fq "rusqlite / libsqlite3-sys" "$notice" || { echo "rusqlite provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
+grep -Fq "SQLite core" "$notice" || { echo "SQLite provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
 
 for license in "${required_licenses[@]}"; do
   test -s "$root/LICENSES/$license" || { echo "missing license text: $license" >&2; exit 1; }

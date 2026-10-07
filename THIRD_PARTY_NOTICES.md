@@ -89,3 +89,19 @@ Horizon uses lighter outline presentation derivatives for the Web and Settings u
 - **Modification:** None. Horizon installs the published font faces without changing their names or outlines.
 
 The applicable license text is included as `LICENSES/OFL-1.1.txt`.
+
+
+### Phase 5 database dependencies
+
+- **rusqlite / libsqlite3-sys**
+  - Upstream: https://github.com/rusqlite/rusqlite
+  - License: MIT
+  - Use in Horizon: Rust SQLite bindings for the persistence adapter.
+  - Modification: none; consumed as Cargo dependencies.
+- **SQLite core**
+  - Upstream: https://www.sqlite.org/
+  - Status: public domain.
+  - Use in Horizon: embedded database engine compiled through rusqlite's `bundled` feature.
+  - Modification: none by Horizon.
+
+The exact resolved Cargo dependency-license inventory remains a release gate and will be generated from the committed `Cargo.lock` before public release.

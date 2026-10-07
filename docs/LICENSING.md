@@ -52,3 +52,8 @@ The Flatpak installs Horizon's project license, third-party notice, and bundled 
 ## Bundled fonts
 
 LINE Seed JP is bundled in Flatpak builds under the SIL Open Font License 1.1. The manifest pins the upstream source revision, builds the original font sources without modification, and installs all four faces into `/app/share/fonts/truetype/line-seed-jp`. Keep the copyright notice `© LY Corporation`, `THIRD_PARTY_NOTICES.md`, and `LICENSES/OFL-1.1.txt` with distributed builds.
+
+
+## Phase 5 SQLite dependency
+
+Horizon uses `rusqlite`/`libsqlite3-sys` under the MIT license. Development currently enables rusqlite's `bundled` feature, which compiles the SQLite core into Horizon; the SQLite core is dedicated to the public domain. These dependencies are recorded in `THIRD_PARTY_NOTICES.md`. The final release artifact must still include a license inventory generated from the exact committed `Cargo.lock` rather than treating this hand-written note as the complete Rust dependency report.
