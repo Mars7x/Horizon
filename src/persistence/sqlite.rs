@@ -1,6 +1,6 @@
 use std::{path::Path, time::Duration};
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
 use crate::{
     domain::{
@@ -49,16 +49,11 @@ impl SqliteLibraryRepository {
     ) -> Result<T, PersistenceError> {
         result.map_err(|source| PersistenceError::InvalidStoredDomainValue { field, source })
     }
-}
 
-impl LibraryRepository for SqliteLibraryRepository {
-    type Error = PersistenceError;
-
-    fn upsert_discovered_game(
-        &mut self,
+    fn upsert_in_transaction(
+        transaction: &Transaction<'_>,
         discovered: &DiscoveredGame,
-    ) -> Result<GameId, Self::Error> {
-        let transaction = self.connection.transaction()?;
+    ) -> Result<i64, PersistenceError> {
         let existing_game_id = transaction
             .query_row(
                 "SELECT game_id FROM game_sources WHERE source_id = ?1 AND external_id = ?2",
@@ -70,7 +65,7 @@ impl LibraryRepository for SqliteLibraryRepository {
             )
             .optional()?;
 
-        let raw_game_id = if let Some(game_id) = existing_game_id {
+        let game_id = if let Some(game_id) = existing_game_id {
             transaction.execute(
                 "UPDATE games SET title = ?1, updated_at = unixepoch() WHERE id = ?2",
                 params![discovered.title().as_str(), game_id],
@@ -101,8 +96,37 @@ impl LibraryRepository for SqliteLibraryRepository {
             game_id
         };
 
+        Ok(game_id)
+    }
+}
+
+impl LibraryRepository for SqliteLibraryRepository {
+    type Error = PersistenceError;
+
+    fn upsert_discovered_game(
+        &mut self,
+        discovered: &DiscoveredGame,
+    ) -> Result<GameId, Self::Error> {
+        let transaction = self.connection.transaction()?;
+        let raw_game_id = Self::upsert_in_transaction(&transaction, discovered)?;
         transaction.commit()?;
         Self::domain_value("games.id", GameId::new(raw_game_id))
+    }
+
+    fn upsert_discovered_games(
+        &mut self,
+        discovered_games: &[DiscoveredGame],
+    ) -> Result<Vec<GameId>, Self::Error> {
+        let transaction = self.connection.transaction()?;
+        let mut game_ids = Vec::with_capacity(discovered_games.len());
+
+        for discovered in discovered_games {
+            let raw_game_id = Self::upsert_in_transaction(&transaction, discovered)?;
+            game_ids.push(Self::domain_value("games.id", GameId::new(raw_game_id))?);
+        }
+
+        transaction.commit()?;
+        Ok(game_ids)
     }
 
     fn list_games(&self) -> Result<Vec<LibraryGame>, Self::Error> {
@@ -247,6 +271,30 @@ mod tests {
         }
 
         std::fs::remove_file(path).expect("remove test database");
+    }
+
+    #[test]
+    fn batch_upsert_is_atomic_per_source_snapshot() {
+        let mut repository = SqliteLibraryRepository::open_in_memory().expect("repository");
+        repository
+            .connection
+            .execute_batch(
+                "CREATE TRIGGER reject_test_title \
+                 BEFORE INSERT ON games \
+                 WHEN NEW.title = 'Reject Me' \
+                 BEGIN SELECT RAISE(ABORT, 'test rejection'); END;",
+            )
+            .expect("test trigger");
+
+        let games = vec![
+            discovered("test", "one", "Keep Me"),
+            discovered("test", "two", "Reject Me"),
+        ];
+        repository
+            .upsert_discovered_games(&games)
+            .expect_err("batch must fail");
+
+        assert_eq!(repository.game_count().expect("count"), 0);
     }
 
     #[test]

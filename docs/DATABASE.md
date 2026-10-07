@@ -46,6 +46,13 @@ Titles are not used for deduplication. Two equal titles from different source ke
 
 Each Horizon connection enables foreign-key enforcement and uses a bounded busy timeout. The development build uses rusqlite's `bundled` feature so its SQLite engine is deterministic across native and Flatpak builds.
 
+
+## Phase 6 source-batch writes
+
+The schema remains at version 1 in Phase 6. The repository boundary now supports batch upserts because one successful source discovery is treated as a coherent snapshot. `SqliteLibraryRepository` writes each source snapshot inside one transaction. If any write in that batch fails, the entire source snapshot rolls back rather than leaving a committed prefix.
+
+Source discovery and registry logic remain outside persistence. SQLite receives only normalized `DiscoveredGame` values through the service/repository boundary.
+
 ## Future schema areas
 
 Phase 5 intentionally does not pre-create columns for launching, source-specific metadata, user library UX, or activity. Those features get migrations when their owning phases are implemented.

@@ -214,6 +214,7 @@ Keep these documents current when their area changes:
 - `docs/HOME_UI.md`
 - `docs/INPUT.md`
 - `docs/NAVIGATION.md`
+- `docs/SOURCES.md`
 - `docs/CLOCK.md`
 - `docs/adr/`
 
@@ -221,7 +222,7 @@ Use an Architecture Decision Record when a change introduces or reverses a signi
 
 ## Current phase boundary
 
-The repository currently contains work through **Phase 5.0**.
+The repository currently contains work through **Phase 6.0**.
 
 Implemented:
 
@@ -272,10 +273,16 @@ Implemented:
 - XDG application-data database path resolution without broad Flatpak filesystem access
 - schema v1 `games` + `game_sources` tables with stable `(source_id, external_id)` rediscovery identity
 - startup database initialization/migration and pure/in-memory persistence tests
+- generic `GameSource` adapter boundary and deterministic `SourceRegistry`
+- explicit source descriptors/capabilities without provider-name branching
+- normalized `SourceGame`/`SourceSnapshot` discovery contract with duplicate external-ID rejection
+- unavailable-vs-failed source discovery outcomes
+- `SourceImportService` with per-source failure isolation and source-owned identity attachment
+- atomic per-source snapshot persistence through repository batch writes
 
 Not yet implemented:
 
-- real game importers
+- concrete provider adapters (Steam, Heroic, Lutris, Bottles)
 - launching
 - playtime/session tracking
 - utility submenu production pages
@@ -313,6 +320,24 @@ Phase 5 establishes the durable library/domain foundation while deliberately kee
 9. The existing demo Home cards remain presentation-only until the Phase 7 source-backed vertical slice.
 
 If Phase 5 work requires Steam parsing, launch commands, activity/session rows, or production Library/Home replacement, stop: those belong to later phases. See `docs/DOMAIN.md`, `docs/DATABASE.md`, and ADR 0037.
+
+
+## Phase 6 target
+
+Phase 6 establishes the generic source/import framework while keeping concrete provider parsing for the vertical slices:
+
+1. Provider-specific paths, formats, and quirks terminate behind `GameSource` implementations in `src/sources/`.
+2. Every adapter exposes one stable `SourceDescriptor`; duplicate `SourceId` registration is rejected.
+3. Provider capabilities are explicit metadata. Never branch on source-name strings outside the owning adapter.
+4. Discovery distinguishes normal unavailability from genuine failure; one failing optional source must not block unrelated sources.
+5. Adapters emit normalized `SourceGame` values without choosing their own registered `SourceId`; the import service attaches registry identity.
+6. A source snapshot must not contain duplicate `ExternalGameId` values.
+7. Successful snapshots flow through `LibraryService`/`LibraryRepository`; source adapters never issue SQL.
+8. Persist one successful source snapshot atomically. A persistence failure aborts the import pass instead of pretending the durable state is healthy.
+9. Keep launch commands, source playtime, artwork retrieval, and production Home/Library wiring out of the framework until a real provider exercises those boundaries.
+10. Phase 7 is the first concrete adapter: Steam.
+
+If Phase 6 work requires provider-name conditionals in generic services, direct SQL from an adapter, or fake launch/playtime abstractions with no concrete consumer, stop and fix the boundary instead. See `docs/SOURCES.md` and ADR 0038.
 
 ## Coding style
 
@@ -635,3 +660,14 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
 - Phase 5 startup may initialize/migrate the database, but the demo Home model remains until the source-backed vertical slice. Do not read SQLite directly into Slint.
 - Source-reported lifetime playtime and future Horizon-observed sessions must remain separate persistence concepts.
 - `rusqlite` uses the `bundled` feature in the current development baseline; preserve the dependency provenance in `THIRD_PARTY_NOTICES.md` and include it in the final lockfile-derived license report. See ADR 0037.
+
+
+## Phase 6 source-framework invariants
+
+- `src/sources/` is the only layer allowed to understand provider-specific discovery formats and quirks.
+- `SourceRegistry` owns adapter uniqueness. Generic services must consume `GameSource`/descriptor/capability abstractions rather than matching `SourceId` strings.
+- Adapter discovery output is source-neutral: `SourceGame` carries external identity/title; `SourceImportService` attaches the registry-owned `SourceId`.
+- `Unavailable` is expected optional-source state; `Failed` is a real discovery error. A failed source must not suppress discovery of later registered sources.
+- One successful `SourceSnapshot` has unique `ExternalGameId` values and is persisted as one atomic repository batch.
+- Persistence failure aborts the import pass and reports the source whose snapshot was being committed. Do not swallow it into a per-source discovery report.
+- Phase 6 adds no concrete provider adapter and no launch/playtime/UI shortcut. Steam consumes this framework in Phase 7. See ADR 0038.

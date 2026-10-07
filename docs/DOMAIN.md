@@ -31,4 +31,4 @@ Persistence re-validates values read from SQLite. Corrupt or incompatible stored
 - `LibraryRepository` describes the persistence operations the service needs;
 - `LibraryService` coordinates those operations without importing SQLite types.
 
-Phase 5 does not add source adapters. Steam, Heroic, Lutris, and other provider-specific parsing belongs to Phase 6 and later.
+Phase 6 adds the provider boundary without changing domain identity. Source adapters emit `SourceGame` values containing only `ExternalGameId` and `GameTitle`; `SourceImportService` attaches the registered adapter's `SourceId` to create `DiscoveredGame`. This keeps provider-specific parsing outside the domain and prevents adapter output from selecting a different source identity. See `SOURCES.md` and ADR 0038.

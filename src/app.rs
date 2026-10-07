@@ -27,7 +27,7 @@ pub fn run() -> Result<(), AppError> {
         )
         .init();
 
-    info!("starting Horizon phase 5.0");
+    info!("starting Horizon phase 6.0");
 
     let database_path = data_paths::library_database_path()?;
     let repository = SqliteLibraryRepository::open(&database_path)?;

@@ -165,3 +165,18 @@ Phase 5 introduces the durable library without coupling it to presentation or so
 - the app initializes/migrates the database at startup but Phase 5 intentionally leaves the demo Home presentation in place.
 
 The stable rediscovery key is `(SourceId, ExternalGameId)`. Equal game titles are not sufficient evidence for cross-source deduplication. Schema evolution begins at `0001_initial_library.sql` and all later changes must be new numbered migrations. See `DOMAIN.md`, `DATABASE.md`, and ADR 0037.
+
+
+## Phase 6 source-framework boundary
+
+Phase 6 adds the generic provider layer without adding a concrete launcher adapter:
+
+- `src/sources/` owns `GameSource`, normalized source discovery types, descriptors, capabilities, and the source registry;
+- `SourceRegistry` rejects duplicate stable `SourceId` values and exposes providers through one trait boundary;
+- adapters return `SourceGame` values without a `SourceId`; `SourceImportService` attaches the registered descriptor identity, preventing provider output from claiming another source;
+- expected provider absence is represented separately from discovery failure; one failing source does not block later sources;
+- source snapshots require unique `ExternalGameId` values within a provider;
+- `SourceImportService` converts successful snapshots into Phase 5 `DiscoveredGame` values and uses `LibraryService`;
+- repository batch writes are atomic per successful source snapshot in the SQLite adapter.
+
+No Steam/Heroic/Lutris/Bottles parser, launch command, production artwork pipeline, or playtime implementation is part of Phase 6. See `SOURCES.md` and ADR 0038.

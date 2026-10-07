@@ -1,3 +1,5 @@
+use std::fmt;
+
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -51,6 +53,12 @@ impl GameTitle {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SourceId(String);
 
+impl fmt::Display for SourceId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
 impl SourceId {
     pub fn new(value: impl Into<String>) -> Result<Self, DomainValidationError> {
         let value = value.into();
@@ -68,6 +76,12 @@ impl SourceId {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ExternalGameId(String);
+
+impl fmt::Display for ExternalGameId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
 
 impl ExternalGameId {
     pub fn new(value: impl Into<String>) -> Result<Self, DomainValidationError> {

@@ -33,13 +33,18 @@ impl DiscoveredGame {
 
 /// Boundary implemented by persistence adapters.
 ///
-/// Source adapters and presentation code must not issue SQL directly. Future
-/// import services can feed source-neutral `DiscoveredGame` values through this
-/// interface instead.
+/// Source adapters and presentation code must not issue SQL directly.
+/// `SourceImportService` feeds normalized `DiscoveredGame` values through this
+/// interface instead. Batch upserts represent one coherent source snapshot and
+/// persistence implementations must commit the batch atomically.
 pub trait LibraryRepository {
     type Error: Error + 'static;
 
     fn upsert_discovered_game(&mut self, game: &DiscoveredGame) -> Result<GameId, Self::Error>;
+    fn upsert_discovered_games(
+        &mut self,
+        games: &[DiscoveredGame],
+    ) -> Result<Vec<GameId>, Self::Error>;
     fn list_games(&self) -> Result<Vec<LibraryGame>, Self::Error>;
     fn game_count(&self) -> Result<usize, Self::Error>;
 }
@@ -58,6 +63,13 @@ where
 
     pub fn record_discovered_game(&mut self, game: &DiscoveredGame) -> Result<GameId, R::Error> {
         self.repository.upsert_discovered_game(game)
+    }
+
+    pub fn record_discovered_games(
+        &mut self,
+        games: &[DiscoveredGame],
+    ) -> Result<Vec<GameId>, R::Error> {
+        self.repository.upsert_discovered_games(games)
     }
 
     pub fn games(&self) -> Result<Vec<LibraryGame>, R::Error> {
