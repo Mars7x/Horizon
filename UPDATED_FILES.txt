@@ -1,0 +1,31 @@
+Horizon Phase 5.0 - changed/new files relative to Phase 4.7.0
+
+AGENTS.md
+Cargo.toml
+THIRD_PARTY_NOTICES.md
+docs/ARCHITECTURE.md
+docs/DATABASE.md
+docs/DOMAIN.md
+docs/LICENSING.md
+docs/adr/0037-domain-library-and-sqlite-persistence.md
+scripts/check-third-party.sh
+src/app.rs
+src/domain/library.rs
+src/domain/mod.rs
+src/error.rs
+src/lib.rs
+src/persistence/mod.rs
+src/persistence/migrations.rs
+src/persistence/migrations/0001_initial_library.sql
+src/persistence/sqlite.rs
+src/platform/data_paths.rs
+src/platform/mod.rs
+src/services/library.rs
+src/services/mod.rs
+
+Deleted files: none
+
+Verification performed in this environment:
+- scripts/check-third-party.sh: PASS
+- SQLite migration/schema smoke test using Python sqlite3: PASS
+- scripts/check.sh: NOT RUN TO COMPLETION (cargo is not installed in this container)
