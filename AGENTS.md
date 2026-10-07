@@ -257,9 +257,9 @@ Implemented:
 - `NavigationController` between semantic input and page controllers
 - active route published to Slint as presentation state
 - app-level top/footer chrome on Home and Library, suppressed by full-shell utility destinations
-- retained route layers with central Home/Library bounds and full-shell Friends/Album/Activity/Web/Settings bounds
-- presentation-only placeholder pages for Library, Friends, Album, Web, and Settings; Activity is now production-backed
-- route-local shell-focus restoration for Home, Library, and all five utility submenu routes
+- retained route layers with central Home/Library bounds and full-shell Friends/Album/Activity/Web/Settings/Shop bounds
+- presentation-only placeholder pages for Library, Friends, Album, Web, Settings, and Shop; Activity is now production-backed
+- route-local shell-focus restoration for Home, Library, and all six utility submenu routes
 - explicit global Back/Menu/Home policy with modal shell Menu state
 - tested keyboard/controller mappings for global shell actions
 - restrained routed-page crossfade/settle transitions driven by design-system motion tokens
@@ -289,7 +289,7 @@ Implemented:
 - Steam launch from the existing semantic Accept action without Steam-specific presentation/input branching
 - read-only Steam-scoped Flatpak access, including the complete `com.valvesoftware.Steam` app-data subtree for Flatpak Steam
 - source-neutral procedural `FallbackCover` for real games without imported artwork
-- five Horizon-owned top-utility SVG assets rendered directly without path transcription, colorization, or theme recoloring
+- six Horizon-owned top-utility SVG assets rendered directly without path transcription, colorization, or theme recoloring
 - Steam root discovery reuses XDG data paths without moving their `OsString` values during candidate construction
 - Steam discovery keeps readable manifest-backed games when `appinfo.vdf` is missing, unreadable, or unparsable
 - Flatpak packaging exposes the complete `~/.var/app/com.valvesoftware.Steam` subtree read-only so packaged discovery matches real Flatpak Steam layouts without granting general home access.
@@ -311,7 +311,7 @@ Not yet implemented:
 - production source artwork retrieval/cache
 - exact process-lifetime tracking for URI-launched sources
 - source-reported Steam lifetime playtime ingestion
-- production Friends/Album/Web/Settings submenu pages
+- production Friends/Album/Web/Settings/Shop submenu pages
 
 Do not prematurely implement later-phase behavior as a shortcut while working on the current phase.
 
@@ -319,7 +319,7 @@ Do not prematurely implement later-phase behavior as a shortcut while working on
 
 Phase 4 establishes the application navigation shell without adding persistence or real game sources. **Phase 4.7 completes the shell with hardening for controller topology changes, responsive-window edge cases, rapid route retargeting, focus validity, and stress-tested Back/Home semantics:**
 
-1. Define Rust-owned navigation state for Home, Library, and the five routed utility submenus.
+1. Define Rust-owned navigation state for Home, Library, and the six routed utility submenus.
 2. Define focus regions so Up/Down/Left/Right have deterministic screen-level behavior.
 3. Route existing `UiAction` values into that navigation state; do not change SDL/keyboard adapters to understand screens.
 4. Add page transitions that use the design-system motion tokens and respect reduced motion.
@@ -398,7 +398,7 @@ Phase 8 adds real activity/history while preserving uncertainty honestly:
 5. Startup recovery marks leftover open sessions `interrupted` without assigning an end timestamp or duration.
 6. Activity SQL remains in `src/persistence/`; `ActivityService` consumes an `ActivityRepository` boundary and Slint receives presentation models only.
 7. Preserve logical game rows that own historical activity/source-lifetime records after uninstall, but active library queries must still require a current source reference.
-8. The Activity route is a production full-shell page backed by persisted aggregates and recent sessions. Friends/Album/Web/Settings remain separate placeholders.
+8. The Activity route is a production full-shell page backed by persisted aggregates and recent sessions. Friends/Album/Web/Settings/Shop remain separate placeholders.
 9. Source-reported lifetime values may be persisted through the generic Activity boundary, but no source may advertise/report them until it can provide a reliable value.
 10. Do not add process-name polling, Steam-specific timers, or fabricated session end times as shortcuts for exact tracking.
 
@@ -538,7 +538,7 @@ Phase 3.14.1 updates:
 
 ## Current utility artwork invariant (ADR 0040)
 
-Friends, Album, Activity, Web, and Settings are Horizon-owned authored SVG assets.
+Friends, Album, Activity, Web, Settings, and Shop are Horizon-owned authored SVG assets.
 `ui/components/utility-icons.slint` must render those SVG files directly with
 Slint `Image`/`@image-url`. Do not transcribe their geometry into `Path`, apply
 `Image.colorize`, replace their fills/strokes with theme tokens, raster-export
@@ -602,7 +602,7 @@ Phase 3.14.10 rendering update:
 ## Phase 3.14.12 typography/icon invariants
 - LINE Seed JP is the application-wide font family. Do not reintroduce UD Shin Go NT or Inter as the default without a later ADR explicitly superseding ADR 0025.
 - The Flatpak must bundle LINE Seed JP under OFL-1.1 and make it available through fontconfig from `/app/share/fonts`.
-- Utility artwork now follows ADR 0040: the five authored Horizon SVG files are rendered directly and are not recolored or geometrically re-derived.
+- Utility artwork now follows ADR 0040: the six authored Horizon SVG files are rendered directly and are not recolored or geometrically re-derived.
 
 
 Phase 3.14.13 home sizing:
@@ -636,7 +636,7 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
 ## Phase 4.2 navigation/shell invariants
 
 - Route history is Rust-owned in `src/navigation/`; Slint must never push/pop history.
-- `AppRoute` is structured as Home, Library, or `Utility(UtilityPage)`. `UtilityPage` contains Friends, Album, Activity, Web, and Settings. This is the canonical route model; do not reintroduce a separate utility-overlay navigation path. See ADR 0035.
+- `AppRoute` is structured as Home, Library, or `Utility(UtilityPage)`. `UtilityPage` contains Friends, Album, Activity, Web, Settings, and Shop. This is the canonical route model; do not reintroduce a separate utility-overlay navigation path. See ADR 0035.
 - `InputManager`, keyboard mapping, and SDL mapping remain screen-agnostic and emit only semantic `UiActionEvent` values.
 - `presentation::NavigationController` is the screen-level input boundary: global Back/Home are handled there and remaining actions are forwarded to the active page controller.
 - Global Home clears the back stack and establishes Home as the root; Back after Home must not return to the abandoned page.
@@ -665,8 +665,8 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
 - Shell focus is Rust-owned. Slint may render the current focus region and selected utility, but it must not decide Up/Down/Left/Right navigation policy.
 - When top utilities own focus on Home, the selected game remains logical state only: its focus brackets, title/connector, scale-up, raised z-order, and selected shadow must all be hidden. Returning focus to content restores the selection visuals.
 - Fresh Home↔utility transfers choose the shortest rendered center-to-center path. The resulting game↔utility pair is reciprocal: reversing vertical direction without horizontal movement returns to the exact source element. Horizontal movement in the destination region invalidates that pair and the next transfer uses nearest-center geometry. Other pages may preserve the last utility.
-- Left/Right within the top utility row clamp at Friends/Settings; they do not wrap. Held directional repeat still comes only from the input adapters.
-- Every utility icon activates a first-class `AppRoute::Utility(UtilityPage)` submenu route. Friends, Album, Activity, Web, and Settings must share this route/history abstraction rather than splitting into route and modal-overlay special cases.
+- Left/Right within the top utility row clamp at Friends/Shop; they do not wrap. Held directional repeat still comes only from the input adapters.
+- Every utility icon activates a first-class `AppRoute::Utility(UtilityPage)` submenu route. Friends, Album, Activity, Web, Settings, and Shop must share this route/history abstraction rather than splitting into route and modal-overlay special cases.
 - Every utility submenu owns the full visual shell while active, hides top/footer chrome, and restores as content focus because the utility row is not visible there.
 - Pointer activation of a utility must enter the same Rust `NavigationController` path as Accept; do not duplicate route policy in Slint.
 - The utility focus treatment is a compact rounded surface behind the authored icon. Focus may move the whole icon by the existing restrained 2px lift, but must never recolor, colorize, redraw, mutate the SVG artwork, or change its layout scale.
@@ -697,8 +697,8 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
 ## Phase 4.6 page-transition invariants
 
 - Route history and route selection remain Rust-owned. Slint may animate the already-published `AppRouteView`, but it must not infer or mutate navigation history.
-- Route pages use one reusable `PageTransitionLayer` per retained route. Home/Library keep the central shell content bounds; Friends/Album/Activity/Web/Settings use the full logical surface. The active page crossfades to full opacity and settles upward by the centralized `Metrics.page-transition-offset`; inactive pages perform the inverse.
-- During Phase 4 all five utility routes shared `UtilitySubmenuPage`. Phase 8 legitimately replaces Activity with `ActivityPage` while preserving the same route/full-shell semantics; do not duplicate navigation policy in the production page.
+- Route pages use one reusable `PageTransitionLayer` per retained route. Home/Library keep the central shell content bounds; Friends/Album/Activity/Web/Settings/Shop use the full logical surface. The active page crossfades to full opacity and settles upward by the centralized `Metrics.page-transition-offset`; inactive pages perform the inverse.
+- During Phase 4 the original five utility routes shared `UtilitySubmenuPage`; Shop now joins the same routed placeholder abstraction. Phase 8 legitimately replaces Activity with `ActivityPage` while preserving the same route/full-shell semantics; do not duplicate navigation policy in the production page.
 - Page transition timing must use `Motion.page-duration`. Do not add route-specific hard-coded durations or offsets.
 - Reduced Motion makes `Motion.page-duration` zero, so route changes become immediate while preserving the exact same route/focus/history semantics.
 - Top navigation, footer chrome, and the global shell Menu do not participate in route motion. Route content alone transitions. Every utility submenu suppresses top/footer chrome while active; chrome visibility changes immediately and is not part of the route animation.
@@ -793,3 +793,24 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
 - Edge cueing for overflow should remain a presentation-layer surface-overlay
   effect local to `SelectedGameLabel`; Rust must not synthesize title images or
   measure text just to supply a fade mask.
+
+
+## Phase 9.5.23 shop utility and application icon invariant
+
+- The persistent utility row now contains six items in stable index order: Friends (0), Album (1), Activity (2), Web (3), Settings (4), Shop (5). Existing utility indices remain unchanged; Shop is appended to the right.
+- Shop is a normal durable `AppRoute::Utility(UtilityPage::Shop)` full-shell placeholder. It uses the same Back/Home history, route-local focus memory, page transition, and hidden shell-chrome semantics as the other utility routes.
+- `ui/assets/red-shop.svg` is Horizon-owned artwork supplied by the project owner and must be rendered directly through `AuthoredUtilityIcon` without recoloring or path transcription.
+- `data/io.github.Mars7x.Horizon.svg` is the current Horizon-owned application icon supplied by the project owner and is installed unchanged by the existing Flatpak icon rule.
+- Phase 10 — Library UX remains the next major phase.
+
+## Phase 9.5.24 utility render-scale and launch-token invariant
+
+- Authored utility SVGs must not use an unconditional 4× intermediate render
+  target. `AppWindow` passes its actual uniform UI scale into `TopNavigation`;
+  `AuthoredUtilityIcon` renders at 1× for normal/downscaled layouts and tracks
+  enlargement above 1× (capped at 4×). This keeps low-scale icons from being
+  needlessly downsampled while preserving fullscreen sharpness.
+- Preserve `Metrics.game-launch-pressed-scale = 1.055` and
+  `Motion.launch-press-duration = reduced-motion ? 0ms : 90ms`. These are part
+  of the established Phase 7.0.5 launch-feedback contract consumed by
+  `GameTile`; utility/theme edits must not drop them.

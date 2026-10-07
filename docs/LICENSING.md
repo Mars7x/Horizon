@@ -22,7 +22,9 @@ If the exact asset license cannot be established, it must be marked as a release
 
 ## SVG artwork
 
-The five top-utility icons (Friends, Album, Activity, Web, and Settings) are Horizon-owned artwork supplied by the project owner. They are stored as SVG files in `ui/assets/` and rendered directly by Slint. Their authored paths, fills, strokes, filters, and colors are not transcribed or recolored at runtime.
+The six top-utility icons (Friends, Album, Activity, Web, Settings, and Shop) are Horizon-owned artwork supplied by the project owner. They are stored as SVG files in `ui/assets/` and rendered directly by Slint. Their authored paths, fills, strokes, filters, and colors are not transcribed or recolored at runtime.
+
+The application icon at `data/io.github.Mars7x.Horizon.svg` is also Horizon-owned artwork supplied by the project owner and is covered by the project-owned REUSE annotation.
 
 `applications-games-symbolic.svg` remains third-party GNOME artwork under CC-BY-SA-3.0-US and its geometry is represented in `ui/components/system-icons.slint`. Keep that component's provenance intact. Before Horizon 1.0, perform a final compatibility review of this embedded derivative or replace it with an original/CC0 alternative if that simplifies distribution.
 
@@ -57,25 +59,3 @@ Horizon uses `rusqlite`/`libsqlite3-sys` under the MIT license. Development curr
 The Steam source adapter uses `steam-vdf-parser` 0.1.2 to read Valve Data Format metadata locally, including current binary `appinfo.vdf` v40/v41 files. Upstream licenses the crate under **Apache-2.0 OR MIT**. Horizon does not copy parser source into its own modules; it consumes the published Cargo crate unchanged.
 
 `THIRD_PARTY_NOTICES.md` records the upstream project and copyright. `LICENSES/Apache-2.0.txt` and `LICENSES/MIT.txt` are installed with Flatpak artifacts. This hand-written record does not replace the lockfile-derived release inventory.
-
-## Phase 9 metadata parsers
-
-The Phase 9 Heroic/Bottles adapters use the Serde ecosystem rather than copying or hand-transcribing provider parsers:
-
-- `serde` 1.x — Apache-2.0 OR MIT;
-- `serde_json` 1.x — Apache-2.0 OR MIT;
-- `yaml_serde` 0.10 — Apache-2.0 OR MIT (maintained by the YAML Organization).
-
-These crates are consumed unchanged. `LICENSES/Apache-2.0.txt` and `LICENSES/MIT.txt` are already installed with Horizon's Flatpak. As with every Rust dependency, these hand-written records supplement rather than replace the final `Cargo.lock`-derived release inventory.
-
-
-## Phase 9.5 D-Bus dependency
-
-Horizon directly uses `zbus` 5.x for the narrow user-session D-Bus protocol
-between the sandboxed application and optional host managed-session helper.
-Upstream licenses zbus under MIT. Horizon consumes the Cargo crate unchanged and
-the existing `LICENSES/MIT.txt` covers the hand-written notice.
-
-Gamescope is an optional external host runtime in Phase 9.5. It is not bundled,
-vendored, or redistributed by Horizon. Release packaging must still inventory
-the exact resolved zbus dependency graph from the committed `Cargo.lock`.

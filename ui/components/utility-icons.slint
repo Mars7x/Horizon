@@ -2,19 +2,22 @@
 // files. Do not transcribe, recolor, colorize, or otherwise derive these
 // assets in Slint; preserving the authored SVG is part of the visual contract.
 //
-// AppWindow uniformly scales the logical 1280x720 scene. Slint rasterizes SVG
-// Image elements before that scene transform, so a 40x40 image can become soft
-// when the whole scene is enlarged for fullscreen. Render the unchanged SVG at
-// a larger internal target and scale that image back into the fixed 40x40
-// logical cell. This is one shared rendering policy for authored utility SVGs,
-// not per-icon geometry or artwork modification.
+// AppWindow uniformly scales the logical scene. Slint rasterizes SVG Image
+// elements before that outer scene transform, so the source target should track
+// actual enlargement instead of always using a fixed 4x intermediate image.
+// At normal/downscaled sizes render directly at the logical icon size; when the
+// shell is enlarged, supersample only by the current UI scale (capped at 4x).
+// This avoids unnecessary downsampling at small window scales while preserving
+// crisp authored SVGs in fullscreen/high-resolution layouts.
 component AuthoredUtilityIcon inherits Rectangle {
     in property <image> artwork;
+    in property <float> render-scale: 1.0;
     background: transparent;
 
-    // 4x covers the normal 1280x720 window through high-resolution fullscreen
-    // surfaces without changing the icon's logical size or authored SVG bytes.
-    private property <float> internal-render-scale: 4.0;
+    private property <float> internal-render-scale:
+        root.render-scale > 1.0
+            ? (root.render-scale < 4.0 ? root.render-scale : 4.0)
+            : 1.0;
 
     Image {
         x: 0px;
@@ -46,4 +49,8 @@ export component WebIcon inherits AuthoredUtilityIcon {
 
 export component SettingsIcon inherits AuthoredUtilityIcon {
     artwork: @image-url("../assets/gray-settings.svg");
+}
+
+export component ShopIcon inherits AuthoredUtilityIcon {
+    artwork: @image-url("../assets/red-shop.svg");
 }

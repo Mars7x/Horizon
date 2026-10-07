@@ -108,7 +108,7 @@ Phase 4.2 turns the published route into visible shell composition:
 - Home's established scene geometry is preserved across the shell refactor;
 - page switching is driven only by Rust-published `AppRouteView` state.
 
-Later Phase 4.6 refinements generalized the full-shell destination model so all five top utilities are routed submenu pages. See `NAVIGATION.md`, ADR 0029, and ADR 0035.
+Later Phase 4.6 refinements generalized the full-shell destination model so all six top utilities are routed submenu pages. See `NAVIGATION.md`, ADR 0029, and ADR 0035.
 
 ## Phase 4.3 shell focus boundary
 
@@ -133,7 +133,7 @@ See ADR 0033.
 
 ## Phase 4.6 route-transition presentation boundary
 
-Route policy remains entirely in Rust. `NavigationController` publishes `AppRouteView`; Slint maps that presentation enum to retained `PageTransitionLayer` instances for Home, Library, and all five utility submenu routes. Home/Library retain the central shell bounds while every `UtilityPage` fills the logical surface. The layer owns only visual interpolation and pointer isolation during overlap. It cannot push/pop routes, alter focus memory, or change Back/Home/Menu behavior.
+Route policy remains entirely in Rust. `NavigationController` publishes `AppRouteView`; Slint maps that presentation enum to retained `PageTransitionLayer` instances for Home, Library, and all six utility submenu routes. Home/Library retain the central shell bounds while every `UtilityPage` fills the logical surface. The layer owns only visual interpolation and pointer isolation during overlap. It cannot push/pop routes, alter focus memory, or change Back/Home/Menu behavior.
 
 Route motion is limited to opacity plus a small vertical settle using `Metrics.page-transition-offset` and `Motion.page-duration`. The latter already resolves to zero through the appearance pipeline when the host requests Reduced Motion, so accessibility preference changes do not require a second navigation code path. Shell chrome is outside the transition contract and is suppressed for the lifetime of any utility submenu route.
 

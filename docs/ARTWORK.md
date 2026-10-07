@@ -16,9 +16,13 @@ not inherit low-resolution thumbnails.
 
 ## Utility artwork
 
-The top Friends, Album, Activity, Web, and Settings icons are Horizon-owned authored SVGs. Their source files in `ui/assets/` are the single visual source of truth. `utility-icons.slint` loads them directly with `@image-url`; do not transcribe their paths, apply `Image.colorize`, substitute theme colors, raster-export them, or create alternate light/dark variants. The authored white outline, shadow/filter, stroke geometry, and intrinsic colors must remain intact.
+The top Friends, Album, Activity, Web, Settings, and Shop icons are Horizon-owned authored SVGs. Their source files in `ui/assets/` are the single visual source of truth. `utility-icons.slint` loads them directly with `@image-url`; do not transcribe their paths, apply `Image.colorize`, substitute theme colors, raster-export them, or create alternate light/dark variants. The authored white outline, shadow/filter, stroke geometry, and intrinsic colors must remain intact.
 
 The 80×80 SVG canvases are uniformly fitted into fixed 40×40 utility cells with `image-fit: contain`. Because Horizon applies one app-wide logical scene scale, the shared `AuthoredUtilityIcon` renderer uses a larger internal raster target before scaling the complete unchanged image back to its 40×40 logical size. This prevents fullscreen blur without creating alternate raster assets or changing SVG content. Layout may position the complete image and the focus system may move it by its existing small lift, but the artwork itself is never recolored, redrawn, or non-uniformly distorted. See ADR 0040.
+
+## Application icon
+
+`data/io.github.Mars7x.Horizon.svg` is Horizon-owned artwork supplied by the project owner. The Flatpak installs this exact SVG as the scalable application icon; desktop/metainfo identity remains `io.github.Mars7x.Horizon`.
 
 ## Rendering
 
@@ -53,7 +57,7 @@ Games without cover art use Horizon's procedural placeholder. Because the applic
 Phase 3.14.10 rendering update:
 - Slint renderer is now Winit + Skia instead of FemtoVG because FemtoVG scales cached glyph bitmaps and made fullscreen placeholder text visibly soft.
 - Removed the high-density DemoCover workaround that caused breathing during selection.
-- Superseded for top utilities by ADR 0040: Friends, Album, Activity, Web, and Settings now render Horizon-owned SVG artwork directly and unmodified.
+- Superseded for top utilities by ADR 0040: Friends, Album, Activity, Web, Settings, and Shop now render Horizon-owned SVG artwork directly and unmodified.
 
 ## Phase 7 fallback artwork
 

@@ -1,7 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
-  <rect x="12" y="12" width="104" height="104" rx="24" fill="#3584e4"/>
-  <rect x="34" y="42" width="60" height="44" rx="12" fill="none" stroke="#ffffff" stroke-width="8"/>
-  <circle cx="50" cy="64" r="5" fill="#ffffff"/>
-  <circle cx="78" cy="58" r="4" fill="#ffffff"/>
-  <circle cx="86" cy="68" r="4" fill="#ffffff"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" fill="none">
+  <title>Horizon</title>
+  <desc>A white rounded game shell with a teal inset, subtle overlapping color fields, and a custom white H with a rising crossbar.</desc>
+  <defs>
+    <linearGradient id="face" x1="22" y1="22" x2="105" y2="108" gradientUnits="userSpaceOnUse"><stop stop-color="#258FA9"/><stop offset="1" stop-color="#55C5B5"/></linearGradient>
+    <clipPath id="inset"><rect x="18" y="18" width="92" height="92" rx="10"/></clipPath>
+  </defs>
+  <rect x="8" y="11" width="112" height="112" rx="17" fill="#d9dfe3"/>
+  <rect x="8" y="8" width="112" height="112" rx="17" fill="#fff"/>
+  <rect x="18" y="18" width="92" height="92" rx="10" fill="url(#face)"/>
+  <g clip-path="url(#inset)">
+    <circle cx="111" cy="34" r="38" fill="#ACEDD0" opacity=".23"/>
+    <circle cx="33" cy="108" r="37" fill="#146A8A" opacity=".18"/>
+  </g>
+  <path d="M29 30H51" stroke="white" stroke-opacity=".8" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M45 41H51Q53 41 53 43V58L75 54V43Q75 41 77 41H83Q85 41 85 43V85Q85 87 83 87H77Q75 87 75 85V65L53 69V85Q53 87 51 87H45Q43 87 43 85V43Q43 41 45 41Z" fill="white"/>
 </svg>

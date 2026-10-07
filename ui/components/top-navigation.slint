@@ -1,5 +1,5 @@
 import { Theme, Metrics, Motion } from "../theme/theme.slint";
-import { FriendsIcon, AlbumIcon, ActivityIcon, WebIcon, SettingsIcon } from "utility-icons.slint";
+import { FriendsIcon, AlbumIcon, ActivityIcon, WebIcon, SettingsIcon, ShopIcon } from "utility-icons.slint";
 
 component Separator inherits Rectangle {
     width: 1px;
@@ -126,6 +126,7 @@ component UtilityFocusSurface inherits Rectangle {
 }
 
 export component TopNavigation inherits Rectangle {
+    in property <float> icon-render-scale: 1.0;
     in property <bool> utility-focus-visible: false;
     in property <int> focused-utility-index: 2;
     callback utility-activated(int);
@@ -177,14 +178,15 @@ export component TopNavigation inherits Rectangle {
     HorizontalLayout {
         x: (parent.width - self.width) / 2;
         y: root.content-center-y - self.height / 2;
-        width: 296px;
-        height: 40px;
-        spacing: 24px;
+        width: Metrics.utility-row-width;
+        height: Metrics.utility-cell-size;
+        spacing: Metrics.utility-spacing;
 
         UtilityFocusSurface {
             width: 40px; height: 40px;
             focused: root.utility-focus-visible && root.focused-utility-index == 0;
             FriendsIcon {
+                render-scale: root.icon-render-scale;
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2
                     + (parent.focused && !Motion.reduced-motion ? -2px : 0px);
@@ -198,6 +200,7 @@ export component TopNavigation inherits Rectangle {
             width: 40px; height: 40px;
             focused: root.utility-focus-visible && root.focused-utility-index == 1;
             AlbumIcon {
+                render-scale: root.icon-render-scale;
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2
                     + (parent.focused && !Motion.reduced-motion ? -2px : 0px);
@@ -211,6 +214,7 @@ export component TopNavigation inherits Rectangle {
             width: 40px; height: 40px;
             focused: root.utility-focus-visible && root.focused-utility-index == 2;
             ActivityIcon {
+                render-scale: root.icon-render-scale;
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2
                     + (parent.focused && !Motion.reduced-motion ? -2px : 0px);
@@ -224,6 +228,7 @@ export component TopNavigation inherits Rectangle {
             width: 40px; height: 40px;
             focused: root.utility-focus-visible && root.focused-utility-index == 3;
             WebIcon {
+                render-scale: root.icon-render-scale;
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2
                     + (parent.focused && !Motion.reduced-motion ? -2px : 0px);
@@ -237,6 +242,7 @@ export component TopNavigation inherits Rectangle {
             width: 40px; height: 40px;
             focused: root.utility-focus-visible && root.focused-utility-index == 4;
             SettingsIcon {
+                render-scale: root.icon-render-scale;
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2
                     + (parent.focused && !Motion.reduced-motion ? -2px : 0px);
@@ -245,6 +251,20 @@ export component TopNavigation inherits Rectangle {
                 animate y { duration: Motion.focus-duration; easing: ease-out; }
             }
             TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(4); } }
+        }
+        UtilityFocusSurface {
+            width: 40px; height: 40px;
+            focused: root.utility-focus-visible && root.focused-utility-index == 5;
+            ShopIcon {
+                render-scale: root.icon-render-scale;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2
+                    + (parent.focused && !Motion.reduced-motion ? -2px : 0px);
+                width: Metrics.utility-cell-size;
+                height: Metrics.utility-cell-size;
+                animate y { duration: Motion.focus-duration; easing: ease-out; }
+            }
+            TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(5); } }
         }
     }
 

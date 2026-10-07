@@ -67,7 +67,7 @@ Generated UI chrome must use `Theme` properties rather than literal colors. Auth
 - `accent-foreground`
 - `focus`
 
-The five top-utility SVGs are authored artwork, not theme glyph masks. Slint renders those source files directly with no `colorize` property and no semantic tint token; their orange/blue/teal/gray colors and white outline/shadow are part of the assets themselves. A shared authored-icon renderer may use a larger internal render target to stay sharp under Horizon's app-wide fullscreen scale, but that quality policy never changes the SVG bytes or visible 40×40 layout size.
+The six top-utility SVGs are authored artwork, not theme glyph masks. Slint renders those source files directly with no `colorize` property and no semantic tint token; their orange/blue/teal/gray/red colors and white outline/shadow are part of the assets themselves. The shared authored-icon renderer is scale-aware: at UI scales at or below 1× it renders directly at the logical 40×40 size, while enlarged layouts supersample by the actual app UI scale (capped at 4×). This avoids the old 4×→40px→downscaled-window resampling path at small sizes while preserving crisp fullscreen rendering. The policy never changes SVG bytes or the visible 40×40 layout size.
 
 The Rust resolver derives hover, pressed, subtle, and readable accent-foreground values from the effective accent.
 
@@ -87,7 +87,17 @@ components must not introduce local font-family overrides without a documented
 design requirement. Clock-format integration is intentionally separate from
 appearance and is documented in `docs/CLOCK.md`.
 
+## Phase 9.5.24 utility SVG scaling and launch-token restoration
 
-## Launch-feedback motion
+Utility SVG supersampling now follows the actual `AppWindow` UI scale instead of
+always rasterizing at 4×. Window scales at or below 1× render the SVG directly
+at its logical size; larger scales supersample only enough to match the outer
+scene enlargement, capped at 4×. This removes unnecessary intermediate
+resampling at reduced window sizes while retaining the fullscreen sharpness
+workaround.
 
-`Motion.launch-press-duration` is part of the same reduced-motion contract as focus, carousel, and page motion. The Phase 7.0.5 game-launch press-in becomes instantaneous when Reduced Motion is enabled; textual `Launching…` feedback remains visible so accessibility does not remove acknowledgement.
+The Shop utility theme edit also inadvertently dropped the existing
+`Metrics.game-launch-pressed-scale` and `Motion.launch-press-duration` tokens.
+Phase 9.5.24 restores their Phase 7.0.5 values (`1.055` and `90ms`, with Reduced
+Motion resolving the latter to `0ms`) so `GameTile` launch feedback compiles and
+retains its established behavior.

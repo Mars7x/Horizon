@@ -22,7 +22,7 @@ NavigationController ──────────────► active page c
                    retained route layers
 ```
 
-`src/navigation/` is UI-framework agnostic. It owns route identity, history, shell focus, and the five utility submenu identities. `src/presentation/navigation.rs` receives semantic actions, applies global Back/Home/Menu behavior, activates routes, restores route-local focus, and maps `AppRoute` to Slint's presentation-only `AppRouteView`.
+`src/navigation/` is UI-framework agnostic. It owns route identity, history, shell focus, and the six utility submenu identities. `src/presentation/navigation.rs` receives semantic actions, applies global Back/Home/Menu behavior, activates routes, restores route-local focus, and maps `AppRoute` to Slint's presentation-only `AppRouteView`.
 
 Slint never pushes/pops history or decides whether a header utility is a route.
 
@@ -41,6 +41,7 @@ Slint never pushes/pops history or decides whether a header utility is a route.
 - `Activity`
 - `Web`
 - `Settings`
+- `Shop`
 
 This is a real navigation model, not a presentation workaround. Every top utility opens `AppRoute::Utility(...)`, participates in normal Back history, uses the same full-shell page treatment, and can later receive its own page controller without changing input adapters or inventing a second overlay path.
 
@@ -57,9 +58,9 @@ This is a real navigation model, not a presentation workaround. Every top utilit
 `AppWindow` keeps every route layer instantiated so crossfades can overlap and presentation-only state can survive navigation.
 
 - Home and Library render inside the central bounds between the top navigation and footer.
-- Friends, Album, Activity, Web, and Settings render across the full logical surface.
+- Friends, Album, Activity, Web, Settings, and Shop render across the full logical surface.
 - Any utility submenu route hides both top navigation and footer immediately.
-- Phase 4 initially used the reusable `UtilitySubmenuPage` placeholder for all five utility routes. Phase 8 replaces only Activity with its production `ActivityPage`; route/history/focus behavior remains unchanged.
+- All six utility routes use the same reusable `UtilitySubmenuPage` presentation component during Phase 4.
 - The global shell Menu remains a separate modal surface above routes.
 
 Header status, clock, controller state, and footer controls remain shell-owned; utility pages do not duplicate them.
@@ -84,7 +85,7 @@ On Home/Library:
 
 - Up enters the utility row.
 - Down returns to content.
-- Left/Right move across Friends, Album, Activity, Web, and Settings and clamp at the ends.
+- Left/Right move across Friends, Album, Activity, Web, Settings, and Shop and clamp at the ends.
 - Accept opens the selected utility submenu route.
 
 On Home, vertical transfer uses rendered center geometry and reciprocal anchors. Moving from a game to a utility and immediately reversing direction returns to the exact originating game; horizontal movement invalidates that temporary pair.
@@ -107,13 +108,13 @@ Back priority is now simple:
 2. otherwise pop route history;
 3. otherwise no-op at the root.
 
-There is no separate utility-overlay modal path. Friends, Album, Activity, Web, and Settings all use the same routed submenu semantics.
+There is no separate utility-overlay modal path. Friends, Album, Activity, Web, Settings, and Shop all use the same routed submenu semantics.
 
 Menu toggles the global shell Menu without changing route history or route-local focus. Home closes the Menu, clears route history, activates Home, forces Home content focus, and selects the first Home game.
 
 ## Reduced-motion-aware page transitions
 
-Each route is hosted by a reusable `PageTransitionLayer`. Route changes use the centralized 220 ms crossfade plus `Metrics.page-transition-offset` vertical settle. Home/Library use central bounds; all five utility submenu routes use the full logical surface.
+Each route is hosted by a reusable `PageTransitionLayer`. Route changes use the centralized 220 ms crossfade plus `Metrics.page-transition-offset` vertical settle. Home/Library use central bounds; all six utility submenu routes use the full logical surface.
 
 Top/footer chrome does not animate with routes. It disappears immediately when a utility route becomes active and returns immediately when Home/Library becomes active. The global shell Menu remains above route layers.
 

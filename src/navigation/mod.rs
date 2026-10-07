@@ -4,7 +4,7 @@
 //! route and shell focus, but route history, utility destinations, and focus
 //! movement policy are owned by Rust.
 
-/// Full-shell submenu pages opened from the five top utility icons.
+/// Full-shell submenu pages opened from the six top utility icons.
 ///
 /// These are real navigation destinations, not modal overlays. Grouping them
 /// under one type keeps the shell model explicit without pretending every
@@ -17,10 +17,11 @@ pub enum UtilityPage {
     Activity,
     Web,
     Settings,
+    Shop,
 }
 
 impl UtilityPage {
-    const COUNT: usize = 5;
+    const COUNT: usize = 6;
 
     const fn index(self) -> usize {
         match self {
@@ -29,13 +30,14 @@ impl UtilityPage {
             Self::Activity => 2,
             Self::Web => 3,
             Self::Settings => 4,
+            Self::Shop => 5,
         }
     }
 }
 
 /// Navigable destinations in Horizon's Phase 4 application shell.
 ///
-/// Home and Library use the persistent shell chrome. The five utility icons
+/// Home and Library use the persistent shell chrome. The six utility icons
 /// open durable full-shell submenu pages that participate in normal Back/Home
 /// history.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
@@ -79,7 +81,7 @@ pub enum ShellFocusRegion {
     TopUtilities,
 }
 
-/// Stable ordering of the five utility icons in the persistent header.
+/// Stable ordering of the six utility icons in the persistent header.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum TopUtility {
     Friends,
@@ -88,10 +90,11 @@ pub enum TopUtility {
     Activity,
     Web,
     Settings,
+    Shop,
 }
 
 impl TopUtility {
-    pub const COUNT: i32 = 5;
+    pub const COUNT: i32 = 6;
 
     pub const fn index(self) -> i32 {
         match self {
@@ -100,6 +103,7 @@ impl TopUtility {
             Self::Activity => 2,
             Self::Web => 3,
             Self::Settings => 4,
+            Self::Shop => 5,
         }
     }
 
@@ -110,6 +114,7 @@ impl TopUtility {
             2 => Some(Self::Activity),
             3 => Some(Self::Web),
             4 => Some(Self::Settings),
+            5 => Some(Self::Shop),
             _ => None,
         }
     }
@@ -121,6 +126,7 @@ impl TopUtility {
             Self::Activity => UtilityPage::Activity,
             Self::Web => UtilityPage::Web,
             Self::Settings => UtilityPage::Settings,
+            Self::Shop => UtilityPage::Shop,
         }
     }
 
@@ -137,6 +143,7 @@ impl UtilityPage {
             Self::Activity => TopUtility::Activity,
             Self::Web => TopUtility::Web,
             Self::Settings => TopUtility::Settings,
+            Self::Shop => TopUtility::Shop,
         }
     }
 }
@@ -215,6 +222,7 @@ impl Default for RouteFocusMemory {
                 FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Activity)),
                 FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Web)),
                 FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Settings)),
+                FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Shop)),
             ],
         }
     }
@@ -556,6 +564,7 @@ mod tests {
             UtilityPage::Activity,
             UtilityPage::Web,
             UtilityPage::Settings,
+            UtilityPage::Shop,
         ] {
             assert!(!AppRoute::Utility(page).uses_shell_chrome());
         }
@@ -621,13 +630,14 @@ mod tests {
             AppRoute::Utility(UtilityPage::Activity),
             AppRoute::Utility(UtilityPage::Web),
             AppRoute::Utility(UtilityPage::Settings),
+            AppRoute::Utility(UtilityPage::Shop),
             AppRoute::Home,
         ] {
             assert!(navigator.navigate_to(route));
         }
 
         assert_eq!(navigator.current(), AppRoute::Home);
-        assert_eq!(navigator.back_stack_depth(), 7);
+        assert_eq!(navigator.back_stack_depth(), 8);
     }
 
     #[test]
@@ -654,7 +664,7 @@ mod tests {
         assert!(!focus.move_utility(-1));
 
         assert!(focus.move_utility(99));
-        assert_eq!(focus.utility(), TopUtility::Settings);
+        assert_eq!(focus.utility(), TopUtility::Shop);
         assert!(!focus.move_utility(1));
     }
 
@@ -666,6 +676,7 @@ mod tests {
             (TopUtility::Activity, UtilityPage::Activity),
             (TopUtility::Web, UtilityPage::Web),
             (TopUtility::Settings, UtilityPage::Settings),
+            (TopUtility::Shop, UtilityPage::Shop),
         ] {
             assert_eq!(utility.page(), page);
             assert_eq!(utility.route(), AppRoute::Utility(page));
@@ -753,6 +764,7 @@ mod tests {
             (UtilityPage::Activity, TopUtility::Activity),
             (UtilityPage::Web, TopUtility::Web),
             (UtilityPage::Settings, TopUtility::Settings),
+            (UtilityPage::Shop, TopUtility::Shop),
         ] {
             let snapshot = memory.recall(AppRoute::Utility(page));
             assert_eq!(snapshot.utility(), utility);
@@ -800,31 +812,35 @@ mod tests {
         let step = 64.0;
 
         assert_eq!(
-            nearest_utility_for_x(512.0, viewport_width, step),
+            nearest_utility_for_x(480.0, viewport_width, step),
             TopUtility::Friends
         );
         assert_eq!(
-            nearest_utility_for_x(575.0, viewport_width, step),
+            nearest_utility_for_x(544.0, viewport_width, step),
             TopUtility::Album
         );
         assert_eq!(
-            nearest_utility_for_x(640.0, viewport_width, step),
+            nearest_utility_for_x(608.0, viewport_width, step),
             TopUtility::Activity
         );
         assert_eq!(
-            nearest_utility_for_x(704.0, viewport_width, step),
+            nearest_utility_for_x(672.0, viewport_width, step),
             TopUtility::Web
         );
         assert_eq!(
-            nearest_utility_for_x(768.0, viewport_width, step),
+            nearest_utility_for_x(736.0, viewport_width, step),
             TopUtility::Settings
+        );
+        assert_eq!(
+            nearest_utility_for_x(800.0, viewport_width, step),
+            TopUtility::Shop
         );
     }
 
     #[test]
     fn utility_and_game_center_helpers_support_reverse_spatial_transfer() {
         let activity_x = utility_center_x(TopUtility::Activity, 1280.0, 64.0);
-        assert_eq!(activity_x, 640.0);
+        assert_eq!(activity_x, 608.0);
 
         assert_eq!(nearest_game_for_x(activity_x, 439.0, 250.0, 8), 1);
         assert_eq!(nearest_game_for_x(768.0, 439.0, 250.0, 8), 1);
@@ -855,6 +871,7 @@ mod tests {
             AppRoute::Utility(UtilityPage::Activity),
             AppRoute::Utility(UtilityPage::Web),
             AppRoute::Utility(UtilityPage::Settings),
+            AppRoute::Utility(UtilityPage::Shop),
         ];
         let mut navigator = Navigator::default();
         let mut visited = vec![AppRoute::Home];

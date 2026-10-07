@@ -66,7 +66,7 @@ export component AppWindow inherits Window {
     in property <bool> shell-menu-open: false;
 
     // Home and Library use the persistent shell. Every top-utility destination
-    // is a durable full-shell submenu route, so opening any of the five utility
+    // is a durable full-shell submenu route, so opening any of the six utility
     // icons replaces both top navigation and footer chrome.
     private property <bool> shell-chrome-visible:
         root.current-route == AppRouteView.home
@@ -195,7 +195,7 @@ export component AppWindow inherits Window {
                 }
             }
 
-            // All five top utilities are real full-shell submenu routes. They
+            // All six top utilities are real full-shell submenu routes. They
             // share one page component and normal Navigator history semantics.
             PageTransitionLayer {
                 x: 0px;
@@ -280,6 +280,22 @@ export component AppWindow inherits Window {
                 }
             }
 
+            PageTransitionLayer {
+                x: 0px;
+                width: parent.width;
+                height: parent.height;
+                active: root.current-route == AppRouteView.shop;
+                outgoing: root.current-route != AppRouteView.shop
+                    && root.transition-from-route == AppRouteView.shop;
+
+                UtilitySubmenuPage {
+                    width: parent.width;
+                    height: parent.height;
+                    title: "Shop";
+                    description: "The Horizon shop will appear here in a later phase.";
+                }
+            }
+
             // Persistent top chrome lives outside every page. Later Phase 4
             // passes can add focus/activation without duplicating this shell.
             Rectangle {
@@ -304,6 +320,7 @@ export component AppWindow inherits Window {
                 y: 0px;
                 width: parent.width;
                 height: Metrics.top-chrome-height;
+                icon-render-scale: root.ui-scale;
                 visible: root.shell-chrome-visible;
                 utility-focus-visible: root.top-utilities-focused;
                 focused-utility-index: root.focused-utility-index;
