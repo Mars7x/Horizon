@@ -66,6 +66,7 @@ fn tracking_method_label(method: SessionTrackingMethod) -> &'static str {
     match method {
         SessionTrackingMethod::ForegroundHandoff => "Observed foreground",
         SessionTrackingMethod::ManagedSession => "Managed session",
+        SessionTrackingMethod::SourceRuntime => "Source runtime",
     }
 }
 
@@ -122,6 +123,22 @@ mod tests {
         assert_eq!(format_duration(PlaytimeSeconds::new(30).expect("duration")), "<1 min");
         assert_eq!(format_duration(PlaytimeSeconds::new(3_600).expect("duration")), "1h");
         assert_eq!(format_duration(PlaytimeSeconds::new(5_100).expect("duration")), "1h 25m");
+    }
+
+    #[test]
+    fn tracking_method_labels_cover_every_activity_method() {
+        assert_eq!(
+            tracking_method_label(SessionTrackingMethod::ForegroundHandoff),
+            "Observed foreground"
+        );
+        assert_eq!(
+            tracking_method_label(SessionTrackingMethod::ManagedSession),
+            "Managed session"
+        );
+        assert_eq!(
+            tracking_method_label(SessionTrackingMethod::SourceRuntime),
+            "Source runtime"
+        );
     }
 
     #[test]
