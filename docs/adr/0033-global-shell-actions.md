@@ -34,14 +34,14 @@ route history or route-local focus memory.
 Back priority is:
 
 1. close shell Menu;
-2. close transient utility overlay;
-3. pop top-level route history;
-4. no-op at the root.
+2. pop route history;
+3. no-op at the root.
 
-Menu toggles the shell Menu only when no utility overlay is active. Horizon does
-not stack modal surfaces.
+All five top utilities are normal routed submenu destinations, so they do not
+introduce a second modal priority path. Menu toggles the shell Menu from any
+route.
 
-Home closes all modal surfaces, clears navigation history, activates Home,
+Home closes the shell Menu, clears navigation history, activates Home,
 returns Home to content focus, and resets the Home carousel to its first game.
 The previous Home game selection is not restored by the global Home action.
 

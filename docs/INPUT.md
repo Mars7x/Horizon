@@ -91,7 +91,7 @@ The Rust `NavigationController` remains above page controllers while `AppWindow`
 - pointer clicks still select through the same `HomeController`
 - Accept is recognized but intentionally does not launch anything yet
 - Back is interpreted at the navigation layer and restores route history when available
-- Home resets top-level history to the Home root
+- Home resets route history to the Home root
 - Library, Activity, and Settings currently render presentation-only placeholders and intentionally ignore page-local actions
 - Up / Down / Menu / bumpers remain semantic and gain additional screen-level behavior in later Phase 4 passes
 
@@ -139,11 +139,11 @@ Input adapters preserve a `repeated` bit alongside each semantic action. A fresh
 
 ## Phase 4.3 shell focus routing
 
-Directional input remains semantic before it reaches screen logic. `NavigationController` interprets Up/Down when crossing between page content and the persistent top utility row, while Left/Right move the selected utility whenever that row owns focus. On Home, fresh vertical transfers use the shortest rendered center-to-center horizontal distance. The resulting utility↔game pair is sticky in both directions: immediately reversing direction returns to the exact element the user came from, while horizontal movement in the destination region invalidates that pair and restores nearest-center behavior. Slint reports geometry only; Rust owns the focus decision. SDL3 and keyboard adapters remain unaware of focus regions, routes, utility names, or geometry math. Held Left/Right repeats naturally through the existing semantic repeat pipeline and clamps at the ends of the utility strip.
+Directional input remains semantic before it reaches screen logic. On Home/Library, `NavigationController` interprets Up/Down when crossing between page content and the persistent top utility row, while Left/Right move the selected utility whenever that row owns focus. Every routed utility submenu is full-shell with no visible utility row, so Up remains page-local there and Rust normalizes those routes to content focus. On Home, fresh vertical transfers use the shortest rendered center-to-center horizontal distance. The resulting utility↔game pair is sticky in both directions: immediately reversing direction returns to the exact element the user came from, while horizontal movement in the destination region invalidates that pair and restores nearest-center behavior. Slint reports geometry only; Rust owns the focus decision. SDL3 and keyboard adapters remain unaware of focus regions, routes, utility names, or geometry math. Held Left/Right repeats naturally through the existing semantic repeat pipeline and clamps at the ends of the utility strip.
 
 ## Phase 4.4 route-local focus restoration
 
-Focus ownership is remembered per top-level route above the input-adapter layer. SDL3 and keyboard still emit only `UiActionEvent`. When navigation changes routes, Rust saves the source route's shell focus and restores the destination route's saved focus. Back therefore restores the focus region that belonged to the previous page, while global Home always returns Home to content focus and the first Home game. Temporary spatial pairing anchors are route-local and are discarded during route restoration.
+Focus ownership is remembered per route above the input-adapter layer. SDL3 and keyboard still emit only `UiActionEvent`. When navigation changes routes, Rust saves the source route's shell focus and restores the destination route's saved focus. Home/Library may restore top-utility focus; every `Utility(...)` route is normalized to content focus because its shell chrome is hidden. Back therefore restores a focus region that is valid for the destination page, while global Home always returns Home to content focus and the first Home game. Temporary spatial pairing anchors are route-local and are discarded during route restoration.
 
 ## Phase 4.5 canonical global actions
 
@@ -158,5 +158,5 @@ Canonical mappings:
 | Menu | Menu key | Start |
 | Home | Home key | Guide |
 
-The adapters only produce `UiAction`; `NavigationController` owns meaning. Back closes the topmost modal surface before route history. Menu toggles Horizon's shell menu when no utility overlay is active. Home closes modals and resets navigation to Home content focus with the first Home game selected. Unit tests cover both keyboard and SDL mappings so the two input paths cannot silently drift.
+The adapters only produce `UiAction`; `NavigationController` owns meaning. Back closes the global shell Menu when open, then falls through to normal route history. All five top utilities are real routed submenu destinations, so there is no separate utility-overlay modal priority. Menu toggles Horizon's shell Menu without mutating route history. Home closes the shell Menu and resets navigation to Home content focus with the first Home game selected. Unit tests cover both keyboard and SDL mappings so the two input paths cannot silently drift.
 

@@ -88,7 +88,7 @@ workaround. See ADR 0007.
 
 Phase 4.1 introduces the top-level navigation model without changing the visible page composition yet:
 
-- pure Rust `AppRoute` values for Home, Library, Activity, and Settings;
+- pure Rust `AppRoute`/`Navigator` route state (later generalized by ADR 0035 into Home, Library, and `Utility(UtilityPage)`);
 - a pure Rust `Navigator` that owns current route and back history;
 - global Home semantics that clear history and establish Home as the root;
 - a presentation `NavigationController` between semantic input and page controllers;
@@ -101,24 +101,24 @@ The active route is published to Slint, but Phase 4.1 still renders the existing
 
 Phase 4.2 turns the published route into visible shell composition:
 
-- `AppWindow` owns persistent top and bottom chrome;
-- a central clipped page host renders exactly one route component;
-- Home is now a real routed page rather than the entire application surface;
-- Library, Activity, and Settings have presentation-only placeholder pages;
+- `AppWindow` owns top and bottom shell chrome;
+- Home/Library use the central shell bounds;
+- full-shell destinations replace the chrome rather than duplicating it;
+- Home is a routed page rather than the entire application surface;
 - Home's established scene geometry is preserved across the shell refactor;
 - page switching is driven only by Rust-published `AppRouteView` state.
 
-Phase 4.2 does not add utility focus navigation, page transitions, persistence, imports, launching, or production Activity/Settings behavior. See `NAVIGATION.md` and ADR 0029.
+Later Phase 4.6 refinements generalized the full-shell destination model so all five top utilities are routed submenu pages. See `NAVIGATION.md`, ADR 0029, and ADR 0035.
 
 ## Phase 4.3 shell focus boundary
 
-The navigation layer also owns screen-level focus between page content and persistent header utilities. Pure Rust types in `src/navigation/` describe the focus region, selected utility, and whether a utility maps to a route or transient overlay. `presentation::NavigationController` publishes those decisions to Slint. Slint may emit a utility activation callback for pointer input, but it must not choose routes, mutate history, or decide overlay policy.
+The navigation layer owns screen-level focus between page content and persistent header utilities. Pure Rust types in `src/navigation/` describe the focus region, selected utility, and the `UtilityPage` route opened by each utility. `presentation::NavigationController` publishes those decisions to Slint. Slint may emit a utility activation callback for pointer input, but it must not choose routes or mutate history.
 
 ## Phase 4.4 route-focus boundary
 
 Route history and shell focus remain separate concerns but are coordinated by the presentation navigation controller. `RouteFocusMemory` in `src/navigation/` stores one durable `FocusSnapshot` per `AppRoute`. A snapshot contains only the owning shell region and selected utility; temporary Home spatial-transfer anchors are deliberately excluded.
 
-Before a top-level route change, `NavigationController` saves the source route's snapshot. After the route changes it restores the destination route's snapshot before further input is dispatched. Back therefore restores both route and route-local shell focus. Global Home resets Home to content focus and the first Home game while clearing route history. Slint continues to render only the published state and does not own restoration policy.
+Before a route change, `NavigationController` saves the source route's snapshot. Home/Library may remember either content or top-utility focus. Every `AppRoute::Utility(...)` destination is full-shell with no visible utility row, so those snapshots are normalized to content focus on save/restore while retaining their utility identity. Back therefore restores both route and valid route-local focus. Global Home resets Home to content focus and the first Home game while clearing route history. Slint continues to render only the published state and does not own restoration policy.
 
 See ADR 0032.
 
@@ -130,3 +130,13 @@ The global shell menu is modal presentation state (`ShellMenuState`), not an `Ap
 
 See ADR 0033.
 
+
+## Phase 4.6 route-transition presentation boundary
+
+Route policy remains entirely in Rust. `NavigationController` publishes `AppRouteView`; Slint maps that presentation enum to retained `PageTransitionLayer` instances for Home, Library, and all five utility submenu routes. Home/Library retain the central shell bounds while every `UtilityPage` fills the logical surface. The layer owns only visual interpolation and pointer isolation during overlap. It cannot push/pop routes, alter focus memory, or change Back/Home/Menu behavior.
+
+Route motion is limited to opacity plus a small vertical settle using `Metrics.page-transition-offset` and `Motion.page-duration`. The latter already resolves to zero through the appearance pipeline when the host requests Reduced Motion, so accessibility preference changes do not require a second navigation code path. Shell chrome is outside the transition contract and is suppressed for the lifetime of any utility submenu route.
+
+Retaining the route components lets outgoing and incoming pages overlap for a real crossfade and preserves transient presentation-only state. Durable state must still live in the existing Rust controllers/domain layers; retained Slint component state must never become a substitute for application state.
+
+See ADR 0034.

@@ -4,17 +4,16 @@ export { Theme, Metrics, Typography, Motion }
 import { GameCardData } from "models/game-card.slint";
 export { GameCardData }
 
-import { AppRouteView, UtilityOverlayView } from "models/navigation.slint";
-export { AppRouteView, UtilityOverlayView }
+import { AppRouteView } from "models/navigation.slint";
+export { AppRouteView }
 
 import { TopNavigation } from "components/top-navigation.slint";
-import { UtilityOverlay } from "components/utility-overlay.slint";
 import { ShellMenuOverlay } from "components/shell-menu-overlay.slint";
+import { PageTransitionLayer } from "components/page-transition-layer.slint";
 import { Footer } from "components/footer.slint";
 import { HomePage } from "pages/home.slint";
 import { LibraryPage } from "pages/library.slint";
-import { ActivityPage } from "pages/activity.slint";
-import { SettingsPage } from "pages/settings.slint";
+import { UtilitySubmenuPage } from "pages/utility.slint";
 
 export component AppWindow inherits Window {
     title: "Horizon";
@@ -38,13 +37,19 @@ export component AppWindow inherits Window {
     private property <length> logical-width: root.width / root.ui-scale;
     private property <length> logical-height: root.height / root.ui-scale;
 
-    // Rust owns route history/policy. Slint only chooses which page component
-    // to render from the published presentation enum.
+    // Rust owns route history/policy. Slint only presents the active route from
+    // the published presentation enum and may animate that presentation.
     in property <AppRouteView> current-route: AppRouteView.home;
     in property <bool> top-utilities-focused: false;
     in property <int> focused-utility-index: 2;
-    in property <UtilityOverlayView> utility-overlay: UtilityOverlayView.closed;
     in property <bool> shell-menu-open: false;
+
+    // Home and Library use the persistent shell. Every top-utility destination
+    // is a durable full-shell submenu route, so opening any of the five utility
+    // icons replaces both top navigation and footer chrome.
+    private property <bool> shell-chrome-visible:
+        root.current-route == AppRouteView.home
+        || root.current-route == AppRouteView.library;
 
     // Read-only geometry telemetry for Rust-owned spatial focus transfer.
     // Slint reports where the presentation actually rendered things; Rust
@@ -95,50 +100,117 @@ export component AppWindow inherits Window {
                 }
             }
 
-            // Phase 4.2 makes header/footer true shell chrome. The routed page
-            // occupies only the central content region; Home compensates for
-            // the shell inset internally so its established scene geometry is
-            // pixel-identical to the Phase 4.1 layout.
-            page-host := Rectangle {
+            // Home and Library retain the established central content bounds.
+            // All five utility submenu routes use the whole logical surface.
+            // Retaining every route layer preserves crossfade overlap and local
+            // presentation state without moving navigation ownership into Slint.
+            PageTransitionLayer {
                 x: 0px;
-                y: Metrics.top-chrome-height;
+                base-y: Metrics.top-chrome-height;
                 width: parent.width;
                 height: parent.height - Metrics.top-chrome-height - Metrics.footer-height;
-                background: Theme.background;
-                clip: true;
+                active: root.current-route == AppRouteView.home;
 
-                if root.current-route == AppRouteView.home : HomePage {
+                HomePage {
                     width: parent.width;
                     height: parent.height;
                     games: root.games;
                     selected-index: root.selected-index;
                     selected-title: root.selected-title;
-                    focus-visible: !root.top-utilities-focused;
+                    // A retained outgoing Home page remains visible during the
+                    // crossfade, but it must not regain selection chrome after
+                    // route-local focus switches to the destination route.
+                    focus-visible: root.current-route == AppRouteView.home
+                        && !root.top-utilities-focused;
                     select-game(index) => { root.select-game(index); }
                     carousel-geometry-changed(first-game-center-x-px) => {
                         root.home-first-game-center-x-px = first-game-center-x-px;
                     }
                 }
+            }
 
-                if root.current-route == AppRouteView.library : LibraryPage {
+            PageTransitionLayer {
+                x: 0px;
+                base-y: Metrics.top-chrome-height;
+                width: parent.width;
+                height: parent.height - Metrics.top-chrome-height - Metrics.footer-height;
+                active: root.current-route == AppRouteView.library;
+
+                LibraryPage {
                     width: parent.width;
                     height: parent.height;
                 }
+            }
 
-                if root.current-route == AppRouteView.activity : ActivityPage {
+            // All five top utilities are real full-shell submenu routes. They
+            // share one page component and normal Navigator history semantics.
+            PageTransitionLayer {
+                x: 0px;
+                width: parent.width;
+                height: parent.height;
+                active: root.current-route == AppRouteView.friends;
+
+                UtilitySubmenuPage {
                     width: parent.width;
                     height: parent.height;
+                    title: "Friends";
+                    description: "Friends and social activity will appear here.";
                 }
+            }
 
-                if root.current-route == AppRouteView.settings : SettingsPage {
+            PageTransitionLayer {
+                x: 0px;
+                width: parent.width;
+                height: parent.height;
+                active: root.current-route == AppRouteView.album;
+
+                UtilitySubmenuPage {
                     width: parent.width;
                     height: parent.height;
+                    title: "Album";
+                    description: "Screenshots and captured media will appear here.";
                 }
+            }
 
-                UtilityOverlay {
+            PageTransitionLayer {
+                x: 0px;
+                width: parent.width;
+                height: parent.height;
+                active: root.current-route == AppRouteView.activity;
+
+                UtilitySubmenuPage {
                     width: parent.width;
                     height: parent.height;
-                    kind: root.utility-overlay;
+                    title: "Activity";
+                    description: "Play history and session activity will appear here.";
+                }
+            }
+
+            PageTransitionLayer {
+                x: 0px;
+                width: parent.width;
+                height: parent.height;
+                active: root.current-route == AppRouteView.web;
+
+                UtilitySubmenuPage {
+                    width: parent.width;
+                    height: parent.height;
+                    title: "Web";
+                    description: "Web access will be connected here in a later phase.";
+                }
+            }
+
+            PageTransitionLayer {
+                x: 0px;
+                width: parent.width;
+                height: parent.height;
+                active: root.current-route == AppRouteView.settings;
+
+                UtilitySubmenuPage {
+                    width: parent.width;
+                    height: parent.height;
+                    title: "Settings";
+                    description: "Horizon preferences will appear here.";
                 }
             }
 
@@ -149,6 +221,7 @@ export component AppWindow inherits Window {
                 y: 0px;
                 width: parent.width;
                 height: Metrics.top-chrome-height;
+                visible: root.shell-chrome-visible;
                 background: Theme.surface.with-alpha(Theme.is-dark ? 0.78 : 0.92);
 
                 Rectangle {
@@ -165,6 +238,7 @@ export component AppWindow inherits Window {
                 y: 0px;
                 width: parent.width;
                 height: Metrics.top-chrome-height;
+                visible: root.shell-chrome-visible;
                 utility-focus-visible: root.top-utilities-focused;
                 focused-utility-index: root.focused-utility-index;
                 utility-activated(index) => { root.activate-utility(index); }
@@ -175,6 +249,7 @@ export component AppWindow inherits Window {
                 y: parent.height - Metrics.footer-height;
                 width: parent.width;
                 height: Metrics.footer-height;
+                visible: root.shell-chrome-visible;
                 connected-controller-count: root.connected-controller-count;
                 clock-time: root.clock-time;
                 clock-suffix: root.clock-suffix;
@@ -188,6 +263,7 @@ export component AppWindow inherits Window {
                 y: 0px;
                 width: parent.width;
                 height: parent.height;
+                z: 4.0;
                 open: root.shell-menu-open;
             }
         }

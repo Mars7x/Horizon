@@ -25,7 +25,7 @@ pub fn run() -> Result<(), AppError> {
         )
         .init();
 
-    info!("starting Horizon phase 4.5");
+    info!("starting Horizon phase 4.6");
 
     // Backend selection must happen before set_xdg_app_id(), AppWindow::new(),
     // or any other Slint operation that needs the platform.
@@ -55,7 +55,10 @@ pub fn run() -> Result<(), AppError> {
     info!(games = home.game_count(), "demo home library initialized");
 
     let navigation = NavigationController::new(&ui, Rc::clone(&home));
-    info!(route = ?navigation.current_route(), "Phase 4.5 global action policy initialized");
+    info!(
+        route = ?navigation.current_route(),
+        "Phase 4.6 route transition presentation initialized"
+    );
 
     let ui_weak = ui.as_weak();
     let action_navigation = Rc::clone(&navigation);

@@ -4,12 +4,11 @@ use slint::ComponentHandle;
 use tracing::debug;
 
 use crate::{
-    AppRouteView, AppWindow, UtilityOverlayView,
+    AppRouteView, AppWindow,
     input::{UiAction, UiActionEvent},
     navigation::{
         AppRoute, Navigator, RouteFocusMemory, ShellFocus, ShellFocusRegion, ShellMenuState,
-        TopUtility, UtilityDestination, UtilityOverlay, nearest_game_for_x, nearest_utility_for_x,
-        utility_center_x,
+        TopUtility, UtilityPage, nearest_game_for_x, nearest_utility_for_x, utility_center_x,
     },
 };
 
@@ -25,7 +24,6 @@ pub struct NavigationController {
     focus: RefCell<ShellFocus>,
     focus_memory: RefCell<RouteFocusMemory>,
     shell_menu: RefCell<ShellMenuState>,
-    overlay: RefCell<Option<UtilityOverlay>>,
     home: Rc<HomeController>,
 }
 
@@ -36,13 +34,11 @@ impl NavigationController {
             focus: RefCell::new(ShellFocus::default()),
             focus_memory: RefCell::new(RouteFocusMemory::default()),
             shell_menu: RefCell::new(ShellMenuState::default()),
-            overlay: RefCell::new(None),
             home,
         });
         controller.publish_route(ui);
         controller.publish_focus(ui);
         controller.publish_shell_menu(ui);
-        controller.publish_overlay(ui);
         controller.bind_ui_callbacks(ui);
         controller
     }
@@ -55,7 +51,6 @@ impl NavigationController {
     /// route-local shell-focus restoration remain Rust-owned.
     pub fn navigate_to(&self, ui: &AppWindow, route: AppRoute) {
         self.close_shell_menu(ui);
-        self.close_overlay(ui);
         let from = self.current_route();
         if route == from {
             return;
@@ -63,7 +58,7 @@ impl NavigationController {
 
         self.remember_focus_for_route(from);
         if self.navigator.borrow_mut().navigate_to(route) {
-            debug!(?from, to = ?route, "top-level route changed");
+            debug!(?from, to = ?route, "route changed");
             self.publish_route(ui);
             self.restore_focus_for_route(ui, route);
         }
@@ -76,9 +71,6 @@ impl NavigationController {
             }
             UiAction::Back => self.handle_back(ui),
             UiAction::Home => self.handle_home(ui),
-            UiAction::Menu if self.overlay.borrow().is_some() => {
-                debug!("Menu ignored while utility overlay is modal");
-            }
             UiAction::Menu => self.handle_menu(ui),
             _ if self.shell_menu.borrow().is_open() => {
                 debug!(
@@ -86,16 +78,10 @@ impl NavigationController {
                     "shell menu is modal; action ignored until Back/Menu/Home"
                 );
             }
-            _ if self.overlay.borrow().is_some() => {
-                debug!(
-                    action = ?event.action,
-                    "utility overlay is modal; action ignored until Back/Home"
-                );
-            }
             _ if self.focus.borrow().region() == ShellFocusRegion::TopUtilities => {
                 self.handle_utility_action(ui, event)
             }
-            UiAction::Up => {
+            UiAction::Up if self.current_route().uses_shell_chrome() => {
                 let changed = if self.current_route() == AppRoute::Home {
                     let selected_index = self.home.selected_index();
                     let anchored_utility = self
@@ -155,16 +141,11 @@ impl NavigationController {
             return;
         }
 
-        if self.close_overlay(ui) {
-            debug!("Back closed utility overlay");
-            return;
-        }
-
         let from = self.current_route();
         self.remember_focus_for_route(from);
         if self.navigator.borrow_mut().go_back() {
             let to = self.current_route();
-            debug!(?from, ?to, "Back restored previous top-level route and focus");
+            debug!(?from, ?to, "Back restored previous route and focus");
             self.publish_route(ui);
             self.restore_focus_for_route(ui, to);
         } else {
@@ -174,7 +155,6 @@ impl NavigationController {
 
     fn handle_home(&self, ui: &AppWindow) {
         self.close_shell_menu(ui);
-        self.close_overlay(ui);
 
         let from = self.current_route();
         self.remember_focus_for_route(from);
@@ -271,19 +251,11 @@ impl NavigationController {
     }
 
     fn activate_utility(&self, ui: &AppWindow, utility: TopUtility) {
-        match utility.destination() {
-            UtilityDestination::Route(route) => {
-                let from = self.current_route();
-                self.navigate_to(ui, route);
-                if self.current_route() != from {
-                    debug!(?from, to = ?route, ?utility, "utility opened top-level route");
-                }
-            }
-            UtilityDestination::Overlay(overlay) => {
-                *self.overlay.borrow_mut() = Some(overlay);
-                debug!(?overlay, ?utility, "utility overlay opened");
-                self.publish_overlay(ui);
-            }
+        let route = utility.route();
+        let from = self.current_route();
+        self.navigate_to(ui, route);
+        if self.current_route() != from {
+            debug!(?from, to = ?route, ?utility, "utility submenu opened");
         }
     }
 
@@ -292,15 +264,6 @@ impl NavigationController {
             return false;
         }
         self.publish_shell_menu(ui);
-        true
-    }
-
-    fn close_overlay(&self, ui: &AppWindow) -> bool {
-        if self.overlay.borrow().is_none() {
-            return false;
-        }
-        *self.overlay.borrow_mut() = None;
-        self.publish_overlay(ui);
         true
     }
 
@@ -320,12 +283,22 @@ impl NavigationController {
 
     fn remember_focus_for_route(&self, route: AppRoute) {
         let snapshot = self.focus.borrow().snapshot();
-        self.focus_memory.borrow_mut().remember(route, snapshot);
+        let remembered = if route.uses_shell_chrome() {
+            snapshot
+        } else {
+            snapshot.as_content()
+        };
+        self.focus_memory.borrow_mut().remember(route, remembered);
     }
 
     fn restore_focus_for_route(&self, ui: &AppWindow, route: AppRoute) {
         let snapshot = self.focus_memory.borrow().recall(route);
-        self.focus.borrow_mut().restore(snapshot);
+        let restored = if route.uses_shell_chrome() {
+            snapshot
+        } else {
+            snapshot.as_content()
+        };
+        self.focus.borrow_mut().restore(restored);
         self.publish_focus(ui);
     }
 
@@ -342,31 +315,27 @@ impl NavigationController {
     fn publish_shell_menu(&self, ui: &AppWindow) {
         ui.set_shell_menu_open(self.shell_menu.borrow().is_open());
     }
-
-    fn publish_overlay(&self, ui: &AppWindow) {
-        let overlay = match *self.overlay.borrow() {
-            None => UtilityOverlayView::Closed,
-            Some(UtilityOverlay::Friends) => UtilityOverlayView::Friends,
-            Some(UtilityOverlay::Album) => UtilityOverlayView::Album,
-            Some(UtilityOverlay::Web) => UtilityOverlayView::Web,
-        };
-        ui.set_utility_overlay(overlay);
-    }
 }
 
 fn route_view(route: AppRoute) -> AppRouteView {
     match route {
         AppRoute::Home => AppRouteView::Home,
         AppRoute::Library => AppRouteView::Library,
-        AppRoute::Activity => AppRouteView::Activity,
-        AppRoute::Settings => AppRouteView::Settings,
+        AppRoute::Utility(UtilityPage::Friends) => AppRouteView::Friends,
+        AppRoute::Utility(UtilityPage::Album) => AppRouteView::Album,
+        AppRoute::Utility(UtilityPage::Activity) => AppRouteView::Activity,
+        AppRoute::Utility(UtilityPage::Web) => AppRouteView::Web,
+        AppRoute::Utility(UtilityPage::Settings) => AppRouteView::Settings,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::route_view;
-    use crate::{AppRouteView, navigation::AppRoute};
+    use crate::{
+        AppRouteView,
+        navigation::{AppRoute, UtilityPage},
+    };
 
     #[test]
     fn every_rust_route_has_an_explicit_slint_view_mapping() {
@@ -375,13 +344,11 @@ mod tests {
             route_view(AppRoute::Library),
             AppRouteView::Library
         ));
-        assert!(matches!(
-            route_view(AppRoute::Activity),
-            AppRouteView::Activity
-        ));
-        assert!(matches!(
-            route_view(AppRoute::Settings),
-            AppRouteView::Settings
-        ));
+
+        assert!(route_view(AppRoute::Utility(UtilityPage::Friends)) == AppRouteView::Friends);
+        assert!(route_view(AppRoute::Utility(UtilityPage::Album)) == AppRouteView::Album);
+        assert!(route_view(AppRoute::Utility(UtilityPage::Activity)) == AppRouteView::Activity);
+        assert!(route_view(AppRoute::Utility(UtilityPage::Web)) == AppRouteView::Web);
+        assert!(route_view(AppRoute::Utility(UtilityPage::Settings)) == AppRouteView::Settings);
     }
 }

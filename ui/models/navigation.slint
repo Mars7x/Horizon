@@ -1,17 +1,12 @@
-// Slint-facing representation of Horizon's Rust-owned top-level route.
-// Navigation policy/history must remain in Rust; these enums are presentation data only.
+// Slint-facing representation of Horizon's Rust-owned navigation route.
+// Navigation policy/history stays in Rust; Slint only renders the published
+// destination. The five utility values are durable full-shell submenu pages.
 export enum AppRouteView {
     home,
     library,
-    activity,
-    settings,
-}
-
-// Friends, Album, and Web are transient shell surfaces in Phase 4.3 rather than
-// top-level routes. Rust owns whether one is open; Slint only renders it.
-export enum UtilityOverlayView {
-    closed,
     friends,
     album,
+    activity,
     web,
+    settings,
 }

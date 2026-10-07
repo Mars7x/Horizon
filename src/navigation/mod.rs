@@ -4,25 +4,69 @@
 //! route and shell focus, but route history, utility destinations, and focus
 //! movement policy are owned by Rust.
 
-/// Top-level destinations in Horizon's Phase 4 application shell.
+/// Full-shell submenu pages opened from the five top utility icons.
+///
+/// These are real navigation destinations, not modal overlays. Grouping them
+/// under one type keeps the shell model explicit without pretending every
+/// utility page is an unrelated root-level section.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UtilityPage {
+    Friends,
+    Album,
+    #[default]
+    Activity,
+    Web,
+    Settings,
+}
+
+impl UtilityPage {
+    const COUNT: usize = 5;
+
+    const fn index(self) -> usize {
+        match self {
+            Self::Friends => 0,
+            Self::Album => 1,
+            Self::Activity => 2,
+            Self::Web => 3,
+            Self::Settings => 4,
+        }
+    }
+}
+
+/// Navigable destinations in Horizon's Phase 4 application shell.
+///
+/// Home and Library use the persistent shell chrome. The five utility icons
+/// open durable full-shell submenu pages that participate in normal Back/Home
+/// history.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AppRoute {
     #[default]
     Home,
     Library,
-    Activity,
-    Settings,
+    Utility(UtilityPage),
 }
 
 impl AppRoute {
-    const COUNT: usize = 4;
+    const COUNT: usize = 2 + UtilityPage::COUNT;
 
     const fn index(self) -> usize {
         match self {
             Self::Home => 0,
             Self::Library => 1,
-            Self::Activity => 2,
-            Self::Settings => 3,
+            Self::Utility(page) => 2 + page.index(),
+        }
+    }
+
+    /// Whether this route participates in the persistent Home/Library shell
+    /// chrome and can therefore move focus into the top utility row.
+    pub const fn uses_shell_chrome(self) -> bool {
+        matches!(self, Self::Home | Self::Library)
+    }
+
+    pub const fn utility_page(self) -> Option<UtilityPage> {
+        match self {
+            Self::Utility(page) => Some(page),
+            Self::Home | Self::Library => None,
         }
     }
 }
@@ -70,32 +114,34 @@ impl TopUtility {
         }
     }
 
-    pub const fn destination(self) -> UtilityDestination {
+    pub const fn page(self) -> UtilityPage {
         match self {
-            Self::Friends => UtilityDestination::Overlay(UtilityOverlay::Friends),
-            Self::Album => UtilityDestination::Overlay(UtilityOverlay::Album),
-            Self::Activity => UtilityDestination::Route(AppRoute::Activity),
-            Self::Web => UtilityDestination::Overlay(UtilityOverlay::Web),
-            Self::Settings => UtilityDestination::Route(AppRoute::Settings),
+            Self::Friends => UtilityPage::Friends,
+            Self::Album => UtilityPage::Album,
+            Self::Activity => UtilityPage::Activity,
+            Self::Web => UtilityPage::Web,
+            Self::Settings => UtilityPage::Settings,
+        }
+    }
+
+    pub const fn route(self) -> AppRoute {
+        AppRoute::Utility(self.page())
+    }
+}
+
+impl UtilityPage {
+    pub const fn top_utility(self) -> TopUtility {
+        match self {
+            Self::Friends => TopUtility::Friends,
+            Self::Album => TopUtility::Album,
+            Self::Activity => TopUtility::Activity,
+            Self::Web => TopUtility::Web,
+            Self::Settings => TopUtility::Settings,
         }
     }
 }
 
-/// Transient utility surfaces are deliberately separate from top-level routes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UtilityOverlay {
-    Friends,
-    Album,
-    Web,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UtilityDestination {
-    Route(AppRoute),
-    Overlay(UtilityOverlay),
-}
-
-/// Stable shell-focus state remembered independently for each top-level route.
+/// Stable shell-focus state remembered independently for each navigable route.
 ///
 /// Only durable route-local state is captured here. Temporary reciprocal
 /// Home↔utility transfer anchors are intentionally excluded so they cannot leak
@@ -109,8 +155,8 @@ pub struct FocusSnapshot {
 impl FocusSnapshot {
     pub const fn for_route(route: AppRoute) -> Self {
         let utility = match route {
-            AppRoute::Settings => TopUtility::Settings,
-            AppRoute::Home | AppRoute::Library | AppRoute::Activity => TopUtility::Activity,
+            AppRoute::Home | AppRoute::Library => TopUtility::Activity,
+            AppRoute::Utility(page) => page.top_utility(),
         };
 
         Self {
@@ -150,8 +196,11 @@ impl Default for RouteFocusMemory {
             snapshots: [
                 FocusSnapshot::for_route(AppRoute::Home),
                 FocusSnapshot::for_route(AppRoute::Library),
-                FocusSnapshot::for_route(AppRoute::Activity),
-                FocusSnapshot::for_route(AppRoute::Settings),
+                FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Friends)),
+                FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Album)),
+                FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Activity)),
+                FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Web)),
+                FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Settings)),
             ],
         }
     }
@@ -387,7 +436,7 @@ pub fn nearest_game_for_x(
 /// Global shell-menu state.
 ///
 /// The menu is modal presentation state rather than a route: opening it must
-/// not modify top-level history or route-local focus memory. Menu and Back can
+/// not modify route history or route-local focus memory. Menu and Back can
 /// close it; Home also closes it before resetting navigation.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ShellMenuState {
@@ -421,7 +470,7 @@ impl ShellMenuState {
     }
 }
 
-/// Pure Rust navigation state for Horizon's top-level shell.
+/// Pure Rust navigation state for Horizon's routed shell.
 ///
 /// `navigate_to` behaves like pushing a destination onto a back stack. The
 /// global Home action is deliberately different: it resets the stack and makes
@@ -441,7 +490,7 @@ impl Navigator {
         self.back_stack.len()
     }
 
-    /// Navigate to a new top-level route.
+    /// Navigate to a new route.
     ///
     /// Returns `true` only when the active route changes. Navigating to the
     /// already-active route is a no-op and does not grow history.
@@ -455,7 +504,7 @@ impl Navigator {
         true
     }
 
-    /// Return to the previous top-level route when history exists.
+    /// Return to the previous route when history exists.
     pub fn go_back(&mut self) -> bool {
         let Some(route) = self.back_stack.pop() else {
             return false;
@@ -465,7 +514,7 @@ impl Navigator {
         true
     }
 
-    /// Make Home the root route and discard prior top-level history.
+    /// Make Home the root route and discard prior route history.
     pub fn go_home(&mut self) -> bool {
         let changed = self.current != AppRoute::Home || !self.back_stack.is_empty();
         self.current = AppRoute::Home;
@@ -478,9 +527,25 @@ impl Navigator {
 mod tests {
     use super::{
         AppRoute, FocusSnapshot, Navigator, RouteFocusMemory, ShellFocus, ShellFocusRegion,
-        ShellMenuState, TopUtility, UtilityDestination, UtilityOverlay, nearest_game_for_x,
-        nearest_utility_for_x, utility_center_x,
+        ShellMenuState, TopUtility, UtilityPage, nearest_game_for_x, nearest_utility_for_x,
+        utility_center_x,
     };
+
+    #[test]
+    fn only_home_and_library_use_persistent_shell_chrome() {
+        assert!(AppRoute::Home.uses_shell_chrome());
+        assert!(AppRoute::Library.uses_shell_chrome());
+
+        for page in [
+            UtilityPage::Friends,
+            UtilityPage::Album,
+            UtilityPage::Activity,
+            UtilityPage::Web,
+            UtilityPage::Settings,
+        ] {
+            assert!(!AppRoute::Utility(page).uses_shell_chrome());
+        }
+    }
 
     #[test]
     fn starts_on_home_with_empty_history() {
@@ -492,10 +557,11 @@ mod tests {
     #[test]
     fn navigation_pushes_previous_route_and_back_restores_it() {
         let mut navigator = Navigator::default();
+        let activity = AppRoute::Utility(UtilityPage::Activity);
 
         assert!(navigator.navigate_to(AppRoute::Library));
-        assert!(navigator.navigate_to(AppRoute::Activity));
-        assert_eq!(navigator.current(), AppRoute::Activity);
+        assert!(navigator.navigate_to(activity));
+        assert_eq!(navigator.current(), activity);
         assert_eq!(navigator.back_stack_depth(), 2);
 
         assert!(navigator.go_back());
@@ -508,12 +574,13 @@ mod tests {
     #[test]
     fn navigating_to_current_route_is_a_no_op() {
         let mut navigator = Navigator::default();
+        let settings = AppRoute::Utility(UtilityPage::Settings);
 
         assert!(!navigator.navigate_to(AppRoute::Home));
         assert_eq!(navigator.back_stack_depth(), 0);
 
-        assert!(navigator.navigate_to(AppRoute::Settings));
-        assert!(!navigator.navigate_to(AppRoute::Settings));
+        assert!(navigator.navigate_to(settings));
+        assert!(!navigator.navigate_to(settings));
         assert_eq!(navigator.back_stack_depth(), 1);
     }
 
@@ -522,7 +589,7 @@ mod tests {
         let mut navigator = Navigator::default();
 
         navigator.navigate_to(AppRoute::Library);
-        navigator.navigate_to(AppRoute::Settings);
+        navigator.navigate_to(AppRoute::Utility(UtilityPage::Settings));
         assert!(navigator.go_home());
 
         assert_eq!(navigator.current(), AppRoute::Home);
@@ -531,19 +598,22 @@ mod tests {
     }
 
     #[test]
-    fn every_phase_four_route_participates_in_history() {
+    fn every_shell_route_participates_in_history() {
         let mut navigator = Navigator::default();
         for route in [
             AppRoute::Library,
-            AppRoute::Activity,
-            AppRoute::Settings,
+            AppRoute::Utility(UtilityPage::Friends),
+            AppRoute::Utility(UtilityPage::Album),
+            AppRoute::Utility(UtilityPage::Activity),
+            AppRoute::Utility(UtilityPage::Web),
+            AppRoute::Utility(UtilityPage::Settings),
             AppRoute::Home,
         ] {
             assert!(navigator.navigate_to(route));
         }
 
         assert_eq!(navigator.current(), AppRoute::Home);
-        assert_eq!(navigator.back_stack_depth(), 4);
+        assert_eq!(navigator.back_stack_depth(), 7);
     }
 
     #[test]
@@ -575,27 +645,17 @@ mod tests {
     }
 
     #[test]
-    fn utility_destinations_keep_transient_tools_out_of_route_history() {
-        assert_eq!(
-            TopUtility::Friends.destination(),
-            UtilityDestination::Overlay(UtilityOverlay::Friends)
-        );
-        assert_eq!(
-            TopUtility::Album.destination(),
-            UtilityDestination::Overlay(UtilityOverlay::Album)
-        );
-        assert_eq!(
-            TopUtility::Activity.destination(),
-            UtilityDestination::Route(AppRoute::Activity)
-        );
-        assert_eq!(
-            TopUtility::Web.destination(),
-            UtilityDestination::Overlay(UtilityOverlay::Web)
-        );
-        assert_eq!(
-            TopUtility::Settings.destination(),
-            UtilityDestination::Route(AppRoute::Settings)
-        );
+    fn every_top_utility_opens_a_durable_submenu_route() {
+        for (utility, page) in [
+            (TopUtility::Friends, UtilityPage::Friends),
+            (TopUtility::Album, UtilityPage::Album),
+            (TopUtility::Activity, UtilityPage::Activity),
+            (TopUtility::Web, UtilityPage::Web),
+            (TopUtility::Settings, UtilityPage::Settings),
+        ] {
+            assert_eq!(utility.page(), page);
+            assert_eq!(utility.route(), AppRoute::Utility(page));
+        }
     }
 
     #[test]
@@ -672,41 +732,39 @@ mod tests {
             memory.recall(AppRoute::Home),
             FocusSnapshot::for_route(AppRoute::Home)
         );
-        assert_eq!(
-            memory.recall(AppRoute::Activity).utility(),
-            TopUtility::Activity
-        );
-        assert_eq!(
-            memory.recall(AppRoute::Settings).utility(),
-            TopUtility::Settings
-        );
-        assert_eq!(
-            memory.recall(AppRoute::Settings).region(),
-            ShellFocusRegion::Content
-        );
+
+        for (page, utility) in [
+            (UtilityPage::Friends, TopUtility::Friends),
+            (UtilityPage::Album, TopUtility::Album),
+            (UtilityPage::Activity, TopUtility::Activity),
+            (UtilityPage::Web, TopUtility::Web),
+            (UtilityPage::Settings, TopUtility::Settings),
+        ] {
+            let snapshot = memory.recall(AppRoute::Utility(page));
+            assert_eq!(snapshot.utility(), utility);
+            assert_eq!(snapshot.region(), ShellFocusRegion::Content);
+        }
     }
 
     #[test]
     fn route_focus_memory_keeps_routes_independent() {
         let mut memory = RouteFocusMemory::default();
         let mut focus = ShellFocus::default();
+        let settings = AppRoute::Utility(UtilityPage::Settings);
 
         focus.enter_utilities_from_content(TopUtility::Web, 2);
         memory.remember(AppRoute::Home, focus.snapshot());
 
-        focus.restore(FocusSnapshot::for_route(AppRoute::Settings));
+        focus.restore(FocusSnapshot::for_route(settings));
         focus.enter_utilities();
-        memory.remember(AppRoute::Settings, focus.snapshot());
+        memory.remember(settings, focus.snapshot());
 
         assert_eq!(memory.recall(AppRoute::Home).utility(), TopUtility::Web);
         assert_eq!(
             memory.recall(AppRoute::Home).region(),
             ShellFocusRegion::TopUtilities
         );
-        assert_eq!(
-            memory.recall(AppRoute::Settings).utility(),
-            TopUtility::Settings
-        );
+        assert_eq!(memory.recall(settings).utility(), TopUtility::Settings);
     }
 
     #[test]
@@ -727,11 +785,26 @@ mod tests {
         let viewport_width = 1280.0;
         let step = 64.0;
 
-        assert_eq!(nearest_utility_for_x(512.0, viewport_width, step), TopUtility::Friends);
-        assert_eq!(nearest_utility_for_x(575.0, viewport_width, step), TopUtility::Album);
-        assert_eq!(nearest_utility_for_x(640.0, viewport_width, step), TopUtility::Activity);
-        assert_eq!(nearest_utility_for_x(704.0, viewport_width, step), TopUtility::Web);
-        assert_eq!(nearest_utility_for_x(768.0, viewport_width, step), TopUtility::Settings);
+        assert_eq!(
+            nearest_utility_for_x(512.0, viewport_width, step),
+            TopUtility::Friends
+        );
+        assert_eq!(
+            nearest_utility_for_x(575.0, viewport_width, step),
+            TopUtility::Album
+        );
+        assert_eq!(
+            nearest_utility_for_x(640.0, viewport_width, step),
+            TopUtility::Activity
+        );
+        assert_eq!(
+            nearest_utility_for_x(704.0, viewport_width, step),
+            TopUtility::Web
+        );
+        assert_eq!(
+            nearest_utility_for_x(768.0, viewport_width, step),
+            TopUtility::Settings
+        );
     }
 
     #[test]

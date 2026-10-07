@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for Phase 4.1.
+Accepted for Phase 4.1; route shape later generalized by ADR 0035. Rust-owned history and controller boundaries remain active.
 
 ## Context
 

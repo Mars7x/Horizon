@@ -73,6 +73,8 @@ The Rust resolver derives hover, pressed, subtle, and readable accent-foreground
 
 Components use durations from the `Motion` global. When the desktop requests reduced motion, those shared durations resolve to zero. Individual components must not bypass the motion tokens with hard-coded animation durations.
 
+Phase 4.6 applies this contract to route changes. `PageTransitionLayer` animates opacity and a small vertical settle using `Motion.page-duration`; when Reduced Motion is active, the duration is `0ms` and the same route bindings resolve immediately. Persistent shell chrome and the global shell Menu are intentionally not included in page motion.
+
 ## Typography
 
 `Typography.family` is the single app-wide font-family token and currently

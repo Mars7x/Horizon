@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for Phase 4.2.
+Accepted for Phase 4.2; full-shell utility-route composition later extended by ADR 0035.
 
 ## Context
 

@@ -9,6 +9,15 @@ export component UtilityOverlay inherits Rectangle {
     visible: root.kind != UtilityOverlayView.closed;
     background: Theme.background.with-alpha(Theme.is-dark ? 0.82 : 0.72);
 
+    // The applet is modal across the entire shell, including the space normally
+    // occupied by the top and bottom chrome. Prevent pointer input from leaking
+    // through to the retained route underneath.
+    TouchArea {
+        width: parent.width;
+        height: parent.height;
+        clicked => {}
+    }
+
     private property <string> overlay-title:
         root.kind == UtilityOverlayView.friends ? "Friends" :
         root.kind == UtilityOverlayView.album ? "Album" :
