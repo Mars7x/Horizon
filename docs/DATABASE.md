@@ -27,6 +27,9 @@ The current migration sequence is:
 ```text
 0001_initial_library.sql
 0002_activity_sessions.sql
+0003_managed_session_tracking.sql
+0004_source_runtime_tracking.sql
+0005_remove_lutris_source.sql
 ```
 
 Startup applies missing migrations in one transaction per migration. Migration history must be contiguous. A database from a newer Horizon schema is rejected instead of being opened with older code.
@@ -105,3 +108,31 @@ rows while widening the `play_sessions.tracking_method` constraint to accept:
 No existing Phase 8 row changes meaning during migration. Managed sessions still
 use the same `play_sessions` table because they are Horizon-observed sessions;
 provider lifetime totals remain separate.
+
+
+## Schema v4: source runtime tracking
+
+Migration `0004_source_runtime_tracking.sql` preserves all existing activity
+rows while widening `play_sessions.tracking_method` to accept a third explicit
+method:
+
+- `foreground_handoff`
+- `managed_session`
+- `source_runtime`
+
+`source_runtime` is used only when a registered source owns a host-side runtime
+signal for the exact source/game identity. Steam is the first provider. These
+rows remain Horizon-observed session history and are not combined with the
+separate `source_lifetime_playtime` table.
+
+
+## Schema v5: retire Lutris active membership
+
+Migration `0005_remove_lutris_source.sql` removes every `game_sources` row whose
+`source_id` is `lutris`. Because active-library queries require current source
+membership, retired Lutris-only titles disappear from Home/Library immediately.
+
+The migration deliberately does **not** delete historical `play_sessions` or
+`source_lifetime_playtime`. A logical `games` row is removed only when it has no
+remaining source reference and no Activity/lifetime history. This keeps past
+Activity readable while ensuring Lutris is no longer an active provider.

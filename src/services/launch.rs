@@ -11,9 +11,15 @@ use tracing::warn;
 
 use crate::{
     domain::{GameId, LibraryGame, SourceId},
-    services::session::{
-        ManagedSessionCompletion, ManagedSessionExecutor, ManagedSessionId, ManagedSessionState,
-        ManagedSessionTerminalState, ManagedStartOutcome,
+    services::{
+        runtime::{
+            RuntimeObservationEvent, RuntimeObservationExecutor, RuntimeObservationId,
+            RuntimeObservationStartOutcome, RuntimeObservationState, RuntimeObservationTerminalState,
+        },
+        session::{
+            ManagedSessionCompletion, ManagedSessionExecutor, ManagedSessionId, ManagedSessionState,
+            ManagedSessionTerminalState, ManagedStartOutcome,
+        },
     },
     sources::{SourceCapability, SourceLaunchTarget, SourceRegistry},
 };
@@ -57,6 +63,7 @@ pub trait LaunchExecutor {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameLaunchMode {
     External,
+    Observed(RuntimeObservationId),
     Managed(ManagedSessionId),
 }
 
@@ -108,7 +115,10 @@ pub struct GameLaunchService {
     registry: Rc<SourceRegistry>,
     executor: Rc<dyn LaunchExecutor>,
     managed_executor: Option<Rc<dyn ManagedSessionExecutor>>,
+    runtime_observer: Option<Rc<dyn RuntimeObservationExecutor>>,
     active_managed_sessions: RefCell<BTreeSet<ManagedSessionId>>,
+    active_runtime_observations: RefCell<BTreeSet<RuntimeObservationId>>,
+    running_runtime_observations: RefCell<BTreeSet<RuntimeObservationId>>,
 }
 
 impl GameLaunchService {
@@ -117,12 +127,20 @@ impl GameLaunchService {
             registry,
             executor,
             managed_executor: None,
+            runtime_observer: None,
             active_managed_sessions: RefCell::new(BTreeSet::new()),
+            active_runtime_observations: RefCell::new(BTreeSet::new()),
+            running_runtime_observations: RefCell::new(BTreeSet::new()),
         }
     }
 
     pub fn with_managed_executor(mut self, executor: Rc<dyn ManagedSessionExecutor>) -> Self {
         self.managed_executor = Some(executor);
+        self
+    }
+
+    pub fn with_runtime_observer(mut self, observer: Rc<dyn RuntimeObservationExecutor>) -> Self {
+        self.runtime_observer = Some(observer);
         self
     }
 
@@ -177,6 +195,34 @@ impl GameLaunchService {
                     source_id: source_id.clone(),
                     source,
                 })?;
+
+            if source
+                .descriptor()
+                .supports(SourceCapability::RuntimeObservation)
+                && let Some(runtime_observer) = &self.runtime_observer
+            {
+                match runtime_observer.start_observation(&source_id, source_ref.external_id()) {
+                    Ok(RuntimeObservationStartOutcome::Started(observation_id)) => {
+                        self.active_runtime_observations
+                            .borrow_mut()
+                            .insert(observation_id);
+                        return Ok(GameLaunchReceipt::new(
+                            source_id,
+                            GameLaunchMode::Observed(observation_id),
+                        ));
+                    }
+                    Ok(RuntimeObservationStartOutcome::Unsupported)
+                    | Ok(RuntimeObservationStartOutcome::Unavailable) => {}
+                    Err(error) => {
+                        warn!(
+                            source = %source_id,
+                            %error,
+                            "source runtime observation could not start; using foreground handoff fallback"
+                        );
+                    }
+                }
+            }
+
             return Ok(GameLaunchReceipt::new(source_id, GameLaunchMode::External));
         }
 
@@ -230,6 +276,113 @@ impl GameLaunchService {
         completed
     }
 
+    pub fn poll_runtime_observations(&self) -> Vec<RuntimeObservationEvent> {
+        let Some(observer) = &self.runtime_observer else {
+            return vec![];
+        };
+
+        let observation_ids = self
+            .active_runtime_observations
+            .borrow()
+            .iter()
+            .copied()
+            .collect::<Vec<_>>();
+        let mut events = Vec::new();
+
+        for observation_id in observation_ids {
+            match observer.observation_state(observation_id) {
+                Ok(RuntimeObservationState::Waiting) => {}
+                Ok(RuntimeObservationState::Running { started_at }) => {
+                    if self
+                        .running_runtime_observations
+                        .borrow_mut()
+                        .insert(observation_id)
+                    {
+                        events.push(RuntimeObservationEvent::Started {
+                            observation_id,
+                            started_at,
+                        });
+                    }
+                }
+                Ok(RuntimeObservationState::Exited {
+                    started_at,
+                    ended_at,
+                }) => {
+                    if self
+                        .running_runtime_observations
+                        .borrow_mut()
+                        .insert(observation_id)
+                    {
+                        events.push(RuntimeObservationEvent::Started {
+                            observation_id,
+                            started_at,
+                        });
+                    }
+                    self.active_runtime_observations
+                        .borrow_mut()
+                        .remove(&observation_id);
+                    self.running_runtime_observations
+                        .borrow_mut()
+                        .remove(&observation_id);
+                    if let Err(error) = observer.forget_observation(observation_id) {
+                        warn!(
+                            observation_id = observation_id.get(),
+                            %error,
+                            "host helper could not forget terminal runtime observation"
+                        );
+                    }
+                    events.push(RuntimeObservationEvent::Terminal {
+                        observation_id,
+                        terminal: RuntimeObservationTerminalState::Exited {
+                            started_at,
+                            ended_at,
+                        },
+                    });
+                }
+                Ok(RuntimeObservationState::Failed { message }) => {
+                    self.active_runtime_observations
+                        .borrow_mut()
+                        .remove(&observation_id);
+                    self.running_runtime_observations
+                        .borrow_mut()
+                        .remove(&observation_id);
+                    if let Err(error) = observer.forget_observation(observation_id) {
+                        warn!(
+                            observation_id = observation_id.get(),
+                            %error,
+                            "host helper could not forget failed runtime observation"
+                        );
+                    }
+                    events.push(RuntimeObservationEvent::Terminal {
+                        observation_id,
+                        terminal: RuntimeObservationTerminalState::Failed { message },
+                    });
+                }
+                Ok(RuntimeObservationState::Unknown) => {
+                    self.active_runtime_observations
+                        .borrow_mut()
+                        .remove(&observation_id);
+                    self.running_runtime_observations
+                        .borrow_mut()
+                        .remove(&observation_id);
+                    events.push(RuntimeObservationEvent::Terminal {
+                        observation_id,
+                        terminal: RuntimeObservationTerminalState::Lost,
+                    });
+                }
+                Err(error) => {
+                    warn!(
+                        observation_id = observation_id.get(),
+                        %error,
+                        "runtime observation status could not be queried; retaining observation for retry"
+                    );
+                }
+            }
+        }
+
+        events
+    }
+
     pub fn stop_managed_session(&self, session_id: ManagedSessionId) {
         let Some(executor) = &self.managed_executor else {
             return;
@@ -251,9 +404,15 @@ mod tests {
     use super::*;
     use crate::{
         domain::{ExternalGameId, Game, GameTitle, SourceGameRef},
-        services::session::{
-            ManagedSessionExecutionError, ManagedSessionExecutor, ManagedSessionState,
-            ManagedStartOutcome,
+        services::{
+            runtime::{
+                RuntimeObservationError, RuntimeObservationExecutor, RuntimeObservationState,
+                RuntimeObservationStartOutcome,
+            },
+            session::{
+                ManagedSessionExecutionError, ManagedSessionExecutor, ManagedSessionState,
+                ManagedStartOutcome,
+            },
         },
         sources::{
             GameSource, SourceDescriptor, SourceDiscovery, SourceError, SourceLaunchTarget,
@@ -266,10 +425,13 @@ mod tests {
     }
 
     impl LaunchableSource {
-        fn new(id: &str, managed: bool) -> Self {
+        fn new(id: &str, managed: bool, observed: bool) -> Self {
             let mut capabilities = vec![SourceCapability::Launch];
             if managed {
                 capabilities.push(SourceCapability::ManagedSession);
+            }
+            if observed {
+                capabilities.push(SourceCapability::RuntimeObservation);
             }
             Self {
                 descriptor: SourceDescriptor::new(
@@ -351,6 +513,34 @@ mod tests {
         }
     }
 
+    struct FakeRuntimeObserver {
+        start: RuntimeObservationStartOutcome,
+    }
+
+    impl RuntimeObservationExecutor for FakeRuntimeObserver {
+        fn start_observation(
+            &self,
+            _source_id: &SourceId,
+            _external_id: &ExternalGameId,
+        ) -> Result<RuntimeObservationStartOutcome, RuntimeObservationError> {
+            Ok(self.start.clone())
+        }
+
+        fn observation_state(
+            &self,
+            _observation_id: RuntimeObservationId,
+        ) -> Result<RuntimeObservationState, RuntimeObservationError> {
+            Ok(RuntimeObservationState::Waiting)
+        }
+
+        fn forget_observation(
+            &self,
+            _observation_id: RuntimeObservationId,
+        ) -> Result<(), RuntimeObservationError> {
+            Ok(())
+        }
+    }
+
     fn game(source: &str) -> LibraryGame {
         LibraryGame::new(
             Game::new(
@@ -368,7 +558,7 @@ mod tests {
     fn launch_uses_registered_source_capability_without_source_name_branching() {
         let mut registry = SourceRegistry::new();
         registry
-            .register(LaunchableSource::new("provider", false))
+            .register(LaunchableSource::new("provider", false, false))
             .expect("register");
         let registry = Rc::new(registry);
         let executor = Rc::new(RecordingExecutor::default());
@@ -387,7 +577,7 @@ mod tests {
     fn managed_capability_prefers_managed_session_when_helper_starts_it() {
         let mut registry = SourceRegistry::new();
         registry
-            .register(LaunchableSource::new("provider", true))
+            .register(LaunchableSource::new("provider", true, false))
             .expect("register");
         let registry = Rc::new(registry);
         let external = Rc::new(RecordingExecutor::default());
@@ -407,7 +597,7 @@ mod tests {
     fn unavailable_managed_helper_falls_back_to_external_launch() {
         let mut registry = SourceRegistry::new();
         registry
-            .register(LaunchableSource::new("provider", true))
+            .register(LaunchableSource::new("provider", true, false))
             .expect("register");
         let registry = Rc::new(registry);
         let external = Rc::new(RecordingExecutor::default());
@@ -421,4 +611,24 @@ mod tests {
         assert_eq!(receipt.mode(), GameLaunchMode::External);
         assert_eq!(external.targets.borrow().len(), 1);
     }
+    #[test]
+    fn runtime_observation_is_used_after_successful_external_dispatch() {
+        let mut registry = SourceRegistry::new();
+        registry
+            .register(LaunchableSource::new("provider", false, true))
+            .expect("register");
+        let registry = Rc::new(registry);
+        let external = Rc::new(RecordingExecutor::default());
+        let observation_id = RuntimeObservationId::new(9).expect("observation id");
+        let observer: Rc<dyn RuntimeObservationExecutor> = Rc::new(FakeRuntimeObserver {
+            start: RuntimeObservationStartOutcome::Started(observation_id),
+        });
+        let service = GameLaunchService::new(registry, external.clone())
+            .with_runtime_observer(observer);
+
+        let receipt = service.launch_game(&game("provider")).expect("launch");
+        assert_eq!(receipt.mode(), GameLaunchMode::Observed(observation_id));
+        assert_eq!(external.targets.borrow().len(), 1);
+    }
+
 }

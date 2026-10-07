@@ -86,11 +86,9 @@ Launching does not require access to `/usr/bin/steam` or the Flatpak Steam comma
 
 ## Phase 9 provider metadata access
 
-Lutris, Bottles, and Heroic follow the same Flatpak rule as Steam: Horizon receives only read-only access to launcher-owned metadata roots needed for local discovery.
+Bottles and Heroic follow the same Flatpak rule as Steam: Horizon receives only read-only access to launcher-owned metadata roots needed for local discovery.
 
 ```text
---filesystem=xdg-data/lutris:ro
---filesystem=~/.var/app/net.lutris.Lutris:ro
 --filesystem=xdg-data/bottles:ro
 --filesystem=~/.var/app/com.usebottles.bottles:ro
 --filesystem=xdg-config/heroic:ro
@@ -100,7 +98,7 @@ Lutris, Bottles, and Heroic follow the same Flatpak rule as Steam: Horizon recei
 
 Do not replace these with `--filesystem=home` or `--filesystem=host`. Bottles external-location placeholders may intentionally remain unreadable; that degrades the Bottles snapshot to partial rather than expanding Horizon's sandbox.
 
-Lutris/Bottles/Heroic launch through their registered URI schemes via the existing XDG OpenURI portal. The Flatpak does not need access to host launcher binaries and must not gain `flatpak-spawn --host` merely to launch Phase 9 sources.
+Bottles/Heroic launch through their registered URI schemes via the existing XDG OpenURI portal. The Flatpak does not need access to host launcher binaries and must not gain `flatpak-spawn --host` merely to launch Phase 9 sources.
 
 ## Managed-session host helper
 
@@ -123,3 +121,11 @@ The script installs only into the current user's `~/.local/libexec` and
 `~/.config/systemd/user`. Phase 12 release hardening owns distro/image packaging
 for the helper; the Flatpak remains fully usable without it and falls back to
 the existing portal launch path.
+
+
+## Phase 9.5.28 Lutris permission removal
+
+Lutris is no longer a supported Horizon source. Its native and Flatpak metadata
+filesystem grants were removed rather than left dormant. Historical Activity
+rows remain in Horizon's database, but the sandbox no longer receives access to
+Lutris-owned metadata trees.

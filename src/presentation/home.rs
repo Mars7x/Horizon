@@ -1,6 +1,9 @@
 use std::{cell::RefCell, rc::Rc};
 
-use slint::{Color, ComponentHandle, Model, ModelRc, SharedString, VecModel};
+use slint::{
+    Color, ComponentHandle, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString,
+    VecModel,
+};
 use tracing::{debug, warn};
 
 use crate::{
@@ -9,6 +12,7 @@ use crate::{
     input::{UiAction, UiActionEvent},
     services::{
         activity::LaunchActivitySink,
+        artwork::{ArtworkService, SquareArtwork},
         launch::{GameLaunchMode, GameLaunchService},
         session::ManagedSessionId,
     },
@@ -107,12 +111,13 @@ impl HomeController {
     pub fn new(
         ui: &AppWindow,
         library_games: Vec<LibraryGame>,
+        artwork_service: &ArtworkService,
         launch_service: Rc<GameLaunchService>,
         launch_activity: Rc<dyn LaunchActivitySink>,
     ) -> Rc<Self> {
         let card_data = library_games
             .iter()
-            .map(game_card)
+            .map(|game| game_card(game, artwork_service))
             .collect::<Vec<_>>();
         let titles = card_data.iter().map(|game| game.title.clone()).collect();
         let cards = Rc::new(VecModel::from(card_data));
@@ -150,7 +155,6 @@ impl HomeController {
     pub fn selected_index(&self) -> i32 {
         self.state.borrow().selected_index
     }
-
 
     /// Reset Home to its canonical global-Home destination: the first game.
     pub fn reset_for_global_home(&self, ui: &AppWindow) {
@@ -265,6 +269,20 @@ impl HomeController {
                             "external game launch dispatched; waiting for foreground handoff"
                         );
                     }
+                    GameLaunchMode::Observed(observation_id) => {
+                        self.launch_activity.runtime_observation_armed(
+                            observation_id,
+                            game.game().id(),
+                            receipt.source_id().clone(),
+                        );
+                        debug!(
+                            game_id = game.game().id().get(),
+                            title = %game.game().title().as_str(),
+                            source = %receipt.source_id(),
+                            observation_id = observation_id.get(),
+                            "external game launch dispatched with source runtime observation"
+                        );
+                    }
                     GameLaunchMode::Managed(session_id) => {
                         self.set_launch_feedback(
                             ui,
@@ -349,19 +367,33 @@ impl HomeController {
     }
 }
 
-
-fn game_card(game: &LibraryGame) -> GameCardData {
+fn game_card(game: &LibraryGame, artwork_service: &ArtworkService) -> GameCardData {
     let title = game.game().title().as_str();
     let (primary, secondary, highlight) = fallback_palette(game.game().id().get(), title);
+    let artwork = artwork_service
+        .square_artwork(game)
+        .map(square_artwork_to_slint);
+    let has_artwork = artwork.is_some();
 
     GameCardData {
         title: title.into(),
         platform: "PC".into(),
         monogram: monogram(title).into(),
+        artwork: artwork.unwrap_or_default(),
+        has_artwork,
         cover_primary: rgb(primary),
         cover_secondary: rgb(secondary),
         cover_highlight: rgb(highlight),
     }
+}
+
+fn square_artwork_to_slint(artwork: SquareArtwork) -> Image {
+    let buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+        artwork.rgba(),
+        artwork.size(),
+        artwork.size(),
+    );
+    Image::from_rgba8(buffer)
 }
 
 fn monogram(title: &str) -> String {

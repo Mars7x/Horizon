@@ -8,7 +8,7 @@ unit_root="${HOME}/.config/systemd/user"
 
 if [[ ! -x "$binary" ]]; then
   cat >&2 <<EOF
-managed-session helper binary not found or not executable:
+host session/runtime helper binary not found or not executable:
   $binary
 
 Build it on the host/toolbox first:
@@ -21,12 +21,16 @@ EOF
 fi
 
 install -d "$install_root" "$unit_root"
+# Stop an older helper before replacing its executable. This matters when a
+# protocol update is being installed over an already-running user service.
+systemctl --user stop horizon-session-helper.service 2>/dev/null || true
 install -m0755 "$binary" "$install_root/horizon-session-helper"
 install -m0644 "$root/data/horizon-session-helper.service" \
   "$unit_root/horizon-session-helper.service"
 
 systemctl --user daemon-reload
-systemctl --user enable --now horizon-session-helper.service
+systemctl --user enable horizon-session-helper.service
+systemctl --user restart horizon-session-helper.service
 
-echo "installed Horizon managed-session helper"
+echo "installed Horizon managed-session/runtime helper"
 systemctl --user --no-pager --full status horizon-session-helper.service || true

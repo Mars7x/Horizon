@@ -108,7 +108,7 @@ Phase 4.2 turns the published route into visible shell composition:
 - Home's established scene geometry is preserved across the shell refactor;
 - page switching is driven only by Rust-published `AppRouteView` state.
 
-Later Phase 4.6 refinements generalized the full-shell destination model so all six top utilities are routed submenu pages. See `NAVIGATION.md`, ADR 0029, and ADR 0035.
+Later Phase 4.6 refinements generalized the full-shell destination model so all five top utilities are routed submenu pages. See `NAVIGATION.md`, ADR 0029, and ADR 0035.
 
 ## Phase 4.3 shell focus boundary
 
@@ -133,7 +133,7 @@ See ADR 0033.
 
 ## Phase 4.6 route-transition presentation boundary
 
-Route policy remains entirely in Rust. `NavigationController` publishes `AppRouteView`; Slint maps that presentation enum to retained `PageTransitionLayer` instances for Home, Library, and all six utility submenu routes. Home/Library retain the central shell bounds while every `UtilityPage` fills the logical surface. The layer owns only visual interpolation and pointer isolation during overlap. It cannot push/pop routes, alter focus memory, or change Back/Home/Menu behavior.
+Route policy remains entirely in Rust. `NavigationController` publishes `AppRouteView`; Slint maps that presentation enum to retained `PageTransitionLayer` instances for Home, Library, and all five utility submenu routes. Home/Library retain the central shell bounds while every `UtilityPage` fills the logical surface. The layer owns only visual interpolation and pointer isolation during overlap. It cannot push/pop routes, alter focus memory, or change Back/Home/Menu behavior.
 
 Route motion is limited to opacity plus a small vertical settle using `Metrics.page-transition-offset` and `Motion.page-duration`. The latter already resolves to zero through the appearance pipeline when the host requests Reduced Motion, so accessibility preference changes do not require a second navigation code path. Shell chrome is outside the transition contract and is suppressed for the lifetime of any utility submenu route.
 
@@ -179,7 +179,7 @@ Phase 6 adds the generic provider layer without adding a concrete launcher adapt
 - `SourceImportService` converts successful snapshots into Phase 5 `DiscoveredGame` values and uses `LibraryService`;
 - repository batch writes are atomic per successful source snapshot in the SQLite adapter.
 
-No Steam/Heroic/Lutris/Bottles parser, launch command, production artwork pipeline, or playtime implementation is part of Phase 6. See `SOURCES.md` and ADR 0038.
+No concrete provider parser, launch command, production artwork pipeline, or playtime implementation is part of Phase 6. See `SOURCES.md` and ADR 0038.
 
 ## Phase 7 Steam vertical-slice boundary
 
@@ -214,19 +214,18 @@ The runtime repository is shared behind `Rc<RefCell<_>>` only after startup disc
 
 ## Phase 9 multi-source boundary
 
-Phase 9 expands the concrete adapter set without changing the inward dependency direction established by Phases 5–7:
+Phase 9 expanded the concrete adapter set without changing the inward dependency direction established by Phases 5–7. After the Phase 9.5.28 Lutris retirement, the current production adapters are:
 
-- `src/sources/lutris.rs` owns Lutris `pga.db` paths/schema details and the `lutris:` launch URI;
 - `src/sources/bottles.rs` owns Bottles `bottle.yml`/`External_Programs` details and the `bottles:` launch URI;
 - `src/sources/heroic.rs` owns Heroic/Legendary local metadata and the `heroic:` launch URI;
 - `src/sources/support.rs` contains only source-layer helpers shared by adapters, such as host XDG resolution and URI-component encoding;
 - startup registers every provider through `SourceRegistry`; `SourceImportService`, `LibraryService`, SQLite, Home, Activity, and the platform launcher remain unchanged and provider-neutral.
 
-Provider-specific installation scopes are encoded only when the upstream identifier is installation-local. Lutris database IDs and Bottles program identities are therefore namespaced by native/Flatpak scope. Heroic's store runner is part of its external identity so additional Heroic stores can be implemented later without breaking persisted Epic identities.
+Provider-specific installation scopes are encoded only when the upstream identifier is installation-local. Bottles program identities are namespaced by native/Flatpak scope. Heroic's store runner is part of its external identity so additional Heroic stores can be implemented later without breaking persisted Epic identities.
 
 Phase 9 retains URI-based external handoff. It does not add host executable spawning, `flatpak run`, Gamescope, process ownership, or managed sessions. Those belong to the planned managed-session phase and should extend the generic launch capability rather than replace the source boundary.
 
-See `SOURCES.md`, `LUTRIS.md`, `BOTTLES.md`, `HEROIC.md`, and ADR 0045.
+See `SOURCES.md`, `BOTTLES.md`, `HEROIC.md`, ADR 0045, and ADR 0048.
 
 
 ## Phase 9.5 managed-session boundary
@@ -264,3 +263,25 @@ Managed sessions are optional. The launch service falls back to the existing
 target is unavailable.
 
 See `docs/MANAGED_SESSIONS.md` and ADR 0046.
+
+
+## Phase 9.5.28 source-set cleanup
+
+Lutris is retired as an active source. The production registry is constructed in
+`src/sources/mod.rs` and now contains Steam, Bottles, and Heroic only. The host
+helper uses that same registry, so removal applies consistently to both the
+Flatpak and helper processes without source-name conditionals elsewhere.
+
+Schema migration 0005 removes only active Lutris source membership. It preserves
+logical game rows that still own Activity or lifetime-playtime history, matching
+the existing separation between active library membership and historical identity.
+
+
+## Phase 9.5.29 artwork boundary
+
+Primary game artwork is source-neutral and always normalized to a 1:1 square.
+Provider adapters expose `SourceArtworkCandidate` values through
+`GameSource::artwork_candidates`; `ArtworkService` owns decoding, quality
+selection, and square normalization. Presentation converts the resulting RGBA
+buffer into a Slint `Image`. No provider filesystem path, AppID, or image-format
+rule enters Slint. Steam is the first concrete `Artwork` provider. See ADR 0049.

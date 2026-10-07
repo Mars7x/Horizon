@@ -38,8 +38,6 @@ finish-args:
   # Additional provider metadata is read-only and scoped to each launcher's
   # own native XDG tree or Flatpak app-data tree. Do not replace these with
   # broad home/host access.
-  - --filesystem=xdg-data/lutris:ro
-  - --filesystem=~/.var/app/net.lutris.Lutris:ro
   - --filesystem=xdg-data/bottles:ro
   - --filesystem=~/.var/app/com.usebottles.bottles:ro
   - --filesystem=xdg-config/heroic:ro

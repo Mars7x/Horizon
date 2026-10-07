@@ -1,6 +1,6 @@
 # Source framework
 
-Phase 6 defined the provider boundary that launcher adapters plug into. Phase 7 exercised it with Steam; Phase 9 expands the same unchanged generic contracts to Lutris, Bottles, and Heroic.
+Phase 6 defined the provider boundary that launcher adapters plug into. Phase 7 exercised it with Steam; Phase 9 expanded the same unchanged generic contracts to additional providers. The current production set is Steam, Bottles, and Heroic.
 
 ## Boundary
 
@@ -43,7 +43,7 @@ Phase 6 defines capability vocabulary for:
 - artwork;
 - source-reported lifetime playtime.
 
-Capability metadata describes behavior exposed through generic contracts. Phase 7 adds the first concrete consumer of `Launch`: a source-neutral launch target/service plus a platform executor. Phase 8 establishes separate domain/service/persistence storage for provider-reported lifetime playtime, but Steam does not advertise `LifetimePlaytime` until the adapter has a reliable local value to publish. Artwork remains deferred.
+Capability metadata describes behavior exposed through generic contracts. Phase 7 added the first concrete consumer of `Launch`; Phase 9.5 added `ManagedSession` and `RuntimeObservation`; Phase 9.5.29 adds the first concrete `Artwork` consumer through a source-neutral artwork service. Steam still does not advertise `LifetimePlaytime` until the adapter has a reliable value to publish.
 
 ## Registry
 
@@ -83,13 +83,12 @@ A successful source snapshot is persisted as one repository batch. The SQLite ad
 All production providers use the same registry/import/persistence/launch path:
 
 - **Steam** — local VDF/app manifests and `steam://rungameid/<appid>`; see `STEAM.md` and ADR 0039.
-- **Lutris** — read-only `pga.db` installed rows and `lutris:rungameid/<id>`; see `LUTRIS.md`.
 - **Bottles** — persisted `External_Programs` from `bottle.yml` and `bottles:run/<bottle>/<program>`; see `BOTTLES.md`.
 - **Heroic** — Phase 9 imports installed Epic/Legendary entries from local Heroic/Legendary metadata and launches with the Heroic protocol; see `HEROIC.md`.
 
 ADR 0045 records the multi-provider decisions. The adapters may use different local schemas and identity namespaces, but `SourceImportService`, SQLite persistence, `GameLaunchService`, Home presentation, launch feedback, and Activity remain provider-neutral.
 
-Phase 8's source-reported lifetime-playtime boundary is unchanged. None of the Phase 9 adapters advertises `LifetimePlaytime` until a reliable provider value is deliberately implemented. Production artwork retrieval also remains deferred.
+Phase 8's source-reported lifetime-playtime boundary is unchanged. None of the current adapters advertises `LifetimePlaytime` until a reliable provider value is deliberately implemented. Production artwork is now available through the generic `Artwork` capability, with Steam as the first provider.
 
 ## Phase 9 local-only rule
 
@@ -119,6 +118,40 @@ The Flatpak does not receive arbitrary host execution. It sends only
 `(SourceId, ExternalGameId)` to `io.github.Mars7x.Horizon.Session1`; the host
 helper re-resolves the source adapter and target independently.
 
-Bottles is the initial managed provider. Steam, Lutris, and Heroic remain
+Bottles is the initial managed provider. Steam and Heroic remain
 external URI launches until their actual game process/session can be guaranteed
 inside the managed compositor. See `MANAGED_SESSIONS.md` and ADR 0046.
+
+
+## Phase 9.5.28 Lutris retirement
+
+Lutris is no longer registered as a production source. Horizon no longer reads
+`pga.db`, launches `lutris:` URIs, or requests Lutris filesystem access. Migration
+`0005_remove_lutris_source.sql` removes persisted Lutris `game_sources` membership
+so those titles leave the active library. Logical game rows that own Activity or
+provider-lifetime history are retained, preserving historical records without
+keeping Lutris as an active source. See ADR 0048.
+
+
+## Phase 9.5.29 artwork capability
+
+Artwork uses the same capability-driven source boundary as launch/session
+features:
+
+```text
+GameSource::artwork_candidates(ExternalGameId)
+                  ↓
+             ArtworkService
+                  ↓
+         1:1 SquareArtwork RGBA
+                  ↓
+             presentation
+```
+
+Adapters expose candidates only. `ArtworkService` chooses/decodes the best
+available candidate and normalizes it to Horizon's 1:1 contract. Slint never
+branches on a provider name and never opens provider paths directly.
+
+Steam is the first provider to advertise `Artwork`. Bottles and Heroic continue
+to use the procedural fallback until they implement the same generic method.
+See `ARTWORK.md` and ADR 0049.

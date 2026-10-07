@@ -59,11 +59,13 @@ impl PlaytimeSeconds {
 /// stops timing when Horizon becomes active again. It must never be presented
 /// as exact child-process lifetime. `ManagedSession` follows the host-managed
 /// Gamescope session lifecycle; it is stronger than foreground handoff but also
-/// must not be described as exact game-process lifetime.
+/// must not be described as exact game-process lifetime. `SourceRuntime` follows
+/// a provider-owned host lifecycle signal for the specific source/game identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SessionTrackingMethod {
     ForegroundHandoff,
     ManagedSession,
+    SourceRuntime,
 }
 
 impl SessionTrackingMethod {
@@ -71,6 +73,7 @@ impl SessionTrackingMethod {
         match self {
             Self::ForegroundHandoff => "foreground_handoff",
             Self::ManagedSession => "managed_session",
+            Self::SourceRuntime => "source_runtime",
         }
     }
 
@@ -78,6 +81,7 @@ impl SessionTrackingMethod {
         match value {
             "foreground_handoff" => Ok(Self::ForegroundHandoff),
             "managed_session" => Ok(Self::ManagedSession),
+            "source_runtime" => Ok(Self::SourceRuntime),
             other => Err(ActivityValidationError::UnknownTrackingMethod(
                 other.to_owned(),
             )),

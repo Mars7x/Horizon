@@ -61,7 +61,7 @@ The domain must not depend on Slint, SDL, SQLite, Flatpak, DBus, or source-speci
 - Depend on abstractions, not concrete source implementations.
 
 **`src/sources/`**
-- Source-specific adapters such as Steam, Heroic, Lutris, and Bottles.
+- Source-specific adapters such as Steam, Heroic, and Bottles.
 - Source-specific quirks must remain here.
 
 **`src/platform/`**
@@ -83,7 +83,7 @@ Do not fix architectural problems with local exceptions.
 Before adding a special case, ask whether the abstraction is missing a legitimate concept. If it is, improve the abstraction and document the change. Examples of disallowed patterns include:
 
 - source-name checks scattered outside `src/sources/`
-- UI components directly handling Steam/Heroic/Lutris behavior
+- UI components directly handling Steam/Heroic/Bottles behavior
 - hard-coded filesystem paths in presentation/services
 - broad Flatpak permissions added simply to make a feature work
 - duplicating slightly different copies of the same UI component
@@ -300,16 +300,16 @@ Implemented:
 - source-neutral Home launch feedback provides a press-in animation plus `Launching…`/failure status and blocks duplicate launch presses while pending
 - schema v2 `play_sessions` + `source_lifetime_playtime` tables with explicit separation of observed vs provider-reported playtime
 - source-neutral `ActivityService` session lifecycle over a generic `ActivityRepository` boundary
-- `ForegroundHandoff` tracking that starts only after a Horizon-dispatched launch yields OS window activation and ends when Horizon becomes active again
+- `ForegroundHandoff` tracking that starts only after a Horizon-dispatched launch yields OS window activation and completes only after a Horizon reactivation remains stable through the source-neutral return debounce
 - crash/startup recovery that marks open sessions interrupted without inventing duration
 - persisted Activity overview with observed total time, completed sessions, games played, recent sessions, and most-played games
 - historical activity retention for uninstalled games without returning those games to the active Home library
 
 Not yet implemented:
 
-- additional provider adapters (Heroic, Lutris, Bottles)
-- production source artwork retrieval/cache
-- exact process-lifetime tracking for URI-launched sources
+- additional provider adapters beyond the current Steam/Bottles/Heroic set
+- persistent artwork cache and non-Steam source artwork providers
+- source-owned runtime observation beyond Steam and exact managed lifecycle for URI-only sources
 - source-reported Steam lifetime playtime ingestion
 - production Friends/Album/Web/Settings/Shop submenu pages
 
@@ -393,7 +393,7 @@ Phase 8 adds real activity/history while preserving uncertainty honestly:
 
 1. Keep Horizon-observed sessions separate from source-reported lifetime playtime in both domain and schema.
 2. Every observed session stores its tracking method. The initial `ForegroundHandoff` method is approximate and must never be relabeled as exact process lifetime.
-3. A successful source-neutral launch dispatch only arms a pending session. Timing starts when Horizon loses OS window activation and ends when Horizon becomes active again.
+3. A successful source-neutral launch dispatch only arms a pending session. Timing starts when Horizon loses OS window activation; a later reactivation becomes a candidate return and completes only after it remains stable through the source-neutral return debounce.
 4. Unrelated app deactivation without a pending Horizon launch creates no session.
 5. Startup recovery marks leftover open sessions `interrupted` without assigning an end timestamp or duration.
 6. Activity SQL remains in `src/persistence/`; `ActivityService` consumes an `ActivityRepository` boundary and Slint receives presentation models only.
@@ -776,7 +776,7 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
 ## Phase 8 activity/playtime invariants
 
 - `play_sessions` is Horizon-observed history. `source_lifetime_playtime` is provider-reported cumulative data. Never add one to the other.
-- `SessionTrackingMethod::ForegroundHandoff` means exactly: pending Horizon launch → Horizon deactivation starts timing → Horizon activation ends timing. It is approximate foreground ownership, not proven game-process lifetime.
+- `SessionTrackingMethod::ForegroundHandoff` means: pending Horizon launch → Horizon deactivation starts timing → Horizon reactivation becomes a candidate return → a stable candidate completes at the original return timestamp. A renewed deactivation cancels the candidate and keeps the same session open. It remains approximate foreground ownership, not proven game-process lifetime.
 - Only a successful source-neutral launch dispatch may arm a pending session. Cancelling the pending Home launch state must cancel that pending activity handoff so a later unrelated alt-tab cannot fabricate playtime.
 - The root activation callback must let `ActivityService` consume deactivation before Home clears launch feedback. Do not move this ordering into Steam/source code.
 - Open sessions surviving a crash/exit become `interrupted` on startup with no end timestamp. Interrupted rows never contribute duration to observed totals.
@@ -814,3 +814,78 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
   `Motion.launch-press-duration = reduced-motion ? 0ms : 90ms`. These are part
   of the established Phase 7.0.5 launch-feedback contract consumed by
   `GameTile`; utility/theme edits must not drop them.
+
+
+## Phase 9.5.26 foreground-handoff bounce invariant
+
+- External URI launches must not complete an observed session on the first
+  Horizon reactivation. Steam and other launcher handoffs may briefly return
+  focus before the real game window appears.
+- During the first 30 seconds after a foreground session starts, candidate
+  returns are held through the launch-stabilization window and for at least a
+  10-second startup grace. Mature sessions use a 1.5-second stable-return grace.
+- If Horizon loses activation again before confirmation, discard only the return
+  candidate; keep the same `ForegroundHandoff` row open.
+- Completion persists the candidate's original return timestamp, never the end
+  of the debounce interval. The debounce must not fabricate additional playtime.
+- Keep `ForegroundHandoff` itself source-neutral. Do not add provider checks or
+  `/proc` scanning to Activity/application code, and never reinterpret it as
+  exact process lifetime. Provider-specific lifecycle observation may exist only
+  behind the source adapter and same-user host-helper boundary described by ADR
+  0047.
+
+
+## Phase 9.5.27 source-runtime observation invariant
+
+- `SourceCapability::RuntimeObservation` is independent of `Launch` and
+  `ManagedSession`. A source may advertise it only when it can resolve runtime
+  state from `(SourceId, ExternalGameId)` without generic caller-supplied process
+  patterns.
+- The Flatpak sends only source/game identity and helper-issued observation IDs.
+  It must never send PIDs, executable paths, process names, shell commands, or
+  arbitrary `/proc` match expressions.
+- Steam runtime observation belongs in `src/sources/steam.rs` and executes only
+  inside the same-user host helper. It matches the exact numeric
+  `SteamLaunch AppId=<appid>` reaper lifecycle, including token-boundary checks.
+- `SessionTrackingMethod::SourceRuntime` is distinct from
+  `ForegroundHandoff` and `ManagedSession`. Window activation does not start,
+  pause, or end a source-runtime session.
+- Normal Flatpak launch and Gamescope-oriented use share the same runtime
+  observer. Gamescope availability must not gate runtime observation.
+- If runtime observation is unavailable at launch, fall back to
+  `ForegroundHandoff`. If an observation is lost after timing starts, interrupt
+  the row without fabricating an end time.
+- Steam still does not advertise `ManagedSession`; observing its reaper does not
+  prove the game was launched inside Horizon-owned Gamescope. See ADR 0047.
+
+
+## Phase 9.5.28 Lutris retirement invariant
+
+- Lutris is not a production Horizon source. Do not register a Lutris adapter,
+  read `pga.db`, dispatch `lutris:` URIs, or restore Lutris filesystem grants
+  without a new explicit architecture decision.
+- Migration 0005 removes active Lutris `game_sources` membership while preserving
+  game rows still owned by Activity/lifetime history. Never erase historical
+  play sessions merely because a source adapter is retired.
+- The production Flatpak and host helper must consume the same source registry;
+  retired providers must not remain helper-only capabilities.
+
+
+## Phase 9.5.29 square artwork invariant
+
+- Primary game artwork presented by Horizon is always 1:1. Source adapters expose
+  provider-owned candidates only; `ArtworkService` owns decoding, quality
+  selection, and square normalization. Slint must never inspect source IDs,
+  provider cache paths, or raw artwork hashes.
+- Steam advertises `SourceCapability::Artwork` and may expose local
+  `linuxclienticon` ZIP PNGs, client-icon ICO, plus App-Icon cache candidates for
+  the exact AppID. Prefer the largest actually decodable local candidate; never
+  hard-code 184×184 as the quality ceiling.
+- Never stretch or crop provider art merely to force 1:1. Center non-square
+  input on a transparent square canvas. Cap Home normalization at 512×512 and
+  do not pre-upscale smaller sources.
+- Missing/corrupt artwork must fall back to `FallbackCover` and must never make
+  source discovery or startup fail.
+- Phase 9.5.29 remains local-only: do not broaden Flatpak network permissions
+  solely to fetch artwork. Steam game images are displayed from the user's local
+  Steam cache and are not redistributed by Horizon. See ADR 0049.

@@ -52,12 +52,27 @@ export component GameTile inherits Rectangle {
             drop-shadow-blur: root.selected ? (root.launching ? 14px : 20px) : 14px;
             drop-shadow-color: Theme.shadow.with-alpha(root.selected ? 0.95 : 0.72);
 
-            FallbackCover {
+            artwork-frame := Rectangle {
                 x: Metrics.game-art-inset;
                 y: Metrics.game-art-inset;
                 width: parent.width - (Metrics.game-art-inset * 2);
                 height: parent.height - (Metrics.game-art-inset * 2);
-                game: root.game;
+                border-radius: Metrics.cover-radius;
+                background: transparent;
+                clip: true;
+
+                if root.game.has-artwork : Image {
+                    width: parent.width;
+                    height: parent.height;
+                    source: root.game.artwork;
+                    image-fit: cover;
+                }
+
+                if !root.game.has-artwork : FallbackCover {
+                    width: parent.width;
+                    height: parent.height;
+                    game: root.game;
+                }
             }
         }
 

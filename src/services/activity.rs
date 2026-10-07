@@ -8,7 +8,12 @@ use crate::{
         GameId, GameTitle, PlaySession, PlaySessionId, PlaytimeSeconds, SessionTrackingMethod,
         SourceId, SourceLifetimePlaytime,
     },
-    services::session::{ManagedSessionId, ManagedSessionTerminalState},
+    services::{
+        runtime::{
+            RuntimeObservationEvent, RuntimeObservationId, RuntimeObservationTerminalState,
+        },
+        session::{ManagedSessionId, ManagedSessionTerminalState},
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -167,6 +172,30 @@ struct PendingLaunch {
     source_id: SourceId,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RuntimeActivity {
+    game_id: GameId,
+    source_id: SourceId,
+    play_session_id: Option<PlaySessionId>,
+}
+
+const FOREGROUND_LAUNCH_STABILIZATION_MS: i64 = 30_000;
+const FOREGROUND_STARTUP_RETURN_GRACE_MS: i64 = 10_000;
+const FOREGROUND_RETURN_GRACE_MS: i64 = 1_500;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ForegroundSession {
+    id: PlaySessionId,
+    started_at_millis: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ForegroundReturnCandidate {
+    session_id: PlaySessionId,
+    returned_at_millis: i64,
+    confirm_after_millis: i64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivitySessionTransition {
     None,
@@ -181,13 +210,19 @@ impl ActivitySessionTransition {
     }
 }
 
-/// Small source-neutral hook used by Home after a launch target is dispatched.
+/// Small source-neutral hook used by Home after a launch path is selected.
 ///
-/// Home does not know how activity persistence works and sources do not know
-/// whether Horizon will observe a foreground handoff. This boundary only arms
-/// the next application-deactivation event for the launched game.
+/// Home does not know how activity persistence works. The sink records which
+/// observation model owns the launch: foreground handoff, source runtime, or a
+/// managed session. Provider-specific lifecycle details never enter Home.
 pub trait LaunchActivitySink {
     fn launch_dispatched(&self, game_id: GameId, source_id: SourceId);
+    fn runtime_observation_armed(
+        &self,
+        observation_id: RuntimeObservationId,
+        game_id: GameId,
+        source_id: SourceId,
+    );
     fn managed_session_started(
         &self,
         managed_session_id: ManagedSessionId,
@@ -201,13 +236,20 @@ pub trait LaunchActivitySink {
 ///
 /// A URI/portal launch does not provide exact process lifetime. Horizon therefore
 /// records the explicitly labeled `ForegroundHandoff` method: timing begins when
-/// a pending launch causes the Horizon window to become inactive and ends when
-/// Horizon becomes active again. Source-reported lifetime values are persisted
-/// through a separate method and are never added to these observed totals.
+/// a pending launch causes the Horizon window to become inactive. A later
+/// activation is treated as a candidate return rather than an immediate end so
+/// launcher handoff focus bounces cannot truncate the session. If Horizon loses
+/// activation again before the candidate is confirmed, the same session remains
+/// open. When a source provides a host runtime observer, that stronger signal
+/// owns start/end timing instead and window focus is ignored for that launch.
+/// Source-reported lifetime values are persisted through a separate method and
+/// are never added to these observed totals.
 pub struct ActivityService<R> {
     repository: Rc<RefCell<R>>,
     pending_launch: RefCell<Option<PendingLaunch>>,
-    active_session: RefCell<Option<PlaySessionId>>,
+    active_session: RefCell<Option<ForegroundSession>>,
+    foreground_return: RefCell<Option<ForegroundReturnCandidate>>,
+    runtime_observations: RefCell<BTreeMap<RuntimeObservationId, RuntimeActivity>>,
     managed_sessions: RefCell<BTreeMap<ManagedSessionId, PlaySessionId>>,
 }
 
@@ -220,6 +262,8 @@ where
             repository,
             pending_launch: RefCell::new(None),
             active_session: RefCell::new(None),
+            foreground_return: RefCell::new(None),
+            runtime_observations: RefCell::new(BTreeMap::new()),
             managed_sessions: RefCell::new(BTreeMap::new()),
         }
     }
@@ -227,6 +271,8 @@ where
     pub fn recover_interrupted_sessions(&self) -> Result<usize, R::Error> {
         self.pending_launch.borrow_mut().take();
         self.active_session.borrow_mut().take();
+        self.foreground_return.borrow_mut().take();
+        self.runtime_observations.borrow_mut().clear();
         self.managed_sessions.borrow_mut().clear();
         self.repository.borrow_mut().interrupt_open_play_sessions()
     }
@@ -235,31 +281,53 @@ where
         &self,
         active: bool,
     ) -> Result<ActivitySessionTransition, R::Error> {
-        self.handle_application_active_changed_at(active, Utc::now().timestamp())
+        self.handle_application_active_changed_at_millis(active, Utc::now().timestamp_millis())
     }
 
-    fn handle_application_active_changed_at(
+    fn handle_application_active_changed_at_millis(
         &self,
         active: bool,
-        now: i64,
+        now_millis: i64,
     ) -> Result<ActivitySessionTransition, R::Error> {
         if active {
-            let Some(session_id) = self.active_session.borrow_mut().take() else {
+            let Some(session) = *self.active_session.borrow() else {
                 return Ok(ActivitySessionTransition::None);
             };
 
-            if let Err(error) = self
-                .repository
-                .borrow_mut()
-                .complete_play_session(session_id, now)
-            {
-                self.active_session.borrow_mut().replace(session_id);
-                return Err(error);
+            // Do not end a foreground-handoff session on the first activation.
+            // URI launchers can briefly return focus to Horizon between their
+            // own handoff and the real game window. Arm a candidate return and
+            // let the periodic confirmation path decide whether focus stayed.
+            if self.foreground_return.borrow().is_none() {
+                let startup_window_end = session
+                    .started_at_millis
+                    .saturating_add(FOREGROUND_LAUNCH_STABILIZATION_MS);
+                let elapsed = now_millis.saturating_sub(session.started_at_millis);
+                let grace = if elapsed < FOREGROUND_LAUNCH_STABILIZATION_MS {
+                    FOREGROUND_STARTUP_RETURN_GRACE_MS
+                } else {
+                    FOREGROUND_RETURN_GRACE_MS
+                };
+                let confirm_after_millis = now_millis
+                    .saturating_add(grace)
+                    .max(startup_window_end);
+
+                self.foreground_return
+                    .borrow_mut()
+                    .replace(ForegroundReturnCandidate {
+                        session_id: session.id,
+                        returned_at_millis: now_millis,
+                        confirm_after_millis,
+                    });
             }
 
-            return Ok(ActivitySessionTransition::Completed(session_id));
+            return Ok(ActivitySessionTransition::None);
         }
 
+        // A renewed deactivation before the return candidate matures means the
+        // game/launcher took the foreground again. Keep the existing session
+        // open instead of recording a short false session.
+        self.foreground_return.borrow_mut().take();
         if self.active_session.borrow().is_some() {
             return Ok(ActivitySessionTransition::None);
         }
@@ -268,14 +336,170 @@ where
             return Ok(ActivitySessionTransition::None);
         };
 
+        let started_at = now_millis.div_euclid(1_000);
         let session_id = self.repository.borrow_mut().begin_play_session(
             pending.game_id,
             &pending.source_id,
-            now,
+            started_at,
             SessionTrackingMethod::ForegroundHandoff,
         )?;
-        self.active_session.borrow_mut().replace(session_id);
+        self.active_session.borrow_mut().replace(ForegroundSession {
+            id: session_id,
+            started_at_millis: now_millis,
+        });
         Ok(ActivitySessionTransition::Started(session_id))
+    }
+
+    /// Confirm a candidate return after it has remained stable long enough to
+    /// distinguish a real return to Horizon from launcher startup focus bounce.
+    /// The persisted end timestamp is the original return instant, not the end
+    /// of the grace period, so the debounce does not inflate observed playtime.
+    pub fn poll_foreground_return(&self) -> Result<ActivitySessionTransition, R::Error> {
+        self.poll_foreground_return_at_millis(Utc::now().timestamp_millis())
+    }
+
+    fn poll_foreground_return_at_millis(
+        &self,
+        now_millis: i64,
+    ) -> Result<ActivitySessionTransition, R::Error> {
+        let Some(candidate) = *self.foreground_return.borrow() else {
+            return Ok(ActivitySessionTransition::None);
+        };
+        if now_millis < candidate.confirm_after_millis {
+            return Ok(ActivitySessionTransition::None);
+        }
+
+        let Some(session) = *self.active_session.borrow() else {
+            self.foreground_return.borrow_mut().take();
+            return Ok(ActivitySessionTransition::None);
+        };
+        if session.id != candidate.session_id {
+            self.foreground_return.borrow_mut().take();
+            return Ok(ActivitySessionTransition::None);
+        }
+
+        self.foreground_return.borrow_mut().take();
+        self.active_session.borrow_mut().take();
+        let ended_at = candidate.returned_at_millis.div_euclid(1_000);
+
+        if let Err(error) = self
+            .repository
+            .borrow_mut()
+            .complete_play_session(session.id, ended_at)
+        {
+            self.active_session.borrow_mut().replace(session);
+            self.foreground_return.borrow_mut().replace(candidate);
+            return Err(error);
+        }
+
+        Ok(ActivitySessionTransition::Completed(session.id))
+    }
+
+    pub fn handle_runtime_observation_event(
+        &self,
+        event: &RuntimeObservationEvent,
+    ) -> Result<ActivitySessionTransition, R::Error> {
+        match event {
+            RuntimeObservationEvent::Started {
+                observation_id,
+                started_at,
+            } => self.begin_runtime_session(*observation_id, *started_at),
+            RuntimeObservationEvent::Terminal {
+                observation_id,
+                terminal,
+            } => self.finish_runtime_session(*observation_id, terminal),
+        }
+    }
+
+    fn begin_runtime_session(
+        &self,
+        observation_id: RuntimeObservationId,
+        started_at: i64,
+    ) -> Result<ActivitySessionTransition, R::Error> {
+        let Some(activity) = self
+            .runtime_observations
+            .borrow()
+            .get(&observation_id)
+            .cloned()
+        else {
+            return Ok(ActivitySessionTransition::None);
+        };
+        if activity.play_session_id.is_some() {
+            return Ok(ActivitySessionTransition::None);
+        }
+
+        let play_session_id = self.repository.borrow_mut().begin_play_session(
+            activity.game_id,
+            &activity.source_id,
+            started_at,
+            SessionTrackingMethod::SourceRuntime,
+        )?;
+        if let Some(activity) = self
+            .runtime_observations
+            .borrow_mut()
+            .get_mut(&observation_id)
+        {
+            activity.play_session_id = Some(play_session_id);
+        }
+        Ok(ActivitySessionTransition::Started(play_session_id))
+    }
+
+    fn finish_runtime_session(
+        &self,
+        observation_id: RuntimeObservationId,
+        terminal: &RuntimeObservationTerminalState,
+    ) -> Result<ActivitySessionTransition, R::Error> {
+        let Some(mut activity) = self
+            .runtime_observations
+            .borrow_mut()
+            .remove(&observation_id)
+        else {
+            return Ok(ActivitySessionTransition::None);
+        };
+
+        if activity.play_session_id.is_none()
+            && let RuntimeObservationTerminalState::Exited { started_at, .. } = terminal
+        {
+            match self.repository.borrow_mut().begin_play_session(
+                activity.game_id,
+                &activity.source_id,
+                *started_at,
+                SessionTrackingMethod::SourceRuntime,
+            ) {
+                Ok(play_session_id) => activity.play_session_id = Some(play_session_id),
+                Err(error) => {
+                    self.runtime_observations
+                        .borrow_mut()
+                        .insert(observation_id, activity);
+                    return Err(error);
+                }
+            }
+        }
+
+        let Some(play_session_id) = activity.play_session_id else {
+            return Ok(ActivitySessionTransition::None);
+        };
+
+        let result = match terminal {
+            RuntimeObservationTerminalState::Exited { ended_at, .. } => self
+                .repository
+                .borrow_mut()
+                .complete_play_session(play_session_id, *ended_at)
+                .map(|()| ActivitySessionTransition::Completed(play_session_id)),
+            RuntimeObservationTerminalState::Failed { .. }
+            | RuntimeObservationTerminalState::Lost => self
+                .repository
+                .borrow_mut()
+                .interrupt_play_session(play_session_id)
+                .map(|()| ActivitySessionTransition::Interrupted(play_session_id)),
+        };
+
+        if result.is_err() {
+            self.runtime_observations
+                .borrow_mut()
+                .insert(observation_id, activity);
+        }
+        result
     }
 
     pub fn handle_managed_session_terminal(
@@ -363,6 +587,24 @@ where
         self.pending_launch
             .borrow_mut()
             .replace(PendingLaunch { game_id, source_id });
+    }
+
+    fn runtime_observation_armed(
+        &self,
+        observation_id: RuntimeObservationId,
+        game_id: GameId,
+        source_id: SourceId,
+    ) {
+        self.pending_launch.borrow_mut().take();
+        self.foreground_return.borrow_mut().take();
+        self.runtime_observations.borrow_mut().insert(
+            observation_id,
+            RuntimeActivity {
+                game_id,
+                source_id,
+                play_session_id: None,
+            },
+        );
     }
 
     fn managed_session_started(
@@ -548,7 +790,7 @@ mod tests {
 
         assert_eq!(
             service
-                .handle_application_active_changed_at(true, 100)
+                .handle_application_active_changed_at_millis(true, 100_000)
                 .expect("active"),
             ActivitySessionTransition::None
         );
@@ -556,7 +798,7 @@ mod tests {
 
         assert!(matches!(
             service
-                .handle_application_active_changed_at(false, 110)
+                .handle_application_active_changed_at_millis(false, 110_000)
                 .expect("inactive"),
             ActivitySessionTransition::Started(_)
         ));
@@ -564,16 +806,32 @@ mod tests {
     }
 
     #[test]
-    fn returning_to_horizon_completes_the_observed_session() {
+    fn mature_return_completes_after_short_grace_without_inflating_duration() {
         let repository = Rc::new(RefCell::new(FakeRepository::default()));
         let service = ActivityService::new(Rc::clone(&repository));
         service.launch_dispatched(game_id(), source_id());
         service
-            .handle_application_active_changed_at(false, 100)
+            .handle_application_active_changed_at_millis(false, 100_000)
             .expect("start");
-        service
-            .handle_application_active_changed_at(true, 220)
-            .expect("finish");
+
+        assert_eq!(
+            service
+                .handle_application_active_changed_at_millis(true, 220_000)
+                .expect("candidate return"),
+            ActivitySessionTransition::None
+        );
+        assert_eq!(
+            service
+                .poll_foreground_return_at_millis(221_499)
+                .expect("still in grace"),
+            ActivitySessionTransition::None
+        );
+        assert!(matches!(
+            service
+                .poll_foreground_return_at_millis(221_500)
+                .expect("confirmed return"),
+            ActivitySessionTransition::Completed(_)
+        ));
 
         let repository = repository.borrow();
         assert_eq!(repository.sessions[0].state(), PlaySessionState::Completed);
@@ -581,14 +839,84 @@ mod tests {
     }
 
     #[test]
+    fn startup_focus_bounce_keeps_the_same_foreground_session_open() {
+        let repository = Rc::new(RefCell::new(FakeRepository::default()));
+        let service = ActivityService::new(Rc::clone(&repository));
+        service.launch_dispatched(game_id(), source_id());
+        service
+            .handle_application_active_changed_at_millis(false, 100_000)
+            .expect("start");
+
+        service
+            .handle_application_active_changed_at_millis(true, 101_000)
+            .expect("launcher bounced focus back");
+        assert_eq!(
+            service
+                .poll_foreground_return_at_millis(120_000)
+                .expect("startup candidate remains pending"),
+            ActivitySessionTransition::None
+        );
+
+        service
+            .handle_application_active_changed_at_millis(false, 125_000)
+            .expect("game took focus");
+        assert_eq!(repository.borrow().sessions.len(), 1);
+        assert_eq!(repository.borrow().sessions[0].state(), PlaySessionState::Open);
+
+        service
+            .handle_application_active_changed_at_millis(true, 280_000)
+            .expect("real return");
+        assert!(matches!(
+            service
+                .poll_foreground_return_at_millis(281_500)
+                .expect("confirmed real return"),
+            ActivitySessionTransition::Completed(_)
+        ));
+
+        let repository = repository.borrow();
+        assert_eq!(repository.sessions[0].state(), PlaySessionState::Completed);
+        assert_eq!(repository.sessions[0].duration().expect("duration").get(), 180);
+    }
+
+    #[test]
+    fn startup_candidate_uses_original_return_time_after_stabilization() {
+        let repository = Rc::new(RefCell::new(FakeRepository::default()));
+        let service = ActivityService::new(Rc::clone(&repository));
+        service.launch_dispatched(game_id(), source_id());
+        service
+            .handle_application_active_changed_at_millis(false, 100_000)
+            .expect("start");
+        service
+            .handle_application_active_changed_at_millis(true, 101_000)
+            .expect("early return");
+
+        assert_eq!(
+            service
+                .poll_foreground_return_at_millis(129_999)
+                .expect("still stabilizing"),
+            ActivitySessionTransition::None
+        );
+        assert!(matches!(
+            service
+                .poll_foreground_return_at_millis(130_000)
+                .expect("stabilized return"),
+            ActivitySessionTransition::Completed(_)
+        ));
+
+        let repository = repository.borrow();
+        assert_eq!(repository.sessions[0].state(), PlaySessionState::Completed);
+        assert_eq!(repository.sessions[0].duration().expect("duration").get(), 1);
+    }
+
+    #[test]
     fn unrelated_window_activation_does_not_fabricate_a_session() {
         let repository = Rc::new(RefCell::new(FakeRepository::default()));
         let service = ActivityService::new(Rc::clone(&repository));
         service
-            .handle_application_active_changed_at(false, 100)
+            .handle_application_active_changed_at_millis(false, 100_000)
             .expect("inactive");
         service
-            .handle_application_active_changed_at(true, 110)
+            .handle_application_active_changed_at_millis(true, 110_000)
             .expect("active");
         assert!(repository.borrow().sessions.is_empty());
     }
@@ -600,7 +928,7 @@ mod tests {
         service.launch_dispatched(game_id(), source_id());
         service.cancel_pending_launch();
         service
-            .handle_application_active_changed_at(false, 100)
+            .handle_application_active_changed_at_millis(false, 100_000)
             .expect("inactive");
         assert!(repository.borrow().sessions.is_empty());
     }
@@ -611,7 +939,7 @@ mod tests {
         let service = ActivityService::new(Rc::clone(&repository));
         service.launch_dispatched(game_id(), source_id());
         service
-            .handle_application_active_changed_at(false, 100)
+            .handle_application_active_changed_at_millis(false, 100_000)
             .expect("start");
 
         assert_eq!(service.recover_interrupted_sessions().expect("recover"), 1);
@@ -636,13 +964,13 @@ mod tests {
 
         assert_eq!(
             service
-                .handle_application_active_changed_at(false, 100)
+                .handle_application_active_changed_at_millis(false, 100_000)
                 .expect("inactive"),
             ActivitySessionTransition::None
         );
         assert_eq!(
             service
-                .handle_application_active_changed_at(true, 200)
+                .handle_application_active_changed_at_millis(true, 200_000)
                 .expect("active"),
             ActivitySessionTransition::None
         );
@@ -686,6 +1014,78 @@ mod tests {
         let repository = repository.borrow();
         assert_eq!(repository.sessions[0].state(), PlaySessionState::Interrupted);
         assert_eq!(repository.sessions[0].duration(), None);
+    }
+
+    #[test]
+    fn source_runtime_observation_ignores_focus_and_uses_host_timestamps() {
+        let repository = Rc::new(RefCell::new(FakeRepository::default()));
+        let service = ActivityService::new(Rc::clone(&repository));
+        let observation_id = RuntimeObservationId::new(11).expect("observation id");
+        service.runtime_observation_armed(observation_id, game_id(), source_id());
+
+        assert!(matches!(
+            service
+                .handle_runtime_observation_event(&RuntimeObservationEvent::Started {
+                    observation_id,
+                    started_at: 100,
+                })
+                .expect("runtime start"),
+            ActivitySessionTransition::Started(_)
+        ));
+        assert_eq!(
+            repository.borrow().sessions[0].tracking_method(),
+            SessionTrackingMethod::SourceRuntime
+        );
+
+        service
+            .handle_application_active_changed_at_millis(true, 150_000)
+            .expect("focus in");
+        service
+            .handle_application_active_changed_at_millis(false, 160_000)
+            .expect("focus out");
+        assert_eq!(repository.borrow().sessions[0].state(), PlaySessionState::Open);
+
+        assert!(matches!(
+            service
+                .handle_runtime_observation_event(&RuntimeObservationEvent::Terminal {
+                    observation_id,
+                    terminal: RuntimeObservationTerminalState::Exited {
+                        started_at: 100,
+                        ended_at: 280,
+                    },
+                })
+                .expect("runtime end"),
+            ActivitySessionTransition::Completed(_)
+        ));
+        assert_eq!(
+            repository.borrow().sessions[0].duration().expect("duration").get(),
+            180
+        );
+    }
+
+    #[test]
+    fn lost_runtime_observation_interrupts_started_session() {
+        let repository = Rc::new(RefCell::new(FakeRepository::default()));
+        let service = ActivityService::new(Rc::clone(&repository));
+        let observation_id = RuntimeObservationId::new(12).expect("observation id");
+        service.runtime_observation_armed(observation_id, game_id(), source_id());
+        service
+            .handle_runtime_observation_event(&RuntimeObservationEvent::Started {
+                observation_id,
+                started_at: 100,
+            })
+            .expect("runtime start");
+
+        assert!(matches!(
+            service
+                .handle_runtime_observation_event(&RuntimeObservationEvent::Terminal {
+                    observation_id,
+                    terminal: RuntimeObservationTerminalState::Lost,
+                })
+                .expect("runtime lost"),
+            ActivitySessionTransition::Interrupted(_)
+        ));
+        assert_eq!(repository.borrow().sessions[0].duration(), None);
     }
 
     #[test]

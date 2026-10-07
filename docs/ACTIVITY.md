@@ -28,10 +28,28 @@ ForegroundHandoff session starts
    ↓
 Horizon becomes active again
    ↓
-session completes
+candidate return (not complete yet)
+   ↓
+short grace / startup stabilization
+   ↓
+├─ Horizon loses activation again → cancel candidate, keep session open
+└─ Horizon stays active → complete at the original return timestamp
 ```
 
 Only a launch dispatched by Horizon arms this handoff. Ordinary alt-tabbing away from Horizon does not fabricate a session.
+
+A URI launcher may temporarily give focus back to Horizon while it is still
+starting the real game. Phase 9.5.26 therefore treats reactivation as a
+**candidate return**, not an immediate session end. During the first 30 seconds
+a startup return must remain stable through the launch-stabilization window
+(with at least a 10-second grace from the bounce). Once a session is mature, a
+1.5-second stable return is enough. If Horizon loses activation again before
+confirmation, the candidate is discarded and the same session continues.
+
+The grace period never inflates playtime: when a return is confirmed, SQLite is
+completed using the timestamp at which Horizon originally became active, not
+the later confirmation time. This remains approximate foreground ownership; it
+does not claim Steam process lifetime.
 
 The same activation boundary already owns controller-input suspension. Session tracking consumes the semantic activation event at the application/service boundary; Steam does not toggle tracking directly.
 
@@ -80,8 +98,52 @@ when the helper reports the managed session exited.
 If the helper reports failure or loses the session identity, Horizon marks that
 activity row interrupted with no fabricated end timestamp/duration.
 
-`ForegroundHandoff` remains the fallback method for ordinary URI launches and
-its meaning is unchanged. Activity totals can contain both methods because both
-are Horizon-observed sessions; provider-reported lifetime values remain in the
+`ForegroundHandoff` remains the fallback method for ordinary URI launches. Its
+Phase 9.5.26 focus-bounce tolerance changes only *when a return is considered
+stable*; it still measures Horizon-observed foreground handoff rather than exact
+process lifetime. Activity totals can contain both methods because both are
+Horizon-observed sessions; provider-reported lifetime values remain in the
 separate `source_lifetime_playtime` table and are still never added to observed
 totals.
+
+## Source-runtime sessions (Phase 9.5.27)
+
+Schema v4 adds `source_runtime` as a third explicit tracking method.
+
+A source-runtime session is used when a registered source can identify the
+lifecycle of one exact source-owned game on the host. The Flatpak does not scan
+host processes itself. Instead it sends only `(source_id, external_id)` to the
+same-user Horizon helper, and the helper asks the registered source adapter for
+provider-specific runtime state.
+
+Steam is the first provider. Steam launches a per-game `reaper` process whose
+command line includes `SteamLaunch AppId=<appid>`. Horizon's Steam adapter checks
+only for that exact numeric AppID in the host helper. The helper records the
+first observed running timestamp and the timestamp at which that exact reaper
+is no longer present.
+
+This means Horizon focus changes do not affect an observed Steam session:
+
+```text
+Horizon dispatches steam://rungameid/<appid>
+   ↓
+host observer armed for that exact AppID
+   ↓
+Steam reaper appears → SourceRuntime session starts
+   ↓
+Alt-Tab to Horizon / another app → no session transition
+   ↓
+return to game → same session remains open
+   ↓
+Steam reaper exits → SourceRuntime session completes
+```
+
+If the host helper/runtime observer is unavailable, launch still succeeds and
+Horizon falls back to the existing `ForegroundHandoff` behavior. If an observer
+is lost after a source-runtime row has started, that row is interrupted rather
+than assigned a fabricated end time.
+
+This works whether Horizon is being used as a normal Flatpak window or from a
+Gamescope-oriented shell. Runtime observation is not conditional on Gamescope
+being installed; Gamescope is only required for the separate managed-session
+launch capability.

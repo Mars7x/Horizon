@@ -75,7 +75,7 @@ bottles-cli run -b <bottle> -p <program>
 Flatpak Bottles uses the equivalent host-side Flatpak command. Those exact
 provider mechanics remain inside `src/sources/bottles.rs`.
 
-Steam, Lutris, and Heroic remain normal external launches in Phase 9.5. Their
+Steam and Heroic remain normal external launches in Phase 9.5. Their
 existing URI handoff may be serviced by an already-running launcher, which means
 wrapping the URI dispatcher in Gamescope would not prove that the actual game
 joined the managed compositor. Do not advertise `ManagedSession` for those
@@ -150,3 +150,29 @@ remain usable when this helper is absent.
 - Gamescope options are intentionally minimal (`-f`) in this first slice.
 - HDR, VRR, nested resolution policy, overlay composition, and advanced
   Gamescope tuning belong to later console-polish work.
+
+## Phase 9.5.27 helper runtime-observation role
+
+The existing same-user D-Bus helper now has a second narrow responsibility:
+provider-owned runtime observation. This is available even when Gamescope is
+not installed and therefore also serves ordinary Flatpak launches.
+
+The additional D-Bus surface still accepts only source/game identity and
+helper-issued observation IDs. It does not expose generic `/proc` search,
+process-name matching, arbitrary executable paths, or host command execution.
+The helper rebuilds the production `SourceRegistry`, verifies that the source
+advertises `RuntimeObservation`, and asks that source adapter for runtime state.
+
+Steam is the first runtime-observed source. Bottles managed launching remains
+unchanged. Steam still does not advertise `ManagedSession`.
+
+The helper protocol version is now 2. Development installs must rebuild and
+reinstall `horizon-session-helper` after applying this phase.
+
+
+## Phase 9.5.28 provider set
+
+Lutris is no longer part of the production source registry. The helper therefore
+cannot resolve Lutris identities for managed launch or runtime observation. This
+requires no helper-specific special case because both processes consume the same
+`production_source_registry()`.

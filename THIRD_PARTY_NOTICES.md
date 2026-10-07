@@ -102,3 +102,26 @@ The existing MIT license text is included as `LICENSES/MIT.txt`.
 **Gamescope is not bundled by Horizon.** Phase 9.5 may use an independently
 installed host Gamescope executable through the optional helper. Horizon neither
 redistributes Gamescope nor copies its source in this phase.
+
+
+### Phase 9.5.29 artwork dependencies
+
+- **image 0.25.x**
+  - Upstream: https://github.com/image-rs/image
+  - License: MIT OR Apache-2.0
+  - Use in Horizon: decode provider-owned local Steam JPG/PNG/ICO artwork and
+    normalize presentation pixels to Horizon's square-artwork contract.
+  - Modification: none; consumed as a Cargo dependency.
+- **zip 8.6.x**
+  - Upstream: https://github.com/zip-rs/zip2
+  - License: MIT
+  - Use in Horizon: read local Steam `linuxclienticon` ZIP containers and feed
+    their PNG representations into the generic artwork decoder.
+  - Modification: none; consumed as a Cargo dependency with Deflate support.
+
+Steam game artwork is not bundled with Horizon. Horizon reads images already
+present in the user's Steam installation/cache and displays them locally. The
+artwork remains owned/licensed by its respective game publisher/developer.
+
+The existing MIT and Apache-2.0 license texts cover these dependencies. The exact
+resolved Cargo dependency-license inventory remains a release gate.

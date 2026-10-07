@@ -59,3 +59,23 @@ Horizon uses `rusqlite`/`libsqlite3-sys` under the MIT license. Development curr
 The Steam source adapter uses `steam-vdf-parser` 0.1.2 to read Valve Data Format metadata locally, including current binary `appinfo.vdf` v40/v41 files. Upstream licenses the crate under **Apache-2.0 OR MIT**. Horizon does not copy parser source into its own modules; it consumes the published Cargo crate unchanged.
 
 `THIRD_PARTY_NOTICES.md` records the upstream project and copyright. `LICENSES/Apache-2.0.txt` and `LICENSES/MIT.txt` are installed with Flatpak artifacts. This hand-written record does not replace the lockfile-derived release inventory.
+
+## Phase 9.5.29 artwork dependencies and provider artwork
+
+Horizon now uses `image` 0.25.x directly to decode provider-owned local
+JPG/PNG/ICO artwork and normalize it to the square presentation contract.
+Upstream licenses the crate under **MIT OR Apache-2.0**.
+
+Horizon also uses `zip` 8.6.x with only Deflate support enabled to read Steam's
+local `linuxclienticon` ZIP containers in memory. Upstream licenses `zip` under
+**MIT**. Horizon does not extract those archives to disk and consumes the
+published crate unchanged.
+
+The existing MIT and Apache-2.0 license texts cover these dependencies, and the
+final lockfile-derived inventory remains mandatory.
+
+Steam game artwork is not part of Horizon's source distribution. Horizon reads
+artwork already cached by the user's Steam installation and displays it locally.
+Copyright and other rights in those game images remain with the respective game
+publishers/developers. Horizon must not copy those cached images into release
+artifacts or treat them as project-owned artwork.

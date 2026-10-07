@@ -7,6 +7,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
     fmt,
+    path::PathBuf,
 };
 
 use thiserror::Error;
@@ -15,9 +16,50 @@ use crate::domain::{DomainValidationError, ExternalGameId, GameTitle, SourceId};
 
 pub mod bottles;
 pub mod heroic;
-pub mod lutris;
 pub mod steam;
 mod support;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceArtworkKind {
+    /// Primary square game artwork suitable for Home/Library tiles.
+    SquareIcon,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SourceArtworkLocation {
+    File(PathBuf),
+    Bytes(Vec<u8>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceArtworkCandidate {
+    kind: SourceArtworkKind,
+    location: SourceArtworkLocation,
+}
+
+impl SourceArtworkCandidate {
+    pub fn local_square_icon(path: PathBuf) -> Self {
+        Self {
+            kind: SourceArtworkKind::SquareIcon,
+            location: SourceArtworkLocation::File(path),
+        }
+    }
+
+    pub fn in_memory_square_icon(bytes: Vec<u8>) -> Self {
+        Self {
+            kind: SourceArtworkKind::SquareIcon,
+            location: SourceArtworkLocation::Bytes(bytes),
+        }
+    }
+
+    pub const fn kind(&self) -> SourceArtworkKind {
+        self.kind
+    }
+
+    pub fn location(&self) -> &SourceArtworkLocation {
+        &self.location
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceLaunchTarget {
@@ -58,10 +100,17 @@ impl SourceManagedLaunchTarget {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceRuntimeState {
+    Running,
+    Stopped,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SourceCapability {
     Launch,
     ManagedSession,
+    RuntimeObservation,
     Artwork,
     LifetimePlaytime,
 }
@@ -319,6 +368,29 @@ pub trait GameSource: Send + Sync {
     ) -> Result<Option<SourceManagedLaunchTarget>, SourceError> {
         Ok(None)
     }
+
+    /// Observe whether a source-owned game is currently running on the host.
+    ///
+    /// This is invoked by the same-user host helper, not by the sandboxed UI.
+    /// Sources advertising `RuntimeObservation` must keep provider-specific
+    /// process/state knowledge behind this adapter boundary.
+    fn runtime_state(
+        &self,
+        _external_id: &ExternalGameId,
+    ) -> Result<Option<SourceRuntimeState>, SourceError> {
+        Ok(None)
+    }
+
+    /// Return provider-owned artwork candidates for one source-owned game.
+    ///
+    /// Sources only expose candidates and provenance. Selection, decoding, and
+    /// 1:1 normalization are owned by the generic artwork service.
+    fn artwork_candidates(
+        &self,
+        _external_id: &ExternalGameId,
+    ) -> Result<Vec<SourceArtworkCandidate>, SourceError> {
+        Ok(vec![])
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -342,7 +414,6 @@ pub enum SourceRegistryBuildError {
 pub fn production_source_registry() -> Result<SourceRegistry, SourceRegistryBuildError> {
     let mut registry = SourceRegistry::new();
     registry.register(steam::SteamSource::new()?)?;
-    registry.register(lutris::LutrisSource::new()?)?;
     registry.register(bottles::BottlesSource::new()?)?;
     registry.register(heroic::HeroicSource::new()?)?;
     Ok(registry)
@@ -429,6 +500,17 @@ mod tests {
     }
 
     #[test]
+    fn production_registry_excludes_retired_lutris_source() {
+        let registry = production_source_registry().expect("production registry");
+
+        assert_eq!(registry.len(), 3);
+        assert!(registry.get(&source_id("steam")).is_some());
+        assert!(registry.get(&source_id("bottles")).is_some());
+        assert!(registry.get(&source_id("heroic")).is_some());
+        assert!(registry.get(&source_id("lutris")).is_none());
+    }
+
+    #[test]
     fn managed_launch_target_rejects_an_empty_program() {
         assert_eq!(
             SourceManagedLaunchTarget::new("   ", vec![]).expect_err("empty program must fail"),
@@ -453,6 +535,7 @@ mod tests {
         assert!(descriptor.supports(SourceCapability::Launch));
         assert!(descriptor.supports(SourceCapability::Artwork));
         assert!(!descriptor.supports(SourceCapability::ManagedSession));
+        assert!(!descriptor.supports(SourceCapability::RuntimeObservation));
         assert!(!descriptor.supports(SourceCapability::LifetimePlaytime));
         assert_eq!(descriptor.capabilities().len(), 2);
     }

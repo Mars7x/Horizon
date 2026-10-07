@@ -1,66 +1,109 @@
 # Artwork policy
 
-Horizon's Phase 3 demo covers are procedural Slint geometry and are therefore
-resolution-independent. Real imported game artwork arrives in a later phase,
-but the rendering/cache policy is fixed now so fullscreen and HiDPI output do
-not inherit low-resolution thumbnails.
+Horizon treats primary game artwork as a source-neutral **1:1 square asset**.
+Home, Library, and future game-detail surfaces must consume the same normalized
+artwork contract rather than knowing how Steam, Bottles, or Heroic store their
+images.
 
-## Source quality
+## Phase 9.5.29 artwork foundation
 
-- Prefer square cover/icon sources of at least **1024×1024** when a source
-  provides multiple artwork sizes.
-- Keep the highest-quality original that the source legally/localy exposes;
-  do not replace it with a 164/176 px UI thumbnail in persistent storage.
-- Never upscale a small source and then save the upscale as if it were the
-  original.
+The production path is now:
 
-## Utility artwork
+```text
+GameSource
+  └─ artwork_candidates(ExternalGameId)
+          ↓
+     SourceArtworkCandidate
+          ↓
+      ArtworkService
+          ↓
+  decode + choose best local candidate
+          ↓
+       normalize 1:1
+          ↓
+       GameCardData
+          ↓
+        Slint UI
+```
 
-The top Friends, Album, Activity, Web, Settings, and Shop icons are Horizon-owned authored SVGs. Their source files in `ui/assets/` are the single visual source of truth. `utility-icons.slint` loads them directly with `@image-url`; do not transcribe their paths, apply `Image.colorize`, substitute theme colors, raster-export them, or create alternate light/dark variants. The authored white outline, shadow/filter, stroke geometry, and intrinsic colors must remain intact.
+Source adapters expose provider-owned candidates only. They do not decide how
+Horizon crops, pads, scales, or renders those assets. Slint receives only the
+normalized presentation image and a `has-artwork` flag.
 
-The 80×80 SVG canvases are uniformly fitted into fixed 40×40 utility cells with `image-fit: contain`. Because Horizon applies one app-wide logical scene scale, the shared `AuthoredUtilityIcon` renderer uses a larger internal raster target before scaling the complete unchanged image back to its 40×40 logical size. This prevents fullscreen blur without creating alternate raster assets or changing SVG content. Layout may position the complete image and the focus system may move it by its existing small lift, but the artwork itself is never recolored, redrawn, or non-uniformly distorted. See ADR 0040.
+## 1:1 invariant
 
-## Application icon
+- Primary game artwork is always represented as a square RGBA pixel buffer.
+- Already-square source artwork is preserved without cropping or stretching.
+- A non-square future source is centered on a transparent square canvas rather
+  than stretched or silently cropped.
+- Sources larger than 512×512 are downscaled to at most 512×512 for the current
+  Home presentation path.
+- Smaller authoritative artwork is **not upscaled in storage/memory merely to
+  claim a higher resolution**. The UI may naturally scale it at render time.
+- Missing/broken artwork always falls back to the procedural `FallbackCover`.
 
-`data/io.github.Mars7x.Horizon.svg` is Horizon-owned artwork supplied by the project owner. The Flatpak installs this exact SVG as the scalable application icon; desktop/metainfo identity remains `io.github.Mars7x.Horizon`.
+This keeps the source contract stable while allowing a later disk cache or
+higher-resolution detail view without source-specific Slint code.
+
+## Steam square artwork
+
+Steam advertises `SourceCapability::Artwork`. Horizon reads artwork already
+owned and cached by the local Steam installation; Phase 9.5.29 does not grant
+Horizon general runtime network access.
+
+For each installed AppID the Steam adapter exposes the available square icon
+candidates it can prove belong to that AppID, including:
+
+1. Steam's local `linuxclienticon` ZIP from `steam/games/<hash>.zip` when
+   `common.linuxclienticon` is present; every PNG representation in the archive
+   is offered to the generic decoder so the largest usable square can win;
+2. Steam's local `clienticon` ICO container from `steam/games/<hash>.ico` when
+   `common.clienticon` is present;
+3. the AppID/hash image in modern `appcache/librarycache/<appid>/...` layouts;
+4. Steam's legacy `<appid>_icon.jpg`/PNG cache names;
+5. the newer per-AppID `icon.jpg`/PNG filename fallback.
+
+`ArtworkService` decodes every available candidate and chooses the one with the
+largest actual pixel area. This matters because the Linux ZIP or ICO may contain
+a better square representation than Steam's compact 184×184 app icon, while
+older games can still have small client icons. A lower-resolution client icon
+therefore cannot displace a larger cached App Icon simply because it was listed
+first.
+
+Steam documents the compact App Icon as 184×184 JPG and its Shortcut Icon as a
+256×256 or 512×512 PNG/ICO submission. Horizon prefers the best **locally
+available** square representation rather than hard-coding 184×184 as the
+artwork quality ceiling.
 
 ## Rendering
 
-- Decode/render artwork for the current presentation size and display scale.
-- The UI may cache derived renditions for performance, but cache keys must
-  include requested pixel size / scale so fullscreen or HiDPI does not reuse a
-  low-resolution windowed thumbnail.
-- Selected-game emphasis scales the complete card coherently. Because real cover
-  sources are high-resolution, scaling the UI element does not justify storing or
-  reusing a low-resolution thumbnail.
-- Preserve aspect ratio and crop intentionally; never stretch artwork.
+`GameTile` always reserves the same square artwork frame. If real artwork is
+available it fills that 1:1 frame; otherwise `FallbackCover` renders in exactly
+the same geometry. Selection/launch press animation therefore does not change
+artwork aspect ratio or source policy.
 
-## Phase 3 demo art
+The decoded source is retained at native resolution up to 512×512. This avoids
+unnecessary 184→512 preprocessing while still preventing extremely large source
+images from multiplying Home memory use.
 
-The current `FallbackCover` is generated from vector/shape primitives. It does not
-change its own font sizes or detail scale during selection. `GameTile` scales
-the complete shell + artwork + focus treatment as one coherent visual unit,
-which avoids the visible text/detail re-layout that occurred when those
-properties animated independently. Real bitmap covers should still use
-high-resolution sources so this modest UI scale-up remains crisp.
+## Fallback artwork
 
+`FallbackCover` remains source-neutral procedural Slint geometry. Palette and
+monogram values derive from Horizon's durable game identity/title, never from a
+provider name. It is the required fallback for:
 
-## Fallback cover rendering
-Fallback covers are procedural Slint content and should remain resolution-independent. The selected tile grows by animating its actual geometry, not by transform-scaling an already-rendered fallback subtree. Placeholder text uses stable logical typography during the grow/shrink animation so it stays sharp at the selected endpoint without a visible breathing effect.
+- sources that do not advertise artwork;
+- games whose provider cache has no usable square art;
+- unreadable or corrupt artwork files.
 
+The fallback is resolution-independent and remains valid for Steam, Bottles,
+Heroic, and future source adapters.
 
-## Procedural fallback rendering density
+## Provenance and licensing
 
-Games without cover art use Horizon's procedural placeholder. Because the application can scale well beyond its 1280×720 design baseline, the placeholder receives the active UI scale and renders its internal Slint text/shapes at higher logical density before fitting into the game shell. This avoids treating fallback art like a low-resolution thumbnail. The visible layout remains unchanged.
+Horizon does not bundle or redistribute Steam game artwork. It displays files
+already present in the user's Steam installation/cache. Those images remain the
+property of their respective game publishers/developers.
 
-
-Phase 3.14.10 rendering update:
-- Slint renderer is now Winit + Skia instead of FemtoVG because FemtoVG scales cached glyph bitmaps and made fullscreen placeholder text visibly soft.
-- Removed the high-density DemoCover workaround that caused breathing during selection.
-- Superseded for top utilities by ADR 0040: Friends, Album, Activity, Web, Settings, and Shop now render Horizon-owned SVG artwork directly and unmodified.
-
-## Phase 7 fallback artwork
-
-The Phase 7 Home library contains real persisted games, but production source artwork is still outside this vertical slice. The earlier `DemoCover` component is therefore renamed to `FallbackCover`: it is no longer demo content, but a source-neutral procedural fallback for any real library game that has no imported artwork.
-
-Fallback palette/monogram data is derived in presentation code from the durable game identity/title. It must not inspect `SourceId` or render Steam-specific branding. When real artwork support is introduced, source adapters/services should expose artwork through a generic boundary and the fallback should remain available for missing/broken assets.
+The Rust `image` crate is used only for decoding and square normalization; its
+license/provenance is recorded in `THIRD_PARTY_NOTICES.md`.

@@ -24,9 +24,19 @@ const MIGRATIONS: &[Migration] = &[
         name: "managed_session_tracking",
         sql: include_str!("migrations/0003_managed_session_tracking.sql"),
     },
+    Migration {
+        version: 4,
+        name: "source_runtime_tracking",
+        sql: include_str!("migrations/0004_source_runtime_tracking.sql"),
+    },
+    Migration {
+        version: 5,
+        name: "remove_lutris_source",
+        sql: include_str!("migrations/0005_remove_lutris_source.sql"),
+    },
 ];
 
-pub(crate) const LATEST_SCHEMA_VERSION: i64 = 3;
+pub(crate) const LATEST_SCHEMA_VERSION: i64 = 5;
 
 const MIGRATION_LEDGER_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -141,6 +151,120 @@ mod tests {
             )
             .expect("tracking method");
         assert_eq!(method, "managed_session");
+    }
+
+    #[test]
+    fn latest_schema_accepts_source_runtime_activity_rows() {
+        let mut connection = Connection::open_in_memory().expect("in-memory database");
+        migrate(&mut connection).expect("migrate");
+
+        connection
+            .execute(
+                "INSERT INTO games(id, title, created_at, updated_at) VALUES (1, 'Game', 0, 0)",
+                [],
+            )
+            .expect("game");
+        connection
+            .execute(
+                r#"
+                INSERT INTO play_sessions(
+                    id, game_id, source_id, started_at, ended_at, tracking_method, state
+                ) VALUES (1, 1, 'steam', 10, 20, 'source_runtime', 'completed')
+                "#,
+                [],
+            )
+            .expect("source runtime row");
+
+        let method = connection
+            .query_row(
+                "SELECT tracking_method FROM play_sessions WHERE id = 1",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .expect("tracking method");
+        assert_eq!(method, "source_runtime");
+    }
+
+    #[test]
+    fn lutris_removal_migration_drops_active_refs_but_preserves_activity_history() {
+        let mut connection = Connection::open_in_memory().expect("in-memory database");
+        connection
+            .execute_batch(MIGRATION_LEDGER_SQL)
+            .expect("create migration ledger");
+
+        for migration in MIGRATIONS.iter().filter(|migration| migration.version <= 4) {
+            connection.execute_batch(migration.sql).expect("apply old migration");
+            connection
+                .execute(
+                    "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?1, ?2, 0)",
+                    params![migration.version, migration.name],
+                )
+                .expect("record old migration");
+        }
+
+        connection
+            .execute_batch(
+                r#"
+                INSERT INTO games(id, title, created_at, updated_at) VALUES
+                    (1, 'Lutris Only', 0, 0),
+                    (2, 'Lutris History', 0, 0),
+                    (3, 'Steam Game', 0, 0);
+
+                INSERT INTO game_sources(
+                    id, game_id, source_id, external_id, first_seen_at, last_seen_at
+                ) VALUES
+                    (1, 1, 'lutris', 'native:1', 0, 0),
+                    (2, 2, 'lutris', 'native:2', 0, 0),
+                    (3, 3, 'steam', '10', 0, 0);
+
+                INSERT INTO play_sessions(
+                    id, game_id, source_id, started_at, ended_at, tracking_method, state
+                ) VALUES
+                    (1, 2, 'lutris', 10, 70, 'foreground_handoff', 'completed');
+                "#,
+            )
+            .expect("seed version-4 data");
+
+        migrate(&mut connection).expect("apply Lutris retirement migration");
+
+        let lutris_refs = connection
+            .query_row(
+                "SELECT COUNT(*) FROM game_sources WHERE source_id = 'lutris'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("count Lutris refs");
+        assert_eq!(lutris_refs, 0);
+
+        let lutris_only_games = connection
+            .query_row("SELECT COUNT(*) FROM games WHERE id = 1", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .expect("count source-only game");
+        assert_eq!(lutris_only_games, 0);
+
+        let historical_games = connection
+            .query_row("SELECT COUNT(*) FROM games WHERE id = 2", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .expect("count historical game");
+        assert_eq!(historical_games, 1);
+
+        let historical_sessions = connection
+            .query_row("SELECT COUNT(*) FROM play_sessions WHERE game_id = 2", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .expect("count historical session");
+        assert_eq!(historical_sessions, 1);
+
+        let steam_refs = connection
+            .query_row(
+                "SELECT COUNT(*) FROM game_sources WHERE source_id = 'steam'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("count Steam refs");
+        assert_eq!(steam_refs, 1);
     }
 
     #[test]

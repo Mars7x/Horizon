@@ -13,7 +13,7 @@ The Phase 7 Steam slice provides:
 - source-backed Home cards instead of the old demo catalog;
 - launch dispatch through the source-neutral launch service and XDG OpenURI portal.
 
-It intentionally does **not** add Steam account authentication, Steam Web API calls, lifetime playtime, activity/session tracking, cloud data, achievements, or a production artwork cache. Those belong to later phases.
+The original Phase 7 slice intentionally deferred Steam account authentication, Steam Web API calls, lifetime playtime, cloud data, achievements, and production artwork. Phase 9.5.29 now adds local square artwork through the generic `Artwork` capability without adding Steam authentication or general runtime network access.
 
 ## Local metadata
 
@@ -79,7 +79,7 @@ The OpenURI launch path is a portal and requires no direct access to the Steam e
 
 After discovery/import, `LibraryService::games()` supplies durable `LibraryGame` values to `HomeController`. Slint receives only `GameCardData` presentation values; Steam IDs and source objects do not enter Slint.
 
-Phase 7 removes the hard-coded demo catalog. Real imported games currently use Horizon's procedural `FallbackCover` when production artwork has not been imported. The fallback is deliberately source-neutral. Real source artwork/cache policy remains a later feature rather than a Steam-specific UI exception.
+Phase 7 removed the hard-coded demo catalog. Since Phase 9.5.29, Home asks the generic `ArtworkService` for normalized 1:1 artwork and uses `FallbackCover` only when no usable source-owned image is available. Steam IDs/paths still never enter Slint.
 
 If no source-backed games exist, Home shows an explicit empty-library state and does not instantiate the carousel. Horizon does not reinsert fake demo rows into the production database or UI, and zero games must never leave title/shelf/focus geometry stranded on screen.
 
@@ -99,3 +99,69 @@ If any detected Steam root fails, the merged snapshot is deliberately partial an
 ## Phase 9.5 managed-session status
 
 Steam remains an external URI launch in Phase 9.5. The adapter does not advertise `ManagedSession`: invoking `steam://` from inside Gamescope would not prove that an already-running Steam client launches the actual game into that compositor. Steam will opt in only when Horizon can guarantee the real game session is managed rather than merely wrapping URI dispatch.
+
+## Phase 9.5.27 host runtime observation
+
+Steam now advertises `SourceCapability::RuntimeObservation` in addition to
+normal URI launch. This is separate from `ManagedSession`: Steam still does not
+claim that Horizon owns the actual game inside Gamescope.
+
+The same-user Horizon host helper resolves the Steam source/game identity and
+checks host `/proc` for Steam's per-game `reaper` command line containing the
+exact marker:
+
+```text
+SteamLaunch AppId=<appid>
+```
+
+Matching is numeric-AppID scoped and checks the token boundary, so AppID `440`
+will not match `4400`. The Flatpak never sends a PID, executable path, process
+name, or arbitrary search expression over D-Bus.
+
+The observer is armed only after the normal OpenURI launch dispatch succeeds.
+When the exact Steam reaper appears, Activity starts a `source_runtime` session;
+when it disappears, that session ends. Window focus is irrelevant, so an
+Alt-Tab into Horizon does not end Steam playtime.
+
+If the helper is absent, incompatible, or cannot provide the runtime observer,
+Steam remains launchable and Activity falls back to `ForegroundHandoff`.
+
+Implementation provenance: the lifecycle marker is visible in Steam launch
+logs and is also used by Lutris' Steam runner to follow native, Proton/Wine,
+and Flatpak Steam launches. Horizon's Rust implementation is independent and
+does not copy Lutris source code.
+
+References:
+
+- https://github.com/lutris/lutris/blob/master/lutris/runners/steam.py
+- https://github.com/ValveSoftware/steam-for-linux/issues/8308
+
+
+## Phase 9.5.29 square artwork
+
+Steam now advertises `SourceCapability::Artwork`. The adapter exposes only local
+Steam-owned icon candidates for the requested numeric AppID; generic presentation
+code never inspects Steam paths or hashes.
+
+Horizon checks `common.linuxclienticon` first for Steam's local
+`steam/games/<hash>.zip` container and exposes each contained PNG as a candidate.
+It also checks `common.clienticon` for `steam/games/<hash>.ico` and `common.icon`
+for modern `appcache/librarycache/<appid>/<hash>.jpg`/PNG entries. Steam's legacy
+`<appid>_icon.jpg`/PNG and newer per-AppID `icon.jpg`/PNG cache names remain
+fallbacks.
+
+The generic `ArtworkService` decodes all usable candidates and keeps the largest
+actual pixel-area source before enforcing Horizon's 1:1 presentation contract.
+This means a genuinely larger Linux/client/shortcut representation wins, while
+an old 32px ICO does not displace a 184px cached App Icon. Non-square input is padded to a square
+without stretching/cropping. Images above 512px are downscaled for Home; smaller
+source images are not pre-upscaled.
+
+Steam documents the compact App Icon as 184×184 JPG and the submitted Shortcut
+Icon as 256×256 or 512×512 PNG/ICO. Horizon therefore treats 184px as a fallback
+quality level, not a fixed ceiling, and uses whichever higher-resolution local
+square representation Steam has actually cached.
+
+No Steam artwork is bundled or redistributed by Horizon, and this phase does not
+add general network access to fetch missing CDN assets. See `ARTWORK.md` and ADR
+0049.

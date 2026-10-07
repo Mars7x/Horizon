@@ -10,7 +10,9 @@ use crate::{
     input::{ControllerStatus, InputManager, UiActionEvent},
     persistence::SqliteLibraryRepository,
     platform::{
-        data_paths, launcher::PortalLaunchExecutor, session_helper::DbusManagedSessionExecutor,
+        data_paths,
+        launcher::PortalLaunchExecutor,
+        session_helper::{DbusManagedSessionExecutor, DbusRuntimeObservationExecutor},
         slint_backend,
     },
     presentation::{
@@ -19,9 +21,11 @@ use crate::{
     },
     services::{
         activity::{ActivityService, ActivitySessionTransition, LaunchActivitySink},
+        artwork::ArtworkService,
         import::{SourceImportOutcome, SourceImportService},
         launch::GameLaunchService,
         library::LibraryService,
+        runtime::RuntimeObservationExecutor,
         session::{ManagedSessionExecutor, ManagedSessionTerminalState},
     },
     sources::production_source_registry,
@@ -37,7 +41,7 @@ pub fn run() -> Result<(), AppError> {
         )
         .init();
 
-    info!("starting Horizon phase 9.5.0");
+    info!("starting Horizon phase 9.5.29");
 
     let database_path = data_paths::library_database_path()?;
     let repository = SqliteLibraryRepository::open(&database_path)?;
@@ -135,6 +139,7 @@ pub fn run() -> Result<(), AppError> {
     );
 
     let registry = Rc::new(registry);
+    let artwork_service = ArtworkService::new(Rc::clone(&registry));
     let mut launch_service = GameLaunchService::new(
         Rc::clone(&registry),
         Rc::new(PortalLaunchExecutor),
@@ -156,11 +161,29 @@ pub fn run() -> Result<(), AppError> {
             );
         }
     }
+    match DbusRuntimeObservationExecutor::new() {
+        Ok(observer) => {
+            let available = observer.probe();
+            info!(
+                available,
+                "optional source-runtime host observer probe completed"
+            );
+            let observer: Rc<dyn RuntimeObservationExecutor> = Rc::new(observer);
+            launch_service = launch_service.with_runtime_observer(observer);
+        }
+        Err(error) => {
+            warn!(
+                %error,
+                "source-runtime D-Bus client could not initialize; foreground handoff remains available"
+            );
+        }
+    }
     let launch_service = Rc::new(launch_service);
     let launch_activity: Rc<dyn LaunchActivitySink> = activity_service.clone();
     let home = HomeController::new(
         &ui,
         library_games,
+        &artwork_service,
         Rc::clone(&launch_service),
         launch_activity,
     );
@@ -226,6 +249,71 @@ pub fn run() -> Result<(), AppError> {
                     Ok(overview) => ActivityController::publish(&ui, &overview),
                     Err(error) => warn!(%error, "Activity overview could not be refreshed"),
                 }
+            }
+        }
+    });
+
+    // External URI launchers (Steam/Heroic) can bounce activation back
+    // to Horizon briefly during startup. ActivityService treats that as a
+    // candidate return; confirm it only after the candidate remains stable.
+    let foreground_return_timer = Timer::default();
+    let foreground_activity = Rc::clone(&activity_service);
+    let foreground_ui = ui.as_weak();
+    foreground_return_timer.start(
+        TimerMode::Repeated,
+        Duration::from_millis(250),
+        move || match foreground_activity.poll_foreground_return() {
+            Ok(ActivitySessionTransition::Completed(_)) => {
+                let Some(ui) = foreground_ui.upgrade() else {
+                    return;
+                };
+                match foreground_activity.overview(
+                    ActivityController::recent_session_limit(),
+                    ActivityController::top_game_limit(),
+                ) {
+                    Ok(overview) => ActivityController::publish(&ui, &overview),
+                    Err(error) => warn!(%error, "Activity overview could not be refreshed"),
+                }
+            }
+            Ok(_) => {}
+            Err(error) => {
+                warn!(%error, "foreground activity return could not be confirmed");
+            }
+        },
+    );
+
+    // Source-owned runtime observation is independent of Horizon window focus.
+    // Steam uses its exact AppID-scoped host reaper lifecycle when the helper
+    // is available, so Alt-Tabbing to Horizon does not terminate playtime.
+    let runtime_observation_timer = Timer::default();
+    let runtime_launch_service = Rc::clone(&launch_service);
+    let runtime_activity = Rc::clone(&activity_service);
+    let runtime_ui = ui.as_weak();
+    runtime_observation_timer.start(TimerMode::Repeated, Duration::from_millis(500), move || {
+        let events = runtime_launch_service.poll_runtime_observations();
+        if events.is_empty() {
+            return;
+        }
+
+        let mut refresh_activity = false;
+        for event in events {
+            match runtime_activity.handle_runtime_observation_event(&event) {
+                Ok(transition) => refresh_activity |= transition.changed(),
+                Err(error) => {
+                    warn!(%error, ?event, "source-runtime activity transition could not be persisted");
+                }
+            }
+        }
+
+        if refresh_activity
+            && let Some(ui) = runtime_ui.upgrade()
+        {
+            match runtime_activity.overview(
+                ActivityController::recent_session_limit(),
+                ActivityController::top_game_limit(),
+            ) {
+                Ok(overview) => ActivityController::publish(&ui, &overview),
+                Err(error) => warn!(%error, "Activity overview could not be refreshed"),
             }
         }
     });
@@ -297,6 +385,8 @@ pub fn run() -> Result<(), AppError> {
     let _clock = clock;
     let _navigation = navigation;
     let _input = input;
+    let _foreground_return_timer = foreground_return_timer;
+    let _runtime_observation_timer = runtime_observation_timer;
     let _managed_session_timer = managed_session_timer;
 
     ui.run()?;

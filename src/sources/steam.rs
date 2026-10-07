@@ -2,20 +2,22 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     env,
     fs,
-    io,
+    io::{self, Read},
     path::{Path, PathBuf},
+    sync::Mutex,
 };
 
 use steam_vdf_parser::{Obj, parse_appinfo, parse_text};
 use thiserror::Error;
 use tracing::{debug, warn};
+use zip::ZipArchive;
 
 use crate::domain::{DomainValidationError, ExternalGameId, GameTitle, SourceId};
 
 use super::{
-    GameSource, SourceCapability, SourceDescriptor, SourceDiscovery, SourceError, SourceGame,
-    SourceInitializationError, SourceLaunchTarget, SourceSnapshot, SourceSnapshotError,
-    SourceUnavailableReason,
+    GameSource, SourceArtworkCandidate, SourceCapability, SourceDescriptor, SourceDiscovery,
+    SourceError, SourceGame, SourceInitializationError, SourceLaunchTarget, SourceRuntimeState,
+    SourceSnapshot, SourceSnapshotError, SourceUnavailableReason,
 };
 
 const STEAM_SOURCE_ID: &str = "steam";
@@ -60,6 +62,7 @@ struct SteamRootDiscovery {
 pub struct SteamSource {
     descriptor: SourceDescriptor,
     roots: Vec<PathBuf>,
+    artwork_hashes: Mutex<BTreeMap<String, SteamArtworkHashes>>,
 }
 
 impl SteamSource {
@@ -67,12 +70,17 @@ impl SteamSource {
         let descriptor = SourceDescriptor::new(
             SourceId::new(STEAM_SOURCE_ID)?,
             STEAM_DISPLAY_NAME,
-            vec![SourceCapability::Launch],
+            vec![
+                SourceCapability::Launch,
+                SourceCapability::RuntimeObservation,
+                SourceCapability::Artwork,
+            ],
         )?;
 
         Ok(Self {
             descriptor,
             roots: default_steam_roots(),
+            artwork_hashes: Mutex::new(BTreeMap::new()),
         })
     }
 
@@ -81,6 +89,28 @@ impl SteamSource {
         let mut source = Self::new()?;
         source.roots = roots;
         Ok(source)
+    }
+
+    fn remember_artwork_hashes(&self, app_id: &str, common: Option<&Obj<'_>>) {
+        let Some(common) = common else {
+            return;
+        };
+        let hashes = SteamArtworkHashes::from_common(common);
+        if hashes.is_empty() {
+            return;
+        }
+
+        if let Ok(mut cache) = self.artwork_hashes.lock() {
+            cache.insert(app_id.to_owned(), hashes);
+        }
+    }
+
+    fn cached_artwork_hashes(&self, app_id: &str) -> SteamArtworkHashes {
+        self.artwork_hashes
+            .lock()
+            .ok()
+            .and_then(|cache| cache.get(app_id).cloned())
+            .unwrap_or_default()
     }
 
     fn discover_root(&self, root: &Path) -> Result<SteamRootDiscovery, SteamDiscoveryError> {
@@ -163,6 +193,7 @@ impl SteamSource {
                 .and_then(|root| root.get(&app_id))
                 .and_then(|value| value.as_obj())
                 .and_then(appinfo_common);
+            self.remember_artwork_hashes(&app_id, common);
             let app_type = common
                 .and_then(|common| common.get("type"))
                 .and_then(|value| value.as_str());
@@ -301,6 +332,230 @@ impl GameSource for SteamSource {
             "steam://rungameid/{}",
             external_id.as_str()
         ))))
+    }
+
+    fn runtime_state(
+        &self,
+        external_id: &ExternalGameId,
+    ) -> Result<Option<SourceRuntimeState>, SourceError> {
+        let app_id = external_id.as_str();
+        if app_id.parse::<u32>().is_err() {
+            return Err(SourceError::new(SteamDiscoveryError::InvalidAppId(
+                app_id.to_owned(),
+            )));
+        }
+
+        let running = steam_reaper_is_running(app_id).map_err(SourceError::new)?;
+        Ok(Some(if running {
+            SourceRuntimeState::Running
+        } else {
+            SourceRuntimeState::Stopped
+        }))
+    }
+
+    fn artwork_candidates(
+        &self,
+        external_id: &ExternalGameId,
+    ) -> Result<Vec<SourceArtworkCandidate>, SourceError> {
+        let app_id = external_id.as_str();
+        if app_id.parse::<u32>().is_err() {
+            return Err(SourceError::new(SteamDiscoveryError::InvalidAppId(
+                app_id.to_owned(),
+            )));
+        }
+
+        let mut candidates = Vec::new();
+        let mut seen = BTreeSet::new();
+        let hashes = self.cached_artwork_hashes(app_id);
+        for root in self.roots.iter().filter(|root| looks_like_steam_root(root)) {
+            if let Some(hash) = &hashes.linux_client_icon {
+                let archive_path = root.join("steam/games").join(format!("{hash}.zip"));
+                if archive_path.is_file() && seen.insert(archive_path.clone()) {
+                    candidates.extend(steam_linux_icon_archive_candidates(&archive_path));
+                }
+            }
+
+            for path in steam_artwork_paths(root, app_id, &hashes) {
+                if path.is_file() && seen.insert(path.clone()) {
+                    candidates.push(SourceArtworkCandidate::local_square_icon(path));
+                }
+            }
+        }
+
+        Ok(candidates)
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct SteamArtworkHashes {
+    app_icon: Option<String>,
+    client_icon: Option<String>,
+    linux_client_icon: Option<String>,
+}
+
+impl SteamArtworkHashes {
+    fn from_common(common: &Obj<'_>) -> Self {
+        Self {
+            app_icon: artwork_hash(common, "icon"),
+            client_icon: artwork_hash(common, "clienticon"),
+            linux_client_icon: artwork_hash(common, "linuxclienticon"),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.app_icon.is_none()
+            && self.client_icon.is_none()
+            && self.linux_client_icon.is_none()
+    }
+}
+
+fn artwork_hash(common: &Obj<'_>, key: &str) -> Option<String> {
+    common
+        .get(key)
+        .and_then(|value| value.as_str())
+        .filter(|hash| is_sha1_hash(hash))
+        .map(ToOwned::to_owned)
+}
+
+fn steam_artwork_paths(
+    root: &Path,
+    app_id: &str,
+    hashes: &SteamArtworkHashes,
+) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+
+    // Steam's client/shortcut icon container may contain a substantially larger
+    // square representation than the 184px compact app icon. The generic
+    // artwork service decodes every available candidate and chooses the largest
+    // actual pixel area, so low-resolution ICOs cannot beat a better cache JPG.
+    if let Some(hash) = &hashes.client_icon {
+        paths.push(root.join("steam/games").join(format!("{hash}.ico")));
+    }
+
+    let library_cache = root.join("appcache/librarycache");
+    let nested = library_cache.join(app_id);
+    if let Some(hash) = &hashes.app_icon {
+        paths.push(nested.join(format!("{hash}.jpg")));
+        paths.push(nested.join(format!("{hash}.png")));
+    }
+
+    // Steam has used both the legacy flat filename and newer per-AppID cache
+    // layouts. Keep these local-only fallbacks so artwork still works when
+    // appinfo is temporarily unavailable or a client version omits the hash.
+    paths.push(library_cache.join(format!("{app_id}_icon.jpg")));
+    paths.push(library_cache.join(format!("{app_id}_icon.png")));
+    paths.push(nested.join("icon.jpg"));
+    paths.push(nested.join("icon.png"));
+
+    paths
+}
+
+const MAX_STEAM_ICON_ARCHIVE_ENTRY_BYTES: u64 = 16 * 1024 * 1024;
+
+fn steam_linux_icon_archive_candidates(path: &Path) -> Vec<SourceArtworkCandidate> {
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) => {
+            debug!(
+                path = %path.display(),
+                %error,
+                "optional Steam Linux client icon archive could not be opened"
+            );
+            return vec![];
+        }
+    };
+    let mut archive = match ZipArchive::new(file) {
+        Ok(archive) => archive,
+        Err(error) => {
+            debug!(
+                path = %path.display(),
+                %error,
+                "optional Steam Linux client icon archive could not be parsed"
+            );
+            return vec![];
+        }
+    };
+
+    let mut candidates = Vec::new();
+    for index in 0..archive.len() {
+        let mut entry = match archive.by_index(index) {
+            Ok(entry) => entry,
+            Err(error) => {
+                debug!(
+                    path = %path.display(),
+                    index,
+                    %error,
+                    "Steam Linux client icon archive entry could not be read"
+                );
+                continue;
+            }
+        };
+
+        if !entry.is_file()
+            || !entry.name().to_ascii_lowercase().ends_with(".png")
+            || entry.size() > MAX_STEAM_ICON_ARCHIVE_ENTRY_BYTES
+        {
+            continue;
+        }
+
+        let mut bytes = Vec::with_capacity(entry.size() as usize);
+        match entry.read_to_end(&mut bytes) {
+            Ok(_) if !bytes.is_empty() => {
+                candidates.push(SourceArtworkCandidate::in_memory_square_icon(bytes));
+            }
+            Ok(_) => {}
+            Err(error) => {
+                debug!(
+                    path = %path.display(),
+                    entry = entry.name(),
+                    %error,
+                    "Steam Linux client icon PNG could not be read"
+                );
+            }
+        }
+    }
+
+    candidates
+}
+
+fn is_sha1_hash(value: &str) -> bool {
+    value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn steam_reaper_is_running(app_id: &str) -> Result<bool, SteamDiscoveryError> {
+    let entries = fs::read_dir("/proc").map_err(|source| SteamDiscoveryError::Read {
+        path: PathBuf::from("/proc"),
+        source,
+    })?;
+
+    Ok(entries.filter_map(Result::ok).any(|entry| {
+        let Some(pid) = entry.file_name().to_str().map(ToOwned::to_owned) else {
+            return false;
+        };
+        if !pid.bytes().all(|byte| byte.is_ascii_digit()) {
+            return false;
+        }
+
+        fs::read(entry.path().join("cmdline"))
+            .ok()
+            .is_some_and(|cmdline| steam_reaper_cmdline_matches(&cmdline, app_id))
+    }))
+}
+
+fn steam_reaper_cmdline_matches(cmdline: &[u8], app_id: &str) -> bool {
+    let text = String::from_utf8_lossy(cmdline).replace('\0', " ");
+    if !text.contains("reaper") {
+        return false;
+    }
+
+    let marker = format!("SteamLaunch AppId={app_id}");
+    let Some(index) = text.find(&marker) else {
+        return false;
+    };
+    let after = text[index + marker.len()..].chars().next();
+    match after {
+        None => true,
+        Some(character) => character.is_whitespace(),
     }
 }
 
@@ -730,6 +985,46 @@ mod tests {
     }
 
     #[test]
+    fn steam_advertises_runtime_observation_without_managed_session() {
+        let source = SteamSource::with_roots(vec![]).expect("source");
+        assert!(source.descriptor().supports(SourceCapability::Launch));
+        assert!(
+            source
+                .descriptor()
+                .supports(SourceCapability::RuntimeObservation)
+        );
+        assert!(source.descriptor().supports(SourceCapability::Artwork));
+        assert!(
+            !source
+                .descriptor()
+                .supports(SourceCapability::ManagedSession)
+        );
+    }
+
+    #[test]
+    fn artwork_candidates_include_local_steam_icon_cache_fallbacks() {
+        let root = temp_dir("artwork-cache");
+        fs::create_dir_all(root.join("steamapps")).expect("steamapps");
+        let cache = root.join("appcache/librarycache");
+        fs::create_dir_all(&cache).expect("library cache");
+        let icon = cache.join("480_icon.jpg");
+        fs::write(&icon, b"not decoded by source adapter").expect("icon marker");
+
+        let source = SteamSource::with_roots(vec![root.clone()]).expect("source");
+        let candidates = source
+            .artwork_candidates(&ExternalGameId::new("480").expect("appid"))
+            .expect("artwork candidates");
+
+        assert!(candidates.iter().any(|candidate| {
+            matches!(
+                candidate.location(),
+                crate::sources::SourceArtworkLocation::File(path) if path == &icon
+            )
+        }));
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
     fn launch_target_uses_steam_uri_for_numeric_app_id() {
         let source = SteamSource::with_roots(vec![]).expect("source");
         let target = source
@@ -740,5 +1035,16 @@ mod tests {
             target,
             SourceLaunchTarget::Uri("steam://rungameid/570".into())
         );
+    }
+
+    #[test]
+    fn steam_reaper_match_uses_exact_app_id_boundary() {
+        let matching = b"/home/test/Steam/ubuntu12_32/reaper\0SteamLaunch\0AppId=1462040\0--\0game";
+        let collision = b"/home/test/Steam/ubuntu12_32/reaper\0SteamLaunch\0AppId=14620400\0--\0game";
+        let unrelated = b"/usr/bin/game\0SteamLaunch\0AppId=1462040\0";
+
+        assert!(steam_reaper_cmdline_matches(matching, "1462040"));
+        assert!(!steam_reaper_cmdline_matches(collision, "1462040"));
+        assert!(!steam_reaper_cmdline_matches(unrelated, "1462040"));
     }
 }
