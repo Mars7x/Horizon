@@ -140,3 +140,15 @@ Route motion is limited to opacity plus a small vertical settle using `Metrics.p
 Retaining the route components lets outgoing and incoming pages overlap for a real crossfade and preserves transient presentation-only state. Durable state must still live in the existing Rust controllers/domain layers; retained Slint component state must never become a substitute for application state.
 
 See ADR 0034.
+
+
+## Phase 4.7 shell-hardening boundary
+
+Phase 4.7 does not add a new application layer. It strengthens existing boundaries:
+
+- `src/input/sdl.rs` treats gamepad add/remove as topology changes and clears device-derived hold/repeat latches there; presentation never receives raw device lifecycle state.
+- `src/navigation/RouteFocusMemory` enforces route-valid focus snapshots instead of requiring every caller to remember which routes expose shell chrome.
+- `presentation::NavigationController` publishes the active route plus the immediate transition source. Slint uses that pair only to bound visual overlap; route history remains exclusively in `Navigator`.
+- `AppWindow` keeps responsive sizing presentation-only and guards transient zero-sized surfaces without changing the 1280×720 reference-space contract.
+
+Stress coverage stays framework-independent where possible: deep route/back-stack churn, global Home reset, focus normalization, spatial helper bounds, and input latch resets are pure Rust tests. See ADR 0036 and `SHELL_HARDENING.md`.

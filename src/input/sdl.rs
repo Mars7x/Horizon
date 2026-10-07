@@ -292,13 +292,13 @@ impl SdlState {
         }
     }
 
-    fn open_gamepad(&mut self, id: sdl3::joystick::JoystickId) {
+    fn open_gamepad(&mut self, id: sdl3::joystick::JoystickId) -> bool {
         let already_open = self
             .open_gamepads
             .iter()
             .any(|gamepad| gamepad.id().is_ok_and(|open_id| open_id == id));
         if already_open {
-            return;
+            return false;
         }
 
         match self.gamepad_subsystem.open(id) {
@@ -308,24 +308,35 @@ impl SdlState {
                     .unwrap_or_else(|| "Unknown gamepad".to_owned());
                 info!(controller = %name, "gamepad connected");
                 self.open_gamepads.push(gamepad);
+                true
             }
             Err(error) => {
                 warn!(%error, "failed to open gamepad");
+                false
             }
         }
     }
 
-    fn remove_disconnected_gamepads(&mut self) {
+    fn remove_gamepad(&mut self, id: sdl3::joystick::JoystickId) -> bool {
         let before = self.open_gamepads.len();
-        self.open_gamepads.retain(Gamepad::connected);
+        self.open_gamepads.retain(|gamepad| {
+            let removed_device = gamepad.id().is_ok_and(|open_id| open_id == id);
+            !removed_device && gamepad.connected()
+        });
         let removed = before.saturating_sub(self.open_gamepads.len());
         if removed > 0 {
             info!(removed, "gamepad disconnected");
         }
-        if self.open_gamepads.is_empty() {
-            self.analog_navigation.reset();
-            self.digital_navigation.reset();
-        }
+        removed > 0
+    }
+
+    /// Device topology changes invalidate held-button/axis state. SDL may never
+    /// deliver the matching button-up or centered-axis event for a controller
+    /// that disappears, so carrying those latches across disconnect/reconnect
+    /// can create phantom navigation.
+    fn reset_navigation_state(&mut self) {
+        self.analog_navigation.reset();
+        self.digital_navigation.reset();
     }
 
     fn status(&self) -> ControllerStatus {
@@ -371,12 +382,17 @@ fn poll_gamepad_events(
                 }
             }
             Event::GamepadAdded { which, .. } => {
-                state.open_gamepad(which);
-                status_changed = true;
+                if state.open_gamepad(which) {
+                    state.reset_navigation_state();
+                    status_changed = true;
+                }
             }
-            Event::GamepadRemoved { .. } => {
-                state.remove_disconnected_gamepads();
-                status_changed = true;
+            Event::GamepadRemoved { which, .. } => {
+                let removed = state.remove_gamepad(which);
+                // Reset even if SDL's bookkeeping has already dropped the
+                // handle: the removal event itself invalidates held state.
+                state.reset_navigation_state();
+                status_changed |= removed;
             }
             _ => {}
         }
@@ -526,6 +542,30 @@ mod tests {
             navigation.repeat_due(now + DIGITAL_INITIAL_REPEAT_DELAY + Duration::from_millis(200)),
             None
         );
+    }
+
+    #[test]
+    fn topology_change_reset_clears_all_held_navigation_state() {
+        let now = Instant::now();
+        let mut analog = AnalogNavigation::default();
+        let mut digital = DigitalNavigation::default();
+
+        assert_eq!(
+            analog.axis_motion(Axis::LeftX, 24_000, now),
+            Some(UiAction::Right)
+        );
+        assert_eq!(digital.press(UiAction::Down, now), Some(UiAction::Down));
+
+        analog.reset();
+        digital.reset();
+
+        assert_eq!(analog.active_direction, None);
+        assert_eq!(analog.next_repeat, None);
+        assert_eq!(analog.left_x, 0);
+        assert_eq!(analog.left_y, 0);
+        assert_eq!(digital.active_direction, None);
+        assert_eq!(digital.next_repeat, None);
+        assert!(!digital.up && !digital.down && !digital.left && !digital.right);
     }
 }
 

@@ -59,7 +59,7 @@ impl NavigationController {
         self.remember_focus_for_route(from);
         if self.navigator.borrow_mut().navigate_to(route) {
             debug!(?from, to = ?route, "route changed");
-            self.publish_route(ui);
+            self.publish_route_change(ui, from, route);
             self.restore_focus_for_route(ui, route);
         }
     }
@@ -146,7 +146,7 @@ impl NavigationController {
         if self.navigator.borrow_mut().go_back() {
             let to = self.current_route();
             debug!(?from, ?to, "Back restored previous route and focus");
-            self.publish_route(ui);
+            self.publish_route_change(ui, from, to);
             self.restore_focus_for_route(ui, to);
         } else {
             debug!(route = ?from, "Back ignored at navigation root");
@@ -177,7 +177,7 @@ impl NavigationController {
                 to = ?AppRoute::Home,
                 "Home reset top-level navigation, content focus, and first-game selection"
             );
-            self.publish_route(ui);
+            self.publish_route_change(ui, from, AppRoute::Home);
         }
     }
 
@@ -282,28 +282,29 @@ impl NavigationController {
     }
 
     fn remember_focus_for_route(&self, route: AppRoute) {
-        let snapshot = self.focus.borrow().snapshot();
-        let remembered = if route.uses_shell_chrome() {
-            snapshot
-        } else {
-            snapshot.as_content()
-        };
-        self.focus_memory.borrow_mut().remember(route, remembered);
+        self.focus_memory
+            .borrow_mut()
+            .remember(route, self.focus.borrow().snapshot());
     }
 
     fn restore_focus_for_route(&self, ui: &AppWindow, route: AppRoute) {
         let snapshot = self.focus_memory.borrow().recall(route);
-        let restored = if route.uses_shell_chrome() {
-            snapshot
-        } else {
-            snapshot.as_content()
-        };
-        self.focus.borrow_mut().restore(restored);
+        self.focus.borrow_mut().restore(snapshot);
         self.publish_focus(ui);
     }
 
     fn publish_route(&self, ui: &AppWindow) {
-        ui.set_current_route(route_view(self.current_route()));
+        let route = self.current_route();
+        ui.set_transition_from_route(route_view(route));
+        ui.set_current_route(route_view(route));
+    }
+
+    /// Publish exactly one outgoing route for the visual transition layer.
+    /// Older outgoing pages are dropped immediately when rapid navigation
+    /// retargets the shell, preventing several half-faded pages from stacking.
+    fn publish_route_change(&self, ui: &AppWindow, from: AppRoute, to: AppRoute) {
+        ui.set_transition_from_route(route_view(from));
+        ui.set_current_route(route_view(to));
     }
 
     fn publish_focus(&self, ui: &AppWindow) {

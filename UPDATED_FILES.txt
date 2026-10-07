@@ -1,0 +1,19 @@
+Phase 4.7 updated/new files
+
+AGENTS.md
+docs/APPEARANCE.md
+docs/ARCHITECTURE.md
+docs/HOME_UI.md
+docs/INPUT.md
+docs/NAVIGATION.md
+docs/SHELL_HARDENING.md (new)
+docs/adr/0034-reduced-motion-page-transitions.md
+docs/adr/0036-shell-hardening.md (new)
+src/app.rs
+src/input/sdl.rs
+src/navigation/mod.rs
+src/presentation/navigation.rs
+ui/app.slint
+ui/components/page-transition-layer.slint
+
+Deleted files: none.

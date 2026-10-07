@@ -31,15 +31,33 @@ export component AppWindow inherits Window {
     // use every available pixel instead of letterboxing a fixed 1280×720 box.
     private property <float> width-scale: root.width / Metrics.design-width;
     private property <float> height-scale: root.height / Metrics.design-height;
-    private property <float> ui-scale: root.width-scale < root.height-scale
+    private property <float> raw-ui-scale: root.width-scale < root.height-scale
         ? root.width-scale
         : root.height-scale;
-    private property <length> logical-width: root.width / root.ui-scale;
-    private property <length> logical-height: root.height / root.ui-scale;
+    // Some compositors briefly report a zero-sized surface while minimizing or
+    // changing fullscreen state. Fall back to the reference surface instead of
+    // dividing by zero; normal non-zero sizes use the exact existing scale.
+    private property <float> ui-scale: root.raw-ui-scale > 0.0
+        ? root.raw-ui-scale
+        : 1.0;
+    private property <length> logical-width: root.raw-ui-scale > 0.0
+        ? root.width / root.ui-scale
+        : Metrics.design-width;
+    private property <length> logical-height: root.raw-ui-scale > 0.0
+        ? root.height / root.ui-scale
+        : Metrics.design-height;
+    private property <length> shell-content-height:
+        root.logical-height > Metrics.top-chrome-height + Metrics.footer-height
+        ? root.logical-height - Metrics.top-chrome-height - Metrics.footer-height
+        : 0px;
 
     // Rust owns route history/policy. Slint only presents the active route from
     // the published presentation enum and may animate that presentation.
     in property <AppRouteView> current-route: AppRouteView.home;
+    // Rust publishes only the immediate source route. This lets rapid route
+    // changes keep a single outgoing crossfade instead of accumulating several
+    // half-visible retained pages.
+    in property <AppRouteView> transition-from-route: AppRouteView.home;
     in property <bool> top-utilities-focused: false;
     in property <int> focused-utility-index: 2;
     in property <bool> shell-menu-open: false;
@@ -108,8 +126,10 @@ export component AppWindow inherits Window {
                 x: 0px;
                 base-y: Metrics.top-chrome-height;
                 width: parent.width;
-                height: parent.height - Metrics.top-chrome-height - Metrics.footer-height;
+                height: root.shell-content-height;
                 active: root.current-route == AppRouteView.home;
+                outgoing: root.current-route != AppRouteView.home
+                    && root.transition-from-route == AppRouteView.home;
 
                 HomePage {
                     width: parent.width;
@@ -133,8 +153,10 @@ export component AppWindow inherits Window {
                 x: 0px;
                 base-y: Metrics.top-chrome-height;
                 width: parent.width;
-                height: parent.height - Metrics.top-chrome-height - Metrics.footer-height;
+                height: root.shell-content-height;
                 active: root.current-route == AppRouteView.library;
+                outgoing: root.current-route != AppRouteView.library
+                    && root.transition-from-route == AppRouteView.library;
 
                 LibraryPage {
                     width: parent.width;
@@ -149,6 +171,8 @@ export component AppWindow inherits Window {
                 width: parent.width;
                 height: parent.height;
                 active: root.current-route == AppRouteView.friends;
+                outgoing: root.current-route != AppRouteView.friends
+                    && root.transition-from-route == AppRouteView.friends;
 
                 UtilitySubmenuPage {
                     width: parent.width;
@@ -163,6 +187,8 @@ export component AppWindow inherits Window {
                 width: parent.width;
                 height: parent.height;
                 active: root.current-route == AppRouteView.album;
+                outgoing: root.current-route != AppRouteView.album
+                    && root.transition-from-route == AppRouteView.album;
 
                 UtilitySubmenuPage {
                     width: parent.width;
@@ -177,6 +203,8 @@ export component AppWindow inherits Window {
                 width: parent.width;
                 height: parent.height;
                 active: root.current-route == AppRouteView.activity;
+                outgoing: root.current-route != AppRouteView.activity
+                    && root.transition-from-route == AppRouteView.activity;
 
                 UtilitySubmenuPage {
                     width: parent.width;
@@ -191,6 +219,8 @@ export component AppWindow inherits Window {
                 width: parent.width;
                 height: parent.height;
                 active: root.current-route == AppRouteView.web;
+                outgoing: root.current-route != AppRouteView.web
+                    && root.transition-from-route == AppRouteView.web;
 
                 UtilitySubmenuPage {
                     width: parent.width;
@@ -205,6 +235,8 @@ export component AppWindow inherits Window {
                 width: parent.width;
                 height: parent.height;
                 active: root.current-route == AppRouteView.settings;
+                outgoing: root.current-route != AppRouteView.settings
+                    && root.transition-from-route == AppRouteView.settings;
 
                 UtilitySubmenuPage {
                     width: parent.width;

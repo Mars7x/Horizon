@@ -28,5 +28,5 @@ Route components remain instantiated after fading out. This permits the outgoing
 - Reduced Motion produces an immediate page swap with identical navigation semantics.
 - Pointer input cannot leak to the outgoing page while it remains visible.
 - The retained shell route pages remain instantiated. This is acceptable for the fixed shell route set; production pages must keep expensive work in services/models rather than tying it to component visibility.
-- Rapid route changes naturally retarget the same animated properties; Phase 4.7 will stress-test rapid navigation and back-stack behavior.
+- Rapid route changes retarget the same animated properties. Phase 4.7/ADR 0036 additionally limits overlap to the active page plus one immediate outgoing page so repeated retargeting cannot accumulate stale fading layers.
 - No new third-party code or assets are introduced.

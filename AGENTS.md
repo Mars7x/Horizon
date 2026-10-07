@@ -221,7 +221,7 @@ Use an Architecture Decision Record when a change introduces or reverses a signi
 
 ## Current phase boundary
 
-The repository currently contains work through **Phase 4.6**.
+The repository currently contains work through **Phase 4.7**.
 
 Implemented:
 
@@ -261,10 +261,14 @@ Implemented:
 - tested keyboard/controller mappings for global shell actions
 - restrained routed-page crossfade/settle transitions driven by design-system motion tokens
 - Reduced Motion disables route animation through `Motion.page-duration` without changing navigation semantics
+- controller topology changes clear held analog/D-pad navigation state to prevent phantom repeat after disconnect/reconnect
+- rapid route retargeting permits only the active route and one immediate outgoing transition layer
+- route focus memory enforces route-valid focus snapshots at its own boundary
+- responsive shell math guards transient zero-sized surfaces while preserving windowed/fullscreen/ultrawide fill behavior
+- deep route/back-stack, focus-normalization, spatial-boundary, and input-reset stress tests
 
 Not yet implemented:
 
-- Phase 4.7 shell hardening/stress coverage
 - SQLite library
 - real game importers
 - launching
@@ -275,7 +279,7 @@ Do not prematurely implement later-phase behavior as a shortcut while working on
 
 ## Phase 4 target
 
-Phase 4 should establish the application navigation shell without adding persistence or real game sources. **Phase 4.6 is complete for route/focus restoration, global action policy, and reduced-motion-aware page transitions; Phase 4.7 is the remaining shell-hardening pass:**
+Phase 4 establishes the application navigation shell without adding persistence or real game sources. **Phase 4.7 completes the shell with hardening for controller topology changes, responsive-window edge cases, rapid route retargeting, focus validity, and stress-tested Back/Home semantics:**
 
 1. Define Rust-owned navigation state for Home, Library, and the five routed utility submenus.
 2. Define focus regions so Up/Down/Left/Right have deterministic screen-level behavior.
@@ -587,3 +591,13 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
 - Retained inactive pages must not render active-route selection chrome. In particular, outgoing Home must hide its game focus brackets/title treatment as soon as `current-route` leaves Home, even while the page is still fading.
 - Route components stay instantiated across navigation so crossfades can overlap and route-local presentation state can survive navigation. Do not move durable application state out of Rust into those retained Slint components.
 - Keep the transition restrained: no zoom, blur, bounce, parallax, or long travel. See ADR 0034 and ADR 0035.
+
+
+## Phase 4.7 shell-hardening invariants
+
+- SDL gamepad add/remove is a topology boundary. Reset analog-stick and D-pad held/repeat state on topology changes so disconnect/reconnect cannot carry phantom input into the new device set. Do not move device lifecycle handling above `src/input/sdl.rs`.
+- `RouteFocusMemory` is responsible for route-valid snapshots. Full-shell `Utility(...)` routes must normalize to content focus inside the navigation abstraction; callers must not reintroduce per-route focus fixups.
+- Rust publishes both the active route and exactly one immediate transition source route. `PageTransitionLayer` may keep only that source visible while fading. Rapid navigation must immediately drop any older outgoing retained route so partially faded pages cannot accumulate.
+- The back stack remains independent of animation state. Rapid navigation and Back must be deterministic even when visual transitions are still in flight. Global Home remains a hard reset of history, Home content focus, and first-title selection.
+- Responsive sizing keeps one uniform visual scale and an expanded logical viewport. Guard transient zero-sized compositor surfaces and non-negative content bounds; do not solve resize/fullscreen issues with fixed root dimensions, letterboxing, or non-uniform tile scaling.
+- Phase 4.7 stress behavior is documented in `docs/SHELL_HARDENING.md` and ADR 0036.

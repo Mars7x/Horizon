@@ -121,8 +121,17 @@ Retained inactive pages cannot receive pointer input. Route-specific selection v
 
 Reduced Motion uses the same navigation path: `Motion.page-duration` becomes `0ms`, making the route presentation update immediately.
 
-## Next pass
+## Phase 4.7 shell hardening
 
-Phase 4.7 hardens controller disconnect/reconnect, resize/fullscreen and ultrawide behavior, focus restoration under stress, rapid navigation, and route/back-stack tests.
+Phase 4.7 keeps the route model unchanged and hardens its failure/stress cases:
 
-The current utility-route decision is documented by ADR 0035, which supersedes the transient-overlay portion of ADR 0030.
+- Rust publishes the immediate transition source route alongside the active route, so rapid navigation permits exactly one outgoing crossfade. Older outgoing retained pages are hidden immediately instead of stacking several partially visible surfaces.
+- `RouteFocusMemory` normalizes snapshots at its own boundary. Full-shell utility routes can never persist hidden top-row focus even if a future caller passes an invalid snapshot.
+- deep and rapidly changing route histories are covered by pure Rust stress tests; Back must unwind exactly in reverse order and global Home must clear the entire history.
+- responsive geometry guards transient zero-sized compositor surfaces and never produces a negative central content height.
+
+The current utility-route decision is documented by ADR 0035, which supersedes the transient-overlay portion of ADR 0030. Phase 4.7 hardening is documented by ADR 0036 and `SHELL_HARDENING.md`.
+
+## Next phase
+
+Phase 5 introduces the domain model and SQLite persistence. Shell behavior established through Phase 4.7 should remain stable while real library data is introduced.

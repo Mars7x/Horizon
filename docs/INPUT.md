@@ -160,3 +160,10 @@ Canonical mappings:
 
 The adapters only produce `UiAction`; `NavigationController` owns meaning. Back closes the global shell Menu when open, then falls through to normal route history. All five top utilities are real routed submenu destinations, so there is no separate utility-overlay modal priority. Menu toggles Horizon's shell Menu without mutating route history. Home closes the shell Menu and resets navigation to Home content focus with the first Home game selected. Unit tests cover both keyboard and SDL mappings so the two input paths cannot silently drift.
 
+
+
+## Phase 4.7 controller-topology hardening
+
+SDL device topology changes invalidate held navigation state. On any successful gamepad addition or any gamepad removal event, the SDL adapter resets both analog and D-pad direction/repeat latches before subsequent input is processed. This prevents a disconnected controller from leaving a phantom held direction when another controller remains connected or when the device reconnects without delivering the matching release/center event.
+
+The connected-controller count changes only when Horizon actually opens or removes a gamepad handle. Screen and presentation code remain unaware of SDL device IDs. Hardware-independent tests verify that topology reset returns both repeat engines to neutral state.

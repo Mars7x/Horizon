@@ -179,6 +179,20 @@ impl FocusSnapshot {
             utility: self.utility,
         }
     }
+
+    /// Return a focus snapshot that is valid for the route that will own it.
+    ///
+    /// Full-shell utility submenus never expose the persistent top utility row,
+    /// so they must never retain or restore `TopUtilities` as their active focus
+    /// region. Keeping this normalization with the snapshot type makes the
+    /// invariant impossible for callers to accidentally bypass.
+    pub const fn normalized_for_route(self, route: AppRoute) -> Self {
+        if route.uses_shell_chrome() {
+            self
+        } else {
+            self.as_content()
+        }
+    }
 }
 
 /// Last durable shell-focus state for every routed page.
@@ -208,11 +222,11 @@ impl Default for RouteFocusMemory {
 
 impl RouteFocusMemory {
     pub fn remember(&mut self, route: AppRoute, snapshot: FocusSnapshot) {
-        self.snapshots[route.index()] = snapshot;
+        self.snapshots[route.index()] = snapshot.normalized_for_route(route);
     }
 
     pub fn recall(&self, route: AppRoute) -> FocusSnapshot {
-        self.snapshots[route.index()]
+        self.snapshots[route.index()].normalized_for_route(route)
     }
 }
 
@@ -814,5 +828,93 @@ mod tests {
 
         assert_eq!(nearest_game_for_x(activity_x, 439.0, 250.0, 8), 1);
         assert_eq!(nearest_game_for_x(768.0, 439.0, 250.0, 8), 1);
+    }
+
+    #[test]
+    fn full_shell_focus_memory_normalizes_hidden_header_focus() {
+        let mut memory = RouteFocusMemory::default();
+        let route = AppRoute::Utility(UtilityPage::Web);
+        let mut focus = ShellFocus::default();
+
+        assert!(focus.enter_utilities_from_content(TopUtility::Settings, 6));
+        assert_eq!(focus.region(), ShellFocusRegion::TopUtilities);
+
+        memory.remember(route, focus.snapshot());
+        let restored = memory.recall(route);
+
+        assert_eq!(restored.region(), ShellFocusRegion::Content);
+        assert_eq!(restored.utility(), TopUtility::Settings);
+    }
+
+    #[test]
+    fn rapid_route_churn_unwinds_exactly_in_reverse_order() {
+        let routes = [
+            AppRoute::Library,
+            AppRoute::Utility(UtilityPage::Friends),
+            AppRoute::Utility(UtilityPage::Album),
+            AppRoute::Utility(UtilityPage::Activity),
+            AppRoute::Utility(UtilityPage::Web),
+            AppRoute::Utility(UtilityPage::Settings),
+        ];
+        let mut navigator = Navigator::default();
+        let mut visited = vec![AppRoute::Home];
+
+        for step in 0..120 {
+            let route = routes[step % routes.len()];
+            assert!(navigator.navigate_to(route));
+            visited.push(route);
+        }
+
+        assert_eq!(navigator.back_stack_depth(), 120);
+        while visited.len() > 1 {
+            visited.pop();
+            assert!(navigator.go_back());
+            assert_eq!(navigator.current(), *visited.last().unwrap());
+        }
+
+        assert_eq!(navigator.current(), AppRoute::Home);
+        assert_eq!(navigator.back_stack_depth(), 0);
+        assert!(!navigator.go_back());
+    }
+
+    #[test]
+    fn global_home_remains_a_hard_reset_after_deep_route_churn() {
+        let mut navigator = Navigator::default();
+
+        for step in 0..200 {
+            let route = if step % 2 == 0 {
+                AppRoute::Utility(UtilityPage::Settings)
+            } else {
+                AppRoute::Library
+            };
+            assert!(navigator.navigate_to(route));
+        }
+
+        assert!(navigator.go_home());
+        assert_eq!(navigator.current(), AppRoute::Home);
+        assert_eq!(navigator.back_stack_depth(), 0);
+        assert!(!navigator.go_back());
+    }
+
+    #[test]
+    fn spatial_helpers_stay_bounded_for_resize_extremes() {
+        for viewport_width in [1.0_f32, 1280.0, 1720.0, 3440.0, 20_000.0] {
+            let utility = nearest_utility_for_x(
+                viewport_width * 0.9,
+                viewport_width,
+                64.0,
+            );
+            assert!((0..TopUtility::COUNT).contains(&utility.index()));
+        }
+
+        for x in [-10_000.0_f32, 0.0, 640.0, 10_000.0] {
+            let game = nearest_game_for_x(x, 439.0, 250.0, 8);
+            assert!((0..8).contains(&game));
+        }
+
+        assert_eq!(nearest_utility_for_x(f32::NAN, 1280.0, 64.0), TopUtility::Activity);
+        assert_eq!(nearest_game_for_x(f32::INFINITY, 439.0, 250.0, 8), 0);
+        assert_eq!(nearest_game_for_x(640.0, 439.0, 0.0, 8), 0);
+        assert_eq!(nearest_game_for_x(640.0, 439.0, 250.0, 0), 0);
     }
 }

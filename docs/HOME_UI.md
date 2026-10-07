@@ -225,3 +225,8 @@ The white mix is reduced slightly from 42% to 38%. Highlight width and the 4.0-s
 ## Phase 4.1.5 focus sweep balance
 
 The white mix is reduced to 34%. Highlight width and the 4.0-second cycle remain unchanged. This is the current focus-sweep baseline. Reduced Motion and High Contrast remain static.
+
+
+## Phase 4.7 responsive-shell hardening
+
+The existing responsive-fill model is unchanged: Horizon uses one uniform scale derived from the 1280×720 reference surface and expands the logical viewport to consume extra width/height. Phase 4.7 guards the scale denominator against compositor-reported zero-sized transient surfaces during minimize/fullscreen changes and clamps the central shell content region to a non-negative height. This is defensive only; normal windowed, fullscreen, 16:10, and ultrawide geometry remains the same.
