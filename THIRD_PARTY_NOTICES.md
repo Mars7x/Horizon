@@ -125,3 +125,17 @@ artwork remains owned/licensed by its respective game publisher/developer.
 
 The existing MIT and Apache-2.0 license texts cover these dependencies. The exact
 resolved Cargo dependency-license inventory remains a release gate.
+
+### Phase 9.5.37 multi-resolution ICO dependency
+
+- **ico 0.5.x**
+  - Upstream: https://github.com/mdsteele/rust-ico
+  - License: MIT
+  - Use in Horizon: enumerate and decode every representation in Steam's local
+    `clienticon` ICO containers so Horizon can explicitly choose the largest
+    true-square frame instead of relying on a generic decoder's implicit frame
+    selection.
+  - Modification: none; consumed as a Cargo dependency.
+
+The existing MIT license text covers this dependency. The exact resolved Cargo
+dependency-license inventory remains a release gate.

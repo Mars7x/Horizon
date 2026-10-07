@@ -12,7 +12,7 @@ use crate::{
     platform::{
         data_paths,
         launcher::PortalLaunchExecutor,
-        session_helper::{DbusManagedSessionExecutor, DbusRuntimeObservationExecutor},
+        session_helper::DbusManagedSessionExecutor,
         slint_backend,
     },
     presentation::{
@@ -25,7 +25,7 @@ use crate::{
         import::{SourceImportOutcome, SourceImportService},
         launch::GameLaunchService,
         library::LibraryService,
-        runtime::RuntimeObservationExecutor,
+        runtime::{RuntimeObservationExecutor, SourceRuntimeObservationExecutor},
         session::{ManagedSessionExecutor, ManagedSessionTerminalState},
     },
     sources::production_source_registry,
@@ -41,7 +41,7 @@ pub fn run() -> Result<(), AppError> {
         )
         .init();
 
-    info!("starting Horizon phase 9.5.29");
+    info!("starting Horizon phase 9.5.34");
 
     let database_path = data_paths::library_database_path()?;
     let repository = SqliteLibraryRepository::open(&database_path)?;
@@ -99,7 +99,7 @@ pub fn run() -> Result<(), AppError> {
     if interrupted_sessions > 0 {
         warn!(
             interrupted_sessions,
-            "recovered unfinished activity sessions without inventing playtime"
+            "recovered unfinished activity sessions through their last durable checkpoint"
         );
     }
 
@@ -161,23 +161,15 @@ pub fn run() -> Result<(), AppError> {
             );
         }
     }
-    match DbusRuntimeObservationExecutor::new() {
-        Ok(observer) => {
-            let available = observer.probe();
-            info!(
-                available,
-                "optional source-runtime host observer probe completed"
-            );
-            let observer: Rc<dyn RuntimeObservationExecutor> = Rc::new(observer);
-            launch_service = launch_service.with_runtime_observer(observer);
-        }
-        Err(error) => {
-            warn!(
-                %error,
-                "source-runtime D-Bus client could not initialize; foreground handoff remains available"
-            );
-        }
-    }
+    // Source-runtime observation must work in the ordinary Flatpak without the
+    // optional host helper. Provider adapters expose only provider-owned state
+    // that is already readable through Horizon's narrow filesystem grants.
+    // Steam uses its local gameprocess_log.txt rather than /proc.
+    let runtime_observer: Rc<dyn RuntimeObservationExecutor> = Rc::new(
+        SourceRuntimeObservationExecutor::new(Rc::clone(&registry)),
+    );
+    launch_service = launch_service.with_runtime_observer(runtime_observer);
+    info!("in-process source-runtime observation initialized");
     let launch_service = Rc::new(launch_service);
     let launch_activity: Rc<dyn LaunchActivitySink> = activity_service.clone();
     let home = HomeController::new(
@@ -283,8 +275,8 @@ pub fn run() -> Result<(), AppError> {
     );
 
     // Source-owned runtime observation is independent of Horizon window focus.
-    // Steam uses its exact AppID-scoped host reaper lifecycle when the helper
-    // is available, so Alt-Tabbing to Horizon does not terminate playtime.
+    // Steam derives exact AppID-scoped running-list transitions from its local
+    // gameprocess_log.txt, so this works in the normal Flatpak without a helper.
     let runtime_observation_timer = Timer::default();
     let runtime_launch_service = Rc::clone(&launch_service);
     let runtime_activity = Rc::clone(&activity_service);
@@ -315,6 +307,44 @@ pub fn run() -> Result<(), AppError> {
                 Ok(overview) => ActivityController::publish(&ui, &overview),
                 Err(error) => warn!(%error, "Activity overview could not be refreshed"),
             }
+        }
+    });
+
+    // Keep open sessions visibly ticking in Activity without committing a
+    // synthetic end timestamp. The repository exposes open rows separately;
+    // completed totals remain durable history until a real terminal event.
+    let live_activity_timer = Timer::default();
+    let live_activity = Rc::clone(&activity_service);
+    let live_activity_ui = ui.as_weak();
+    live_activity_timer.start(TimerMode::Repeated, Duration::from_secs(1), move || {
+        if !live_activity.has_live_session() {
+            return;
+        }
+
+        let Some(ui) = live_activity_ui.upgrade() else {
+            return;
+        };
+        match live_activity.overview(
+            ActivityController::recent_session_limit(),
+            ActivityController::top_game_limit(),
+        ) {
+            Ok(overview) => ActivityController::publish(&ui, &overview),
+            Err(error) => warn!(%error, "live Activity overview could not be refreshed"),
+        }
+    });
+
+    // Persist a conservative observation checkpoint for every live session.
+    // A hard process/system loss can then recover confirmed playtime through
+    // the last committed checkpoint instead of discarding the entire session.
+    // The terminal lifecycle signal still owns the exact end of clean sessions.
+    let activity_checkpoint_timer = Timer::default();
+    let checkpoint_activity = Rc::clone(&activity_service);
+    activity_checkpoint_timer.start(TimerMode::Repeated, Duration::from_secs(5), move || {
+        if !checkpoint_activity.has_live_session() {
+            return;
+        }
+        if let Err(error) = checkpoint_activity.checkpoint_live_sessions() {
+            warn!(%error, "live Activity checkpoint could not be persisted");
         }
     });
 
@@ -387,6 +417,8 @@ pub fn run() -> Result<(), AppError> {
     let _input = input;
     let _foreground_return_timer = foreground_return_timer;
     let _runtime_observation_timer = runtime_observation_timer;
+    let _live_activity_timer = live_activity_timer;
+    let _activity_checkpoint_timer = activity_checkpoint_timer;
     let _managed_session_timer = managed_session_timer;
 
     ui.run()?;

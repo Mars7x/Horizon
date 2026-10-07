@@ -150,12 +150,10 @@ for modern `appcache/librarycache/<appid>/<hash>.jpg`/PNG entries. Steam's legac
 `<appid>_icon.jpg`/PNG and newer per-AppID `icon.jpg`/PNG cache names remain
 fallbacks.
 
-The generic `ArtworkService` decodes all usable candidates and keeps the largest
-actual pixel-area source before enforcing Horizon's 1:1 presentation contract.
-This means a genuinely larger Linux/client/shortcut representation wins, while
-an old 32px ICO does not displace a 184px cached App Icon. Non-square input is padded to a square
-without stretching/cropping. Images above 512px are downscaled for Home; smaller
-source images are not pre-upscaled.
+The original Phase 9.5.29 implementation decoded the local icon candidates and
+kept the largest source. Its temporary behavior of adapting unexpectedly
+non-square inputs has been superseded by Phase 9.5.36: current Horizon rejects
+any decoded candidate whose width and height differ.
 
 Steam documents the compact App Icon as 184×184 JPG and the submitted Shortcut
 Icon as 256×256 or 512×512 PNG/ICO. Horizon therefore treats 184px as a fallback
@@ -165,3 +163,58 @@ square representation Steam has actually cached.
 No Steam artwork is bundled or redistributed by Horizon, and this phase does not
 add general network access to fetch missing CDN assets. See `ARTWORK.md` and ADR
 0049.
+
+## Phase 9.5.36 square-only artwork
+
+Horizon only uses Steam artwork whose decoded source dimensions are already
+1:1. The Steam adapter exposes icon-oriented local cache candidates and does
+not expose `library_600x900`, `library_capsule`, hero, or header assets as
+primary game artwork.
+
+Candidate locations include the Linux client icon ZIP, client ICO, hashed App
+Icon cache entries, and legacy/per-AppID icon paths. `ArtworkService` decodes
+them, rejects any candidate where `width != height`, and chooses the
+highest-resolution remaining square.
+
+A low-resolution 184×184 square icon is still valid. It is never replaced with
+a sharper portrait image simply to improve resolution. If Steam has no usable
+true-square source, Horizon falls back to its procedural cover.
+
+The normalized Horizon cache is `square-v4`, which invalidates older cached
+entries derived from non-square artwork.
+
+## Phase 9.5.37 multi-resolution square icon extraction
+
+Horizon now resolves Steam icon containers explicitly rather than handing the
+container to a generic image decoder and accepting whichever representation it
+chooses.
+
+For `common.clienticon`, Horizon reads the local ICO directory, enumerates every
+frame, rejects non-square or unreasonable representations, decodes every usable
+frame, and selects the largest square. Higher bit depth breaks ties at the same
+resolution. The selected frame is converted to PNG bytes before entering the
+generic source-artwork boundary.
+
+For `common.linuxclienticon`, Horizon enumerates every PNG in the local ZIP,
+validates its decoded dimensions, rejects non-1:1 entries, and retains only the
+largest valid square PNG from that archive.
+
+The ordinary 184×184 App Icon remains a valid fallback. Horizon does not replace
+it with portrait/landscape artwork when no larger square representation exists.
+
+Artwork cache version `square-v5` forces an immediate re-resolution after this
+change so a lower-resolution square chosen by an older decoder cannot remain
+hidden behind a fresh cache entry.
+
+## Phase 9.5.32 runtime tracking without the host helper
+
+Steam playtime tracking in the ordinary Flatpak uses Steam's own
+`logs/gameprocess_log.txt`, not host `/proc` and not the Horizon session helper.
+The Steam adapter derives running state for the exact AppID from Steam's
+tracked-process/running-list transitions. Horizon already has read-only access
+to the supported Steam data roots, so this requires no additional filesystem
+or D-Bus permission.
+
+The optional host helper remains unrelated to normal Steam runtime tracking; it
+is reserved for launch/session capabilities that genuinely require host-side
+execution such as managed Gamescope sessions.

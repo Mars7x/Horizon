@@ -30,6 +30,7 @@ The current migration sequence is:
 0003_managed_session_tracking.sql
 0004_source_runtime_tracking.sql
 0005_remove_lutris_source.sql
+0006_activity_session_checkpoints.sql
 ```
 
 Startup applies missing migrations in one transaction per migration. Migration history must be contiguous. A database from a newer Horizon schema is rejected instead of being opened with older code.
@@ -48,7 +49,7 @@ Titles are not used for deduplication. Two equal titles from different source ke
 
 ## SQLite configuration
 
-Each Horizon connection enables foreign-key enforcement and uses a bounded busy timeout. The development build uses rusqlite's `bundled` feature so its SQLite engine is deterministic across native and Flatpak builds.
+Each Horizon connection enables foreign-key enforcement, explicitly requests SQLite `synchronous = FULL`, and uses a bounded busy timeout. Activity checkpoints are tiny committed transactions so a sudden machine loss can recover through the most recent durable checkpoint. The development build uses rusqlite's `bundled` feature so its SQLite engine is deterministic across native and Flatpak builds.
 
 
 ## Phase 6 source-batch writes
@@ -72,7 +73,7 @@ Partial/degraded snapshots continue to use additive upsert and never remove exis
 - `play_sessions`: Horizon-observed sessions with game/source identity, start/end timestamps, an explicit tracking method, and `open`/`completed`/`interrupted` state;
 - `source_lifetime_playtime`: provider-reported cumulative playtime keyed by `(game_id, source_id)`.
 
-Only completed sessions have an end timestamp. Startup recovery changes leftover `open` rows to `interrupted` without inventing an end time, so they contribute no fabricated duration.
+Through schema v5, only completed sessions had an end timestamp. Schema v6 keeps exact completion semantics for clean exits but also lets an interrupted row retain the final **confirmed** checkpoint timestamp as a conservative observed-through boundary.
 
 Source-reported lifetime values are never summed into Horizon-observed totals. See `ACTIVITY.md` and ADR 0044.
 
@@ -92,7 +93,7 @@ The persistence tests use in-memory SQLite and cover:
 - no unsafe title-based deduplication;
 - deterministic stable-ID ordering without embedding presentation sorting policy in persistence;
 - observed session start/completion and aggregate activity;
-- interruption recovery without fabricated duration;
+- crash recovery through the last committed activity checkpoint without fabricating post-checkpoint time;
 - lifetime-playtime separation;
 - preservation of historical activity after a source game is uninstalled.
 
@@ -136,3 +137,22 @@ The migration deliberately does **not** delete historical `play_sessions` or
 `source_lifetime_playtime`. A logical `games` row is removed only when it has no
 remaining source reference and no Activity/lifetime history. This keeps past
 Activity readable while ensuring Lutris is no longer an active provider.
+
+
+## Schema v6: crash-resilient Activity checkpoints
+
+Migration `0006_activity_session_checkpoints.sql` adds `checkpoint_at` to
+`play_sessions`. New open sessions initialize the checkpoint to `started_at`.
+While Horizon knows a session is still live, the application advances that
+checkpoint every five seconds in a small committed SQLite update. Clean
+terminal events still write the exact observed `ended_at`.
+
+If Horizon or the computer stops unexpectedly, the next startup converts the
+leftover `open` row to `interrupted` and copies its last committed
+`checkpoint_at` into `ended_at`. That timestamp does **not** claim to be the
+actual game exit; it means only "Horizon had definitely observed this session
+running through here." Recovered duration therefore contributes to observed
+playtime and recent history, while the completed-session counter remains limited
+to genuinely completed sessions. With the five-second cadence, a normal hard
+power loss should lose at most roughly the interval since the last committed
+checkpoint, subject to the usual storage/filesystem durability limits.

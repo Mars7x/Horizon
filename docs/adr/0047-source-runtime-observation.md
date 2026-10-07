@@ -45,3 +45,13 @@ managed compositor/session lifecycle.
   must fail conservatively if that signal changes.
 - An observation that is lost after timing starts is interrupted rather than
   assigned a fabricated duration.
+
+## Phase 9.5.32 amendment
+
+The initial implementation placed Steam runtime observation in the host helper
+and inspected host `/proc`. That made accurate Steam Activity dependent on an
+optional component, which is not acceptable for the normal Flatpak experience.
+Steam observation now runs in-process and consumes Steam's provider-owned
+`logs/gameprocess_log.txt` through existing read-only Steam grants. The generic
+runtime-observation contract is unchanged; only the execution location and
+Steam signal changed. Host `/proc` is no longer the Steam runtime source.

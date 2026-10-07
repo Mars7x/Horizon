@@ -88,6 +88,7 @@ pub struct ActivityOverview {
     observed_playtime: PlaytimeSeconds,
     completed_sessions: usize,
     played_games: usize,
+    active_sessions: Vec<RecentActivitySession>,
     recent_sessions: Vec<RecentActivitySession>,
     top_games: Vec<GameActivitySummary>,
 }
@@ -104,9 +105,15 @@ impl ActivityOverview {
             observed_playtime,
             completed_sessions,
             played_games,
+            active_sessions: Vec::new(),
             recent_sessions,
             top_games,
         }
+    }
+
+    pub fn with_active_sessions(mut self, active_sessions: Vec<RecentActivitySession>) -> Self {
+        self.active_sessions = active_sessions;
+        self
     }
 
     pub const fn observed_playtime(&self) -> PlaytimeSeconds {
@@ -119,6 +126,10 @@ impl ActivityOverview {
 
     pub const fn played_games(&self) -> usize {
         self.played_games
+    }
+
+    pub fn active_sessions(&self) -> &[RecentActivitySession] {
+        &self.active_sessions
     }
 
     pub fn recent_sessions(&self) -> &[RecentActivitySession] {
@@ -151,6 +162,8 @@ pub trait ActivityRepository {
         &mut self,
         session_id: PlaySessionId,
     ) -> Result<(), Self::Error>;
+
+    fn checkpoint_open_play_sessions(&mut self, observed_at: i64) -> Result<usize, Self::Error>;
 
     fn interrupt_open_play_sessions(&mut self) -> Result<usize, Self::Error>;
 
@@ -240,8 +253,8 @@ pub trait LaunchActivitySink {
 /// activation is treated as a candidate return rather than an immediate end so
 /// launcher handoff focus bounces cannot truncate the session. If Horizon loses
 /// activation again before the candidate is confirmed, the same session remains
-/// open. When a source provides a host runtime observer, that stronger signal
-/// owns start/end timing instead and window focus is ignored for that launch.
+/// open. When a source provides a runtime observer, that stronger signal owns start/end
+/// timing instead and window focus is ignored for that launch.
 /// Source-reported lifetime values are persisted through a separate method and
 /// are never added to these observed totals.
 pub struct ActivityService<R> {
@@ -559,6 +572,30 @@ where
         Ok(play_session_id)
     }
 
+    pub fn has_live_session(&self) -> bool {
+        if self.active_session.borrow().is_some() || !self.managed_sessions.borrow().is_empty() {
+            return true;
+        }
+
+        self.runtime_observations
+            .borrow()
+            .values()
+            .any(|activity| activity.play_session_id.is_some())
+    }
+
+    pub fn checkpoint_live_sessions(&self) -> Result<usize, R::Error> {
+        self.checkpoint_live_sessions_at(Utc::now().timestamp())
+    }
+
+    fn checkpoint_live_sessions_at(&self, observed_at: i64) -> Result<usize, R::Error> {
+        if !self.has_live_session() {
+            return Ok(0);
+        }
+        self.repository
+            .borrow_mut()
+            .checkpoint_open_play_sessions(observed_at)
+    }
+
     pub fn overview(
         &self,
         recent_limit: usize,
@@ -644,6 +681,7 @@ mod tests {
     struct FakeRepository {
         next_id: i64,
         sessions: Vec<PlaySession>,
+        checkpoints: BTreeMap<PlaySessionId, i64>,
         reports: Vec<SourceLifetimePlaytime>,
     }
 
@@ -671,6 +709,7 @@ mod tests {
                 )
                 .expect("session"),
             );
+            self.checkpoints.insert(id, started_at);
             Ok(id)
         }
 
@@ -695,6 +734,7 @@ mod tests {
                 PlaySessionState::Completed,
             )
             .expect("completed session");
+            self.checkpoints.insert(session_id, ended_at);
             Ok(())
         }
 
@@ -708,17 +748,30 @@ mod tests {
                 .position(|session| session.id() == session_id)
                 .expect("open session");
             let session = self.sessions[index].clone();
+            let confirmed_through = self.checkpoints.get(&session_id).copied();
             self.sessions[index] = PlaySession::new(
                 session.id(),
                 session.game_id(),
                 session.source_id().clone(),
                 session.started_at(),
-                None,
+                confirmed_through,
                 session.tracking_method(),
                 PlaySessionState::Interrupted,
             )
             .expect("interrupted session");
             Ok(())
+        }
+
+        fn checkpoint_open_play_sessions(&mut self, observed_at: i64) -> Result<usize, Self::Error> {
+            let mut checkpointed = 0;
+            for session in &self.sessions {
+                if session.state() != PlaySessionState::Open || observed_at < session.started_at() {
+                    continue;
+                }
+                checkpointed += 1;
+                self.checkpoints.insert(session.id(), observed_at);
+            }
+            Ok(checkpointed)
         }
 
         fn interrupt_open_play_sessions(&mut self) -> Result<usize, Self::Error> {
@@ -728,12 +781,13 @@ mod tests {
                     continue;
                 }
                 interrupted += 1;
+                let confirmed_through = self.checkpoints.get(&session.id()).copied();
                 *session = PlaySession::new(
                     session.id(),
                     session.game_id(),
                     session.source_id().clone(),
                     session.started_at(),
-                    None,
+                    confirmed_through,
                     session.tracking_method(),
                     PlaySessionState::Interrupted,
                 )
@@ -934,18 +988,24 @@ mod tests {
     }
 
     #[test]
-    fn recovery_marks_open_sessions_interrupted_without_inventing_duration() {
+    fn recovery_preserves_only_the_last_confirmed_checkpoint() {
         let repository = Rc::new(RefCell::new(FakeRepository::default()));
         let service = ActivityService::new(Rc::clone(&repository));
         service.launch_dispatched(game_id(), source_id());
         service
             .handle_application_active_changed_at_millis(false, 100_000)
             .expect("start");
+        assert_eq!(
+            service
+                .checkpoint_live_sessions_at(145)
+                .expect("checkpoint"),
+            1
+        );
 
         assert_eq!(service.recover_interrupted_sessions().expect("recover"), 1);
         let repository = repository.borrow();
         assert_eq!(repository.sessions[0].state(), PlaySessionState::Interrupted);
-        assert_eq!(repository.sessions[0].duration(), None);
+        assert_eq!(repository.sessions[0].duration().expect("duration").get(), 45);
     }
 
     #[test]

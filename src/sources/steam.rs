@@ -5,6 +5,7 @@ use std::{
     io::{self, Read},
     path::{Path, PathBuf},
     sync::Mutex,
+    time::SystemTime,
 };
 
 use steam_vdf_parser::{Obj, parse_appinfo, parse_text};
@@ -41,6 +42,8 @@ enum SteamDiscoveryError {
     NoUsableInstallation,
     #[error("Steam app id is not numeric: {0}")]
     InvalidAppId(String),
+    #[error("Steam runtime log cache mutex was poisoned")]
+    RuntimeLogCachePoisoned,
     #[error(transparent)]
     Domain(#[from] DomainValidationError),
     #[error(transparent)]
@@ -59,10 +62,18 @@ struct SteamRootDiscovery {
     present_game_ids: BTreeSet<ExternalGameId>,
 }
 
+#[derive(Debug, Clone)]
+struct SteamRuntimeLogCache {
+    length: u64,
+    modified: Option<SystemTime>,
+    states: BTreeMap<String, bool>,
+}
+
 pub struct SteamSource {
     descriptor: SourceDescriptor,
     roots: Vec<PathBuf>,
     artwork_hashes: Mutex<BTreeMap<String, SteamArtworkHashes>>,
+    runtime_logs: Mutex<BTreeMap<PathBuf, SteamRuntimeLogCache>>,
 }
 
 impl SteamSource {
@@ -81,6 +92,7 @@ impl SteamSource {
             descriptor,
             roots: default_steam_roots(),
             artwork_hashes: Mutex::new(BTreeMap::new()),
+            runtime_logs: Mutex::new(BTreeMap::new()),
         })
     }
 
@@ -111,6 +123,48 @@ impl SteamSource {
             .ok()
             .and_then(|cache| cache.get(app_id).cloned())
             .unwrap_or_default()
+    }
+
+    fn gameprocess_log_state(
+        &self,
+        path: &Path,
+        app_id: &str,
+    ) -> Result<bool, SteamDiscoveryError> {
+        let metadata = fs::metadata(path).map_err(|source| SteamDiscoveryError::Read {
+            path: path.to_owned(),
+            source,
+        })?;
+        let modified = metadata.modified().ok();
+        let length = metadata.len();
+
+        let mut cache = self
+            .runtime_logs
+            .lock()
+            .map_err(|_| SteamDiscoveryError::RuntimeLogCachePoisoned)?;
+        let refresh = cache.get(path).is_none_or(|entry| {
+            entry.length != length || entry.modified != modified
+        });
+
+        if refresh {
+            let content = fs::read_to_string(path).map_err(|source| SteamDiscoveryError::Read {
+                path: path.to_owned(),
+                source,
+            })?;
+            cache.insert(
+                path.to_owned(),
+                SteamRuntimeLogCache {
+                    length,
+                    modified,
+                    states: parse_gameprocess_running_states(&content),
+                },
+            );
+        }
+
+        Ok(cache
+            .get(path)
+            .and_then(|entry| entry.states.get(app_id))
+            .copied()
+            .unwrap_or(false))
     }
 
     fn discover_root(&self, root: &Path) -> Result<SteamRootDiscovery, SteamDiscoveryError> {
@@ -345,12 +399,35 @@ impl GameSource for SteamSource {
             )));
         }
 
-        let running = steam_reaper_is_running(app_id).map_err(SourceError::new)?;
-        Ok(Some(if running {
-            SourceRuntimeState::Running
-        } else {
-            SourceRuntimeState::Stopped
-        }))
+        let mut found_log = false;
+        let mut first_error = None;
+
+        for root in self.roots.iter().filter(|root| looks_like_steam_root(root)) {
+            let log_path = root.join("logs/gameprocess_log.txt");
+            if !log_path.is_file() {
+                continue;
+            }
+            found_log = true;
+
+            match self.gameprocess_log_state(&log_path, app_id) {
+                Ok(true) => return Ok(Some(SourceRuntimeState::Running)),
+                Ok(false) => {}
+                Err(error) => {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
+        }
+
+        if !found_log {
+            return Ok(None);
+        }
+        if let Some(error) = first_error {
+            return Err(SourceError::new(error));
+        }
+
+        Ok(Some(SourceRuntimeState::Stopped))
     }
 
     fn artwork_candidates(
@@ -371,7 +448,20 @@ impl GameSource for SteamSource {
             if let Some(hash) = &hashes.linux_client_icon {
                 let archive_path = root.join("steam/games").join(format!("{hash}.zip"));
                 if archive_path.is_file() && seen.insert(archive_path.clone()) {
-                    candidates.extend(steam_linux_icon_archive_candidates(&archive_path));
+                    if let Some(candidate) =
+                        steam_linux_icon_archive_candidate(&archive_path)
+                    {
+                        candidates.push(candidate);
+                    }
+                }
+            }
+
+            if let Some(hash) = &hashes.client_icon {
+                let ico_path = root.join("steam/games").join(format!("{hash}.ico"));
+                if ico_path.is_file() && seen.insert(ico_path.clone()) {
+                    if let Some(candidate) = steam_client_icon_candidate(&ico_path) {
+                        candidates.push(candidate);
+                    }
                 }
             }
 
@@ -424,14 +514,6 @@ fn steam_artwork_paths(
 ) -> Vec<PathBuf> {
     let mut paths = Vec::new();
 
-    // Steam's client/shortcut icon container may contain a substantially larger
-    // square representation than the 184px compact app icon. The generic
-    // artwork service decodes every available candidate and chooses the largest
-    // actual pixel area, so low-resolution ICOs cannot beat a better cache JPG.
-    if let Some(hash) = &hashes.client_icon {
-        paths.push(root.join("steam/games").join(format!("{hash}.ico")));
-    }
-
     let library_cache = root.join("appcache/librarycache");
     let nested = library_cache.join(app_id);
     if let Some(hash) = &hashes.app_icon {
@@ -451,8 +533,9 @@ fn steam_artwork_paths(
 }
 
 const MAX_STEAM_ICON_ARCHIVE_ENTRY_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_STEAM_ICON_DIMENSION: u32 = 4096;
 
-fn steam_linux_icon_archive_candidates(path: &Path) -> Vec<SourceArtworkCandidate> {
+fn steam_linux_icon_archive_candidate(path: &Path) -> Option<SourceArtworkCandidate> {
     let file = match fs::File::open(path) {
         Ok(file) => file,
         Err(error) => {
@@ -461,7 +544,7 @@ fn steam_linux_icon_archive_candidates(path: &Path) -> Vec<SourceArtworkCandidat
                 %error,
                 "optional Steam Linux client icon archive could not be opened"
             );
-            return vec![];
+            return None;
         }
     };
     let mut archive = match ZipArchive::new(file) {
@@ -472,11 +555,11 @@ fn steam_linux_icon_archive_candidates(path: &Path) -> Vec<SourceArtworkCandidat
                 %error,
                 "optional Steam Linux client icon archive could not be parsed"
             );
-            return vec![];
+            return None;
         }
     };
 
-    let mut candidates = Vec::new();
+    let mut best: Option<(u32, Vec<u8>)> = None;
     for index in 0..archive.len() {
         let mut entry = match archive.by_index(index) {
             Ok(entry) => entry,
@@ -499,64 +582,165 @@ fn steam_linux_icon_archive_candidates(path: &Path) -> Vec<SourceArtworkCandidat
         }
 
         let mut bytes = Vec::with_capacity(entry.size() as usize);
-        match entry.read_to_end(&mut bytes) {
-            Ok(_) if !bytes.is_empty() => {
-                candidates.push(SourceArtworkCandidate::in_memory_square_icon(bytes));
-            }
-            Ok(_) => {}
-            Err(error) => {
-                debug!(
-                    path = %path.display(),
-                    entry = entry.name(),
-                    %error,
-                    "Steam Linux client icon PNG could not be read"
-                );
-            }
+        if let Err(error) = entry.read_to_end(&mut bytes) {
+            debug!(
+                path = %path.display(),
+                entry = entry.name(),
+                %error,
+                "Steam Linux client icon PNG could not be read"
+            );
+            continue;
+        }
+
+        let Some(side) = square_png_side(&bytes) else {
+            debug!(
+                path = %path.display(),
+                entry = entry.name(),
+                "ignoring Steam Linux client icon entry that is invalid or not 1:1"
+            );
+            continue;
+        };
+
+        if best.as_ref().is_none_or(|(best_side, _)| side > *best_side) {
+            best = Some((side, bytes));
         }
     }
 
-    candidates
+    best.map(|(_, bytes)| SourceArtworkCandidate::in_memory_square_icon(bytes))
+}
+
+fn steam_client_icon_candidate(path: &Path) -> Option<SourceArtworkCandidate> {
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) => {
+            debug!(
+                path = %path.display(),
+                %error,
+                "optional Steam client ICO could not be opened"
+            );
+            return None;
+        }
+    };
+    let icon_dir = match ico::IconDir::read(file) {
+        Ok(icon_dir) => icon_dir,
+        Err(error) => {
+            debug!(
+                path = %path.display(),
+                %error,
+                "optional Steam client ICO could not be parsed"
+            );
+            return None;
+        }
+    };
+
+    // ICO is a container. Do not let a generic decoder implicitly choose a
+    // frame. Decode every usable square representation and keep the largest
+    // one explicitly. Color depth breaks ties at the same resolution.
+    let mut best: Option<(u32, u16, Vec<u8>)> = None;
+    for entry in icon_dir.entries() {
+        let width = entry.width();
+        let height = entry.height();
+        if width == 0
+            || width != height
+            || width > MAX_STEAM_ICON_DIMENSION
+        {
+            continue;
+        }
+
+        let decoded = match entry.decode() {
+            Ok(decoded) => decoded,
+            Err(error) => {
+                debug!(
+                    path = %path.display(),
+                    width,
+                    height,
+                    %error,
+                    "Steam client ICO frame could not be decoded"
+                );
+                continue;
+            }
+        };
+
+        if decoded.width() != decoded.height()
+            || decoded.width() == 0
+            || decoded.width() > MAX_STEAM_ICON_DIMENSION
+        {
+            continue;
+        }
+
+        let mut png = Vec::new();
+        if let Err(error) = decoded.write_png(&mut png) {
+            debug!(
+                path = %path.display(),
+                width = decoded.width(),
+                height = decoded.height(),
+                %error,
+                "Steam client ICO frame could not be converted to PNG"
+            );
+            continue;
+        }
+
+        let rank = (decoded.width(), entry.bits_per_pixel());
+        if best
+            .as_ref()
+            .is_none_or(|(best_side, best_depth, _)| rank > (*best_side, *best_depth))
+        {
+            best = Some((rank.0, rank.1, png));
+        }
+    }
+
+    best.map(|(_, _, bytes)| SourceArtworkCandidate::in_memory_square_icon(bytes))
+}
+
+fn square_png_side(bytes: &[u8]) -> Option<u32> {
+    let image = image::load_from_memory_with_format(bytes, image::ImageFormat::Png).ok()?;
+    let width = image.width();
+    let height = image.height();
+    (width > 0 && width == height && width <= MAX_STEAM_ICON_DIMENSION).then_some(width)
 }
 
 fn is_sha1_hash(value: &str) -> bool {
     value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-fn steam_reaper_is_running(app_id: &str) -> Result<bool, SteamDiscoveryError> {
-    let entries = fs::read_dir("/proc").map_err(|source| SteamDiscoveryError::Read {
-        path: PathBuf::from("/proc"),
-        source,
-    })?;
+fn parse_gameprocess_running_states(content: &str) -> BTreeMap<String, bool> {
+    let mut states = BTreeMap::new();
 
-    Ok(entries.filter_map(Result::ok).any(|entry| {
-        let Some(pid) = entry.file_name().to_str().map(ToOwned::to_owned) else {
-            return false;
-        };
-        if !pid.bytes().all(|byte| byte.is_ascii_digit()) {
-            return false;
+    for line in content.lines() {
+        if let Some(app_id) = gameprocess_added_app_id(line) {
+            states.insert(app_id.to_owned(), true);
+            continue;
         }
+        if let Some(app_id) = gameprocess_removed_app_id(line) {
+            states.insert(app_id.to_owned(), false);
+        }
+    }
 
-        fs::read(entry.path().join("cmdline"))
-            .ok()
-            .is_some_and(|cmdline| steam_reaper_cmdline_matches(&cmdline, app_id))
-    }))
+    states
 }
 
-fn steam_reaper_cmdline_matches(cmdline: &[u8], app_id: &str) -> bool {
-    let text = String::from_utf8_lossy(cmdline).replace('\0', " ");
-    if !text.contains("reaper") {
-        return false;
+fn gameprocess_added_app_id(line: &str) -> Option<&str> {
+    let marker = "AppID ";
+    let start = line.find(marker)? + marker.len();
+    let rest = &line[start..];
+    let end = rest.find(char::is_whitespace)?;
+    let app_id = &rest[..end];
+    if !app_id.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
     }
+    rest[end..]
+        .contains(" adding PID ")
+        .then_some(app_id)
+}
 
-    let marker = format!("SteamLaunch AppId={app_id}");
-    let Some(index) = text.find(&marker) else {
-        return false;
-    };
-    let after = text[index + marker.len()..].chars().next();
-    match after {
-        None => true,
-        Some(character) => character.is_whitespace(),
-    }
+fn gameprocess_removed_app_id(line: &str) -> Option<&str> {
+    let marker = "Remove ";
+    let start = line.find(marker)? + marker.len();
+    let rest = &line[start..];
+    let suffix = " from running list";
+    let end = rest.find(suffix)?;
+    let app_id = rest[..end].trim();
+    (!app_id.is_empty() && app_id.bytes().all(|byte| byte.is_ascii_digit())).then_some(app_id)
 }
 
 fn appinfo_common<'a, 'text>(app_obj: &'a Obj<'text>) -> Option<&'a Obj<'text>> {
@@ -1024,6 +1208,63 @@ mod tests {
         fs::remove_dir_all(root).expect("cleanup");
     }
 
+
+    #[test]
+    fn client_ico_chooses_largest_square_frame() {
+        let root = temp_dir("multi-resolution-ico");
+        fs::create_dir_all(&root).expect("root");
+        let path = root.join("client.ico");
+
+        let mut icon_dir = ico::IconDir::new(ico::ResourceType::Icon);
+        for side in [32_u32, 64, 256] {
+            let pixels = vec![side as u8; (side * side * 4) as usize];
+            let image = ico::IconImage::from_rgba_data(side, side, pixels);
+            icon_dir.add_entry(ico::IconDirEntry::encode(&image).expect("encode ICO frame"));
+        }
+        icon_dir
+            .write(fs::File::create(&path).expect("create ICO"))
+            .expect("write ICO");
+
+        let candidate = steam_client_icon_candidate(&path).expect("ICO candidate");
+        let crate::sources::SourceArtworkLocation::Bytes(bytes) = candidate.location() else {
+            panic!("ICO candidate must be materialized in memory");
+        };
+        let image = image::load_from_memory(bytes).expect("decode selected ICO frame PNG");
+        assert_eq!(image.width(), 256);
+        assert_eq!(image.height(), 256);
+
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn linux_icon_png_selection_prefers_largest_true_square() {
+        fn png(width: u32, height: u32) -> Vec<u8> {
+            let image = image::RgbaImage::from_pixel(
+                width,
+                height,
+                image::Rgba([20, 40, 60, 255]),
+            );
+            let mut bytes = Vec::new();
+            image::DynamicImage::ImageRgba8(image)
+                .write_to(
+                    &mut std::io::Cursor::new(&mut bytes),
+                    image::ImageFormat::Png,
+                )
+                .expect("encode PNG");
+            bytes
+        }
+
+        let small = png(64, 64);
+        let medium = png(184, 184);
+        let large = png(512, 512);
+        let non_square = png(1024, 512);
+
+        assert_eq!(square_png_side(&small), Some(64));
+        assert_eq!(square_png_side(&medium), Some(184));
+        assert_eq!(square_png_side(&large), Some(512));
+        assert_eq!(square_png_side(&non_square), None);
+    }
+
     #[test]
     fn launch_target_uses_steam_uri_for_numeric_app_id() {
         let source = SteamSource::with_roots(vec![]).expect("source");
@@ -1038,13 +1279,32 @@ mod tests {
     }
 
     #[test]
-    fn steam_reaper_match_uses_exact_app_id_boundary() {
-        let matching = b"/home/test/Steam/ubuntu12_32/reaper\0SteamLaunch\0AppId=1462040\0--\0game";
-        let collision = b"/home/test/Steam/ubuntu12_32/reaper\0SteamLaunch\0AppId=14620400\0--\0game";
-        let unrelated = b"/usr/bin/game\0SteamLaunch\0AppId=1462040\0";
+    fn gameprocess_log_tracks_app_until_remove_from_running_list() {
+        let log = "[2026-10-07 10:00:00] AppID 1462040 adding PID 100 as a tracked process
+\
+                   [2026-10-07 10:00:01] AppID 1462040 no longer tracking PID 100, exit code -1
+\
+                   [2026-10-07 10:00:02] AppID 480 adding PID 200 as a tracked process
+";
+        let states = parse_gameprocess_running_states(log);
+        assert_eq!(states.get("1462040"), Some(&true));
+        assert_eq!(states.get("480"), Some(&true));
 
-        assert!(steam_reaper_cmdline_matches(matching, "1462040"));
-        assert!(!steam_reaper_cmdline_matches(collision, "1462040"));
-        assert!(!steam_reaper_cmdline_matches(unrelated, "1462040"));
+        let ended = format!("{log}[2026-10-07 10:03:00] Remove 1462040 from running list
+");
+        let states = parse_gameprocess_running_states(&ended);
+        assert_eq!(states.get("1462040"), Some(&false));
+        assert_eq!(states.get("480"), Some(&true));
+    }
+
+    #[test]
+    fn gameprocess_log_app_id_matching_is_exact() {
+        let log = "[x] AppID 14620400 adding PID 1 as a tracked process
+\
+                   [x] Remove 14620400 from running list
+";
+        let states = parse_gameprocess_running_states(log);
+        assert!(!states.contains_key("1462040"));
+        assert_eq!(states.get("14620400"), Some(&false));
     }
 }

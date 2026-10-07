@@ -155,3 +155,25 @@ branches on a provider name and never opens provider paths directly.
 Steam is the first provider to advertise `Artwork`. Bottles and Heroic continue
 to use the procedural fallback until they implement the same generic method.
 See `ARTWORK.md` and ADR 0049.
+
+## Phase 9.5.36 native-square artwork contract
+
+`GameSource::artwork_candidates` exposes provider-owned candidates that are
+expected to be square. The generic `ArtworkService` decodes every candidate and
+enforces `width == height` before the image can reach presentation.
+
+There is no `CoverArt` fallback class. Adapters must not offer portrait,
+landscape, capsule, hero, or header art for Horizon's primary game tile merely
+because it has more pixels.
+
+The generic rule is therefore:
+
+```text
+true provider 1:1 asset -> eligible
+non-1:1 provider asset  -> rejected
+no eligible square      -> FallbackCover
+```
+
+Steam remains the first provider to implement the capability. Bottles and
+Heroic continue to use the procedural fallback until they can expose genuine
+1:1 provider artwork.

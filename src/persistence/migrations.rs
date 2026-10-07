@@ -34,9 +34,14 @@ const MIGRATIONS: &[Migration] = &[
         name: "remove_lutris_source",
         sql: include_str!("migrations/0005_remove_lutris_source.sql"),
     },
+    Migration {
+        version: 6,
+        name: "activity_session_checkpoints",
+        sql: include_str!("migrations/0006_activity_session_checkpoints.sql"),
+    },
 ];
 
-pub(crate) const LATEST_SCHEMA_VERSION: i64 = 5;
+pub(crate) const LATEST_SCHEMA_VERSION: i64 = 6;
 
 const MIGRATION_LEDGER_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -136,8 +141,8 @@ mod tests {
             .execute(
                 r#"
                 INSERT INTO play_sessions(
-                    id, game_id, source_id, started_at, ended_at, tracking_method, state
-                ) VALUES (1, 1, 'bottles', 10, 20, 'managed_session', 'completed')
+                    id, game_id, source_id, started_at, ended_at, tracking_method, state, checkpoint_at
+                ) VALUES (1, 1, 'bottles', 10, 20, 'managed_session', 'completed', 20)
                 "#,
                 [],
             )
@@ -168,8 +173,8 @@ mod tests {
             .execute(
                 r#"
                 INSERT INTO play_sessions(
-                    id, game_id, source_id, started_at, ended_at, tracking_method, state
-                ) VALUES (1, 1, 'steam', 10, 20, 'source_runtime', 'completed')
+                    id, game_id, source_id, started_at, ended_at, tracking_method, state, checkpoint_at
+                ) VALUES (1, 1, 'steam', 10, 20, 'source_runtime', 'completed', 20)
                 "#,
                 [],
             )
@@ -265,6 +270,65 @@ mod tests {
             )
             .expect("count Steam refs");
         assert_eq!(steam_refs, 1);
+    }
+
+    #[test]
+    fn checkpoint_migration_preserves_existing_sessions_and_initializes_checkpoint() {
+        let mut connection = Connection::open_in_memory().expect("in-memory database");
+        connection
+            .execute_batch(MIGRATION_LEDGER_SQL)
+            .expect("create migration ledger");
+
+        for migration in MIGRATIONS.iter().filter(|migration| migration.version <= 5) {
+            connection.execute_batch(migration.sql).expect("apply old migration");
+            connection
+                .execute(
+                    "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?1, ?2, 0)",
+                    params![migration.version, migration.name],
+                )
+                .expect("record old migration");
+        }
+
+        connection
+            .execute_batch(
+                r#"
+                INSERT INTO games(id, title, created_at, updated_at)
+                VALUES (1, 'Game', 0, 0);
+
+                INSERT INTO play_sessions(
+                    id, game_id, source_id, started_at, ended_at, tracking_method, state
+                ) VALUES
+                    (1, 1, 'steam', 10, NULL, 'source_runtime', 'open'),
+                    (2, 1, 'steam', 20, 80, 'source_runtime', 'completed'),
+                    (3, 1, 'steam', 90, NULL, 'source_runtime', 'interrupted');
+                "#,
+            )
+            .expect("seed version-5 activity");
+
+        migrate(&mut connection).expect("apply checkpoint migration");
+
+        let mut statement = connection
+            .prepare(
+                "SELECT id, started_at, ended_at, checkpoint_at, state FROM play_sessions ORDER BY id",
+            )
+            .expect("prepare");
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, Option<i64>>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            })
+            .expect("query")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("rows");
+
+        assert_eq!(rows[0], (1, 10, None, 10, "open".to_owned()));
+        assert_eq!(rows[1], (2, 20, Some(80), 80, "completed".to_owned()));
+        assert_eq!(rows[2], (3, 90, None, 90, "interrupted".to_owned()));
     }
 
     #[test]

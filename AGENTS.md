@@ -889,3 +889,122 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
 - Phase 9.5.29 remains local-only: do not broaden Flatpak network permissions
   solely to fetch artwork. Steam game images are displayed from the user's local
   Steam cache and are not redistributed by Horizon. See ADR 0049.
+
+## Phase 9.5.31 artwork quality/cache invariant
+
+- Primary presentation artwork remains strictly 1:1, but the Phase 9.5.29
+  "never crop" rule is superseded for candidates explicitly tagged `CoverArt`.
+  `ArtworkService`, not source adapters or Slint, owns the one standardized
+  centered square crop.
+- Candidate quality is evaluated from decoded source dimensions before any
+  resize. A 512×512 native square icon is preferred; a sub-384px square icon
+  may be replaced by provider cover art only when the cover has a larger usable
+  shortest dimension.
+- Normalize the chosen source to one 512×512 RGBA presentation image and cache
+  it under the XDG cache directory. Cache files are disposable presentation
+  data, never durable library/source identity.
+- Steam may expose local `library_600x900`/`library_capsule` files from legacy,
+  per-AppID, and one-level SHA-1 content-hash library-cache layouts. Keep this
+  local-only for Phase 9.5.31; do not add network permissions merely for art.
+- Missing/corrupt/currently-evicted provider artwork must remain non-fatal. A
+  valid stale normalized cache may be used; otherwise preserve `FallbackCover`.
+- See ADR 0050.
+
+## Phase 9.5.32 normal-Flatpak runtime observation invariant
+
+- Steam runtime/playtime observation must work in the ordinary Horizon Flatpak
+  without installing `horizon-session-helper` and without host `/proc` access.
+- Steam derives AppID lifecycle from provider-owned `logs/gameprocess_log.txt`
+  available through Horizon's existing read-only Steam filesystem grants.
+- Window focus never ends a Steam `SourceRuntime` session. The exact AppID's
+  Steam running-list removal is the terminal signal.
+- The host helper remains optional for genuine managed-session execution; do
+  not make normal source runtime observation depend on it again.
+
+
+## Phase 9.5.33 live Activity invariant
+
+- Open play sessions may be shown as live presentation data and may temporarily
+  contribute to the displayed Observed playtime total, but they remain `open`
+  in persistence until their owning lifecycle signal terminates.
+- Completed-session counts must not treat a live/open session as completed
+  history.
+
+## Phase 9.5.34 crash-resilient Activity invariant
+
+- Every persisted open session owns a conservative `checkpoint_at`, initialized
+  to `started_at` and advanced through the generic ActivityRepository boundary
+  while Horizon knows the session is still live.
+- The application checkpoints live sessions every five seconds. Do not move
+  checkpoint persistence into Steam/source adapters or Slint.
+- Clean terminal signals remain authoritative and write the exact observed
+  `ended_at`. A checkpoint never replaces a known clean terminal timestamp.
+- Startup recovery may convert a leftover open row to `interrupted` using only
+  its already-persisted checkpoint as the recovered observed-through boundary.
+  Never use current startup/reboot time as a synthetic end.
+- Confirmed recovered interrupted duration contributes to durable observed
+  playtime and may appear in Most played/Recent Activity, but interrupted rows
+  must not increment the completed-session counter.
+- SQLite connections explicitly use `synchronous = FULL`; keep checkpoint
+  writes tiny and infrequent enough that this durability preference does not
+  become a general high-frequency persistence loop.
+- See ADR 0051.
+
+## Phase 9.5.35 non-destructive cover-art invariant
+
+- The Phase 9.5.31 centered-crop policy is superseded. `CoverArt` may replace a
+  low-resolution square icon for source quality, but the visible provider cover
+  must never be cropped to satisfy Horizon's 1:1 presentation contract.
+- `ArtworkService` composes non-square cover art into a 512×512 square by
+  fitting the complete cover as the foreground and using a subdued blurred
+  derivative only as decorative square background fill. Cropping is permitted
+  only for that decorative backdrop.
+- Normalized artwork cache version `square-v3` intentionally invalidates the
+  cropped `square-v2` presentation cache. Do not reuse `square-v2` after this
+  policy change.
+- `GameTile` uses non-destructive image fitting. Slint must not introduce a
+  second crop after `ArtworkService` has normalized the provider artwork.
+- See ADR 0052.
+
+## Phase 9.5.36 native-square artwork invariant
+
+- Primary game art must originate from a provider asset whose decoded width and
+  height are equal. A square presentation buffer derived from portrait or
+  landscape art does not satisfy this rule.
+- `ArtworkService` rejects non-1:1 candidates. Do not crop, pad, letterbox,
+  blur-fill, or otherwise adapt non-square artwork for primary game tiles.
+- Steam library portraits/capsules/heroes/headers are not primary artwork
+  candidates. Use the best available native square icon; otherwise use
+  `FallbackCover`.
+- `square-v4` invalidates all older artwork caches that could contain converted
+  non-square source art.
+- ADR 0053 supersedes ADRs 0050 and 0052 where they conflict.
+
+## Phase 9.5.37 Steam multi-resolution icon invariant
+
+- Steam ICO files are containers, not single artwork images. `SteamSource`
+  explicitly enumerates their frames and exposes only the largest successfully
+  decoded native 1:1 frame; generic image decoding must not implicitly choose an
+  ICO frame for primary artwork.
+- Steam `linuxclienticon` ZIPs are likewise resolved inside the Steam adapter.
+  Enumerate their PNG entries, validate decoded dimensions, and expose only the
+  largest valid native 1:1 PNG from each archive.
+- The normal 184×184 Steam App Icon remains a valid fallback if no larger true
+  square exists. Do not substitute non-square artwork.
+- `square-v5` invalidates the previous artwork presentation cache so improved
+  frame selection takes effect immediately after upgrade.
+
+## Phase 9.5.38 pixel-art rendering invariant
+
+- Pixel art must not be smoothed at any stage.
+- `ArtworkService` classifies the selected native-square source before cache
+  normalization. Pixel-art-like sources use nearest-neighbour resampling;
+  continuous-tone sources use Lanczos3.
+- Preserve the `SquareArtwork::pixelated` flag through presentation into
+  `GameCardData.pixelated-artwork`.
+- Slint `GameTile` must use `image-rendering: pixelated` for pixel-art cards,
+  not merely rely on a nearest-neighbour 512×512 cache. This prevents a second
+  smoothing pass during tile/UI/device scaling.
+- Cache version `square-v6` invalidates older normalized files that may already
+  contain smoothed pixel art.
+- ADR 0055 records this rule.

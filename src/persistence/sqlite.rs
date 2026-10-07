@@ -39,7 +39,7 @@ impl SqliteLibraryRepository {
     }
 
     fn from_connection(mut connection: Connection) -> Result<Self, PersistenceError> {
-        connection.execute_batch("PRAGMA foreign_keys = ON;")?;
+        connection.execute_batch("PRAGMA foreign_keys = ON; PRAGMA synchronous = FULL;")?;
         connection.busy_timeout(Duration::from_secs(5))?;
         migrations::migrate(&mut connection)?;
         Ok(Self { connection })
@@ -266,8 +266,8 @@ impl ActivityRepository for SqliteLibraryRepository {
     ) -> Result<PlaySessionId, Self::Error> {
         self.connection.execute(
             "INSERT INTO play_sessions(\
-             game_id, source_id, started_at, ended_at, tracking_method, state\
-             ) VALUES (?1, ?2, ?3, NULL, ?4, 'open')",
+             game_id, source_id, started_at, ended_at, tracking_method, state, checkpoint_at\
+             ) VALUES (?1, ?2, ?3, NULL, ?4, 'open', ?3)",
             params![
                 game_id.get(),
                 source_id.as_str(),
@@ -307,7 +307,8 @@ impl ActivityRepository for SqliteLibraryRepository {
         }
 
         let changed = self.connection.execute(
-            "UPDATE play_sessions SET ended_at = ?1, state = 'completed' \
+            "UPDATE play_sessions \
+             SET ended_at = ?1, checkpoint_at = ?1, state = 'completed' \
              WHERE id = ?2 AND state = 'open'",
             params![ended_at, session_id.get()],
         )?;
@@ -322,7 +323,8 @@ impl ActivityRepository for SqliteLibraryRepository {
         session_id: PlaySessionId,
     ) -> Result<(), Self::Error> {
         let changed = self.connection.execute(
-            "UPDATE play_sessions SET state = 'interrupted' \
+            "UPDATE play_sessions \
+             SET ended_at = checkpoint_at, state = 'interrupted' \
              WHERE id = ?1 AND state = 'open'",
             [session_id.get()],
         )?;
@@ -332,9 +334,25 @@ impl ActivityRepository for SqliteLibraryRepository {
         Ok(())
     }
 
+    fn checkpoint_open_play_sessions(&mut self, observed_at: i64) -> Result<usize, Self::Error> {
+        self.connection
+            .execute(
+                "UPDATE play_sessions \
+                 SET checkpoint_at = ?1 \
+                 WHERE state = 'open' AND started_at <= ?1 AND checkpoint_at < ?1",
+                [observed_at],
+            )
+            .map_err(Into::into)
+    }
+
     fn interrupt_open_play_sessions(&mut self) -> Result<usize, Self::Error> {
         self.connection
-            .execute("UPDATE play_sessions SET state = 'interrupted' WHERE state = 'open'", [])
+            .execute(
+                "UPDATE play_sessions \
+                 SET ended_at = checkpoint_at, state = 'interrupted' \
+                 WHERE state = 'open'",
+                [],
+            )
             .map_err(Into::into)
     }
 
@@ -345,10 +363,14 @@ impl ActivityRepository for SqliteLibraryRepository {
     ) -> Result<ActivityOverview, Self::Error> {
         let (raw_total, raw_sessions, raw_games) = self.connection.query_row(
             "SELECT \
-             COALESCE(SUM(ended_at - started_at), 0), \
-             COUNT(*), \
-             COUNT(DISTINCT game_id) \
-             FROM play_sessions WHERE state = 'completed'",
+             COALESCE(SUM(CASE \
+                 WHEN state IN ('completed', 'interrupted') AND ended_at IS NOT NULL \
+                 THEN ended_at - started_at ELSE 0 END), 0), \
+             COALESCE(SUM(CASE WHEN state = 'completed' THEN 1 ELSE 0 END), 0), \
+             COUNT(DISTINCT CASE \
+                 WHEN state IN ('completed', 'interrupted') AND ended_at IS NOT NULL \
+                 THEN game_id END) \
+             FROM play_sessions",
             [],
             |row| {
                 Ok((
@@ -373,6 +395,7 @@ impl ActivityRepository for SqliteLibraryRepository {
              FROM play_sessions AS ps \
              INNER JOIN games AS g ON g.id = ps.game_id \
              WHERE ps.state = 'completed' \
+                OR (ps.state = 'interrupted' AND ps.ended_at IS NOT NULL) \
              ORDER BY ps.started_at DESC, ps.id DESC LIMIT ?1",
         )?;
         let recent_rows = recent_statement.query_map([recent_limit], |row| {
@@ -429,13 +452,80 @@ impl ActivityRepository for SqliteLibraryRepository {
         }
         drop(recent_statement);
 
+        // Open sessions are returned separately from durable completed/recovered
+        // history so presentation can show live elapsed time without treating
+        // an unfinished session as completed or recovered playtime.
+        let mut active_statement = self.connection.prepare(
+            "SELECT ps.id, ps.game_id, g.title, ps.source_id, ps.started_at, ps.ended_at, \
+             ps.tracking_method, ps.state \
+             FROM play_sessions AS ps \
+             INNER JOIN games AS g ON g.id = ps.game_id \
+             WHERE ps.state = 'open' \
+             ORDER BY ps.started_at DESC, ps.id DESC LIMIT ?1",
+        )?;
+        let active_rows = active_statement.query_map([recent_limit], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, Option<i64>>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
+            ))
+        })?;
+        let mut active_sessions = Vec::new();
+        for row in active_rows {
+            let (
+                raw_session_id,
+                raw_game_id,
+                raw_title,
+                raw_source_id,
+                started_at,
+                ended_at,
+                raw_method,
+                raw_state,
+            ) = row?;
+            let session_id =
+                Self::activity_value("play_sessions.id", PlaySessionId::new(raw_session_id))?;
+            let game_id = Self::domain_value("play_sessions.game_id", GameId::new(raw_game_id))?;
+            let title = Self::domain_value("games.title", GameTitle::new(raw_title))?;
+            let source_id =
+                Self::domain_value("play_sessions.source_id", SourceId::new(raw_source_id))?;
+            let tracking_method = Self::activity_value(
+                "play_sessions.tracking_method",
+                SessionTrackingMethod::from_storage_key(&raw_method),
+            )?;
+            let state = Self::activity_value(
+                "play_sessions.state",
+                PlaySessionState::from_storage_key(&raw_state),
+            )?;
+            let session = Self::activity_value(
+                "play_sessions",
+                PlaySession::new(
+                    session_id,
+                    game_id,
+                    source_id,
+                    started_at,
+                    ended_at,
+                    tracking_method,
+                    state,
+                ),
+            )?;
+            active_sessions.push(RecentActivitySession::new(session, title));
+        }
+        drop(active_statement);
+
         let top_limit = i64::try_from(top_games_limit)
             .map_err(|_| PersistenceError::InvalidCount(i64::MAX))?;
         let mut top_statement = self.connection.prepare(
-            "SELECT ps.game_id, g.title, SUM(ps.ended_at - ps.started_at), COUNT(*), MAX(ps.ended_at) \
+            "SELECT ps.game_id, g.title, SUM(ps.ended_at - ps.started_at), \
+             SUM(CASE WHEN ps.state = 'completed' THEN 1 ELSE 0 END), MAX(ps.ended_at) \
              FROM play_sessions AS ps \
              INNER JOIN games AS g ON g.id = ps.game_id \
              WHERE ps.state = 'completed' \
+                OR (ps.state = 'interrupted' AND ps.ended_at IS NOT NULL) \
              GROUP BY ps.game_id, g.title \
              ORDER BY SUM(ps.ended_at - ps.started_at) DESC, MAX(ps.ended_at) DESC, g.title ASC \
              LIMIT ?1",
@@ -475,7 +565,8 @@ impl ActivityRepository for SqliteLibraryRepository {
             played_games,
             recent_sessions,
             top_games,
-        ))
+        )
+        .with_active_sessions(active_sessions))
     }
 
     fn upsert_source_lifetime_playtime(
@@ -704,6 +795,30 @@ mod tests {
     }
 
     #[test]
+    fn open_sessions_surface_as_live_without_entering_completed_totals() {
+        let mut repository = SqliteLibraryRepository::open_in_memory().expect("repository");
+        let game_id = seed_game(&mut repository, "Live Game", "steam", "10");
+        repository
+            .begin_play_session(
+                game_id,
+                &SourceId::new("steam").expect("source"),
+                100,
+                SessionTrackingMethod::SourceRuntime,
+            )
+            .expect("session");
+
+        let overview = repository.activity_overview(8, 4).expect("overview");
+        assert_eq!(overview.observed_playtime().get(), 0);
+        assert_eq!(overview.completed_sessions(), 0);
+        assert_eq!(overview.active_sessions().len(), 1);
+        assert_eq!(overview.active_sessions()[0].title().as_str(), "Live Game");
+        assert_eq!(
+            overview.active_sessions()[0].session().tracking_method(),
+            SessionTrackingMethod::SourceRuntime
+        );
+    }
+
+    #[test]
     fn completed_sessions_feed_observed_activity_overview() {
         let mut repository = SqliteLibraryRepository::open_in_memory().expect("repository");
         let game_id = repository
@@ -745,7 +860,7 @@ mod tests {
     }
 
     #[test]
-    fn interrupted_sessions_do_not_invent_playtime() {
+    fn interrupted_sessions_preserve_only_confirmed_checkpoint_time() {
         let mut repository = SqliteLibraryRepository::open_in_memory().expect("repository");
         let game_id = repository
             .upsert_discovered_game(&discovered("steam", "10", "Interrupted"))
@@ -755,14 +870,34 @@ mod tests {
                 game_id,
                 &SourceId::new("steam").expect("source"),
                 100,
-                SessionTrackingMethod::ForegroundHandoff,
+                SessionTrackingMethod::SourceRuntime,
             )
             .expect("session");
+        assert_eq!(
+            repository
+                .checkpoint_open_play_sessions(145)
+                .expect("checkpoint"),
+            1
+        );
 
         assert_eq!(repository.interrupt_open_play_sessions().expect("interrupt"), 1);
         let overview = repository.activity_overview(8, 4).expect("overview");
-        assert_eq!(overview.observed_playtime().get(), 0);
+        assert_eq!(overview.observed_playtime().get(), 45);
         assert_eq!(overview.completed_sessions(), 0);
+        assert_eq!(overview.played_games(), 1);
+        assert_eq!(overview.recent_sessions().len(), 1);
+        assert_eq!(
+            overview.recent_sessions()[0].session().state(),
+            PlaySessionState::Interrupted
+        );
+        assert_eq!(
+            overview.recent_sessions()[0]
+                .session()
+                .duration()
+                .expect("recovered duration")
+                .get(),
+            45
+        );
     }
 
     #[test]

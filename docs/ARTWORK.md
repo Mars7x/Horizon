@@ -1,109 +1,134 @@
 # Artwork policy
 
-Horizon treats primary game artwork as a source-neutral **1:1 square asset**.
-Home, Library, and future game-detail surfaces must consume the same normalized
-artwork contract rather than knowing how Steam, Bottles, or Heroic store their
-images.
+Horizon primary game artwork is **native 1:1 only**.
 
-## Phase 9.5.29 artwork foundation
+The 1:1 requirement applies to the provider source asset itself, not merely to
+the final presentation buffer. Horizon does not crop, pad, letterbox, blur-fill,
+or otherwise convert portrait/landscape artwork into a square game tile.
 
-The production path is now:
+## Phase 9.5.38 square-only artwork pipeline
 
 ```text
 GameSource
   └─ artwork_candidates(ExternalGameId)
           ↓
-     SourceArtworkCandidate
+    provider-owned square candidates only
           ↓
       ArtworkService
-          ↓
-  decode + choose best local candidate
-          ↓
-       normalize 1:1
+        ├─ decode
+        ├─ reject width != height
+        ├─ choose highest-resolution true square
+        ├─ resize only (aspect ratio unchanged)
+        └─ cache 512×512 PNG
           ↓
        GameCardData
           ↓
-        Slint UI
+         Slint
 ```
 
-Source adapters expose provider-owned candidates only. They do not decide how
-Horizon crops, pads, scales, or renders those assets. Slint receives only the
-normalized presentation image and a `has-artwork` flag.
+The source adapter may identify files that are expected to be square, but
+`ArtworkService` validates the decoded dimensions. A mislabeled 256×255,
+600×900, or any other non-1:1 image is rejected.
 
-## 1:1 invariant
+If no valid square artwork exists, Horizon uses `FallbackCover`. It does not use
+a non-square image as a quality fallback.
 
-- Primary game artwork is always represented as a square RGBA pixel buffer.
-- Already-square source artwork is preserved without cropping or stretching.
-- A non-square future source is centered on a transparent square canvas rather
-  than stretched or silently cropped.
-- Sources larger than 512×512 are downscaled to at most 512×512 for the current
-  Home presentation path.
-- Smaller authoritative artwork is **not upscaled in storage/memory merely to
-  claim a higher resolution**. The UI may naturally scale it at render time.
-- Missing/broken artwork always falls back to the procedural `FallbackCover`.
+## Steam
 
-This keeps the source contract stable while allowing a later disk cache or
-higher-resolution detail view without source-specific Slint code.
+Steam is the first provider with artwork support. Horizon considers only local
+square/icon-oriented Steam assets:
 
-## Steam square artwork
+- the largest valid square PNG representation inside
+  `steam/games/<linuxclienticon-hash>.zip`;
+- the largest decodable square frame inside
+  `steam/games/<clienticon-hash>.ico`;
+- hashed App Icon files under `appcache/librarycache/<appid>/`;
+- legacy `<appid>_icon.jpg` / `<appid>_icon.png`;
+- per-AppID `icon.jpg` / `icon.png`.
 
-Steam advertises `SourceCapability::Artwork`. Horizon reads artwork already
-owned and cached by the local Steam installation; Phase 9.5.29 does not grant
-Horizon general runtime network access.
+Steam `library_600x900`, `library_capsule`, hero, header, and other non-square
+library artwork are not candidates for Horizon primary game art.
 
-For each installed AppID the Steam adapter exposes the available square icon
-candidates it can prove belong to that AppID, including:
+Steam container formats are resolved explicitly before they enter the generic
+artwork service. Horizon enumerates all usable PNG entries in a Linux icon ZIP
+and all frames in a client ICO, rejects non-square representations, and keeps
+the largest true-square representation from each container. For ICO frames at
+the same resolution, higher color depth wins.
 
-1. Steam's local `linuxclienticon` ZIP from `steam/games/<hash>.zip` when
-   `common.linuxclienticon` is present; every PNG representation in the archive
-   is offered to the generic decoder so the largest usable square can win;
-2. Steam's local `clienticon` ICO container from `steam/games/<hash>.ico` when
-   `common.clienticon` is present;
-3. the AppID/hash image in modern `appcache/librarycache/<appid>/...` layouts;
-4. Steam's legacy `<appid>_icon.jpg`/PNG cache names;
-5. the newer per-AppID `icon.jpg`/PNG filename fallback.
+The generic artwork service then chooses the largest true-square candidate
+across those container results and ordinary App Icon files. Horizon may resize
+that square to its canonical 512×512 cache buffer, but it never changes the
+source aspect ratio.
 
-`ArtworkService` decodes every available candidate and chooses the one with the
-largest actual pixel area. This matters because the Linux ZIP or ICO may contain
-a better square representation than Steam's compact 184×184 app icon, while
-older games can still have small client icons. A lower-resolution client icon
-therefore cannot displace a larger cached App Icon simply because it was listed
-first.
+This means a game with only a 184×184 square Steam icon will use that square
+icon rather than replacing it with a sharper portrait cover. If there is no
+usable square asset at all, Horizon uses its procedural fallback.
 
-Steam documents the compact App Icon as 184×184 JPG and its Shortcut Icon as a
-256×256 or 512×512 PNG/ICO submission. Horizon prefers the best **locally
-available** square representation rather than hard-coding 184×184 as the
-artwork quality ceiling.
+## Persistent cache
+
+Canonical artwork is cached under:
+
+```text
+$XDG_CACHE_HOME/horizon/artwork/square-v6/<game-key>.png
+```
+
+or, when `XDG_CACHE_HOME` is unavailable:
+
+```text
+$HOME/.cache/horizon/artwork/square-v6/<game-key>.png
+```
+
+`square-v6` invalidates the earlier cache so artwork is rebuilt with the
+pixel-art rendering classification introduced in 9.5.38. A cached image created
+with smooth interpolation must never keep a pixel-art source blurred after the
+policy changes.
+
+The cache is disposable presentation data and is refreshed from provider-owned
+square sources. No additional network permission is required.
 
 ## Rendering
 
-`GameTile` always reserves the same square artwork frame. If real artwork is
-available it fills that 1:1 frame; otherwise `FallbackCover` renders in exactly
-the same geometry. Selection/launch press animation therefore does not change
-artwork aspect ratio or source policy.
+`GameTile` receives an already-square image and uses non-destructive fitting.
+Presentation must not introduce cropping.
 
-The decoded source is retained at native resolution up to 512×512. This avoids
-unnecessary 184→512 preprocessing while still preventing extremely large source
-images from multiplying Home memory use.
+## Provenance
 
-## Fallback artwork
+Horizon does not bundle or redistribute Steam game artwork. It displays and
+locally caches artwork already present in the user's Steam installation. The
+underlying artwork remains the property of its respective publisher/developer.
 
-`FallbackCover` remains source-neutral procedural Slint geometry. Palette and
-monogram values derive from Horizon's durable game identity/title, never from a
-provider name. It is the required fallback for:
 
-- sources that do not advertise artwork;
-- games whose provider cache has no usable square art;
-- unreadable or corrupt artwork files.
+## Pixel-art rendering
 
-The fallback is resolution-independent and remains valid for Steam, Bottles,
-Heroic, and future source adapters.
+Pixel art must not be smoothed.
 
-## Provenance and licensing
+`ArtworkService` classifies the selected true-square source before
+normalization. Pixel-art-like sources use nearest-neighbour scaling into the
+canonical 512×512 cache. Smooth/photographic artwork continues to use Lanczos3.
 
-Horizon does not bundle or redistribute Steam game artwork. It displays files
-already present in the user's Steam installation/cache. Those images remain the
-property of their respective game publishers/developers.
+The classification looks for discrete raster characteristics: hard or flat
+neighbor transitions, comparatively few soft gradient transitions, and bounded
+quantized color complexity. Very small square sources (128×128 or below) stay
+on the nearest-neighbour path by default.
 
-The Rust `image` crate is used only for decoding and square normalization; its
-license/provenance is recorded in `THIRD_PARTY_NOTICES.md`.
+The classification bit is carried into `GameCardData`. Slint then sets the
+`Image.image-rendering` property to `pixelated` for those cards, so later
+fullscreen, HiDPI, selection-size, or fractional UI scaling cannot reintroduce
+linear interpolation. Slint documents `pixelated` image rendering as
+nearest-neighbour scaling.
+
+This is intentionally a two-stage invariant:
+
+```text
+provider square source
+       ↓
+pixel-art classification
+       ↓
+pixel art ── nearest-neighbour cache normalization
+normal art ─ Lanczos3 cache normalization
+       ↓
+GameCardData.pixelated-artwork
+       ↓
+Slint image-rendering:
+pixelated OR smooth
+```

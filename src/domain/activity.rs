@@ -12,7 +12,7 @@ pub enum ActivityValidationError {
     EndBeforeStart { started_at: i64, ended_at: i64 },
     #[error("completed sessions require an end time")]
     CompletedSessionMissingEnd,
-    #[error("open/interrupted sessions must not have an end time")]
+    #[error("open sessions must not have an end time")]
     NonCompletedSessionHasEnd,
     #[error("unknown session tracking method: {0}")]
     UnknownTrackingMethod(String),
@@ -146,10 +146,20 @@ impl PlaySession {
                     });
                 }
             }
-            PlaySessionState::Open | PlaySessionState::Interrupted if ended_at.is_some() => {
+            PlaySessionState::Open if ended_at.is_some() => {
                 return Err(ActivityValidationError::NonCompletedSessionHasEnd);
             }
-            PlaySessionState::Open | PlaySessionState::Interrupted => {}
+            PlaySessionState::Interrupted => {
+                if let Some(ended_at) = ended_at
+                    && ended_at < started_at
+                {
+                    return Err(ActivityValidationError::EndBeforeStart {
+                        started_at,
+                        ended_at,
+                    });
+                }
+            }
+            PlaySessionState::Open => {}
         }
 
         Ok(Self {
@@ -268,7 +278,7 @@ mod tests {
     }
 
     #[test]
-    fn interrupted_session_keeps_duration_unknown() {
+    fn interrupted_session_without_checkpoint_keeps_duration_unknown() {
         let session = PlaySession::new(
             PlaySessionId::new(1).expect("session id"),
             game_id(),
@@ -281,6 +291,22 @@ mod tests {
         .expect("session");
 
         assert_eq!(session.duration(), None);
+    }
+
+    #[test]
+    fn interrupted_session_can_preserve_confirmed_duration() {
+        let session = PlaySession::new(
+            PlaySessionId::new(1).expect("session id"),
+            game_id(),
+            source_id(),
+            100,
+            Some(145),
+            SessionTrackingMethod::SourceRuntime,
+            PlaySessionState::Interrupted,
+        )
+        .expect("session");
+
+        assert_eq!(session.duration().expect("duration").get(), 45);
     }
 
     #[test]

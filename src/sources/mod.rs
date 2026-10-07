@@ -19,12 +19,6 @@ pub mod heroic;
 pub mod steam;
 mod support;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SourceArtworkKind {
-    /// Primary square game artwork suitable for Home/Library tiles.
-    SquareIcon,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceArtworkLocation {
     File(PathBuf),
@@ -33,27 +27,26 @@ pub enum SourceArtworkLocation {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceArtworkCandidate {
-    kind: SourceArtworkKind,
     location: SourceArtworkLocation,
 }
 
 impl SourceArtworkCandidate {
+    /// A provider-owned candidate that is expected to be natively 1:1.
+    ///
+    /// `ArtworkService` still validates the decoded dimensions before the
+    /// candidate can reach presentation. A mislabeled non-square file is
+    /// rejected rather than cropped, padded, or otherwise converted to 1:1.
     pub fn local_square_icon(path: PathBuf) -> Self {
         Self {
-            kind: SourceArtworkKind::SquareIcon,
             location: SourceArtworkLocation::File(path),
         }
     }
 
+    /// In-memory equivalent of `local_square_icon`.
     pub fn in_memory_square_icon(bytes: Vec<u8>) -> Self {
         Self {
-            kind: SourceArtworkKind::SquareIcon,
             location: SourceArtworkLocation::Bytes(bytes),
         }
-    }
-
-    pub const fn kind(&self) -> SourceArtworkKind {
-        self.kind
     }
 
     pub fn location(&self) -> &SourceArtworkLocation {
@@ -369,11 +362,11 @@ pub trait GameSource: Send + Sync {
         Ok(None)
     }
 
-    /// Observe whether a source-owned game is currently running on the host.
+    /// Observe whether a source-owned game is currently running.
     ///
-    /// This is invoked by the same-user host helper, not by the sandboxed UI.
-    /// Sources advertising `RuntimeObservation` must keep provider-specific
-    /// process/state knowledge behind this adapter boundary.
+    /// Sources advertising `RuntimeObservation` must derive this from reliable
+    /// provider-owned state behind the adapter boundary. Implementations used
+    /// by the normal Flatpak must not depend on visibility into host `/proc`.
     fn runtime_state(
         &self,
         _external_id: &ExternalGameId,

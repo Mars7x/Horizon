@@ -147,3 +147,56 @@ This works whether Horizon is being used as a normal Flatpak window or from a
 Gamescope-oriented shell. Runtime observation is not conditional on Gamescope
 being installed; Gamescope is only required for the separate managed-session
 launch capability.
+
+## Phase 9.5.32 normal-Flatpak Steam lifecycle
+
+Steam `SourceRuntime` tracking no longer depends on the optional host helper.
+The ordinary Horizon Flatpak reads Steam's provider-owned
+`logs/gameprocess_log.txt` through the same read-only Steam filesystem grants
+already used for discovery/artwork. `AppID <id> adding PID ...` marks that AppID
+running; `Remove <id> from running list` marks it stopped. Alt-Tab/focus changes
+therefore do not complete a Steam `SourceRuntime` session.
+
+The host helper remains optional and is still used for genuine managed
+Gamescope sessions. `ForegroundHandoff` remains the fallback when a provider
+cannot expose a reliable runtime signal from within the normal app.
+
+
+## Phase 9.5.33 live in-progress Activity
+
+Open Horizon-observed sessions are now surfaced separately from completed
+history. While a source-runtime, managed, or foreground session is open, the
+Activity page shows it at the top of Recent sessions as `Playing now` and its
+elapsed duration refreshes once per second. The Observed playtime summary also
+adds the current in-memory/open-session elapsed time for display.
+
+This live value is presentation-only until Horizon receives a real terminal
+signal and completes the session. Completed-session count, durable historical
+totals, and Most played remain based on completed rows so an unfinished session
+is never silently converted into permanent history.
+
+Schema v6 supersedes the old all-or-nothing crash rule with persisted
+observation checkpoints. Live sessions remain `open`, but Horizon periodically
+records the last instant at which the session was definitely still being
+observed. Startup recovery never uses reboot/startup time as a fabricated exit.
+
+
+## Phase 9.5.34 crash-resilient checkpoints
+
+Every live Horizon-observed session now receives a durable checkpoint every
+five seconds. The checkpoint is conservative: it means Horizon definitely knew
+the session was still live at that timestamp; it does not claim the game ended
+there. The session-start transaction itself provides the initial checkpoint.
+
+On a clean exit, the normal source-runtime/managed/foreground terminal signal
+continues to provide the final `ended_at`, so no precision is lost. On a hard
+Horizon crash or full computer power loss, the next startup converts any
+leftover `open` row to `interrupted` and recovers duration only through its last
+committed checkpoint. That recovered duration is included in Observed playtime,
+Recent sessions labels it `Recovered`, and Most played may include the confirmed
+recovered seconds. The completed-session count still excludes interrupted rows.
+
+This intentionally loses the small uncheckpointed tail rather than inventing
+playtime after Horizon's last proof of life. With a five-second cadence the
+normal loss window is less than one interval, subject to filesystem/storage
+durability. SQLite synchronous mode is explicitly `FULL` for these commits.

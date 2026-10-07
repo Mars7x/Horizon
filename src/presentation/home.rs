@@ -370,9 +370,11 @@ impl HomeController {
 fn game_card(game: &LibraryGame, artwork_service: &ArtworkService) -> GameCardData {
     let title = game.game().title().as_str();
     let (primary, secondary, highlight) = fallback_palette(game.game().id().get(), title);
-    let artwork = artwork_service
-        .square_artwork(game)
-        .map(square_artwork_to_slint);
+    let square_artwork = artwork_service.square_artwork(game);
+    let pixelated_artwork = square_artwork
+        .as_ref()
+        .is_some_and(SquareArtwork::pixelated);
+    let artwork = square_artwork.map(square_artwork_to_slint);
     let has_artwork = artwork.is_some();
 
     GameCardData {
@@ -381,6 +383,7 @@ fn game_card(game: &LibraryGame, artwork_service: &ArtworkService) -> GameCardDa
         monogram: monogram(title).into(),
         artwork: artwork.unwrap_or_default(),
         has_artwork,
+        pixelated_artwork,
         cover_primary: rgb(primary),
         cover_secondary: rgb(secondary),
         cover_highlight: rgb(highlight),

@@ -65,7 +65,10 @@ export component GameTile inherits Rectangle {
                     width: parent.width;
                     height: parent.height;
                     source: root.game.artwork;
-                    image-fit: cover;
+                    // ArtworkService already produces the complete square composition.
+                    // Keep presentation non-destructive if that invariant ever regresses.
+                    image-fit: contain;
+                    image-rendering: root.game.pixelated-artwork ? pixelated : smooth;
                 }
 
                 if !root.game.has-artwork : FallbackCover {

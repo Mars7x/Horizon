@@ -5,7 +5,7 @@ use slint::{ModelRc, VecModel};
 
 use crate::{
     ActivityGameData, ActivitySessionData, AppWindow,
-    domain::{PlaytimeSeconds, SessionTrackingMethod},
+    domain::{PlaySessionState, PlaytimeSeconds, SessionTrackingMethod},
     services::activity::ActivityOverview,
 };
 
@@ -28,25 +28,60 @@ impl ActivityController {
     }
 
     pub fn publish(ui: &AppWindow, overview: &ActivityOverview) {
-        ui.set_activity_total_playtime(format_duration(overview.observed_playtime()).into());
+        let now = Utc::now().timestamp();
+        let live_seconds = overview
+            .active_sessions()
+            .iter()
+            .map(|entry| now.saturating_sub(entry.session().started_at()).max(0))
+            .fold(0_i64, i64::saturating_add);
+        let display_total = PlaytimeSeconds::new(
+            overview
+                .observed_playtime()
+                .get()
+                .saturating_add(live_seconds),
+        )
+        .unwrap_or_else(|_| overview.observed_playtime());
+
+        ui.set_activity_total_playtime(format_duration(display_total).into());
         ui.set_activity_session_count(overview.completed_sessions().to_string().into());
         ui.set_activity_game_count(overview.played_games().to_string().into());
 
-        let recent = overview
-            .recent_sessions()
+        let mut recent = overview
+            .active_sessions()
             .iter()
             .map(|entry| ActivitySessionData {
                 title: entry.title().as_str().into(),
-                duration: entry
-                    .session()
-                    .duration()
-                    .map(format_duration)
-                    .unwrap_or_else(|| "Unknown".to_owned())
-                    .into(),
-                when: format_timestamp(entry.session().started_at()).into(),
+                duration: format_duration(
+                    PlaytimeSeconds::new(now.saturating_sub(entry.session().started_at()).max(0))
+                        .unwrap_or_else(|_| PlaytimeSeconds::new(0).expect("zero playtime")),
+                )
+                .into(),
+                when: "Playing now".into(),
                 method: tracking_method_label(entry.session().tracking_method()).into(),
             })
             .collect::<Vec<_>>();
+        recent.extend(
+            overview
+                .recent_sessions()
+                .iter()
+                .take(RECENT_SESSION_LIMIT.saturating_sub(recent.len()))
+                .map(|entry| ActivitySessionData {
+                    title: entry.title().as_str().into(),
+                    duration: entry
+                        .session()
+                        .duration()
+                        .map(format_duration)
+                        .unwrap_or_else(|| "Unknown".to_owned())
+                        .into(),
+                    when: format_session_when(
+                        entry.session().state(),
+                        entry.session().started_at(),
+                    )
+                    .into(),
+                    method: tracking_method_label(entry.session().tracking_method()).into(),
+                }),
+        );
+        recent.truncate(RECENT_SESSION_LIMIT);
         ui.set_activity_recent_sessions(ModelRc::from(Rc::new(VecModel::from(recent))));
 
         let top_games = overview
@@ -101,6 +136,15 @@ fn format_session_count(count: usize) -> String {
     }
 }
 
+fn format_session_when(state: PlaySessionState, timestamp: i64) -> String {
+    let when = format_timestamp(timestamp);
+    if state == PlaySessionState::Interrupted {
+        format!("Recovered · {when}")
+    } else {
+        when
+    }
+}
+
 fn format_timestamp(timestamp: i64) -> String {
     let Some(utc) = Utc.timestamp_opt(timestamp, 0).single() else {
         return "Unknown time".to_owned();
@@ -139,6 +183,12 @@ mod tests {
             tracking_method_label(SessionTrackingMethod::SourceRuntime),
             "Source runtime"
         );
+    }
+
+    #[test]
+    fn interrupted_history_is_labeled_as_recovered() {
+        let label = format_session_when(PlaySessionState::Interrupted, Utc::now().timestamp());
+        assert!(label.starts_with("Recovered · "));
     }
 
     #[test]

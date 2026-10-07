@@ -1,1 +1,7 @@
-src/presentation/activity.rs
+AGENTS.md
+docs/ARTWORK.md
+docs/adr/0055-pixel-art-nearest-neighbour-rendering.md
+src/presentation/home.rs
+src/services/artwork.rs
+ui/components/game-tile.slint
+ui/models/game-card.slint

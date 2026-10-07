@@ -176,3 +176,10 @@ Lutris is no longer part of the production source registry. The helper therefore
 cannot resolve Lutris identities for managed launch or runtime observation. This
 requires no helper-specific special case because both processes consume the same
 `production_source_registry()`.
+
+## Runtime observation is not a helper requirement
+
+As of Phase 9.5.32, normal Steam `SourceRuntime` observation is performed inside
+the Horizon Flatpak from Steam-owned `gameprocess_log.txt`. Installing the
+session helper is not required for Steam playtime tracking. The helper remains
+optional for managed Gamescope launch/session ownership.
