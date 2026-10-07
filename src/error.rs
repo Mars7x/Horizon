@@ -1,6 +1,11 @@
 use thiserror::Error;
 
-use crate::{persistence::PersistenceError, platform::data_paths::DataPathError};
+use crate::{
+    persistence::PersistenceError,
+    platform::data_paths::DataPathError,
+    services::import::SourceImportError,
+    sources::{SourceRegistryError, steam::SteamSourceInitError},
+};
 
 #[derive(Debug, Error)]
 pub enum AppError {
@@ -10,4 +15,10 @@ pub enum AppError {
     DataPath(#[from] DataPathError),
     #[error(transparent)]
     Persistence(#[from] PersistenceError),
+    #[error(transparent)]
+    SteamSource(#[from] SteamSourceInitError),
+    #[error(transparent)]
+    SourceRegistry(#[from] SourceRegistryError),
+    #[error(transparent)]
+    SourceImport(#[from] SourceImportError<PersistenceError>),
 }

@@ -8,12 +8,13 @@ publish = false
 license = "GPL-3.0-or-later"
 
 [dependencies]
-ashpd = { version = "0.13", default-features = false, features = ["settings", "tokio"] }
+ashpd = { version = "0.13", default-features = false, features = ["open_uri", "settings", "tokio"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 futures-util = "0.3"
 rusqlite = { version = "0.37", features = ["bundled"] }
 slint = { version = "~1.18", default-features = false, features = ["compat-1-18", "std", "backend-winit-wayland", "backend-winit-x11", "renderer-skia"] }
 sdl3 = { version = "0.20", default-features = false, features = ["use-pkg-config"] }
+steam-vdf-parser = "0.1.2"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt", "sync"] }
 tracing = "0.1"

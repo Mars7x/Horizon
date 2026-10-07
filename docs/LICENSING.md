@@ -20,17 +20,11 @@ No third-party asset may be merged without recording all of the following:
 
 If the exact asset license cannot be established, it must be marked as a release blocker rather than guessed.
 
-## SVG-derived Slint geometry
+## SVG artwork
 
-Some symbolic SVGs are represented as Slint `Path` geometry because Slint's image path did not preserve the desired crisp recoloring behavior at fullscreen and HiDPI sizes. Reproducing path geometry is still use of the original artwork; the source and license therefore remain relevant even though the SVG is not rendered directly.
+The five top-utility icons (Friends, Album, Activity, Web, and Settings) are Horizon-owned artwork supplied by the project owner. They are stored as SVG files in `ui/assets/` and rendered directly by Slint. Their authored paths, fills, strokes, filters, and colors are not transcribed or recolored at runtime.
 
-The original supplied SVG is retained in `ui/assets/` and the derived use is listed in `THIRD_PARTY_NOTICES.md`.
-
-## Current mixed-license note
-
-`applications-games-symbolic.svg` comes from the GNOME Symbolic Icon Theme under CC-BY-SA-3.0-US and its geometry is represented in `ui/components/system-icons.slint`. Keep that component's provenance intact. Before Horizon 1.0, perform a final compatibility review of this embedded derivative or replace it with an original/CC0 alternative if that simplifies distribution.
-
-The Settings and Epiphany SVGs do not include a separate license declaration in the supplied files. Horizon currently records them under their upstream projects' default licenses (GPL-2.0-or-later for GNOME Settings and GPL-3.0-or-later for GNOME Web). Re-verify these exact assets against the exact upstream revision before 1.0.
+`applications-games-symbolic.svg` remains third-party GNOME artwork under CC-BY-SA-3.0-US and its geometry is represented in `ui/components/system-icons.slint`. Keep that component's provenance intact. Before Horizon 1.0, perform a final compatibility review of this embedded derivative or replace it with an original/CC0 alternative if that simplifies distribution.
 
 ## Software dependency notices
 
@@ -57,3 +51,9 @@ LINE Seed JP is bundled in Flatpak builds under the SIL Open Font License 1.1. T
 ## Phase 5 SQLite dependency
 
 Horizon uses `rusqlite`/`libsqlite3-sys` under the MIT license. Development currently enables rusqlite's `bundled` feature, which compiles the SQLite core into Horizon; the SQLite core is dedicated to the public domain. These dependencies are recorded in `THIRD_PARTY_NOTICES.md`. The final release artifact must still include a license inventory generated from the exact committed `Cargo.lock` rather than treating this hand-written note as the complete Rust dependency report.
+
+## Phase 7 Steam parser dependency
+
+The Steam source adapter uses `steam-vdf-parser` 0.1.2 to read Valve Data Format metadata locally, including current binary `appinfo.vdf` v40/v41 files. Upstream licenses the crate under **Apache-2.0 OR MIT**. Horizon does not copy parser source into its own modules; it consumes the published Cargo crate unchanged.
+
+`THIRD_PARTY_NOTICES.md` records the upstream project and copyright. `LICENSES/Apache-2.0.txt` and `LICENSES/MIT.txt` are installed with Flatpak artifacts. This hand-written record does not replace the lockfile-derived release inventory.

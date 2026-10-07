@@ -1,6 +1,7 @@
 import { Theme, Metrics } from "../theme/theme.slint";
 import { GameCardData } from "../models/game-card.slint";
 import { GameCarousel } from "../components/game-carousel.slint";
+import { PagePlaceholder } from "../components/page-placeholder.slint";
 
 // Home is now a routed content page. Persistent header/footer chrome lives in
 // AppWindow; the carousel keeps its established design-space Y coordinates by
@@ -9,13 +10,15 @@ export component HomePage inherits Rectangle {
     in property <[GameCardData]> games;
     in property <int> selected-index: 0;
     in property <string> selected-title;
+    in property <int> launching-game-index: -1;
+    in property <string> launch-feedback-text;
     in property <bool> focus-visible: true;
     callback select-game(int);
     callback carousel-geometry-changed(float);
 
     background: Theme.background;
 
-    GameCarousel {
+    if root.games.length > 0 : GameCarousel {
         x: 0px;
         y: Metrics.selected-label-y - Metrics.top-chrome-height;
         width: parent.width;
@@ -25,10 +28,22 @@ export component HomePage inherits Rectangle {
         games: root.games;
         selected-index: root.selected-index;
         selected-title: root.selected-title;
+        launching-game-index: root.launching-game-index;
+        launch-feedback-text: root.launch-feedback-text;
         focus-visible: root.focus-visible;
         game-selected(index) => { root.select-game(index); }
         geometry-changed(first-game-center-x-px) => {
             root.carousel-geometry-changed(first-game-center-x-px);
         }
+    }
+
+    // An empty source-backed library is a valid state, not a zero-width
+    // carousel. Keep all carousel/title/focus geometry out of the scene until
+    // at least one durable game exists.
+    if root.games.length == 0 : PagePlaceholder {
+        width: parent.width;
+        height: parent.height;
+        title: "No games found";
+        description: "No installed games were discovered from your configured sources.";
     }
 }

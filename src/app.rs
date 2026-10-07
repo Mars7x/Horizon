@@ -9,12 +9,17 @@ use crate::{
     error::AppError,
     input::{ControllerStatus, InputManager, UiActionEvent},
     persistence::SqliteLibraryRepository,
-    platform::{data_paths, slint_backend},
+    platform::{data_paths, launcher::PortalLaunchExecutor, slint_backend},
     presentation::{
         appearance::AppearanceController, clock::ClockController, home::HomeController,
         navigation::NavigationController,
     },
-    services::library::LibraryService,
+    services::{
+        import::{SourceImportOutcome, SourceImportService},
+        launch::GameLaunchService,
+        library::LibraryService,
+    },
+    sources::{SourceRegistry, steam::SteamSource},
 };
 
 const APP_ID: &str = "io.github.Mars7x.Horizon";
@@ -27,19 +32,54 @@ pub fn run() -> Result<(), AppError> {
         )
         .init();
 
-    info!("starting Horizon phase 6.0");
+    info!("starting Horizon phase 7.0.5");
 
     let database_path = data_paths::library_database_path()?;
     let repository = SqliteLibraryRepository::open(&database_path)?;
     let schema_version = repository.schema_version()?;
-    let library = LibraryService::new(repository);
-    let persisted_game_count = library.game_count()?;
+    let mut library = LibraryService::new(repository);
     info!(
         path = %database_path.display(),
         schema_version,
-        games = persisted_game_count,
+        games = library.game_count()?,
         "persistent library initialized"
     );
+
+    let mut registry = SourceRegistry::new();
+    registry.register(SteamSource::new()?)?;
+
+    let import_summary = SourceImportService::import_all(&registry, &mut library)?;
+    for report in import_summary.reports() {
+        match report.outcome() {
+            SourceImportOutcome::Imported { discovered } => {
+                info!(
+                    source = %report.source_id(),
+                    discovered,
+                    "source discovery imported"
+                );
+            }
+            SourceImportOutcome::Unavailable(reason) => {
+                info!(
+                    source = %report.source_id(),
+                    ?reason,
+                    "optional game source is unavailable"
+                );
+            }
+            SourceImportOutcome::Failed(error) => {
+                warn!(
+                    source = %report.source_id(),
+                    %error,
+                    "game source discovery failed; continuing with persisted library"
+                );
+            }
+        }
+    }
+
+    let library_games = library.games()?;
+    info!(games = library_games.len(), "source-backed library ready");
+    if library_games.is_empty() {
+        warn!("no source-backed games are currently available; Home will show its empty state");
+    }
 
     // Backend selection must happen before set_xdg_app_id(), AppWindow::new(),
     // or any other Slint operation that needs the platform.
@@ -65,11 +105,13 @@ pub fn run() -> Result<(), AppError> {
         }
     };
 
-    // Phase 5 deliberately keeps the existing demo Home presentation while the
-    // persistent library foundation settles. Phase 7 replaces this with the
-    // first real source-backed vertical slice.
-    let home = HomeController::new(&ui);
-    info!(games = home.game_count(), "demo home library initialized");
+    let registry = Rc::new(registry);
+    let launch_service = Rc::new(GameLaunchService::new(
+        Rc::clone(&registry),
+        Rc::new(PortalLaunchExecutor),
+    ));
+    let home = HomeController::new(&ui, library_games, launch_service);
+    info!(games = home.game_count(), "source-backed Home library initialized");
 
     let navigation = NavigationController::new(&ui, Rc::clone(&home));
     info!(
@@ -95,6 +137,21 @@ pub fn run() -> Result<(), AppError> {
     });
 
     let input = InputManager::new(action_sink, status_sink);
+
+    // SDL gamepad events are process-global, unlike keyboard events delivered
+    // by the focused Slint window. Bind semantic controller ownership to the
+    // window activation signal so a foreground game cannot also navigate the
+    // background Horizon shell.
+    let activation_input = Rc::clone(&input);
+    let activation_home = Rc::clone(&home);
+    let activation_ui = ui.as_weak();
+    ui.on_application_active_changed(move |active| {
+        activation_input.set_ui_input_enabled(active);
+        if let Some(ui) = activation_ui.upgrade() {
+            activation_home.handle_application_active_changed(&ui, active);
+        }
+    });
+
     let keyboard_input = Rc::clone(&input);
     ui.on_raw_key_input(move |text, repeated| {
         keyboard_input.handle_keyboard(text.as_str(), repeated)
@@ -102,6 +159,7 @@ pub fn run() -> Result<(), AppError> {
 
     // Keep services/timers/input managers alive for the full UI event loop.
     let _library = library;
+    let _source_registry = registry;
     let _clock = clock;
     let _navigation = navigation;
     let _input = input;

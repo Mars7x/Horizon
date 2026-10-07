@@ -1,11 +1,12 @@
 import { Theme, Metrics, Motion } from "../theme/theme.slint";
 import { FocusFrame } from "focus-frame.slint";
-import { DemoCover } from "demo-cover.slint";
+import { FallbackCover } from "fallback-cover.slint";
 import { GameCardData } from "../models/game-card.slint";
 
 export component GameTile inherits Rectangle {
     in property <GameCardData> game;
     in property <bool> selected: false;
+    in property <bool> launching: false;
     in property <bool> focus-visible: true;
     in property <int> item-index: 0;
     callback activated(int);
@@ -15,28 +16,28 @@ export component GameTile inherits Rectangle {
     background: transparent;
     z: root.selected ? 2.0 : 1.0;
 
+    private property <float> target-scale: root.selected
+        ? (root.launching ? Metrics.game-launch-pressed-scale : Metrics.game-selected-scale)
+        : 1.0;
+
     // Render the selected card at its real target dimensions instead of scaling
     // an already-rasterized subtree. This keeps procedural fallback text and
-    // shapes crisp at fullscreen/HiDPI sizes. Internal placeholder typography
+    // shapes crisp at fullscreen/HiDPI sizes. Internal fallback typography
     // stays at a stable logical size during the transition, avoiding the
     // breathing/re-rasterizing effect from earlier prototypes.
     visual := Rectangle {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
-        width: root.selected
-            ? Metrics.game-tile-size * Metrics.game-selected-scale
-            : Metrics.game-tile-size;
-        height: root.selected
-            ? Metrics.game-tile-size * Metrics.game-selected-scale
-            : Metrics.game-tile-size;
+        width: Metrics.game-tile-size * root.target-scale;
+        height: Metrics.game-tile-size * root.target-scale;
         background: transparent;
 
         animate width {
-            duration: Motion.focus-duration;
+            duration: root.launching ? Motion.launch-press-duration : Motion.focus-duration;
             easing: ease-out;
         }
         animate height {
-            duration: Motion.focus-duration;
+            duration: root.launching ? Motion.launch-press-duration : Motion.focus-duration;
             easing: ease-out;
         }
 
@@ -47,11 +48,11 @@ export component GameTile inherits Rectangle {
             border-radius: Metrics.game-shell-radius;
             border-width: Theme.high-contrast ? 2px : 1px;
             border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.42);
-            drop-shadow-offset-y: root.selected ? 7px : 4px;
-            drop-shadow-blur: root.selected ? 20px : 14px;
+            drop-shadow-offset-y: root.selected ? (root.launching ? 4px : 7px) : 4px;
+            drop-shadow-blur: root.selected ? (root.launching ? 14px : 20px) : 14px;
             drop-shadow-color: Theme.shadow.with-alpha(root.selected ? 0.95 : 0.72);
 
-            DemoCover {
+            FallbackCover {
                 x: Metrics.game-art-inset;
                 y: Metrics.game-art-inset;
                 width: parent.width - (Metrics.game-art-inset * 2);

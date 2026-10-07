@@ -1,9 +1,14 @@
 use std::{cell::RefCell, rc::Rc};
 
 use slint::{Color, ComponentHandle, Model, ModelRc, SharedString, VecModel};
-use tracing::debug;
+use tracing::{debug, warn};
 
-use crate::{AppWindow, GameCardData, input::{UiAction, UiActionEvent}};
+use crate::{
+    AppWindow, GameCardData,
+    domain::LibraryGame,
+    input::{UiAction, UiActionEvent},
+    services::launch::GameLaunchService,
+};
 
 #[derive(Debug, Default)]
 struct HomeState {
@@ -48,27 +53,69 @@ impl HomeState {
     }
 }
 
-/// Owns the Phase 3 home-screen presentation state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum LaunchFeedbackState {
+    #[default]
+    Idle,
+    Launching { index: i32 },
+    Failed,
+}
+
+impl LaunchFeedbackState {
+    fn is_launching(self) -> bool {
+        matches!(self, Self::Launching { .. })
+    }
+
+    fn launching_index(self) -> i32 {
+        match self {
+            Self::Launching { index } => index,
+            Self::Idle | Self::Failed => -1,
+        }
+    }
+
+    fn status_text(self) -> &'static str {
+        match self {
+            Self::Idle => "",
+            Self::Launching { .. } => "Launching…",
+            Self::Failed => "Launch failed",
+        }
+    }
+}
+
+/// Owns Home presentation state for the durable source-backed library.
 ///
-/// Pointer, keyboard, and controller input all enter through this controller.
-/// Slint renders the resulting state but does not decide navigation behavior.
+/// Slint receives only card presentation data. `LibraryGame` identity stays in
+/// Rust so Accept can launch through the generic service/source boundary.
 pub struct HomeController {
-    games: Rc<VecModel<GameCardData>>,
+    cards: Rc<VecModel<GameCardData>>,
+    library_games: Vec<LibraryGame>,
     titles: Vec<SharedString>,
+    launch_service: Rc<GameLaunchService>,
     state: RefCell<HomeState>,
+    launch_feedback: RefCell<LaunchFeedbackState>,
 }
 
 impl HomeController {
-    pub fn new(ui: &AppWindow) -> Rc<Self> {
-        let demo_games = demo_games();
-        let titles = demo_games.iter().map(|game| game.title.clone()).collect();
-        let games = Rc::new(VecModel::from(demo_games));
-        ui.set_games(ModelRc::from(Rc::clone(&games)));
+    pub fn new(
+        ui: &AppWindow,
+        library_games: Vec<LibraryGame>,
+        launch_service: Rc<GameLaunchService>,
+    ) -> Rc<Self> {
+        let card_data = library_games
+            .iter()
+            .map(game_card)
+            .collect::<Vec<_>>();
+        let titles = card_data.iter().map(|game| game.title.clone()).collect();
+        let cards = Rc::new(VecModel::from(card_data));
+        ui.set_games(ModelRc::from(Rc::clone(&cards)));
 
         let controller = Rc::new(Self {
-            games,
+            cards,
+            library_games,
             titles,
+            launch_service,
             state: RefCell::new(HomeState::default()),
+            launch_feedback: RefCell::new(LaunchFeedbackState::default()),
         });
 
         controller.select_index(ui, 0);
@@ -87,7 +134,7 @@ impl HomeController {
     }
 
     pub fn game_count(&self) -> usize {
-        self.games.row_count()
+        self.cards.row_count()
     }
 
     pub fn selected_index(&self) -> i32 {
@@ -96,6 +143,7 @@ impl HomeController {
 
     /// Reset Home to its canonical global-Home destination: the first game.
     pub fn reset_for_global_home(&self, ui: &AppWindow) {
+        self.clear_launch_feedback(ui);
         let selected_index = self
             .state
             .borrow_mut()
@@ -109,15 +157,30 @@ impl HomeController {
         self.select_index(ui, requested_index);
     }
 
+    /// Clear transient launch feedback when Horizon yields foreground ownership
+    /// to the launched game (or another application).
+    pub fn handle_application_active_changed(&self, ui: &AppWindow, active: bool) {
+        if !active {
+            self.clear_launch_feedback(ui);
+        }
+    }
+
     pub fn handle_action(&self, ui: &AppWindow, event: UiActionEvent) {
+        if self.launch_feedback.borrow().is_launching()
+            && matches!(event.action, UiAction::Left | UiAction::Right | UiAction::Accept)
+        {
+            debug!(
+                action = ?event.action,
+                "Home carousel input ignored while launch handoff is pending"
+            );
+            return;
+        }
+
         match event.action {
             UiAction::Left => self.move_selection(ui, -1, !event.repeated),
             UiAction::Right => self.move_selection(ui, 1, !event.repeated),
-            UiAction::Accept => {
-                if let Some(title) = self.selected_title() {
-                    debug!(game = %title, "accept pressed; launching is deferred to a later phase");
-                }
-            }
+            UiAction::Accept if !event.repeated => self.launch_selected(ui),
+            UiAction::Accept => {},
             UiAction::Up
             | UiAction::Down
             | UiAction::Back
@@ -125,12 +188,59 @@ impl HomeController {
             | UiAction::Home
             | UiAction::LeftBumper
             | UiAction::RightBumper => {
-                debug!(action = ?event.action, repeated = event.repeated, "UI action has no Phase 3 home behavior");
+                debug!(action = ?event.action, repeated = event.repeated, "UI action has no Home-local behavior");
             }
         }
     }
 
+    fn launch_selected(&self, ui: &AppWindow) {
+        let index = self.state.borrow().selected_index;
+        let Some(game) = usize::try_from(index)
+            .ok()
+            .and_then(|index| self.library_games.get(index))
+        else {
+            debug!("Accept ignored because the source-backed Home library is empty");
+            return;
+        };
+
+        self.set_launch_feedback(ui, LaunchFeedbackState::Launching { index });
+
+        match self.launch_service.launch_game(game) {
+            Ok(source_id) => {
+                debug!(
+                    game_id = game.game().id().get(),
+                    title = %game.game().title().as_str(),
+                    source = %source_id,
+                    "game launch dispatched; waiting for foreground handoff"
+                );
+            }
+            Err(error) => {
+                self.set_launch_feedback(ui, LaunchFeedbackState::Failed);
+                warn!(
+                    game_id = game.game().id().get(),
+                    title = %game.game().title().as_str(),
+                    %error,
+                    "game launch failed"
+                );
+            }
+        }
+    }
+
+    fn set_launch_feedback(&self, ui: &AppWindow, state: LaunchFeedbackState) {
+        *self.launch_feedback.borrow_mut() = state;
+        ui.set_launching_game_index(state.launching_index());
+        ui.set_launch_feedback_text(state.status_text().into());
+    }
+
+    fn clear_launch_feedback(&self, ui: &AppWindow) {
+        if *self.launch_feedback.borrow() == LaunchFeedbackState::Idle {
+            return;
+        }
+        self.set_launch_feedback(ui, LaunchFeedbackState::Idle);
+    }
+
     fn move_selection(&self, ui: &AppWindow, delta: i32, allow_wrap: bool) {
+        self.clear_launch_feedback(ui);
         let selected_index = self
             .state
             .borrow_mut()
@@ -139,6 +249,10 @@ impl HomeController {
     }
 
     fn select_index(&self, ui: &AppWindow, requested_index: i32) {
+        if self.launch_feedback.borrow().is_launching() {
+            return;
+        }
+        self.clear_launch_feedback(ui);
         let selected_index = self
             .state
             .borrow_mut()
@@ -156,100 +270,71 @@ impl HomeController {
             .unwrap_or_default();
         ui.set_selected_title(title);
     }
-
-    fn selected_title(&self) -> Option<&SharedString> {
-        let index = self.state.borrow().selected_index;
-        usize::try_from(index)
-            .ok()
-            .and_then(|index| self.titles.get(index))
-    }
 }
 
-fn demo_games() -> Vec<GameCardData> {
-    vec![
-        game(
-            "Solar Drift",
-            "PC",
-            "SD",
-            (243, 94, 69),
-            (244, 173, 70),
-            (255, 220, 117),
-        ),
-        game(
-            "Verdant Echo",
-            "HANDHELD",
-            "VE",
-            (35, 119, 92),
-            (72, 170, 112),
-            (183, 225, 126),
-        ),
-        game(
-            "Neon Circuit",
-            "PC",
-            "NC",
-            (64, 63, 177),
-            (165, 68, 181),
-            (83, 207, 240),
-        ),
-        game(
-            "Deep Atlas",
-            "HANDHELD",
-            "DA",
-            (20, 84, 126),
-            (35, 139, 154),
-            (94, 217, 196),
-        ),
-        game(
-            "Starfall",
-            "PC",
-            "SF",
-            (49, 55, 92),
-            (102, 82, 164),
-            (238, 116, 173),
-        ),
-        game(
-            "Midnight Rally",
-            "PC",
-            "MR",
-            (35, 42, 52),
-            (65, 87, 112),
-            (237, 111, 67),
-        ),
-        game(
-            "Wild Current",
-            "HANDHELD",
-            "WC",
-            (31, 109, 152),
-            (36, 165, 187),
-            (102, 223, 202),
-        ),
-        game(
-            "Arcade Zero",
-            "PC",
-            "AZ",
-            (143, 41, 80),
-            (222, 69, 79),
-            (255, 184, 81),
-        ),
-    ]
-}
+fn game_card(game: &LibraryGame) -> GameCardData {
+    let title = game.game().title().as_str();
+    let (primary, secondary, highlight) = fallback_palette(game.game().id().get(), title);
 
-fn game(
-    title: &str,
-    platform: &str,
-    monogram: &str,
-    primary: (u8, u8, u8),
-    secondary: (u8, u8, u8),
-    highlight: (u8, u8, u8),
-) -> GameCardData {
     GameCardData {
         title: title.into(),
-        platform: platform.into(),
-        monogram: monogram.into(),
+        platform: "PC".into(),
+        monogram: monogram(title).into(),
         cover_primary: rgb(primary),
         cover_secondary: rgb(secondary),
         cover_highlight: rgb(highlight),
     }
+}
+
+fn monogram(title: &str) -> String {
+    let words = title
+        .split_whitespace()
+        .filter_map(|word| word.chars().find(|character| character.is_alphanumeric()))
+        .take(2)
+        .collect::<Vec<_>>();
+
+    let characters = if words.len() >= 2 {
+        words
+    } else {
+        title
+            .chars()
+            .filter(|character| character.is_alphanumeric())
+            .take(2)
+            .collect()
+    };
+
+    characters
+        .into_iter()
+        .flat_map(|character| character.to_uppercase())
+        .collect::<String>()
+}
+
+fn fallback_palette(game_id: i64, title: &str) -> ((u8, u8, u8), (u8, u8, u8), (u8, u8, u8)) {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64 ^ game_id as u64;
+    for byte in title.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+
+    let channel = |shift: u32, base: u8, span: u8| {
+        base.saturating_add(((hash >> shift) as u8) % span)
+    };
+    let primary = (
+        channel(0, 32, 112),
+        channel(8, 42, 112),
+        channel(16, 54, 112),
+    );
+    let secondary = (
+        channel(24, 72, 128),
+        channel(32, 78, 128),
+        channel(40, 84, 128),
+    );
+    let highlight = (
+        channel(48, 148, 96),
+        channel(20, 148, 96),
+        channel(36, 148, 96),
+    );
+    (primary, secondary, highlight)
 }
 
 fn rgb((red, green, blue): (u8, u8, u8)) -> Color {
@@ -258,20 +343,25 @@ fn rgb((red, green, blue): (u8, u8, u8)) -> Color {
 
 #[cfg(test)]
 mod tests {
-    use super::{HomeState, demo_games};
+    use super::{HomeState, LaunchFeedbackState, monogram};
 
     #[test]
-    fn phase_three_has_enough_demo_games_to_exercise_controller_navigation() {
-        assert!(demo_games().len() >= 8);
+    fn imported_titles_get_stable_short_monograms() {
+        assert_eq!(monogram("ELDEN RING"), "ER");
+        assert_eq!(monogram("Portal"), "PO");
+        assert_eq!(monogram("NieR:Automata"), "NI");
     }
 
     #[test]
-    fn demo_game_titles_are_unique() {
-        let games = demo_games();
-        let mut titles: Vec<_> = games.iter().map(|game| game.title.to_string()).collect();
-        titles.sort_unstable();
-        titles.dedup();
-        assert_eq!(titles.len(), games.len());
+    fn launch_feedback_distinguishes_pending_and_failed_states_without_source_details() {
+        let launching = LaunchFeedbackState::Launching { index: 3 };
+        assert!(launching.is_launching());
+        assert_eq!(launching.launching_index(), 3);
+        assert_eq!(launching.status_text(), "Launching…");
+
+        assert!(!LaunchFeedbackState::Failed.is_launching());
+        assert_eq!(LaunchFeedbackState::Failed.launching_index(), -1);
+        assert_eq!(LaunchFeedbackState::Failed.status_text(), "Launch failed");
     }
 
     #[test]

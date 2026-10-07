@@ -167,3 +167,22 @@ The adapters only produce `UiAction`; `NavigationController` owns meaning. Back 
 SDL device topology changes invalidate held navigation state. On any successful gamepad addition or any gamepad removal event, the SDL adapter resets both analog and D-pad direction/repeat latches before subsequent input is processed. This prevents a disconnected controller from leaving a phantom held direction when another controller remains connected or when the device reconnects without delivering the matching release/center event.
 
 The connected-controller count changes only when Horizon actually opens or removes a gamepad handle. Screen and presentation code remain unaware of SDL device IDs. Hardware-independent tests verify that topology reset returns both repeat engines to neutral state.
+
+## Phase 7 Home activation and launch
+
+`UiAction::Accept` on Home now has its first production action. A fresh Accept on the selected source-backed game asks `GameLaunchService` to choose a registered source reference that advertises `SourceCapability::Launch`. Repeated Accept events are ignored to avoid duplicate launch requests.
+
+The input adapters remain completely source-agnostic. They do not know Steam app IDs or URI schemes. The Steam adapter prepares a generic `SourceLaunchTarget::Uri`, while `PortalLaunchExecutor` dispatches the URI through XDG OpenURI. Pointer selection still only changes selection; launching remains the semantic Accept action path.
+
+
+## Phase 7.0.4 active-window input ownership
+
+SDL gamepad events are not scoped to the foreground Slint window. Horizon therefore treats OS window activation as an explicit input-ownership boundary. The root `FocusScope` reports only `FocusReason.window-activation` gain/loss events to Rust; ordinary pointer/programmatic focus changes inside Horizon do not toggle controller ownership.
+
+`InputManager` enables semantic UI input only while Horizon owns the active window. When Horizon deactivates (for example because a launched game takes focus), `SdlGamepadInput` continues polling SDL and processing controller add/remove events so device status stays correct, but it emits no `UiActionEvent`. The analog and D-pad held/repeat latches are reset on every enable/disable transition so a button or stick held while playing cannot produce a stale navigation action when Horizon becomes active again.
+
+This rule is source-neutral and game-neutral. Launch services do not guess process lifetime, and Steam-specific code does not control the input layer. If the user intentionally returns focus to Horizon while a game remains running, Horizon owns input again because it is the active application.
+
+## Phase 7.0.5 launch-pending input policy
+
+The input layer does not learn about launch state. It continues to emit semantic actions while Horizon owns the active window. `HomeController` alone suppresses duplicate Accept and Left/Right carousel actions while a source-neutral launch handoff is pending. This keeps device normalization independent from launch/services and avoids a Steam-specific input mode. See ADR 0043.

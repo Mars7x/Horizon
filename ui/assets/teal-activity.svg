@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80" fill="none">
+  <title>Activity — open book</title>
+  <defs>
+    <filter id="shadow" x="-40%" y="-30%" width="180%" height="180%" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="2.3"/></filter>
+  </defs>
+  <path d="M40 25 C37 21 34 20 28 20 H25 C19 20 17 23 17 29 V50 C17 55 20 57 25 57 H29 C35 57 38 60 40 64 C42 60 45 57 51 57 H55 C60 57 63 55 63 50 V29 C63 23 61 20 55 20 H52 C46 20 43 21 40 25 Z" fill="black" stroke="black" stroke-width="10" opacity=".16" filter="url(#shadow)" transform="translate(0 4)"/>
+  <path d="M40 25 C37 21 34 20 28 20 H25 C19 20 17 23 17 29 V50 C17 55 20 57 25 57 H29 C35 57 38 60 40 64 C42 60 45 57 51 57 H55 C60 57 63 55 63 50 V29 C63 23 61 20 55 20 H52 C46 20 43 21 40 25 Z" fill="white" stroke="white" stroke-width="12" stroke-linejoin="round"/>
+  <path d="M40 25 C37 21 34 20 28 20 H25 C19 20 17 23 17 29 V50 C17 55 20 57 25 57 H29 C35 57 38 60 40 64 C42 60 45 57 51 57 H55 C60 57 63 55 63 50 V29 C63 23 61 20 55 20 H52 C46 20 43 21 40 25 Z" fill="white" stroke="#2bbbc6" stroke-width="5.5" stroke-linejoin="round"/>
+  <path d="M40 25 V63" stroke="#2bbbc6" stroke-width="5.5" stroke-linecap="round"/>
+  <path d="M25 30 H32 M25 38 H32 M25 46 H32 M48 30 H55 M48 38 H55 M48 46 H55" stroke="#2bbbc6" stroke-width="3" stroke-linecap="round"/>
+</svg>

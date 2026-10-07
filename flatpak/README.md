@@ -3,7 +3,7 @@
 Horizon is developed and tested as a Flatpak from the beginning.
 
 Horizon uses Slint's Winit backend with Wayland and X11 support plus the
-FemtoVG renderer. No Qt runtime is required. XDG Settings portal access for
+Skia renderer. No Qt runtime is required. XDG Settings portal access for
 theme, accent, contrast, and reduced-motion preferences does not require broad
 D-Bus permissions in the manifest.
 
@@ -73,3 +73,13 @@ The runtime sandbox receives only:
 
 for `/dev/input` controller access. Do not broaden this to `--device=all` for
 normal navigation.
+
+## Steam metadata access and launching
+
+Phase 7 deliberately avoids broad filesystem permissions. The manifest exposes conventional native-Steam XDG data roots read-only and grants the Flatpak Steam app-data root `~/.var/app/com.valvesoftware.Steam:ro`. The latter is intentionally one app-scoped subtree instead of a collection of deeper child grants because Flatpak Steam may resolve its canonical metadata directory across `.local/share` and `data`. Horizon itself still reads only Steam metadata (`libraryfolders.vdf`, `appinfo.vdf`, and accessible app manifests) from that subtree.
+
+External Steam library mount points are not granted automatically. Modern `libraryfolders.vdf` provides installed app IDs, so Horizon can normally discover games on those libraries without reading `/mnt`, `/run/media`, or other arbitrary storage paths.
+
+Do not replace these Steam-scoped rules with `--filesystem=home` or `--filesystem=host` as a convenience fix.
+
+Launching does not require access to `/usr/bin/steam` or the Flatpak Steam command. Horizon passes `steam://rungameid/<appid>` to `org.freedesktop.portal.OpenURI` through `ashpd`; the host session resolves the URI handler.

@@ -1,6 +1,6 @@
 # Source framework
 
-Phase 6 defines the provider boundary that future Steam, Heroic, Lutris, Bottles, and other adapters plug into. It deliberately does not implement a real provider yet; the first production adapter is the Phase 7 Steam vertical slice.
+Phase 6 defined the provider boundary that Steam, Heroic, Lutris, Bottles, and other adapters plug into. Phase 7 now exercises that boundary with the first production adapter: Steam. The generic contracts remain provider-neutral.
 
 ## Boundary
 
@@ -43,13 +43,13 @@ Phase 6 defines capability vocabulary for:
 - artwork;
 - source-reported lifetime playtime.
 
-The capability metadata does not itself implement those features. Their service contracts are added when the owning vertical slices need them.
+Capability metadata describes behavior exposed through generic contracts. Phase 7 adds the first concrete consumer of `Launch`: a source-neutral launch target/service plus a platform executor. Artwork and lifetime-playtime contracts remain deferred until a real slice needs them.
 
 ## Registry
 
 `SourceRegistry` owns heterogeneous `GameSource` implementations behind one trait boundary. Registration rejects duplicate `SourceId` values. Registry iteration is deterministic by source ID so tests and diagnostics do not depend on insertion order.
 
-Provider names are never used to select behavior outside `src/sources/`. Future services consume the common trait and capability metadata.
+Provider names are never used to select behavior outside `src/sources/`. Services consume the common trait and capability metadata. `SourceRegistry::get` allows launch coordination to resolve the adapter that owns a persisted `SourceGameRef` without provider-name branching.
 
 ## Discovery outcomes
 
@@ -62,9 +62,11 @@ Discovery separates expected absence from failure:
 
 An unavailable optional source is not an application error. A discovery failure is retained in that source's import report and does not prevent later registered sources from being scanned.
 
-## Snapshot identity contract
+## Snapshot identity and completeness contract
 
 `SourceSnapshot` requires every `ExternalGameId` to be unique within that one source snapshot. Duplicate source-owned IDs are rejected before persistence because `(SourceId, ExternalGameId)` is the authoritative rediscovery key.
+
+Snapshots are conservative by default. A source must opt into authoritative membership only when it can identify the complete installed membership for that scan. Authoritative membership is stored separately from normalized `SourceGame` values so a currently installed identity can be preserved even when its fresh title metadata is temporarily unavailable. Every normalized game in an authoritative snapshot must belong to that membership set.
 
 `SourceGame` contains only normalized source-owned identity and title. Raw VDF, JSON, database rows, launcher enums, filesystem paths, or provider SDK types must not escape the adapter.
 
@@ -74,16 +76,10 @@ An unavailable optional source is not an application error. A discovery failure 
 
 Source discovery failures are isolated. Persistence failures are different: the import pass stops and returns the failing `SourceId`, because continuing after a database write failure could hide a broken durable state assumption.
 
-A successful source snapshot is persisted as one repository batch. The SQLite adapter wraps that batch in one transaction, so a failed write cannot leave only part of a source snapshot committed.
+A successful source snapshot is persisted as one repository batch. The SQLite adapter wraps that batch in one transaction, so a failed write cannot leave only part of a source snapshot committed. Partial snapshots are additive. Authoritative snapshots additionally reconcile source membership in that same transaction: references absent from the complete membership set are removed and only truly orphaned logical games are deleted. See ADR 0042.
 
-## Phase boundary
+## Phase 7 concrete consumer
 
-Phase 6 does not add:
+Steam lives in `src/sources/steam.rs` and is the first concrete `GameSource`. It reads only Steam-owned local metadata, emits normalized `SourceGame` values, and prepares a generic URI launch target. `SourceImportService`, SQLite persistence, `GameLaunchService`, and Home presentation remain source-neutral. See `STEAM.md` and ADR 0039.
 
-- Steam/Heroic/Lutris/Bottles parsing;
-- launch commands;
-- production artwork retrieval;
-- playtime/session tracking;
-- source-backed Home/Library presentation.
-
-Those are built on this framework in later phases rather than embedded into it now.
+Phase 7 still does not add Heroic/Lutris/Bottles adapters, source-reported playtime, Horizon-observed sessions, or a production artwork cache. Those later features must extend the same contracts rather than introducing source-name checks.

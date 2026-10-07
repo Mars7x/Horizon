@@ -37,3 +37,7 @@ No provider-specific source adapter is added in this phase. Steam is the first c
 - Successful snapshots are durable atomically per provider.
 - Phase 7 can focus on Steam-specific discovery/launch behavior without redesigning generic import orchestration.
 - Launch and playtime service contracts are intentionally not guessed before a real vertical slice exercises those boundaries.
+
+## Later refinement
+
+ADR 0042 extends the Phase 6 snapshot contract with optional authoritative membership. The original batch-upsert behavior remains the default for partial snapshots; complete sources can now request generic atomic membership reconciliation without provider-specific delete logic.

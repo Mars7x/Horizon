@@ -33,37 +33,21 @@ SPDX-License-Identifier = "CC0-1.0"
 
 [[annotations]]
 path = [
-  "ui/assets/friends-smiley.svg",
-  "ui/assets/album-landscape.svg",
-  "ui/assets/dictionary-symbolic.svg"
+  "ui/assets/orange-friends.svg",
+  "ui/assets/blue-album.svg",
+  "ui/assets/teal-activity.svg",
+  "ui/assets/gray-web.svg",
+  "ui/assets/gray-settings.svg"
 ]
 precedence = "override"
-SPDX-FileCopyrightText = "Jakub Steiner"
-SPDX-License-Identifier = "CC0-1.0"
+SPDX-FileCopyrightText = "Horizon contributors"
+SPDX-License-Identifier = "GPL-3.0-or-later"
 
 [[annotations]]
 path = "ui/assets/applications-games-symbolic.svg"
 precedence = "override"
 SPDX-FileCopyrightText = "GNOME Project"
 SPDX-License-Identifier = "CC-BY-SA-3.0-US"
-
-[[annotations]]
-path = "ui/assets/settings-gear.svg"
-precedence = "override"
-SPDX-FileCopyrightText = "GNOME Project contributors"
-SPDX-License-Identifier = "GPL-2.0-or-later"
-
-[[annotations]]
-path = "ui/assets/web-epiphany.svg"
-precedence = "override"
-SPDX-FileCopyrightText = "GNOME Project contributors"
-SPDX-License-Identifier = "GPL-3.0-or-later"
-
-[[annotations]]
-path = "ui/components/utility-icons.slint"
-precedence = "override"
-SPDX-FileCopyrightText = ["Horizon contributors", "Jakub Steiner", "GNOME Project contributors"]
-SPDX-License-Identifier = "GPL-3.0-or-later"
 
 [[annotations]]
 path = "ui/components/system-icons.slint"

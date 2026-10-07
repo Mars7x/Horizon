@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80" fill="none">
+<title>orange-speech-bubble</title>
+<defs><filter id="shadow" x="-40%" y="-30%" width="180%" height="180%" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="2.3"/></filter></defs>
+<path d="M 23 20 H 56 Q 62 20 62 26 V 53 Q 62 58 57 58 H 47 L 40 65 L 33 58 H 22 Q 17 58 17 53 V 26 Q 17 20 23 20 Z" fill="#000" stroke="#000" stroke-width="10" opacity=".16" filter="url(#shadow)" transform="translate(0 4)"/>
+<path d="M 23 20 H 56 Q 62 20 62 26 V 53 Q 62 58 57 58 H 47 L 40 65 L 33 58 H 22 Q 17 58 17 53 V 26 Q 17 20 23 20 Z" fill="white" stroke="white" stroke-width="12" stroke-linejoin="round"/>
+<path d="M 23 20 H 56 Q 62 20 62 26 V 53 Q 62 58 57 58 H 47 L 40 65 L 33 58 H 22 Q 17 58 17 53 V 26 Q 17 20 23 20 Z" fill="white" stroke="#f58225" stroke-width="5.5" stroke-linejoin="round"/>
+<g fill="#f58225"><ellipse cx="33" cy="32" rx="2.7" ry="3.7"/><ellipse cx="46" cy="32" rx="2.7" ry="3.7"/></g><path d="M 31 44 Q 39.5 54 48 44" stroke="#f58225" stroke-width="5.5" stroke-linecap="round"/>
+</svg>

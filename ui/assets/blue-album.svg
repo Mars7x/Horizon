@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80" fill="none">
+<title>blue-icon</title>
+<defs><filter id="shadow" x="-40%" y="-30%" width="180%" height="180%" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="2.3"/></filter></defs>
+<path d="M 23 20 H 58 Q 65 20 65 27 V 52 Q 65 59 58 59 H 23 Q 16 59 16 52 V 27 Q 16 20 23 20 Z" fill="#000" stroke="#000" stroke-width="10" opacity=".16" filter="url(#shadow)" transform="translate(0 4)"/>
+<path d="M 23 20 H 58 Q 65 20 65 27 V 52 Q 65 59 58 59 H 23 Q 16 59 16 52 V 27 Q 16 20 23 20 Z" fill="white" stroke="white" stroke-width="12" stroke-linejoin="round"/>
+<path d="M 23 20 H 58 Q 65 20 65 27 V 52 Q 65 59 58 59 H 23 Q 16 59 16 52 V 27 Q 16 20 23 20 Z" fill="white" stroke="#448ff3" stroke-width="5.5" stroke-linejoin="round"/>
+<path d="M 28 58 V 39 C 28 28 42 28 42 39 V 48 C 42 36 56 36 56 48 V 58" stroke="#448ff3" stroke-width="5.5" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

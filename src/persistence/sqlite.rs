@@ -1,4 +1,4 @@
-use std::{path::Path, time::Duration};
+use std::{collections::BTreeSet, path::Path, time::Duration};
 
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
@@ -124,6 +124,56 @@ impl LibraryRepository for SqliteLibraryRepository {
             let raw_game_id = Self::upsert_in_transaction(&transaction, discovered)?;
             game_ids.push(Self::domain_value("games.id", GameId::new(raw_game_id))?);
         }
+
+        transaction.commit()?;
+        Ok(game_ids)
+    }
+
+    fn synchronize_source_snapshot(
+        &mut self,
+        source_id: &SourceId,
+        discovered_games: &[DiscoveredGame],
+        present_external_ids: &[ExternalGameId],
+    ) -> Result<Vec<GameId>, Self::Error> {
+        let transaction = self.connection.transaction()?;
+        let mut game_ids = Vec::with_capacity(discovered_games.len());
+        let incoming_ids = present_external_ids
+            .iter()
+            .map(|external_id| external_id.as_str().to_owned())
+            .collect::<BTreeSet<_>>();
+
+        for discovered in discovered_games {
+            let raw_game_id = Self::upsert_in_transaction(&transaction, discovered)?;
+            game_ids.push(Self::domain_value("games.id", GameId::new(raw_game_id))?);
+        }
+
+        let existing_ids = {
+            let mut statement = transaction.prepare(
+                "SELECT external_id FROM game_sources WHERE source_id = ?1",
+            )?;
+            let rows = statement.query_map([source_id.as_str()], |row| row.get::<_, String>(0))?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+
+        for external_id in existing_ids {
+            if incoming_ids.contains(&external_id) {
+                continue;
+            }
+            transaction.execute(
+                "DELETE FROM game_sources WHERE source_id = ?1 AND external_id = ?2",
+                params![source_id.as_str(), external_id],
+            )?;
+        }
+
+        // A logical game may eventually have several source references. Only
+        // delete the game row when authoritative reconciliation removed its
+        // final source membership.
+        transaction.execute(
+            "DELETE FROM games WHERE NOT EXISTS (\
+             SELECT 1 FROM game_sources WHERE game_sources.game_id = games.id\
+             )",
+            [],
+        )?;
 
         transaction.commit()?;
         Ok(game_ids)
@@ -293,6 +343,77 @@ mod tests {
         repository
             .upsert_discovered_games(&games)
             .expect_err("batch must fail");
+
+        assert_eq!(repository.game_count().expect("count"), 0);
+    }
+
+    #[test]
+    fn authoritative_source_sync_removes_games_missing_from_the_new_snapshot() {
+        let mut repository = SqliteLibraryRepository::open_in_memory().expect("repository");
+        repository
+            .upsert_discovered_games(&[
+                discovered("steam", "10", "Installed"),
+                discovered("steam", "20", "Removed"),
+            ])
+            .expect("seed");
+
+        repository
+            .synchronize_source_snapshot(
+                &SourceId::new("steam").expect("source"),
+                &[discovered("steam", "10", "Installed")],
+                &[ExternalGameId::new("10").expect("external id")],
+            )
+            .expect("synchronize");
+
+        let games = repository.list_games().expect("games");
+        assert_eq!(games.len(), 1);
+        assert_eq!(games[0].sources()[0].external_id().as_str(), "10");
+    }
+
+    #[test]
+    fn authoritative_membership_preserves_installed_id_without_fresh_metadata() {
+        let mut repository = SqliteLibraryRepository::open_in_memory().expect("repository");
+        repository
+            .upsert_discovered_games(&[
+                discovered("steam", "10", "Installed"),
+                discovered("steam", "20", "Still Installed"),
+                discovered("steam", "30", "Uninstalled"),
+            ])
+            .expect("seed");
+
+        repository
+            .synchronize_source_snapshot(
+                &SourceId::new("steam").expect("source"),
+                &[discovered("steam", "10", "Installed")],
+                &[
+                    ExternalGameId::new("10").expect("ten"),
+                    ExternalGameId::new("20").expect("twenty"),
+                ],
+            )
+            .expect("synchronize");
+
+        let games = repository.list_games().expect("games");
+        let ids = games
+            .iter()
+            .map(|game| game.sources()[0].external_id().as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["10", "20"]);
+    }
+
+    #[test]
+    fn authoritative_empty_snapshot_removes_orphaned_source_games() {
+        let mut repository = SqliteLibraryRepository::open_in_memory().expect("repository");
+        repository
+            .upsert_discovered_game(&discovered("steam", "10", "Installed"))
+            .expect("seed");
+
+        repository
+            .synchronize_source_snapshot(
+                &SourceId::new("steam").expect("source"),
+                &[],
+                &[],
+            )
+            .expect("synchronize");
 
         assert_eq!(repository.game_count().expect("count"), 0);
     }

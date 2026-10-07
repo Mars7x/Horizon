@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80" fill="none">
+<title>gray-globe</title>
+<defs><filter id="shadow" x="-40%" y="-30%" width="180%" height="180%" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="2.3"/></filter></defs>
+<circle cx="40" cy="44" r="26" fill="black" opacity=".16" filter="url(#shadow)"/>
+<circle cx="40" cy="40" r="28" fill="white"/>
+<g stroke="#a5a5a5" stroke-width="5" stroke-linejoin="round"><circle cx="40" cy="40" r="22.5" fill="white"/>
+<path d="M 40 17.5 C 23 31 23 49 40 62.5 C 57 49 57 31 40 17.5 Z"/>
+<path d="M 21 29.5 H 59 M 17.5 40 H 62.5 M 21 50.5 H 59"/></g>
+</svg>

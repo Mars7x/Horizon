@@ -23,6 +23,14 @@ finish-args:
   # Horizon needs evdev/input access for controller navigation.
   # Do not broaden this to --device=all.
   - --device=input
+  # Read only Steam-owned metadata locations. Native Steam stays limited to
+  # its XDG data roots. Flatpak Steam needs its app-data root exposed as one
+  # read-only subtree because real installations may resolve Steam metadata
+  # through links/paths spanning .local/share and data inside that app sandbox.
+  # This is still scoped to com.valvesoftware.Steam, not home/host generally.
+  - --filesystem=xdg-data/Steam:ro
+  - --filesystem=xdg-data/steam:ro
+  - --filesystem=~/.var/app/com.valvesoftware.Steam:ro
 
 modules:
   # Install the four canonical Google Fonts LINE Seed JP TTFs from one immutable
@@ -67,9 +75,10 @@ modules:
       - install -Dm0644 THIRD_PARTY_NOTICES.md /app/share/doc/horizon/THIRD_PARTY_NOTICES.md
       - install -Dm0644 LICENSES/CC0-1.0.txt /app/share/licenses/horizon/CC0-1.0.txt
       - install -Dm0644 LICENSES/CC-BY-SA-3.0-US.txt /app/share/licenses/horizon/CC-BY-SA-3.0-US.txt
-      - install -Dm0644 LICENSES/GPL-2.0-or-later.txt /app/share/licenses/horizon/GPL-2.0-or-later.txt
       - install -Dm0644 LICENSES/GPL-3.0-or-later.txt /app/share/licenses/horizon/GPL-3.0-or-later.txt
       - install -Dm0644 LICENSES/OFL-1.1.txt /app/share/licenses/horizon/OFL-1.1.txt
+      - install -Dm0644 LICENSES/Apache-2.0.txt /app/share/licenses/horizon/Apache-2.0.txt
+      - install -Dm0644 LICENSES/MIT.txt /app/share/licenses/horizon/MIT.txt
     sources:
       - type: dir
         path: ..

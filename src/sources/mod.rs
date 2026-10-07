@@ -13,6 +13,13 @@ use thiserror::Error;
 
 use crate::domain::{ExternalGameId, GameTitle, SourceId};
 
+pub mod steam;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SourceLaunchTarget {
+    Uri(String),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SourceCapability {
     Launch,
@@ -96,29 +103,99 @@ impl SourceGame {
 pub enum SourceSnapshotError {
     #[error("source snapshot contains duplicate external game id {0}")]
     DuplicateExternalGameId(ExternalGameId),
+    #[error("authoritative source membership is missing discovered game id {0}")]
+    GameOutsideAuthoritativeMembership(ExternalGameId),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceSnapshotCompleteness {
+    /// Discovery succeeded, but absence from this snapshot is not authoritative.
+    Partial,
+    /// Discovery includes authoritative membership for the source's installed games.
+    Authoritative,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceSnapshot {
     games: Vec<SourceGame>,
+    authoritative_membership: Option<BTreeSet<ExternalGameId>>,
 }
 
 impl SourceSnapshot {
+    /// Construct a conservative snapshot. Missing games are not removed from
+    /// persistence when a source cannot prove that discovery was complete.
     pub fn new(games: Vec<SourceGame>) -> Result<Self, SourceSnapshotError> {
-        let mut ids = BTreeSet::new();
+        Self::validate_unique_games(&games)?;
+        Ok(Self {
+            games,
+            authoritative_membership: None,
+        })
+    }
+
+    /// Construct a complete snapshot whose authoritative membership is exactly
+    /// the games with usable normalized metadata.
+    pub fn authoritative(games: Vec<SourceGame>) -> Result<Self, SourceSnapshotError> {
+        let membership = games
+            .iter()
+            .map(|game| game.external_id().clone())
+            .collect::<Vec<_>>();
+        Self::authoritative_with_membership(games, membership)
+    }
+
+    /// Construct a complete snapshot with a broader installed-membership set.
+    /// This lets an adapter preserve an installed identity whose presentation
+    /// metadata is temporarily unavailable while still pruning truly absent IDs.
+    pub fn authoritative_with_membership(
+        games: Vec<SourceGame>,
+        present_external_ids: impl IntoIterator<Item = ExternalGameId>,
+    ) -> Result<Self, SourceSnapshotError> {
+        Self::validate_unique_games(&games)?;
+        let authoritative_membership = present_external_ids.into_iter().collect::<BTreeSet<_>>();
+
         for game in &games {
+            if !authoritative_membership.contains(game.external_id()) {
+                return Err(SourceSnapshotError::GameOutsideAuthoritativeMembership(
+                    game.external_id().clone(),
+                ));
+            }
+        }
+
+        Ok(Self {
+            games,
+            authoritative_membership: Some(authoritative_membership),
+        })
+    }
+
+    fn validate_unique_games(games: &[SourceGame]) -> Result<(), SourceSnapshotError> {
+        let mut ids = BTreeSet::new();
+        for game in games {
             if !ids.insert(game.external_id().clone()) {
                 return Err(SourceSnapshotError::DuplicateExternalGameId(
                     game.external_id().clone(),
                 ));
             }
         }
-
-        Ok(Self { games })
+        Ok(())
     }
 
     pub fn games(&self) -> &[SourceGame] {
         &self.games
+    }
+
+    pub fn completeness(&self) -> SourceSnapshotCompleteness {
+        if self.authoritative_membership.is_some() {
+            SourceSnapshotCompleteness::Authoritative
+        } else {
+            SourceSnapshotCompleteness::Partial
+        }
+    }
+
+    pub fn authoritative_membership(&self) -> Option<&BTreeSet<ExternalGameId>> {
+        self.authoritative_membership.as_ref()
+    }
+
+    pub fn is_authoritative(&self) -> bool {
+        self.authoritative_membership.is_some()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -174,6 +251,17 @@ impl Error for SourceError {
 pub trait GameSource: Send + Sync {
     fn descriptor(&self) -> &SourceDescriptor;
     fn discover(&self) -> Result<SourceDiscovery, SourceError>;
+
+    /// Prepare a source-neutral launch target for one source-owned game.
+    ///
+    /// The default keeps discovery-only adapters simple. Sources advertising
+    /// `SourceCapability::Launch` should return a target for valid game IDs.
+    fn launch_target(
+        &self,
+        _external_id: &ExternalGameId,
+    ) -> Result<Option<SourceLaunchTarget>, SourceError> {
+        Ok(None)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -207,6 +295,10 @@ impl SourceRegistry {
 
     pub fn iter(&self) -> impl Iterator<Item = &dyn GameSource> {
         self.sources.values().map(Box::as_ref)
+    }
+
+    pub fn get(&self, source_id: &SourceId) -> Option<&dyn GameSource> {
+        self.sources.get(source_id).map(Box::as_ref)
     }
 
     pub fn len(&self) -> usize {
@@ -295,6 +387,31 @@ mod tests {
     }
 
     #[test]
+    fn snapshots_are_partial_by_default_and_must_opt_into_authoritative_membership() {
+        let partial = SourceSnapshot::new(vec![source_game("1", "One")]).expect("partial");
+        let authoritative =
+            SourceSnapshot::authoritative(vec![source_game("1", "One")]).expect("authoritative");
+
+        assert_eq!(partial.completeness(), SourceSnapshotCompleteness::Partial);
+        assert!(!partial.is_authoritative());
+        assert_eq!(
+            authoritative.completeness(),
+            SourceSnapshotCompleteness::Authoritative
+        );
+        assert!(authoritative.is_authoritative());
+
+        let broader = SourceSnapshot::authoritative_with_membership(
+            vec![source_game("1", "One")],
+            vec![
+                ExternalGameId::new("1").expect("one"),
+                ExternalGameId::new("2").expect("two"),
+            ],
+        )
+        .expect("broader membership");
+        assert_eq!(broader.authoritative_membership().expect("membership").len(), 2);
+    }
+
+    #[test]
     fn registry_rejects_duplicate_source_ids_and_iterates_stably() {
         let mut registry = SourceRegistry::new();
         registry.register(EmptySource::new("zeta")).expect("zeta");
@@ -313,5 +430,14 @@ mod tests {
             .map(|source| source.descriptor().id().as_str())
             .collect::<Vec<_>>();
         assert_eq!(ids, vec!["alpha", "zeta"]);
+        assert_eq!(
+            registry
+                .get(&source_id("alpha"))
+                .expect("registered source")
+                .descriptor()
+                .id()
+                .as_str(),
+            "alpha"
+        );
     }
 }

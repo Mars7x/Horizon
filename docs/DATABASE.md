@@ -51,7 +51,13 @@ Each Horizon connection enables foreign-key enforcement and uses a bounded busy 
 
 The schema remains at version 1 in Phase 6. The repository boundary now supports batch upserts because one successful source discovery is treated as a coherent snapshot. `SqliteLibraryRepository` writes each source snapshot inside one transaction. If any write in that batch fails, the entire source snapshot rolls back rather than leaving a committed prefix.
 
-Source discovery and registry logic remain outside persistence. SQLite receives only normalized `DiscoveredGame` values through the service/repository boundary.
+Source discovery and registry logic remain outside persistence. SQLite receives only normalized `DiscoveredGame` values and source-owned membership identities through the service/repository boundary.
+
+## Phase 7 authoritative source reconciliation
+
+An additive import cannot remove games that a source no longer reports. Phase 7.0.5 adds an explicit authoritative-membership operation to the repository boundary. When a source proves that a scan represents complete installed membership, SQLite upserts the normalized games, removes source references absent from that membership, and deletes only `games` rows left with zero source references. The entire reconciliation is one transaction.
+
+Partial/degraded snapshots continue to use additive upsert and never remove existing source references. No schema migration is required because this is repository behavior over the existing version-1 relational schema. See ADR 0042.
 
 ## Future schema areas
 

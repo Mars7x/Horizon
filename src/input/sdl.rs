@@ -71,6 +71,7 @@ impl SdlGamepadInput {
             gamepad_subsystem,
             event_pump,
             open_gamepads: Vec::new(),
+            enabled: true,
             analog_navigation: AnalogNavigation::default(),
             digital_navigation: DigitalNavigation::default(),
         };
@@ -101,6 +102,10 @@ impl SdlGamepadInput {
             _state: state,
         })
     }
+
+    pub fn set_enabled(&self, enabled: bool) {
+        self._state.borrow_mut().set_enabled(enabled);
+    }
 }
 
 struct SdlState {
@@ -109,6 +114,7 @@ struct SdlState {
     gamepad_subsystem: GamepadSubsystem,
     event_pump: EventPump,
     open_gamepads: Vec<Gamepad>,
+    enabled: bool,
     analog_navigation: AnalogNavigation,
     digital_navigation: DigitalNavigation,
 }
@@ -330,10 +336,21 @@ impl SdlState {
         removed > 0
     }
 
-    /// Device topology changes invalidate held-button/axis state. SDL may never
-    /// deliver the matching button-up or centered-axis event for a controller
-    /// that disappears, so carrying those latches across disconnect/reconnect
-    /// can create phantom navigation.
+    fn set_enabled(&mut self, enabled: bool) {
+        if self.enabled == enabled {
+            return;
+        }
+
+        self.enabled = enabled;
+        // A controller may stay physically held while Horizon is inactive.
+        // Never carry that held/repeat state across an input-ownership change.
+        self.reset_navigation_state();
+        debug!(enabled, "Horizon gamepad UI input ownership changed");
+    }
+
+    /// Device topology or input-ownership changes invalidate held-button/axis
+    /// state. SDL may never deliver a matching release/center event while a
+    /// controller is disconnected or while Horizon is inactive.
     fn reset_navigation_state(&mut self) {
         self.analog_navigation.reset();
         self.digital_navigation.reset();
@@ -356,6 +373,23 @@ fn poll_gamepad_events(
 
     while let Some(event) = state.event_pump.poll_event() {
         match event {
+            Event::GamepadAdded { which, .. } => {
+                if state.open_gamepad(which) {
+                    state.reset_navigation_state();
+                    status_changed = true;
+                }
+            }
+            Event::GamepadRemoved { which, .. } => {
+                let removed = state.remove_gamepad(which);
+                // Reset even if SDL's bookkeeping has already dropped the
+                // handle: the removal event itself invalidates held state.
+                state.reset_navigation_state();
+                status_changed |= removed;
+            }
+            // Keep pumping SDL while Horizon is inactive so device topology
+            // remains current, but background controller activity must never
+            // become Horizon UI navigation.
+            _ if !state.enabled => {}
             Event::GamepadAxisMotion { axis, value, .. } => {
                 if let Some(action) =
                     state.analog_navigation.axis_motion(axis, value, Instant::now())
@@ -381,31 +415,20 @@ fn poll_gamepad_events(
                     state.digital_navigation.release(direction, Instant::now());
                 }
             }
-            Event::GamepadAdded { which, .. } => {
-                if state.open_gamepad(which) {
-                    state.reset_navigation_state();
-                    status_changed = true;
-                }
-            }
-            Event::GamepadRemoved { which, .. } => {
-                let removed = state.remove_gamepad(which);
-                // Reset even if SDL's bookkeeping has already dropped the
-                // handle: the removal event itself invalidates held state.
-                state.reset_navigation_state();
-                status_changed |= removed;
-            }
             _ => {}
         }
     }
 
-    let now = Instant::now();
-    if let Some(action) = state.analog_navigation.repeat_due(now) {
-        debug!(?action, "left-stick repeated UI action");
-        action_sink(UiActionEvent::repeated(action));
-    }
-    if let Some(action) = state.digital_navigation.repeat_due(now) {
-        debug!(?action, "d-pad repeated UI action");
-        action_sink(UiActionEvent::repeated(action));
+    if state.enabled {
+        let now = Instant::now();
+        if let Some(action) = state.analog_navigation.repeat_due(now) {
+            debug!(?action, "left-stick repeated UI action");
+            action_sink(UiActionEvent::repeated(action));
+        }
+        if let Some(action) = state.digital_navigation.repeat_due(now) {
+            debug!(?action, "d-pad repeated UI action");
+            action_sink(UiActionEvent::repeated(action));
+        }
     }
 
     if status_changed {

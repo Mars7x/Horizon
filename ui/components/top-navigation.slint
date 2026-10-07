@@ -188,8 +188,8 @@ export component TopNavigation inherits Rectangle {
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2
                     + (parent.focused && !Motion.reduced-motion ? -2px : 0px);
-                width: 28px;
-                height: 28px;
+                width: Metrics.utility-cell-size;
+                height: Metrics.utility-cell-size;
                 animate y { duration: Motion.focus-duration; easing: ease-out; }
             }
             TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(0); } }
@@ -201,8 +201,8 @@ export component TopNavigation inherits Rectangle {
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2
                     + (parent.focused && !Motion.reduced-motion ? -2px : 0px);
-                width: 28px;
-                height: 28px;
+                width: Metrics.utility-cell-size;
+                height: Metrics.utility-cell-size;
                 animate y { duration: Motion.focus-duration; easing: ease-out; }
             }
             TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(1); } }
@@ -214,8 +214,8 @@ export component TopNavigation inherits Rectangle {
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2
                     + (parent.focused && !Motion.reduced-motion ? -2px : 0px);
-                width: 28px;
-                height: 28px;
+                width: Metrics.utility-cell-size;
+                height: Metrics.utility-cell-size;
                 animate y { duration: Motion.focus-duration; easing: ease-out; }
             }
             TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(2); } }
@@ -227,8 +227,8 @@ export component TopNavigation inherits Rectangle {
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2
                     + (parent.focused && !Motion.reduced-motion ? -2px : 0px);
-                width: 28px;
-                height: 28px;
+                width: Metrics.utility-cell-size;
+                height: Metrics.utility-cell-size;
                 animate y { duration: Motion.focus-duration; easing: ease-out; }
             }
             TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(3); } }
@@ -240,8 +240,8 @@ export component TopNavigation inherits Rectangle {
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2
                     + (parent.focused && !Motion.reduced-motion ? -2px : 0px);
-                width: 28px;
-                height: 28px;
+                width: Metrics.utility-cell-size;
+                height: Metrics.utility-cell-size;
                 animate y { duration: Motion.focus-duration; easing: ease-out; }
             }
             TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(4); } }

@@ -1,3 +1,0 @@
-ui/components/utility-overlay.slint
-ui/pages/activity.slint
-ui/pages/settings.slint

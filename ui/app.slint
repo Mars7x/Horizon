@@ -83,12 +83,17 @@ export component AppWindow inherits Window {
     in property <[GameCardData]> games;
     in-out property <int> selected-index: 0;
     in property <string> selected-title: "";
+    in-out property <int> launching-game-index: -1;
+    in-out property <string> launch-feedback-text: "";
     in property <int> connected-controller-count: 0;
     in property <string> clock-time: "";
     in property <string> clock-suffix: "";
 
     callback select-game(int);
     callback activate-utility(int);
+    // Reports only OS/window activation changes from the root FocusScope.
+    // Internal programmatic/pointer focus changes must not change SDL ownership.
+    callback application-active-changed(bool);
     callback raw-key-input(string, bool) -> bool;
 
     design-surface := Rectangle {
@@ -106,6 +111,18 @@ export component AppWindow inherits Window {
             height: parent.height;
             focus-on-click: false;
             focus-on-tab-navigation: false;
+
+            focus-gained(reason) => {
+                if (reason == FocusReason.window-activation) {
+                    root.application-active-changed(true);
+                }
+            }
+
+            focus-lost(reason) => {
+                if (reason == FocusReason.window-activation) {
+                    root.application-active-changed(false);
+                }
+            }
 
             key-pressed(event) => {
                 if (event.text == Key.F11 && !event.repeat) {
@@ -137,6 +154,8 @@ export component AppWindow inherits Window {
                     games: root.games;
                     selected-index: root.selected-index;
                     selected-title: root.selected-title;
+                    launching-game-index: root.launching-game-index;
+                    launch-feedback-text: root.launch-feedback-text;
                     // A retained outgoing Home page remains visible during the
                     // crossfade, but it must not regain selection chrome after
                     // route-local focus switches to the destination route.

@@ -22,7 +22,7 @@ The domain must not depend on Slint, SQLite, SDL, Flatpak, DBus, or source-speci
 - No production `unwrap()` for recoverable failures.
 - Database schema changes use numbered migrations once persistence is introduced.
 - UI colors, spacing, typography, radii, and motion values come from the Phase 1 design system.
-- UI components use semantic theme colors; literal colors belong only in the central theme fallback definitions.
+- UI chrome and generated interface geometry use semantic theme colors. Authored artwork may carry intrinsic colors when its documented contract requires byte-for-byte/direct rendering; do not recolor such artwork through theme tokens.
 - Portal/DBus types terminate at the infrastructure boundary and are translated into Horizon domain types.
 - New capabilities must fit an existing boundary or justify a documented architecture change.
 
@@ -180,3 +180,25 @@ Phase 6 adds the generic provider layer without adding a concrete launcher adapt
 - repository batch writes are atomic per successful source snapshot in the SQLite adapter.
 
 No Steam/Heroic/Lutris/Bottles parser, launch command, production artwork pipeline, or playtime implementation is part of Phase 6. See `SOURCES.md` and ADR 0038.
+
+## Phase 7 Steam vertical-slice boundary
+
+Phase 7 exercises the Phase 5/6 abstractions end-to-end without relaxing their dependency direction:
+
+- `src/sources/steam.rs` alone knows Steam roots, VDF layout, Steam app IDs, and the `steam://rungameid` URI shape;
+- `SourceImportService` remains provider-neutral and persists Steam discovery through the existing `LibraryService`/repository boundary;
+- `SourceLaunchTarget` is a source-neutral value produced by launch-capable adapters;
+- `GameLaunchService` selects a registered launch-capable source from a durable `LibraryGame` reference without matching provider names;
+- `src/platform/launcher.rs` owns XDG OpenURI dispatch and does not know Steam;
+- `HomeController` consumes `LibraryGame` values and publishes `GameCardData`; Slint never sees Steam IDs, VDF objects, database rows, or source adapters.
+
+The application performs source discovery/import before constructing the Phase 7 Home presentation. Discovery failure is isolated per source and leaves the persisted library usable; persistence failure still aborts the import pass. The old hard-coded demo catalog is gone, and an empty durable library remains honestly empty.
+
+The Flatpak grants narrow read-only access to Steam's own conventional metadata roots. It does not grant broad home/host/external-library access. Launching is delegated through the OpenURI portal instead of spawning a host Steam binary. See `STEAM.md` and ADR 0039.
+
+
+## Phase 7.0.5 authoritative membership and launch-feedback boundary
+
+The source framework now separates normalized discovered games from authoritative installed membership. Sources remain conservative by default; a complete source scan may publish an authoritative external-ID set. `SourceImportService` chooses additive import or source synchronization from that generic snapshot contract, and `SqliteLibraryRepository` performs reconciliation atomically. Provider-specific code never issues deletes or SQL. See ADR 0042.
+
+Launch acknowledgement remains presentation/application state rather than source state. `HomeController` publishes only a pending game index and human-readable launch status around the existing source-neutral `GameLaunchService`. Slint renders the press/status feedback but does not decide launch policy. OS window deactivation clears the transient handoff state while ADR 0041 independently suspends controller UI input. See ADR 0043.

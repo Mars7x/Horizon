@@ -215,6 +215,7 @@ Keep these documents current when their area changes:
 - `docs/INPUT.md`
 - `docs/NAVIGATION.md`
 - `docs/SOURCES.md`
+- `docs/STEAM.md`
 - `docs/CLOCK.md`
 - `docs/adr/`
 
@@ -222,7 +223,7 @@ Use an Architecture Decision Record when a change introduces or reverses a signi
 
 ## Current phase boundary
 
-The repository currently contains work through **Phase 6.0**.
+The repository currently contains work through **Phase 7.0.5**.
 
 Implemented:
 
@@ -232,12 +233,12 @@ Implemented:
 - system light/dark and accent color
 - reduced motion / higher contrast
 - design tokens
-- Rust-owned demo home state
+- Rust-owned source-backed Home state
 - top navigation
 - selected-game label
 - game carousel and reusable game tiles
 - accent focus brackets
-- pointer-driven demo selection routed through Rust
+- pointer-driven Home selection routed through Rust
 - SDL3 gamepad adapter
 - semantic `UiAction` layer
 - keyboard and controller normalization into the same actions
@@ -279,11 +280,28 @@ Implemented:
 - unavailable-vs-failed source discovery outcomes
 - `SourceImportService` with per-source failure isolation and source-owned identity attachment
 - atomic per-source snapshot persistence through repository batch writes
+- concrete Steam `GameSource` using local `libraryfolders.vdf`, readable manifests, and degradable `appinfo.vdf` enrichment
+- native + Flatpak Steam root detection contained inside the Steam adapter
+- generic source-neutral launch target and `GameLaunchService` capability dispatch
+- XDG OpenURI platform launch executor instead of spawning a host launcher binary
+- source-backed Home cards loaded from persisted `LibraryGame` values
+- Steam launch from the existing semantic Accept action without Steam-specific presentation/input branching
+- read-only Steam-scoped Flatpak access, including the complete `com.valvesoftware.Steam` app-data subtree for Flatpak Steam
+- source-neutral procedural `FallbackCover` for real games without imported artwork
+- five Horizon-owned top-utility SVG assets rendered directly without path transcription, colorization, or theme recoloring
+- Steam root discovery reuses XDG data paths without moving their `OsString` values during candidate construction
+- Steam discovery keeps readable manifest-backed games when `appinfo.vdf` is missing, unreadable, or unparsable
+- Flatpak packaging exposes the complete `~/.var/app/com.valvesoftware.Steam` subtree read-only so packaged discovery matches real Flatpak Steam layouts without granting general home access.
+- Authored utility SVGs use one shared higher-resolution internal render target to remain sharp when the app-wide logical scene is enlarged in fullscreen; SVG source bytes and 40x40 layout geometry remain unchanged.
+- Home uses an explicit empty-library state and never renders zero-game carousel/title/focus geometry
+- authoritative source-membership reconciliation removes stale/uninstalled source refs only after complete scans; partial scans remain additive
+- readable Steam libraries prefer actual appmanifest membership over cached declarations
+- source-neutral Home launch feedback provides a press-in animation plus `Launching…`/failure status and blocks duplicate launch presses while pending
 
 Not yet implemented:
 
-- concrete provider adapters (Steam, Heroic, Lutris, Bottles)
-- launching
+- additional provider adapters (Heroic, Lutris, Bottles)
+- production source artwork retrieval/cache
 - playtime/session tracking
 - utility submenu production pages
 
@@ -338,6 +356,28 @@ Phase 6 establishes the generic source/import framework while keeping concrete p
 10. Phase 7 is the first concrete adapter: Steam.
 
 If Phase 6 work requires provider-name conditionals in generic services, direct SQL from an adapter, or fake launch/playtime abstractions with no concrete consumer, stop and fix the boundary instead. See `docs/SOURCES.md` and ADR 0038.
+
+
+## Phase 7 target
+
+Phase 7 is the first real source vertical slice and must prove the Phase 5/6 boundaries rather than bypass them:
+
+1. Steam-specific paths and VDF parsing live only in `src/sources/steam.rs`.
+2. Discover installed Steam app IDs from local launcher metadata; do not require Steam credentials, Web API access, or runtime network access.
+3. Use `(SourceId("steam"), ExternalGameId(appid))` as durable source identity; never infer identity from a title.
+4. Filter explicit non-game Steam app types from local appinfo metadata instead of maintaining a hard-coded provider denylist.
+5. Feed discovery through `SourceImportService`/`LibraryService`; the Steam adapter must never issue SQL.
+6. Replace the hard-coded demo Home catalog with persisted `LibraryGame` values without exposing source objects or IDs to Slint.
+7. Launch through a generic source capability/target service. Steam may construct `steam://rungameid/<appid>` only inside its adapter; platform execution belongs in `src/platform/`.
+8. Use XDG OpenURI for launch dispatch. Do not spawn `/usr/bin/steam`, call `flatpak run`, or branch on native-vs-Flatpak Steam outside the source/platform boundaries.
+9. Keep Flatpak permissions narrow and read-only to Steam metadata roots. Do not add `--filesystem=home`, `--filesystem=host`, or broad external-library mounts.
+10. Keep real artwork retrieval and playtime/session tracking out of Phase 7 unless their generic contracts are deliberately introduced and documented. `FallbackCover` remains source-neutral for missing artwork.
+11. Treat an unavailable Steam install as normal optional-source state; a Steam parse failure must not destroy the already-persisted library. Persistence failure remains fatal for the import pass.
+12. Steam complete scans must use the generic authoritative-membership contract to remove stale/uninstalled source references; partial/failed scans remain non-destructive. Never issue Steam-specific deletes outside the repository/service boundary.
+13. Readable Steam libraries use actual appmanifest membership as the primary installed set. The `libraryfolders.vdf` `apps` map is only the fallback for libraries Horizon cannot directly read.
+14. Launch acknowledgement is source-neutral presentation state owned by `HomeController`; do not add Steam-specific loading UI or infer process lifetime in Slint.
+
+See `docs/STEAM.md`, `docs/SOURCES.md`, and ADR 0039. Phase 8 adds Activity + Playtime on top of this source-backed library.
 
 ## Coding style
 
@@ -468,32 +508,36 @@ Phase 3.14.1 updates:
 
 - Updated placeholder utility icon colors: Friends orange, Album blue, Web blue, Settings gray.
 
-- Utility SVGs remain unmodified; their colors are applied at render time from semantic Theme tokens.
+- Historical note: this color-token rendering path is superseded by ADR 0040.
 
 
-## Phase 3.14.4 utility icon invariant
+## Current utility artwork invariant (ADR 0040)
 
-The Friends, Album, Web, and Settings placeholder utility icons are rendered as
-Slint `Path` geometry in `ui/components/utility-icons.slint`, derived from the
-user-supplied symbolic SVGs. Keep the SVG source assets untouched. Do not render
-these utilities through `Image.colorize`, bitmap exports, or hard-coded colors.
-All icon colors come from semantic `Theme.nav-*` tokens. This ensures crisp
-vector rendering at every responsive/fullscreen scale. See ADR 0019.
+Friends, Album, Activity, Web, and Settings are Horizon-owned authored SVG assets.
+`ui/components/utility-icons.slint` must render those SVG files directly with
+Slint `Image`/`@image-url`. Do not transcribe their geometry into `Path`, apply
+`Image.colorize`, replace their fills/strokes with theme tokens, raster-export
+them, or otherwise modify the authored artwork. The SVGs' own colors, white
+outlines, shadows, filters, and geometry are part of the asset contract. All five
+icons share the reusable `AuthoredUtilityIcon` rendering policy, which may render
+the unchanged SVG into a larger internal target before uniformly fitting it back
+into the fixed 40x40 logical cell so app-wide fullscreen scaling stays crisp.
+That internal quality scale must never change layout geometry, hit testing, icon
+colors, or SVG content. The existing separate utility-focus surface is allowed;
+the asset itself must remain unchanged. See ADR 0040.
 
 
-Phase 3.14.5 updates:
-- Footer controller indicator now uses the supplied applications-games symbolic geometry, rendered as a Slint Path for crisp scaling.
-- Added Activity placeholder using the supplied dictionary symbolic geometry; Activity is teal.
-- Browser uses the semantic blue browser token; Album remains blue; Friends remains orange; Settings remains adaptive gray.
-- Supplied SVG files are preserved unchanged in ui/assets; colors are applied from Theme at render time.
+Phase 3.14.5 historical updates:
+- Footer controller indicator uses the supplied applications-games symbolic geometry, rendered as a Slint Path for crisp scaling.
+- The earlier utility-icon color-token implementation is superseded by ADR 0040.
 
 
 ## Phase 3.14.6 placeholder-transition invariant
 
 Fallback/demo artwork is part of the selected card's single visual scale. Do not
 independently animate its font sizes, radii, or artwork detail scale during
-selection; that causes visible breathing/re-layout. Browser utility color is
-semantic `Theme.nav-browser` and is green. See ADR 0020.
+selection; that causes visible breathing/re-layout. ADR 0040 supersedes ADR
+0020's browser utility color-token rule.
 
 ## Third-party attribution invariant
 
@@ -504,19 +548,19 @@ Third-party provenance is part of correctness. Before adding any external asset 
 - A game-row boundary wrap is permitted only for a fresh directional input event. Repeated/held directional events clamp at the current boundary.
 - Input adapters must preserve whether a semantic action is fresh or repeated; do not collapse this information before presentation navigation.
 - Procedural/fallback game artwork must be rendered at native target geometry for the selected endpoint; do not reintroduce subtree transform-scaling that softens fallback typography at large UI scales.
-- Utility icon colors remain semantic Theme tokens; current Browser green and Settings gray are intentionally lighter for dark-mode legibility.
+- Utility icon color-token behavior is superseded by ADR 0040; the current authored SVGs carry their own intrinsic colors.
 
 
 ### Phase 3.14.9 rendering invariants
-- Procedural/fallback game artwork must remain crisp when Horizon is fullscreen or HiDPI. Horizon now relies on the Skia renderer for correctly scaled glyph rasterization; do not reintroduce the removed DemoCover render-scale/density supersampling workaround.
+- Procedural/fallback game artwork must remain crisp when Horizon is fullscreen or HiDPI. Horizon now relies on the Skia renderer for correctly scaled glyph rasterization; do not reintroduce the removed fallback-cover render-scale/density supersampling workaround.
 - Real cover art must use appropriately high-resolution source images; do not "fix" soft real covers by supersampling low-resolution files.
-- The supplied Web and Settings SVG assets remain unchanged. Their smaller optical presentation size is intentional because their filled geometry is visually heavier than the outline utility icons.
+- Historical Web/Settings optical-sizing rules are superseded by ADR 0040 and the current authored SVG assets.
 
 
 Phase 3.14.10 rendering update:
 - Slint renderer is now Winit + Skia instead of FemtoVG because FemtoVG scales cached glyph bitmaps and made fullscreen placeholder text visibly soft.
-- Removed the high-density DemoCover workaround that caused breathing during selection.
-- Web and Settings keep the supplied GNOME assets for provenance but render lighter outline derivatives to match the visual weight of the other utilities.
+- Removed the high-density fallback-cover workaround that caused breathing during selection.
+- Historical Web/Settings derivative rendering is superseded by ADR 0040.
 
 
 ### Typography-specific rule
@@ -533,8 +577,7 @@ Phase 3.14.10 rendering update:
 ## Phase 3.14.12 typography/icon invariants
 - LINE Seed JP is the application-wide font family. Do not reintroduce UD Shin Go NT or Inter as the default without a later ADR explicitly superseding ADR 0025.
 - The Flatpak must bundle LINE Seed JP under OFL-1.1 and make it available through fontconfig from `/app/share/fonts`.
-- Web and Settings utility glyphs are presentation derivatives of the credited GNOME assets. Keep the original SVG files untouched in `ui/assets/` and keep provenance in `THIRD_PARTY_NOTICES.md`.
-- Settings should read clearly as an eight-tooth gear at the same optical scale as neighboring utilities; Web should retain a clean globe outline with lighter internal lines.
+- Utility artwork now follows ADR 0040: the five authored Horizon SVG files are rendered directly and are not recolored or geometrically re-derived.
 
 
 Phase 3.14.13 home sizing:
@@ -601,7 +644,7 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
 - Every utility icon activates a first-class `AppRoute::Utility(UtilityPage)` submenu route. Friends, Album, Activity, Web, and Settings must share this route/history abstraction rather than splitting into route and modal-overlay special cases.
 - Every utility submenu owns the full visual shell while active, hides top/footer chrome, and restores as content focus because the utility row is not visible there.
 - Pointer activation of a utility must enter the same Rust `NavigationController` path as Accept; do not duplicate route policy in Slint.
-- The utility focus treatment is a compact rounded surface around the existing icon. Do not alter the credited utility SVG source assets or their semantic colors to indicate focus.
+- The utility focus treatment is a compact rounded surface behind the authored icon. Focus may move the whole icon by the existing restrained 2px lift, but must never recolor, colorize, redraw, mutate the SVG artwork, or change its layout scale.
 - Phase 4 utility submenus are presentation placeholders only; do not add social, screenshot, browser, persistence, or launching behavior yet. See ADR 0035.
 
 - Exactly one focus region should present selection chrome at a time. When top utilities own focus, Home game focus brackets, selected-game title pill, connector line, and connector dot must all be hidden. Slint may report rendered geometry, but Rust owns the shortest-distance/return-anchor focus decision. See ADR 0031.
@@ -671,3 +714,35 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
 - One successful `SourceSnapshot` has unique `ExternalGameId` values and is persisted as one atomic repository batch.
 - Persistence failure aborts the import pass and reports the source whose snapshot was being committed. Do not swallow it into a per-source discovery report.
 - Phase 6 adds no concrete provider adapter and no launch/playtime/UI shortcut. Steam consumes this framework in Phase 7. See ADR 0038.
+
+
+## Phase 7 Steam vertical-slice invariants
+
+- Steam is a normal `GameSource`; generic services, persistence, presentation, and input must never branch on the source ID string `steam`.
+- Steam path/VDF/app-ID quirks terminate in `src/sources/steam.rs`. Slint must never receive VDF objects, Steam paths, or Steam app IDs.
+- Steam discovery is local-only in Phase 7: `libraryfolders.vdf` supplies installed IDs; readable manifests and `appinfo.vdf` are complementary metadata sources. Appinfo enriches type/name data but must not be a hard prerequisite for importing valid manifest-backed games.
+- The Steam adapter advertises `SourceCapability::Launch` and returns the source-neutral URI target `steam://rungameid/<appid>`. URI execution belongs to `PortalLaunchExecutor` through XDG OpenURI.
+- Do not spawn host launcher executables or call `flatpak run` from services/source code.
+- Flatpak Steam metadata permissions stay read-only and provider-scoped. Native Steam uses the narrow XDG roots; Flatpak Steam receives `~/.var/app/com.valvesoftware.Steam:ro` because its canonical metadata may resolve across child directories inside that app sandbox. Do not broaden this to home/host/external-library access.
+- Home is source-backed from persisted `LibraryGame` values. Do not reintroduce a fake/demo catalog when the durable library is empty. A zero-game model must render the dedicated empty state, not any carousel/title/focus geometry.
+- `FallbackCover` is the source-neutral missing-artwork path. Do not make it Steam-branded or key visual behavior from `SourceId`.
+- A complete Steam scan publishes authoritative game membership; persistence atomically removes Steam references absent from that set and deletes only orphaned logical games. If any detected Steam root fails, the snapshot is partial and must not prune prior entries. See ADR 0042.
+- For a readable library, actual `appmanifest_<appid>.acf` files are the primary installed-membership record. Use `libraryfolders.vdf` `apps` only when the library path itself is outside Horizon's readable sandbox.
+- `steam-vdf-parser` provenance and Apache-2.0 OR MIT licensing must remain recorded in `THIRD_PARTY_NOTICES.md`, `docs/LICENSING.md`, and `LICENSES/`. See ADR 0039.
+
+
+## Phase 7.0.4 active-window input invariant
+
+- Horizon may emit semantic controller UI actions only while its own window is active. A launched foreground game must never continue navigating the background Horizon shell.
+- Window activation is reported from the root Slint `FocusScope` only for `FocusReason.window-activation`; internal pointer/programmatic focus changes must not toggle global controller ownership.
+- SDL must continue pumping events while Horizon is inactive so controller hotplug/status remains current, but axis/button events must not reach `UiActionEvent` sinks.
+- Disabling or re-enabling UI input resets analog and D-pad hold/repeat latches. Do not carry a held game input back into Horizon when focus returns.
+- Keep this source-neutral: launch services and Steam adapters must not directly enable/disable controller input or infer game process lifetime merely to protect UI navigation. See ADR 0041.
+
+## Phase 7.0.5 installed-membership and launch-feedback invariants
+
+- `SourceSnapshot` is additive by default. Only a snapshot carrying authoritative external-ID membership may remove stale source references. Authoritative membership may be broader than the normalized `SourceGame` list so temporarily unresolved installed IDs remain protected.
+- `SourceImportService` chooses additive upsert vs authoritative synchronization generically. Provider adapters never issue SQL or repository deletes. SQLite synchronization is one transaction and only deletes a logical game after its final source reference is gone. See ADR 0042.
+- Steam membership must come from installed-library metadata, not the full appinfo catalog. Readable libraries prefer actual appmanifest filenames; inaccessible external libraries may use Steam's `libraryfolders.vdf` installed `apps` map.
+- A fresh Home Accept publishes generic launch feedback before dispatch. While pending, duplicate Accept and carousel Left/Right are suppressed. The selected card uses real width/height press-in geometry and the fixed title pill adds `Launching…`; Reduced Motion makes only the interpolation immediate.
+- A synchronous launch failure may publish `Launch failed`. Pending feedback clears when Horizon loses window activation; do not claim process-running state from OpenURI success. Keep feedback source-neutral and separate from ADR 0041 controller ownership. See ADR 0043.

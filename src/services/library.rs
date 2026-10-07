@@ -45,6 +45,12 @@ pub trait LibraryRepository {
         &mut self,
         games: &[DiscoveredGame],
     ) -> Result<Vec<GameId>, Self::Error>;
+    fn synchronize_source_snapshot(
+        &mut self,
+        source_id: &SourceId,
+        games: &[DiscoveredGame],
+        present_external_ids: &[ExternalGameId],
+    ) -> Result<Vec<GameId>, Self::Error>;
     fn list_games(&self) -> Result<Vec<LibraryGame>, Self::Error>;
     fn game_count(&self) -> Result<usize, Self::Error>;
 }
@@ -70,6 +76,16 @@ where
         games: &[DiscoveredGame],
     ) -> Result<Vec<GameId>, R::Error> {
         self.repository.upsert_discovered_games(games)
+    }
+
+    pub fn synchronize_source_snapshot(
+        &mut self,
+        source_id: &SourceId,
+        games: &[DiscoveredGame],
+        present_external_ids: &[ExternalGameId],
+    ) -> Result<Vec<GameId>, R::Error> {
+        self.repository
+            .synchronize_source_snapshot(source_id, games, present_external_ids)
     }
 
     pub fn games(&self) -> Result<Vec<LibraryGame>, R::Error> {

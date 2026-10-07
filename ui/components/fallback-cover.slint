@@ -1,11 +1,11 @@
 import { Metrics, Typography } from "../theme/theme.slint";
 import { GameCardData } from "../models/game-card.slint";
 
-// Phase 3 uses procedural/vector demo artwork, so it is resolution-independent.
-// Real imported cover artwork should prefer >=1024px square sources; see
-// docs/ARTWORK.md. Selection scales the complete GameTile as one visual unit,
-// so fallback text/details do not independently re-layout during focus changes.
-export component DemoCover inherits Rectangle {
+// Source-backed games without imported artwork use this procedural fallback,
+// which remains resolution-independent. Real cover artwork should prefer
+// >=1024px square sources; see docs/ARTWORK.md. Selection scales the complete
+// GameTile as one visual unit so fallback text/details do not re-layout.
+export component FallbackCover inherits Rectangle {
     in property <GameCardData> game;
 
     background: @linear-gradient(135deg,

@@ -18,13 +18,6 @@ export global Theme {
     in-out property <color> focus: #3584e4;
     in-out property <color> focus-highlight: #62a0ea;
 
-    // Placeholder utility icon colors. Components consume these semantic
-    // tokens; the SVG assets themselves remain untouched and are colorized at render time.
-    out property <color> nav-friends: #f2994a;
-    out property <color> nav-album: #4d91df;
-    out property <color> nav-browser: #75d66d;
-    out property <color> nav-activity: #39b8c4;
-    out property <color> nav-settings: is-dark ? #c6cad2 : #767c86;
 }
 
 export global Metrics {
@@ -85,6 +78,7 @@ export global Metrics {
     out property <length> game-stride: 250px;
     out property <length> game-slot-height: 320px;
     out property <float> game-selected-scale: 1.10;
+    out property <float> game-launch-pressed-scale: 1.055;
     out property <length> game-shell-radius: 30px;
     out property <length> game-art-inset: 20px;
     out property <length> cover-radius: 18px;
@@ -122,6 +116,7 @@ export global Motion {
     in-out property <bool> reduced-motion: false;
 
     out property <duration> focus-duration: reduced-motion ? 0ms : 140ms;
+    out property <duration> launch-press-duration: reduced-motion ? 0ms : 90ms;
     out property <duration> carousel-duration: reduced-motion ? 0ms : 190ms;
     out property <duration> page-duration: reduced-motion ? 0ms : 220ms;
     out property <duration> hover-duration: reduced-motion ? 0ms : 100ms;

@@ -4,30 +4,6 @@ Horizon includes or derives small portions of artwork and other resources from t
 
 ## GNOME symbolic artwork
 
-### Friends — `emote-smile-symbolic.svg`
-- Source: GNOME Icon Library / GNOME Icon Development Kit
-- Creator credited in the supplied SVG metadata: Jakub Steiner
-- License: CC0 1.0 Universal (`CC0-1.0`)
-- Source file in Horizon: `ui/assets/friends-smiley.svg`
-- Derived use: vector path geometry is reproduced in `ui/components/utility-icons.slint` for crisp Slint rendering and runtime recoloring.
-- Changes: geometry is reformatted for Slint; color is applied by Horizon's theme.
-
-### Album — `landscape-symbolic.svg`
-- Source: GNOME Icon Library / GNOME Icon Development Kit
-- Creator credited in the supplied SVG metadata: Jakub Steiner
-- License: CC0 1.0 Universal (`CC0-1.0`)
-- Source file in Horizon: `ui/assets/album-landscape.svg`
-- Derived use: vector path geometry is reproduced in `ui/components/utility-icons.slint` for crisp Slint rendering and runtime recoloring.
-- Changes: geometry is reformatted for Slint; color is applied by Horizon's theme.
-
-### Activity — `dictionary-symbolic.svg`
-- Source: GNOME Icon Library / GNOME Icon Development Kit
-- Creator credited in the supplied SVG metadata: Jakub Steiner
-- License: CC0 1.0 Universal (`CC0-1.0`)
-- Source file in Horizon: `ui/assets/dictionary-symbolic.svg`
-- Derived use: vector path geometry is reproduced in `ui/components/utility-icons.slint` for crisp Slint rendering and runtime recoloring.
-- Changes: geometry is reformatted for Slint; color is applied by Horizon's theme.
-
 ### Controller — `applications-games-symbolic.svg`
 - Source: GNOME Symbolic Icon Theme, surfaced through GNOME Icon Library
 - Attribution: GNOME Project
@@ -37,33 +13,14 @@ Horizon includes or derives small portions of artwork and other resources from t
 - Derived use: vector path geometry is reproduced in `ui/components/system-icons.slint` for crisp Slint rendering and theme coloring.
 - Changes: geometry is reformatted for Slint; color is applied by Horizon's theme.
 
-### Settings — `org.gnome.Settings-system-symbolic.svg`
-- Source: GNOME Settings (`gnome-control-center`)
-- Upstream project: https://gitlab.gnome.org/GNOME/gnome-control-center
-- Copyright: GNOME Project contributors
-- License used for this asset record: GNU General Public License v2.0 or later (`GPL-2.0-or-later`), matching the upstream project license where the supplied SVG does not carry a separate embedded license declaration.
-- Source file in Horizon: `ui/assets/settings-gear.svg`
-- Derived use: vector path geometry is reproduced in `ui/components/utility-icons.slint`.
-- Changes: geometry is reformatted for Slint; color is applied by Horizon's theme.
-
-### Web — `org.gnome.Epiphany-symbolic.svg`
-- Source: GNOME Web / Epiphany
-- Upstream project: https://gitlab.gnome.org/GNOME/epiphany
-- Attribution: GNOME Project contributors; the upstream icon import credited Jakub Steiner for the artwork.
-- License used for this asset record: GNU General Public License v3.0 or later (`GPL-3.0-or-later`), matching the upstream project license where the supplied SVG does not carry a separate embedded license declaration.
-- Source file in Horizon: `ui/assets/web-epiphany.svg`
-- Derived use: vector path geometry is reproduced in `ui/components/utility-icons.slint`.
-- Changes: geometry is reformatted for Slint; color is applied by Horizon's theme.
-
 ## Typography
 
 ## License texts
 
 Corresponding license texts are included in `LICENSES/`:
 
-- `CC0-1.0.txt`
+- `CC0-1.0.txt` (also used for project metadata licensing)
 - `CC-BY-SA-3.0-US.txt`
-- `GPL-2.0-or-later.txt`
 - `GPL-3.0-or-later.txt`
 
 ## Rust and native dependencies
@@ -72,9 +29,6 @@ Horizon also uses third-party software dependencies declared in `Cargo.toml` and
 
 This notice is intended to preserve provenance and attribution. It does not replace the applicable license texts.
 
-
-### Presentation derivatives
-Horizon uses lighter outline presentation derivatives for the Web and Settings utility glyphs so their optical stroke weight matches the other header utilities. The original supplied GNOME SVG files remain unchanged in `ui/assets/`; source, copyright, and license obligations continue to apply to the derivatives.
 
 ## Bundled typeface: LINE Seed JP
 
@@ -105,3 +59,14 @@ The applicable license text is included as `LICENSES/OFL-1.1.txt`.
   - Modification: none by Horizon.
 
 The exact resolved Cargo dependency-license inventory remains a release gate and will be generated from the committed `Cargo.lock` before public release.
+
+### Phase 7 Steam metadata parser
+
+- **steam-vdf-parser 0.1.2**
+  - Upstream: https://github.com/mexus/steam-vdf-parser
+  - Copyright: Copyright 2026 steam-vdf-parser contributors
+  - License: Apache-2.0 OR MIT
+  - Use in Horizon: parse Steam text VDF metadata and current binary `appinfo.vdf` v40/v41 data inside the Steam source adapter.
+  - Modification: none; consumed as a Cargo dependency.
+
+The Apache-2.0 and MIT license texts are included as `LICENSES/Apache-2.0.txt` and `LICENSES/MIT.txt`. The exact resolved Cargo dependency-license inventory remains a release gate and will be generated from the committed `Cargo.lock` before public release.

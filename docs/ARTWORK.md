@@ -14,6 +14,12 @@ not inherit low-resolution thumbnails.
 - Never upscale a small source and then save the upscale as if it were the
   original.
 
+## Utility artwork
+
+The top Friends, Album, Activity, Web, and Settings icons are Horizon-owned authored SVGs. Their source files in `ui/assets/` are the single visual source of truth. `utility-icons.slint` loads them directly with `@image-url`; do not transcribe their paths, apply `Image.colorize`, substitute theme colors, raster-export them, or create alternate light/dark variants. The authored white outline, shadow/filter, stroke geometry, and intrinsic colors must remain intact.
+
+The 80×80 SVG canvases are uniformly fitted into fixed 40×40 utility cells with `image-fit: contain`. Because Horizon applies one app-wide logical scene scale, the shared `AuthoredUtilityIcon` renderer uses a larger internal raster target before scaling the complete unchanged image back to its 40×40 logical size. This prevents fullscreen blur without creating alternate raster assets or changing SVG content. Layout may position the complete image and the focus system may move it by its existing small lift, but the artwork itself is never recolored, redrawn, or non-uniformly distorted. See ADR 0040.
+
 ## Rendering
 
 - Decode/render artwork for the current presentation size and display scale.
@@ -27,7 +33,7 @@ not inherit low-resolution thumbnails.
 
 ## Phase 3 demo art
 
-The current `DemoCover` is generated from vector/shape primitives. It does not
+The current `FallbackCover` is generated from vector/shape primitives. It does not
 change its own font sizes or detail scale during selection. `GameTile` scales
 the complete shell + artwork + focus treatment as one coherent visual unit,
 which avoids the visible text/detail re-layout that occurred when those
@@ -47,4 +53,10 @@ Games without cover art use Horizon's procedural placeholder. Because the applic
 Phase 3.14.10 rendering update:
 - Slint renderer is now Winit + Skia instead of FemtoVG because FemtoVG scales cached glyph bitmaps and made fullscreen placeholder text visibly soft.
 - Removed the high-density DemoCover workaround that caused breathing during selection.
-- Web and Settings keep the supplied GNOME assets for provenance but render lighter outline derivatives to match the visual weight of the other utilities.
+- Superseded for top utilities by ADR 0040: Friends, Album, Activity, Web, and Settings now render Horizon-owned SVG artwork directly and unmodified.
+
+## Phase 7 fallback artwork
+
+The Phase 7 Home library contains real persisted games, but production source artwork is still outside this vertical slice. The earlier `DemoCover` component is therefore renamed to `FallbackCover`: it is no longer demo content, but a source-neutral procedural fallback for any real library game that has no imported artwork.
+
+Fallback palette/monogram data is derived in presentation code from the durable game identity/title. It must not inspect `SourceId` or render Steam-specific branding. When real artwork support is introduced, source adapters/services should expose artwork through a generic boundary and the fallback should remain available for missing/broken assets.

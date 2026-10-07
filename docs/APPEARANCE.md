@@ -52,7 +52,7 @@ Portal/DBus types never enter Slint. Slint only consumes resolved semantic prope
 
 ## Semantic colors
 
-Components must use `Theme` properties rather than literal colors. The current semantic palette contains:
+Generated UI chrome must use `Theme` properties rather than literal colors. Authored artwork with intrinsic colors is exempt when its asset contract explicitly requires direct, unmodified rendering. The current semantic palette contains:
 
 - `background`
 - `surface`
@@ -66,6 +66,8 @@ Components must use `Theme` properties rather than literal colors. The current s
 - `accent-subtle`
 - `accent-foreground`
 - `focus`
+
+The five top-utility SVGs are authored artwork, not theme glyph masks. Slint renders those source files directly with no `colorize` property and no semantic tint token; their orange/blue/teal/gray colors and white outline/shadow are part of the assets themselves. A shared authored-icon renderer may use a larger internal render target to stay sharp under Horizon's app-wide fullscreen scale, but that quality policy never changes the SVG bytes or visible 40×40 layout size.
 
 The Rust resolver derives hover, pressed, subtle, and readable accent-foreground values from the effective accent.
 
@@ -84,3 +86,8 @@ installation. `AppWindow.default-font-family` applies it to all Slint text;
 components must not introduce local font-family overrides without a documented
 design requirement. Clock-format integration is intentionally separate from
 appearance and is documented in `docs/CLOCK.md`.
+
+
+## Launch-feedback motion
+
+`Motion.launch-press-duration` is part of the same reduced-motion contract as focus, carousel, and page motion. The Phase 7.0.5 game-launch press-in becomes instantaneous when Reduced Motion is enabled; textual `Launching…` feedback remains visible so accessibility does not remove acknowledgement.

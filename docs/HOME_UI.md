@@ -20,7 +20,7 @@ AppWindow
     ├── SelectedGameLabel
     ├── GameCarousel
     │   └── GameTile × N
-    │       ├── DemoCover
+    │       ├── FallbackCover
     │       └── FocusFrame
     └── Footer
 ```
@@ -50,7 +50,7 @@ Keyboard/controller navigation is intentionally deferred to Phase 3. Phase 2 onl
 
 ## Demo artwork
 
-`DemoCover` renders original gradient artwork from presentation-model colors. This is intentionally not a filesystem-backed image loader. Real cover art and artwork caching belong to the future library/import infrastructure.
+`FallbackCover` renders original gradient artwork from presentation-model colors. It is not a filesystem-backed image loader; Phase 7 uses it for real source-backed games until the generic production artwork pipeline is introduced.
 
 ## Layout tokens
 
@@ -230,3 +230,36 @@ The white mix is reduced to 34%. Highlight width and the 4.0-second cycle remain
 ## Phase 4.7 responsive-shell hardening
 
 The existing responsive-fill model is unchanged: Horizon uses one uniform scale derived from the 1280×720 reference surface and expands the logical viewport to consume extra width/height. Phase 4.7 guards the scale denominator against compositor-reported zero-sized transient surfaces during minimize/fullscreen changes and clamps the central shell content region to a non-negative height. This is defensive only; normal windowed, fullscreen, 16:10, and ultrawide geometry remains the same.
+
+## Phase 7 source-backed Home
+
+Phase 7 replaces the original hard-coded demo card vector with the durable library returned by `LibraryService::games()`. `HomeController` owns the ordered `LibraryGame` values needed for launch identity and derives a Slint-facing `GameCardData` model from them. Selection is still Rust-owned and all established carousel/focus behavior remains unchanged.
+
+The data flow is now:
+
+```text
+Steam GameSource
+      ↓
+SourceImportService
+      ↓
+SQLite / LibraryService
+      ↓
+Vec<LibraryGame>
+      ↓
+HomeController ──> GameCardData ──> Slint HomePage
+      │
+      └─ Accept ──> GameLaunchService
+```
+
+There is no source check in `HomeController`. Any later source that imports a `LibraryGame` and advertises the generic launch capability can use the same Home/launch path.
+
+Games without production artwork use `FallbackCover`, a renamed source-neutral version of the earlier procedural demo artwork. Its palette is derived deterministically from durable game identity/title so the placeholder remains stable between launches. Horizon does not fabricate demo games when the durable library is empty.
+
+A zero-game library uses a dedicated Home empty state. `GameCarousel` is instantiated only when at least one durable game exists, so its selected-title pill, connector, shelf, focus frame, and camera geometry can never render against an empty model.
+
+
+## Phase 7.0.5 launch feedback
+
+A fresh Accept on a source-backed Home game immediately enters source-neutral launch feedback before `GameLaunchService` dispatch. The selected title pill keeps the same fixed geometry and shows a second-line `Launching…` status. The selected card performs a restrained press-in by changing its real target width/height from the normal selected scale to `Metrics.game-launch-pressed-scale`; it does not transform-scale an already rasterized subtree.
+
+While launch handoff is pending, Home suppresses duplicate Accept and Left/Right carousel actions. A synchronous dispatch error changes the status to `Launch failed`. Pending feedback clears when Horizon loses OS window activation to the launched game/another application. `Motion.launch-press-duration` respects Reduced Motion. See ADR 0043.

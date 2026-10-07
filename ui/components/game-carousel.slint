@@ -11,6 +11,8 @@ export component GameCarousel inherits Rectangle {
     in property <[GameCardData]> games;
     in property <int> selected-index: 0;
     in property <string> selected-title;
+    in property <int> launching-game-index: -1;
+    in property <string> launch-feedback-text;
     in property <bool> focus-visible: true;
     callback game-selected(int);
     callback geometry-changed(float);
@@ -125,6 +127,7 @@ export component GameCarousel inherits Rectangle {
             x: root.selected-center-world-x - self.width / 2;
             y: 0px;
             title: root.selected-title;
+            status: root.launch-feedback-text;
             visible: root.focus-visible;
         }
 
@@ -165,6 +168,7 @@ export component GameCarousel inherits Rectangle {
                 // but remove every game-selection visual when the utility row owns focus.
                 // This prevents the previously selected game from staying enlarged.
                 selected: root.focus-visible && index == root.selected-index;
+                launching: index == root.launching-game-index;
                 focus-visible: root.focus-visible;
                 activated(index) => { root.game-selected(index); }
             }

@@ -120,12 +120,23 @@ impl SourceImportService {
                         .collect::<Vec<_>>();
                     let discovered = discovered_games.len();
 
-                    library
-                        .record_discovered_games(&discovered_games)
-                        .map_err(|source| SourceImportError::Persistence {
-                            source_id: source_id.clone(),
-                            source,
-                        })?;
+                    let persistence_result = if let Some(membership) =
+                        snapshot.authoritative_membership()
+                    {
+                        let present_external_ids = membership.iter().cloned().collect::<Vec<_>>();
+                        library.synchronize_source_snapshot(
+                            &source_id,
+                            &discovered_games,
+                            &present_external_ids,
+                        )
+                    } else {
+                        library.record_discovered_games(&discovered_games)
+                    };
+
+                    persistence_result.map_err(|source| SourceImportError::Persistence {
+                        source_id: source_id.clone(),
+                        source,
+                    })?;
 
                     SourceImportOutcome::Imported { discovered }
                 }
@@ -160,6 +171,7 @@ mod tests {
 
     enum FakeBehavior {
         Available(Vec<SourceGame>),
+        Authoritative(Vec<SourceGame>),
         Unavailable(SourceUnavailableReason),
         Failed,
     }
@@ -193,6 +205,9 @@ mod tests {
                 FakeBehavior::Available(games) => Ok(SourceDiscovery::Available(
                     SourceSnapshot::new(games.clone()).expect("fake snapshot"),
                 )),
+                FakeBehavior::Authoritative(games) => Ok(SourceDiscovery::Available(
+                    SourceSnapshot::authoritative(games.clone()).expect("fake snapshot"),
+                )),
                 FakeBehavior::Unavailable(reason) => Ok(SourceDiscovery::Unavailable(*reason)),
                 FakeBehavior::Failed => Err(SourceError::new(FakeDiscoveryError)),
             }
@@ -202,6 +217,7 @@ mod tests {
     #[derive(Default)]
     struct RecordingRepository {
         discovered: Vec<DiscoveredGame>,
+        synchronized_sources: Vec<SourceId>,
         fail_writes: bool,
     }
 
@@ -227,6 +243,31 @@ mod tests {
                 return Err(FakeRepositoryError);
             }
 
+            let start = self.discovered.len();
+            self.discovered.extend_from_slice(games);
+            (0..games.len())
+                .map(|offset| {
+                    GameId::new((start + offset + 1) as i64)
+                        .map_err(|_| FakeRepositoryError)
+                })
+                .collect()
+        }
+
+        fn synchronize_source_snapshot(
+            &mut self,
+            source_id: &SourceId,
+            games: &[DiscoveredGame],
+            present_external_ids: &[ExternalGameId],
+        ) -> Result<Vec<GameId>, Self::Error> {
+            if self.fail_writes {
+                return Err(FakeRepositoryError);
+            }
+
+            self.synchronized_sources.push(source_id.clone());
+            self.discovered.retain(|game| {
+                game.source_id() != source_id
+                    || present_external_ids.contains(game.external_id())
+            });
             let start = self.discovered.len();
             self.discovered.extend_from_slice(games);
             (0..games.len())
@@ -277,6 +318,26 @@ mod tests {
                 .iter()
                 .all(|game| game.source_id().as_str() == "alpha")
         );
+    }
+
+    #[test]
+    fn authoritative_snapshots_use_source_synchronization_instead_of_additive_upsert() {
+        let mut registry = SourceRegistry::new();
+        registry
+            .register(FakeSource::new(
+                "alpha",
+                FakeBehavior::Authoritative(vec![game("10", "Installed")]),
+            ))
+            .expect("register source");
+
+        let repository = RecordingRepository::default();
+        let mut library = LibraryService::new(repository);
+        SourceImportService::import_all(&registry, &mut library).expect("import");
+
+        let repository = library.into_repository();
+        assert_eq!(repository.synchronized_sources, vec![SourceId::new("alpha").expect("id")]);
+        assert_eq!(repository.discovered.len(), 1);
+        assert_eq!(repository.discovered[0].external_id().as_str(), "10");
     }
 
     #[test]
