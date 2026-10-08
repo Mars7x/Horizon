@@ -8,7 +8,7 @@ use crate::{
     AppWindow,
     error::AppError,
     input::{ControllerStatus, InputManager, UiActionEvent},
-    persistence::SqliteLibraryRepository,
+    persistence::{SqliteLibraryRepository, settings::SettingsStore},
     platform::{
         data_paths,
         launcher::PortalLaunchExecutor,
@@ -17,7 +17,7 @@ use crate::{
     },
     presentation::{
         activity::ActivityController, appearance::AppearanceController, clock::ClockController,
-        home::HomeController, navigation::NavigationController,
+        home::HomeController, navigation::NavigationController, settings::SettingsController,
     },
     services::{
         activity::{ActivityService, ActivitySessionTransition, LaunchActivitySink},
@@ -27,6 +27,7 @@ use crate::{
         library::LibraryService,
         runtime::{RuntimeObservationExecutor, SourceRuntimeObservationExecutor},
         session::{ManagedSessionExecutor, ManagedSessionTerminalState},
+        settings::SettingsService,
     },
     sources::production_source_registry,
 };
@@ -41,7 +42,7 @@ pub fn run() -> Result<(), AppError> {
         )
         .init();
 
-    info!("starting Horizon phase 9.5.34");
+    info!("starting Horizon phase 9.5.43");
 
     let database_path = data_paths::library_database_path()?;
     let repository = SqliteLibraryRepository::open(&database_path)?;
@@ -176,12 +177,43 @@ pub fn run() -> Result<(), AppError> {
         &ui,
         library_games,
         &artwork_service,
+        &registry,
         Rc::clone(&launch_service),
         launch_activity,
     );
     info!(games = home.game_count(), "source-backed Home library initialized");
 
-    let navigation = NavigationController::new(&ui, Rc::clone(&home));
+    let settings_path = data_paths::third_party_settings_path()?;
+    let settings_service = SettingsService::load(SettingsStore::new(settings_path))?;
+    let settings = SettingsController::new(&ui, settings_service);
+    let initial_preferences = settings.artwork_preferences();
+    ui.set_settings_artwork_status(if initial_preferences.api_key.is_some() {
+        "Checking SteamGridDB artwork…".into()
+    } else { "Save an API key to enable SteamGridDB artwork.".into() });
+    home.refresh_steamgriddb(initial_preferences);
+    let artwork_home = Rc::clone(&home);
+    let artwork_ui = ui.as_weak();
+    settings.set_artwork_changed(Rc::new(move |preferences| {
+        if let Some(ui) = artwork_ui.upgrade() {
+            ui.set_settings_artwork_status(if preferences.api_key.is_some() {
+                "Checking SteamGridDB artwork…".into()
+            } else { "SteamGridDB disabled (no API key).".into() });
+        }
+        artwork_home.refresh_steamgriddb(preferences);
+    }));
+    let refresh_home = Rc::clone(&home);
+    settings.set_artwork_refresh(Rc::new(move |preferences| {
+        refresh_home.force_refresh_steamgriddb(preferences);
+    }));
+    let artwork_timer = Timer::default();
+    let artwork_home = Rc::clone(&home);
+    let artwork_ui = ui.as_weak();
+    artwork_timer.start(TimerMode::Repeated, Duration::from_millis(120), move || {
+        if let Some(ui) = artwork_ui.upgrade() {
+            artwork_home.collect_steamgriddb_results(&ui);
+        }
+    });
+    let navigation = NavigationController::new(&ui, Rc::clone(&home), settings);
     info!(
         route = ?navigation.current_route(),
         "Phase 4.7 hardened navigation shell initialized"
@@ -413,6 +445,7 @@ pub fn run() -> Result<(), AppError> {
     let _activity_service = activity_service;
     let _source_registry = registry;
     let _clock = clock;
+    let _artwork_timer = artwork_timer;
     let _navigation = navigation;
     let _input = input;
     let _foreground_return_timer = foreground_return_timer;

@@ -80,7 +80,7 @@ export component GameTile inherits Rectangle {
         }
 
         focus := FocusFrame {
-            active: root.selected && root.focus-visible;
+            active: root.selected && root.focus-visible && !root.launching;
             x: -Metrics.focus-offset;
             y: -Metrics.focus-offset;
             width: parent.width + Metrics.focus-offset * 2;

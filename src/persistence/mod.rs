@@ -50,3 +50,5 @@ pub enum PersistenceError {
         ended_at: i64,
     },
 }
+
+pub mod settings;

@@ -430,6 +430,12 @@ impl GameSource for SteamSource {
         Ok(Some(SourceRuntimeState::Stopped))
     }
 
+    fn external_artwork_id(&self, external_id: &ExternalGameId) -> Option<super::ExternalArtworkId> {
+        external_id.as_str().parse::<u32>().ok()
+            .filter(|id| *id > 0)
+            .map(super::ExternalArtworkId::SteamAppId)
+    }
+
     fn artwork_candidates(
         &self,
         external_id: &ExternalGameId,

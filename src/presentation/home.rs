@@ -1,4 +1,7 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::RefCell, rc::Rc, sync::{Arc, atomic::{AtomicU64, Ordering}, mpsc::{self, Receiver, Sender}},
+    path::PathBuf,
+};
 
 use slint::{
     Color, ComponentHandle, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString,
@@ -14,6 +17,9 @@ use crate::{
         activity::LaunchActivitySink,
         artwork::{ArtworkService, SquareArtwork},
         launch::{GameLaunchMode, GameLaunchService},
+        settings::ArtworkPreferences,
+        steamgriddb::SteamGridDbLookup,
+        steamgriddb_artwork::{self, ArtworkLookupJob, ArtworkWorkerEvent},
         session::ManagedSessionId,
     },
 };
@@ -99,6 +105,13 @@ impl LaunchFeedbackState {
 /// Rust so Accept can launch through the generic service/source boundary.
 pub struct HomeController {
     cards: Rc<VecModel<GameCardData>>,
+    /// Immutable provider-owned fallbacks, never replaced by downloaded art.
+    source_cards: Vec<GameCardData>,
+    artwork_lookup_jobs: Vec<ArtworkLookupJob>,
+    artwork_cache_root: Option<PathBuf>,
+    artwork_sender: Sender<ArtworkWorkerEvent>,
+    artwork_receiver: RefCell<Receiver<ArtworkWorkerEvent>>,
+    artwork_generation: Arc<AtomicU64>,
     library_games: Vec<LibraryGame>,
     titles: Vec<SharedString>,
     launch_service: Rc<GameLaunchService>,
@@ -112,6 +125,7 @@ impl HomeController {
         ui: &AppWindow,
         library_games: Vec<LibraryGame>,
         artwork_service: &ArtworkService,
+        registry: &crate::sources::SourceRegistry,
         launch_service: Rc<GameLaunchService>,
         launch_activity: Rc<dyn LaunchActivitySink>,
     ) -> Rc<Self> {
@@ -120,11 +134,26 @@ impl HomeController {
             .map(|game| game_card(game, artwork_service))
             .collect::<Vec<_>>();
         let titles = card_data.iter().map(|game| game.title.clone()).collect();
+        let artwork_lookup_jobs = library_games.iter().enumerate().map(|(index, game)| {
+            ArtworkLookupJob {
+                index,
+                identity: steamgriddb_artwork::cache_identity(game),
+                lookup: SteamGridDbLookup::for_game(game, registry),
+            }
+        }).collect();
+        let (artwork_sender, artwork_receiver) = mpsc::channel();
+        let card_data_for_fallback = card_data.clone();
         let cards = Rc::new(VecModel::from(card_data));
         ui.set_games(ModelRc::from(Rc::clone(&cards)));
 
         let controller = Rc::new(Self {
             cards,
+            source_cards: card_data_for_fallback,
+            artwork_lookup_jobs,
+            artwork_cache_root: artwork_service.steamgriddb_cache_root(),
+            artwork_sender,
+            artwork_receiver: RefCell::new(artwork_receiver),
+            artwork_generation: Arc::new(AtomicU64::new(0)),
             library_games,
             titles,
             launch_service,
@@ -146,6 +175,67 @@ impl HomeController {
         });
 
         controller
+    }
+
+    /// Reapply persisted precedence immediately and schedule only eligible
+    /// external lookups off-thread. Changing key/preference invalidates old work.
+    pub fn refresh_steamgriddb(&self, preferences: ArtworkPreferences) {
+        self.update_steamgriddb(preferences, false);
+    }
+
+    /// Manual refresh deliberately re-queries the API even for cached images
+    /// and previous misses. Existing cards remain visible until new results.
+    pub fn force_refresh_steamgriddb(&self, preferences: ArtworkPreferences) {
+        self.update_steamgriddb(preferences, true);
+    }
+
+    fn update_steamgriddb(&self, preferences: ArtworkPreferences, force_refresh: bool) {
+        let generation = self.artwork_generation.fetch_add(1, Ordering::AcqRel) + 1;
+        if !force_refresh {
+            for (index, card) in self.source_cards.iter().enumerate() {
+                self.cards.set_row_data(index, card.clone());
+            }
+        }
+        let Some(api_key) = preferences.api_key else { return; };
+        let jobs = self.artwork_lookup_jobs.iter().filter(|job| {
+            needs_external_artwork(preferences.prefer_steamgriddb, self.source_cards[job.index].has_artwork)
+        }).cloned().collect();
+        steamgriddb_artwork::start_artwork_worker(
+            generation, Arc::clone(&self.artwork_generation), self.artwork_sender.clone(),
+            api_key, self.artwork_cache_root.clone(), jobs, force_refresh,
+        );
+    }
+
+    /// Drained by the existing Slint timer on the presentation thread, where
+    /// VecModel updates belong. The original source card is always available.
+    pub fn collect_steamgriddb_results(&self, ui: &AppWindow) {
+        for _ in 0..32 {
+            let Ok(event) = self.artwork_receiver.borrow().try_recv() else { break; };
+            match event {
+                ArtworkWorkerEvent::Artwork(result) => {
+                    if result.generation != self.artwork_generation.load(Ordering::Acquire) { continue; }
+                    let Some(fallback) = self.source_cards.get(result.index) else { continue; };
+                    let mut card = fallback.clone();
+                    card.pixelated_artwork = result.artwork.pixelated();
+                    card.artwork = square_artwork_to_slint(result.artwork);
+                    card.has_artwork = true;
+                    self.cards.set_row_data(result.index, card);
+                }
+                ArtworkWorkerEvent::RefreshProgress { generation, completed, total,
+                    finished, error } => {
+                    if generation != self.artwork_generation.load(Ordering::Acquire) { continue; }
+                    ui.set_settings_refresh_completed(completed.min(i32::MAX as usize) as i32);
+                    ui.set_settings_refresh_total(total.min(i32::MAX as usize) as i32);
+                    ui.set_settings_refresh_error(error.unwrap_or_default().into());
+                    if finished { ui.set_settings_refresh_running(false); }
+                }
+                ArtworkWorkerEvent::Status { generation, message } => {
+                    if generation == self.artwork_generation.load(Ordering::Acquire) {
+                        ui.set_settings_artwork_status(message.into());
+                    }
+                }
+            }
+        }
     }
 
     pub fn game_count(&self) -> usize {
@@ -367,6 +457,10 @@ impl HomeController {
     }
 }
 
+fn needs_external_artwork(prefer_external: bool, has_source_artwork: bool) -> bool {
+    prefer_external || !has_source_artwork
+}
+
 fn game_card(game: &LibraryGame, artwork_service: &ArtworkService) -> GameCardData {
     let title = game.game().title().as_str();
     let (primary, secondary, highlight) = fallback_palette(game.game().id().get(), title);
@@ -456,7 +550,16 @@ fn rgb((red, green, blue): (u8, u8, u8)) -> Color {
 
 #[cfg(test)]
 mod tests {
-    use super::{HomeState, LaunchFeedbackState, monogram};
+    use super::{HomeState, LaunchFeedbackState, monogram, needs_external_artwork};
+
+    #[test]
+    fn artwork_precedence_skips_external_when_source_present_by_default() {
+        assert!(!needs_external_artwork(false, true));
+        assert!(needs_external_artwork(false, false));
+        assert!(needs_external_artwork(true, true));
+        assert!(needs_external_artwork(true, false));
+    }
+
 
     #[test]
     fn imported_titles_get_stable_short_monograms() {

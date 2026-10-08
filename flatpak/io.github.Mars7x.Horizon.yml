@@ -6,9 +6,8 @@ sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
 command: horizon
 
-# GNOME Builder stops before the main module and invokes Cargo inside the SDK.
-# Keep the Rust extension path and development network access at manifest scope
-# so Builder's Cargo invocation sees both. Runtime network access is NOT granted.
+# GNOME Builder invokes Cargo inside the SDK. Keep build network access
+# at manifest scope separately from runtime network access.
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
   build-args:
@@ -17,8 +16,12 @@ build-options:
 finish-args:
   - --require-version=1.16.0
   - --share=ipc
+  # Optional SteamGridDB API metadata and artwork downloads.
+  # Flatpak cannot restrict --share=network to a single host.
+  - --share=network
   - --socket=wayland
-  - --socket=fallback-x11
+  # Wayland-only UI. Do not add X11/XWayland socket permissions to work
+  # around missing GNOME Wayland clipboard support.
   - --device=dri
   # Horizon needs evdev/input access for controller navigation.
   # Do not broaden this to --device=all.

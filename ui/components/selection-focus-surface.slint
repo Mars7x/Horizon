@@ -1,0 +1,37 @@
+import { Theme, Metrics, Motion } from "../theme/theme.slint";
+
+// One accent-colour focus animation for utilities and Settings.
+// The caller owns the geometry (circle or rounded rectangle). Game-cover
+// corner brackets remain a separate component with their own motion/glow.
+export component SelectionFocusSurface inherits Rectangle {
+    in property <bool> focused: false;
+    in property <length> corner-radius: Metrics.radius-lg;
+    in property <bool> filled: true;
+    in property <bool> soft-shadow: true;
+    in property <duration> reveal-duration: Motion.focus-duration;
+
+    // Match the game-title cursor's shared 2.8-second colour rhythm. This
+    // changes the entire sharp outline at once; there is no traveling segment,
+    // extra Path, angular gradient, or movement around a rectangular border.
+    private property <float> motion-strength: root.focused
+        && !Motion.reduced-motion && !Theme.high-contrast ? 1.0 : 0.0;
+    private property <float> pulse-progress: root.motion-strength > 0.0
+        ? 0.5 - 0.5 * cos(animation-tick() / Motion.focus-idle-cycle * 360deg)
+        : 0.0;
+    private property <brush> ring-brush: Theme.focus.mix(
+        Theme.focus-highlight,
+        1.0 - Motion.focus-idle-highlight-strength * root.motion-strength * root.pulse-progress);
+
+    border-radius: root.corner-radius;
+    background: root.filled
+        ? Theme.accent-subtle.with-alpha(Theme.is-dark ? 0.40 : 0.58)
+        : transparent;
+    border-width: 2px;
+    border-color: root.ring-brush;
+    opacity: root.focused ? 1.0 : 0.0;
+    drop-shadow-offset-y: root.soft-shadow ? 2px : 0px;
+    drop-shadow-blur: root.soft-shadow ? 10px : 0px;
+    drop-shadow-color: root.soft-shadow ? Theme.focus.with-alpha(0.15) : transparent;
+
+    animate opacity { duration: root.reveal-duration; easing: ease-out; }
+}

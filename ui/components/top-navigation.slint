@@ -1,4 +1,5 @@
 import { Theme, Metrics, Motion } from "../theme/theme.slint";
+import { SelectionFocusSurface } from "selection-focus-surface.slint";
 import { FriendsIcon, AlbumIcon, ActivityIcon, WebIcon, SettingsIcon, ShopIcon } from "utility-icons.slint";
 
 component Separator inherits Rectangle {
@@ -84,44 +85,18 @@ component UtilityFocusSurface inherits Rectangle {
     background: transparent;
     z: root.focused ? 2 : 0;
 
-    // Keep utility focus visually related to the game focus without copying
-    // the game's chunky corner-bracket language. The 40x40 cell itself never
-    // changes size, so Rust's spatial center geometry remains stable.
-    private property <bool> sweep-enabled:
-        root.focused && !Motion.reduced-motion && !Theme.high-contrast;
-    private property <float> sweep-progress: root.sweep-enabled
-        ? mod(animation-tick(), 4000ms) / 4000ms
-        : 0;
-    private property <angle> sweep-angle: 35deg + root.sweep-progress * 360deg;
-    private property <brush> ring-brush: root.sweep-enabled
-        ? @linear-gradient(
-            root.sweep-angle,
-            Theme.focus 0%,
-            Theme.focus 28%,
-            Theme.focus-highlight 47%,
-            Theme.focus-highlight 53%,
-            Theme.focus 72%,
-            Theme.focus 100%
-        )
-        : Theme.focus;
-
-    Rectangle {
+    // Same focus ring/gradient as Settings, with circular utility geometry.
+    // Keep the existing -2px lift of the ring and icon; the cell's layout
+    // footprint and spatial-navigation center do not change.
+    SelectionFocusSurface {
         x: (root.width - self.width) / 2;
         y: (root.height - self.height) / 2
             + (root.focused && !Motion.reduced-motion ? -2px : 0px);
         width: 48px;
         height: 48px;
-        border-radius: 24px;
-        opacity: root.focused ? 1 : 0;
-        background: Theme.accent-subtle.with-alpha(Theme.is-dark ? 0.40 : 0.58);
-        border-width: 2px;
-        border-color: root.ring-brush;
-        drop-shadow-offset-y: 2px;
-        drop-shadow-blur: 10px;
-        drop-shadow-color: Theme.focus.with-alpha(0.16);
-
+        corner-radius: 24px;
+        focused: root.focused;
         animate y { duration: Motion.focus-duration; easing: ease-out; }
-        animate opacity { duration: Motion.focus-duration; easing: ease-out; }
     }
 }
 

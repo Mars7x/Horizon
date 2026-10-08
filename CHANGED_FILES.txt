@@ -1,7 +1,21 @@
-AGENTS.md
+Phase 9.5.39 → 9.5.43 consolidated integration
+
+Cargo.toml
+THIRD_PARTY_NOTICES.md
 docs/ARTWORK.md
-docs/adr/0055-pixel-art-nearest-neighbour-rendering.md
+docs/SETTINGS.md
+docs/adr/0057-steamgriddb-v2-lookup-and-conservative-matching.md
+docs/adr/0058-steamgriddb-async-square-artwork-preference.md
+flatpak/io.github.Mars7x.Horizon.yml
+src/app.rs
 src/presentation/home.rs
+src/presentation/settings.rs
 src/services/artwork.rs
-ui/components/game-tile.slint
-ui/models/game-card.slint
+src/services/mod.rs
+src/services/settings.rs
+src/services/steamgriddb.rs
+src/services/steamgriddb_artwork.rs
+src/sources/mod.rs
+src/sources/steam.rs
+ui/app.slint
+ui/pages/settings.slint

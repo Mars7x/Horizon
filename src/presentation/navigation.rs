@@ -12,7 +12,7 @@ use crate::{
     },
 };
 
-use super::home::HomeController;
+use super::{home::HomeController, settings::SettingsController};
 
 /// Bridges pure Rust navigation/focus state to Slint presentation state.
 ///
@@ -25,16 +25,18 @@ pub struct NavigationController {
     focus_memory: RefCell<RouteFocusMemory>,
     shell_menu: RefCell<ShellMenuState>,
     home: Rc<HomeController>,
+    settings: Rc<SettingsController>,
 }
 
 impl NavigationController {
-    pub fn new(ui: &AppWindow, home: Rc<HomeController>) -> Rc<Self> {
+    pub fn new(ui: &AppWindow, home: Rc<HomeController>, settings: Rc<SettingsController>) -> Rc<Self> {
         let controller = Rc::new(Self {
             navigator: RefCell::new(Navigator::default()),
             focus: RefCell::new(ShellFocus::default()),
             focus_memory: RefCell::new(RouteFocusMemory::default()),
             shell_menu: RefCell::new(ShellMenuState::default()),
             home,
+            settings,
         });
         controller.publish_route(ui);
         controller.publish_focus(ui);
@@ -59,16 +61,25 @@ impl NavigationController {
         self.remember_focus_for_route(from);
         if self.navigator.borrow_mut().navigate_to(route) {
             debug!(?from, to = ?route, "route changed");
+            if from == AppRoute::Utility(UtilityPage::Settings) { self.settings.on_leave(ui); }
+            if route == AppRoute::Utility(UtilityPage::Settings) { self.settings.on_enter(ui); }
             self.publish_route_change(ui, from, route);
             self.restore_focus_for_route(ui, route);
         }
     }
 
     pub fn handle_action(&self, ui: &AppWindow, event: UiActionEvent) {
+        if event.repeated && event.action.is_global() {
+            debug!(action = ?event.action, "repeated global action ignored by navigation layer");
+            return;
+        }
+        if self.current_route() == AppRoute::Utility(UtilityPage::Settings)
+            && !self.shell_menu.borrow().is_open()
+            && self.settings.handle_action(ui, event)
+        {
+            return;
+        }
         match event.action {
-            action if event.repeated && action.is_global() => {
-                debug!(?action, "repeated global action ignored by navigation layer");
-            }
             UiAction::Back => self.handle_back(ui),
             UiAction::Home => self.handle_home(ui),
             UiAction::Menu => self.handle_menu(ui),
@@ -146,6 +157,8 @@ impl NavigationController {
         if self.navigator.borrow_mut().go_back() {
             let to = self.current_route();
             debug!(?from, ?to, "Back restored previous route and focus");
+            if from == AppRoute::Utility(UtilityPage::Settings) { self.settings.on_leave(ui); }
+            if to == AppRoute::Utility(UtilityPage::Settings) { self.settings.on_enter(ui); }
             self.publish_route_change(ui, from, to);
             self.restore_focus_for_route(ui, to);
         } else {
@@ -177,6 +190,7 @@ impl NavigationController {
                 to = ?AppRoute::Home,
                 "Home reset top-level navigation, content focus, and first-game selection"
             );
+            if from == AppRoute::Utility(UtilityPage::Settings) { self.settings.on_leave(ui); }
             self.publish_route_change(ui, from, AppRoute::Home);
         }
     }

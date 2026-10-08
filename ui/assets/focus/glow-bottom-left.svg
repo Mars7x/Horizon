@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="82" height="82" viewBox="0 0 82 82">
+  <!-- Blur is generated directly from the original 10-unit corner stroke. -->
+  <defs>
+    <filter id="emission" x="-70%" y="-70%" width="240%" height="240%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="2.7" />
+    </filter>
+  </defs>
+  <path d="M 6 6 V 26 A 26 26 0 0 0 32 52 H 52" transform="translate(12 12)" fill="none"
+        stroke="#ffffff" stroke-width="10" stroke-linecap="round"
+        stroke-linejoin="round" filter="url(#emission)" />
+</svg>

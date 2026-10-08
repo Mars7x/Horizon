@@ -80,6 +80,10 @@ impl ArtworkService {
         }
     }
 
+    pub fn steamgriddb_cache_root(&self) -> Option<PathBuf> {
+        self.cache_root.as_ref().map(|root| root.join("steamgriddb"))
+    }
+
     pub fn square_artwork(&self, game: &LibraryGame) -> Option<SquareArtwork> {
         let cached = self.load_cached_artwork(game);
         if cached.as_ref().is_some_and(|entry| entry.fresh) {
@@ -342,6 +346,12 @@ fn normalize_candidate(candidate: DecodedCandidate) -> SquareArtwork {
     square_artwork_from_rgba(normalized, pixelated)
 }
 
+/// Remote candidates use the identical native-square and pixel-art normalization
+/// as provider-local icons. The caller must validate decoded dimensions first.
+pub(crate) fn normalize_remote_square(image: RgbaImage) -> SquareArtwork {
+    normalize_candidate(DecodedCandidate { image })
+}
+
 fn looks_like_pixel_art(image: &RgbaImage) -> bool {
     let width = image.width();
     let height = image.height();
@@ -454,7 +464,7 @@ fn classify_edge(
     }
 }
 
-fn square_artwork_from_rgba(image: RgbaImage, pixelated: bool) -> SquareArtwork {
+pub(crate) fn square_artwork_from_rgba(image: RgbaImage, pixelated: bool) -> SquareArtwork {
     SquareArtwork {
         size: image.width(),
         rgba: image.into_raw(),

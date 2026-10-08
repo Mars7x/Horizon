@@ -19,6 +19,13 @@ pub mod heroic;
 pub mod steam;
 mod support;
 
+/// Source-owned authoritative identifier in an external artwork catalog.
+/// This does not couple generic services to source ID strings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExternalArtworkId {
+    SteamAppId(u32),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceArtworkLocation {
     File(PathBuf),
@@ -372,6 +379,12 @@ pub trait GameSource: Send + Sync {
         _external_id: &ExternalGameId,
     ) -> Result<Option<SourceRuntimeState>, SourceError> {
         Ok(None)
+    }
+
+    /// An authoritative cross-catalog identifier, if this adapter knows one.
+    /// A None result permits conservative title search instead.
+    fn external_artwork_id(&self, _external_id: &ExternalGameId) -> Option<ExternalArtworkId> {
+        None
     }
 
     /// Return provider-owned artwork candidates for one source-owned game.

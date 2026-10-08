@@ -116,6 +116,14 @@ export global Motion {
     in-out property <bool> reduced-motion: false;
 
     out property <duration> focus-duration: reduced-motion ? 0ms : 140ms;
+
+    // One shared idle rhythm for game brackets, circular utilities, and
+    // Settings focus. All three use the same clock and accent-derived colour.
+    // Reduced Motion / High Contrast still suppress idle animation at each
+    // focus component's own eligibility check.
+    out property <duration> focus-idle-cycle: 3200ms;
+    out property <float> focus-idle-highlight-strength: 0.80;
+    out property <length> game-focus-idle-expansion: 2.2px;
     out property <duration> launch-press-duration: reduced-motion ? 0ms : 90ms;
     out property <duration> carousel-duration: reduced-motion ? 0ms : 190ms;
     out property <duration> page-duration: reduced-motion ? 0ms : 220ms;

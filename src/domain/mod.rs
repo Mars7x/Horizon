@@ -14,3 +14,5 @@ pub use library::{
     DomainValidationError, ExternalGameId, Game, GameId, GameTitle, LibraryGame, SourceGameRef,
     SourceId,
 };
+
+pub mod settings;

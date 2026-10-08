@@ -16,6 +16,7 @@ import { Footer } from "components/footer.slint";
 import { HomePage } from "pages/home.slint";
 import { LibraryPage } from "pages/library.slint";
 import { ActivityPage } from "pages/activity.slint";
+import { SettingsPage } from "pages/settings.slint";
 import { UtilitySubmenuPage } from "pages/utility.slint";
 
 export component AppWindow inherits Window {
@@ -97,16 +98,56 @@ export component AppWindow inherits Window {
     in property <[ActivitySessionData]> activity-recent-sessions;
     in property <[ActivityGameData]> activity-top-games;
 
+    // Partial Settings > Third-Party route, with Rust-owned focus/state.
+    in property <int> settings-view: 0;
+    in property <int> settings-selection: 0;
+    in property <bool> settings-key-present: false;
+    in property <bool> settings-prefer-artwork: false;
+    in property <bool> settings-editing-key: false;
+    in property <int> settings-editor-target: 0;
+    // Native Ctrl state from real TextInput key events. Synthetic paste must
+    // not permanently consume a Ctrl key the user is still holding.
+    out property <int> settings-physical-control-mask: settings-page.physical-control-mask;
+    in property <bool> settings-synthetic-key-insertion: false;
+    in-out property <string> settings-key-draft: "";
+    in property <string> settings-feedback: "";
+    in property <string> settings-artwork-status: "";
+    in property <bool> settings-refresh-open: false;
+    in property <bool> settings-refresh-running: false;
+    in property <int> settings-refresh-completed: 0;
+    in property <int> settings-refresh-total: 0;
+    in property <string> settings-refresh-error: "";
+
     in property <int> connected-controller-count: 0;
     in property <string> clock-time: "";
     in property <string> clock-suffix: "";
 
     callback select-game(int);
     callback activate-utility(int);
+    callback settings-activate(int);
+    callback settings-back();
+    callback settings-save-key(string);
+    callback settings-cancel-key();
+    callback settings-dismiss-refresh();
+    callback settings-request-wayland-paste();
+    // Declarations and handlers are separate in Slint 1.18.1.
+    callback settings-apply-wayland-paste(string);
+    callback settings-activate-editor-target(int);
+    settings-activate-editor-target(target) => {
+        settings-page.activate-editor-target(target);
+    }
+    callback settings-paste-failed();
+    settings-apply-wayland-paste(text) => {
+        settings-page.apply-wayland-paste(text);
+    }
     // Reports only OS/window activation changes from the root FocusScope.
     // Internal programmatic/pointer focus changes must not change SDL ownership.
     callback application-active-changed(bool);
     callback raw-key-input(string, bool) -> bool;
+
+    changed settings-editing-key => {
+        if (!root.settings-editing-key) { input-scope.focus(); }
+    }
 
     design-surface := Rectangle {
         x: 0px;
@@ -272,11 +313,30 @@ export component AppWindow inherits Window {
                 outgoing: root.current-route != AppRouteView.settings
                     && root.transition-from-route == AppRouteView.settings;
 
-                UtilitySubmenuPage {
+                settings-page := SettingsPage {
                     width: parent.width;
                     height: parent.height;
-                    title: "Settings";
-                    description: "Horizon preferences will appear here.";
+                    view: root.settings-view;
+                    selection: root.settings-selection;
+                    key-present: root.settings-key-present;
+                    prefer-artwork: root.settings-prefer-artwork;
+                    editing-key: root.settings-editing-key;
+                    editor-target: root.settings-editor-target;
+                    synthetic-key-insertion: root.settings-synthetic-key-insertion;
+                    key-draft <=> root.settings-key-draft;
+                    feedback: root.settings-feedback;
+                    artwork-status: root.settings-artwork-status;
+                    refresh-open: root.settings-refresh-open;
+                    refresh-running: root.settings-refresh-running;
+                    refresh-completed: root.settings-refresh-completed;
+                    refresh-total: root.settings-refresh-total;
+                    refresh-error: root.settings-refresh-error;
+                    dismiss-refresh => { root.settings-dismiss-refresh(); }
+                    activate(index) => { root.settings-activate(index); }
+                    go-back => { root.settings-back(); }
+                    save-key(key) => { root.settings-save-key(key); }
+                    cancel-key => { root.settings-cancel-key(); }
+                    request-wayland-paste => { root.settings-request-wayland-paste(); }
                 }
             }
 

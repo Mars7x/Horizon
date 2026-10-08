@@ -1,78 +1,129 @@
 import { Metrics, Motion, Theme } from "../theme/theme.slint";
 
-// One crisp focus layer. The quarter-circle elbow uses the same visual radius
-// family as the outer game shell. A restrained accent-derived highlight sweeps
-// through the existing stroke; there is still no halo or duplicate under-stroke.
+// 3DS-inspired focus: four crisp native vector corners, without PNG glow
+// masks, continuous moving glints, or artwork/shell movement.
 export component FocusFrame inherits Rectangle {
     in property <float> scale-factor: 1.0;
     in property <bool> active: true;
     background: transparent;
 
-    // Keep the sweep visible on saturated accents without letting it dominate the card.
-    // Reduced-motion and high-contrast modes deliberately fall back to the stable
-    // solid focus color.
-    private property <bool> sweep-enabled:
-        root.active && !Motion.reduced-motion && !Theme.high-contrast;
-    private property <float> sweep-progress: root.sweep-enabled
-        ? mod(animation-tick(), 4000ms) / 4000ms
-        : 0;
-    private property <angle> sweep-angle: 30deg + root.sweep-progress * 360deg;
-    private property <brush> focus-brush: root.sweep-enabled
-        ? @linear-gradient(
-            root.sweep-angle,
-            Theme.focus 0%,
-            Theme.focus 27%,
-            Theme.focus-highlight 48%,
-            Theme.focus-highlight 52%,
-            Theme.focus 73%,
-            Theme.focus 100%
-        )
-        : Theme.focus;
+    private property <float> motion-strength: root.active
+        && !Motion.reduced-motion && !Theme.high-contrast ? 1.0 : 0.0;
+    animate motion-strength {
+        duration: Motion.reduced-motion ? 0ms : 220ms;
+        easing: ease-in-out;
+    }
+    private property <float> cursor-cycle: root.motion-strength > 0.0
+        ? 0.5 - 0.5 * cos(animation-tick() / Motion.focus-idle-cycle * 360deg)
+        : 0.0;
+    private property <length> cursor-outset: Motion.game-focus-idle-expansion * root.motion-strength * root.cursor-cycle;
+    // HSV brightness can clip on already saturated/brilliant accents. Instead,
+    // interpolate toward Horizon's accent-derived, lighter focus highlight.
+    // At full expansion, use the shared stronger accent-derived highlight;
+    // contraction returns precisely to the configured accent.
+    private property <brush> cursor-ink: Theme.focus.mix(
+        Theme.focus-highlight,
+        1.0 - Motion.focus-idle-highlight-strength * root.motion-strength * root.cursor-cycle);
 
+    // A true Gaussian emission of the SAME four bracket strokes. Only the
+    // native Path elements below create a sharp edge; the SVG assets provide
+    // blurred alpha masks, tinted with the live accent color at render time.
+    // Unlike an extra widened Path, these cannot form a second crisp outline.
+    private property <float> glow-opacity: root.motion-strength
+        * (0.22 + 0.11 * root.cursor-cycle);
+    private property <length> glow-margin: 12px * root.scale-factor;
+    private property <length> glow-size: (Metrics.focus-arm + 24px) * root.scale-factor;
+
+    Image {
+        x: -root.cursor-outset - root.glow-margin;
+        y: -root.cursor-outset - root.glow-margin;
+        width: root.glow-size; height: root.glow-size;
+        source: @image-url("../assets/focus/glow-top-left.svg");
+        image-fit: fill;
+        colorize: Theme.focus;
+        opacity: root.glow-opacity;
+        accessible-role: none;
+    }
+    Image {
+        x: parent.width - Metrics.focus-arm * root.scale-factor
+            + root.cursor-outset - root.glow-margin;
+        y: -root.cursor-outset - root.glow-margin;
+        width: root.glow-size; height: root.glow-size;
+        source: @image-url("../assets/focus/glow-top-right.svg");
+        image-fit: fill;
+        colorize: Theme.focus;
+        opacity: root.glow-opacity;
+        accessible-role: none;
+    }
+    Image {
+        x: -root.cursor-outset - root.glow-margin;
+        y: parent.height - Metrics.focus-arm * root.scale-factor
+            + root.cursor-outset - root.glow-margin;
+        width: root.glow-size; height: root.glow-size;
+        source: @image-url("../assets/focus/glow-bottom-left.svg");
+        image-fit: fill;
+        colorize: Theme.focus;
+        opacity: root.glow-opacity;
+        accessible-role: none;
+    }
+    Image {
+        x: parent.width - Metrics.focus-arm * root.scale-factor
+            + root.cursor-outset - root.glow-margin;
+        y: parent.height - Metrics.focus-arm * root.scale-factor
+            + root.cursor-outset - root.glow-margin;
+        width: root.glow-size; height: root.glow-size;
+        source: @image-url("../assets/focus/glow-bottom-right.svg");
+        image-fit: fill;
+        colorize: Theme.focus;
+        opacity: root.glow-opacity;
+        accessible-role: none;
+    }
+
+    // The four original crisp bracket paths are not modified.
     Path {
-        x: 0px; y: 0px;
+        x: -root.cursor-outset; y: -root.cursor-outset;
         width: Metrics.focus-arm * root.scale-factor;
         height: Metrics.focus-arm * root.scale-factor;
         viewbox-width: 58; viewbox-height: 58;
         commands: "M 52 6 H 32 A 26 26 0 0 0 6 32 V 52";
         fill: transparent;
-        stroke: root.focus-brush;
+        stroke: root.cursor-ink;
         stroke-width: Metrics.focus-stroke * root.scale-factor;
         stroke-line-cap: round;
         stroke-line-join: round;
     }
     Path {
-        x: parent.width - self.width; y: 0px;
+        x: parent.width - self.width + root.cursor-outset; y: -root.cursor-outset;
         width: Metrics.focus-arm * root.scale-factor;
         height: Metrics.focus-arm * root.scale-factor;
         viewbox-width: 58; viewbox-height: 58;
         commands: "M 6 6 H 26 A 26 26 0 0 1 52 32 V 52";
         fill: transparent;
-        stroke: root.focus-brush;
+        stroke: root.cursor-ink;
         stroke-width: Metrics.focus-stroke * root.scale-factor;
         stroke-line-cap: round;
         stroke-line-join: round;
     }
     Path {
-        x: 0px; y: parent.height - self.height;
+        x: -root.cursor-outset; y: parent.height - self.height + root.cursor-outset;
         width: Metrics.focus-arm * root.scale-factor;
         height: Metrics.focus-arm * root.scale-factor;
         viewbox-width: 58; viewbox-height: 58;
         commands: "M 6 6 V 26 A 26 26 0 0 0 32 52 H 52";
         fill: transparent;
-        stroke: root.focus-brush;
+        stroke: root.cursor-ink;
         stroke-width: Metrics.focus-stroke * root.scale-factor;
         stroke-line-cap: round;
         stroke-line-join: round;
     }
     Path {
-        x: parent.width - self.width; y: parent.height - self.height;
+        x: parent.width - self.width + root.cursor-outset; y: parent.height - self.height + root.cursor-outset;
         width: Metrics.focus-arm * root.scale-factor;
         height: Metrics.focus-arm * root.scale-factor;
         viewbox-width: 58; viewbox-height: 58;
         commands: "M 52 6 V 26 A 26 26 0 0 1 26 52 H 6";
         fill: transparent;
-        stroke: root.focus-brush;
+        stroke: root.cursor-ink;
         stroke-width: Metrics.focus-stroke * root.scale-factor;
         stroke-line-cap: round;
         stroke-line-join: round;

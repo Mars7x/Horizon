@@ -139,3 +139,46 @@ resolved Cargo dependency-license inventory remains a release gate.
 
 The existing MIT license text covers this dependency. The exact resolved Cargo
 dependency-license inventory remains a release gate.
+
+### Phase 9.5.40 SteamGridDB API transport
+
+- **reqwest 0.12.x**
+  - Upstream: https://github.com/seanmonstar/reqwest
+  - License: MIT OR Apache-2.0
+  - Use in Horizon: blocking Rust HTTPS transport with rustls TLS for optional,
+    personal-key-authenticated SteamGridDB API v2 metadata requests and
+    separate unauthenticated CDN image requests.
+  - Modification: none; consumed as a Cargo dependency.
+- **SteamGridDB API v2**
+  - Upstream: https://www.steamgriddb.com/api/v2
+  - Use in Horizon: retrieve game IDs, titles and metadata for square-grid
+    candidates and download eligible square artwork into the user’s own cache.
+    No SteamGridDB artwork is bundled or redistributed with Horizon.
+  - Third-party image authors and ownership: user-submitted images may belong
+    to separate contributors or game publishers. Local cache entries retain source URLs, game/asset IDs, and author credits
+    in sidecar JSON. API access is not a blanket permission to redistribute
+    artwork; attribution and rights remain with original authors/owners.
+
+The existing MIT and Apache-2.0 license texts cover the dual-licensed Rust
+transport dependency. The exact resolved dependency-license inventory remains
+a release gate.
+
+### Slint's Linux clipboard backend (Phase 9.5.44.5)
+
+- **arboard 3.6.x (transitive dependency of Slint's winit backend)**
+  - Upstream: https://github.com/1Password/arboard
+  - License: MIT OR Apache-2.0
+  - Use in Horizon: Slint's built-in text editing. The API-key editor now requests a focus-scoped standard Wayland selection through smithay-clipboard. Horizon neither enables X11 nor grants X11 socket access.
+  - Modification: none; Horizon does not directly call arboard or SDL3 for API-key clipboard access.
+
+- **smithay-clipboard 0.7.3**
+  - Upstream: https://github.com/Smithay/smithay-clipboard
+  - License: MIT
+  - Use in Horizon: focused-window, standard Wayland `wl_data_device` text
+    selection for the Settings API-key editor, reusing Winit's display handle.
+    Requests are dispatched to a worker thread and do not invoke X11.
+  - Modification: none; consumed as a Cargo dependency.
+
+The existing MIT and Apache-2.0 license texts apply. Horizon stores the key
+only on explicit Save; key content and clipboard data must not be logged.
+
