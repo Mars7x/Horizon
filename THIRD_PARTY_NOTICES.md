@@ -76,14 +76,8 @@ The Apache-2.0 and MIT license texts are included as `LICENSES/Apache-2.0.txt` a
 - **serde 1.x / serde_json 1.x**
   - Upstream: https://github.com/serde-rs/serde and https://github.com/serde-rs/json
   - License: Apache-2.0 OR MIT
-  - Use in Horizon: deserialize provider-owned local metadata for the Heroic and Bottles adapters.
+  - Use in Horizon: deserialize provider-owned local metadata for the Heroic adapter.
   - Modification: none; consumed as Cargo dependencies.
-- **yaml_serde 0.10**
-  - Upstream: https://github.com/yaml/yaml-serde
-  - Maintainer: YAML Organization; actively maintained fork of serde-yaml.
-  - License: Apache-2.0 OR MIT
-  - Use in Horizon: deserialize Bottles `bottle.yml` metadata inside the Bottles adapter.
-  - Modification: none; consumed as a Cargo dependency.
 
 The existing Apache-2.0 and MIT license texts cover these dual-licensed dependencies. The exact resolved Cargo dependency-license inventory remains a release gate and will be generated from the committed `Cargo.lock` before public release.
 

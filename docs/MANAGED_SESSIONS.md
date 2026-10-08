@@ -1,3 +1,8 @@
+> **Current support (Phase 9.5.44.43):** Bottles has been retired as a source.
+> The historical Bottles managed-session design below is retained for context;
+> neither the normal app nor the host helper registers Bottles anymore.
+> Steam and Heroic still launch through their source-owned external URIs.
+
 # Managed game sessions
 
 Phase 9.5 introduces an optional host-managed launch path for games that can be

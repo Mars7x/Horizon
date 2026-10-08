@@ -1,6 +1,6 @@
 # Source framework
 
-Phase 6 defined the provider boundary that launcher adapters plug into. Phase 7 exercised it with Steam; Phase 9 expanded the same unchanged generic contracts to additional providers. The current production set is Steam, Bottles, and Heroic.
+Phase 6 defined the provider boundary that launcher adapters plug into. Phase 7 exercised it with Steam; Phase 9 expanded the same unchanged generic contracts to additional providers. The current production set is Steam and Heroic. Historical Bottles support was retired in Phase 9.5.44.43.
 
 ## Boundary
 
@@ -83,7 +83,6 @@ A successful source snapshot is persisted as one repository batch. The SQLite ad
 All production providers use the same registry/import/persistence/launch path:
 
 - **Steam** — local VDF/app manifests and `steam://rungameid/<appid>`; see `STEAM.md` and ADR 0039.
-- **Bottles** — persisted `External_Programs` from `bottle.yml` and `bottles:run/<bottle>/<program>`; see `BOTTLES.md`.
 - **Heroic** — Phase 9 imports installed Epic/Legendary entries from local Heroic/Legendary metadata and launches with the Heroic protocol; see `HEROIC.md`.
 
 ADR 0045 records the multi-provider decisions. The adapters may use different local schemas and identity namespaces, but `SourceImportService`, SQLite persistence, `GameLaunchService`, Home presentation, launch feedback, and Activity remain provider-neutral.
@@ -96,7 +95,7 @@ Phase 9 does not log in to launcher accounts or call provider web APIs. Discover
 
 Flatpak filesystem access is read-only and provider-scoped. Horizon may read the conventional native XDG subtree and each launcher's own Flatpak app-data tree, but must not add broad `home`, `host`, or arbitrary external-library permissions to increase discovery coverage.
 
-The same authoritative-membership contract from ADR 0042 applies. A provider may prune stale source references only after a complete scan. If any detected root is unreadable, or a Bottles placeholder points outside the readable standard tree, that provider publishes a partial snapshot instead.
+The same authoritative-membership contract from ADR 0042 applies. A provider may prune stale source references only after a complete scan. If a provider cannot prove discovery is complete, it publishes a partial snapshot instead.
 
 
 ## Phase 9.5 managed-session capability
@@ -118,7 +117,7 @@ The Flatpak does not receive arbitrary host execution. It sends only
 `(SourceId, ExternalGameId)` to `io.github.Mars7x.Horizon.Session1`; the host
 helper re-resolves the source adapter and target independently.
 
-Bottles is the initial managed provider. Steam and Heroic remain
+The initial managed-session provider (Bottles) is retired. Steam and Heroic remain
 external URI launches until their actual game process/session can be guaranteed
 inside the managed compositor. See `MANAGED_SESSIONS.md` and ADR 0046.
 
@@ -152,8 +151,8 @@ Adapters expose candidates only. `ArtworkService` chooses/decodes the best
 available candidate and normalizes it to Horizon's 1:1 contract. Slint never
 branches on a provider name and never opens provider paths directly.
 
-Steam is the first provider to advertise `Artwork`. Bottles and Heroic continue
-to use the procedural fallback until they implement the same generic method.
+Steam is the first provider to advertise `Artwork`. Heroic continues
+to use the procedural fallback until it can expose genuine 1:1 provider artwork.
 See `ARTWORK.md` and ADR 0049.
 
 ## Phase 9.5.36 native-square artwork contract
@@ -174,6 +173,5 @@ non-1:1 provider asset  -> rejected
 no eligible square      -> FallbackCover
 ```
 
-Steam remains the first provider to implement the capability. Bottles and
-Heroic continue to use the procedural fallback until they can expose genuine
-1:1 provider artwork.
+Steam remains the first provider to implement the capability. Heroic
+continues to use the procedural fallback until it can expose genuine 1:1 artwork.

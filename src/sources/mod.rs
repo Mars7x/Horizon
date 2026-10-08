@@ -14,7 +14,6 @@ use thiserror::Error;
 
 use crate::domain::{DomainValidationError, ExternalGameId, GameTitle, SourceId};
 
-pub mod bottles;
 pub mod heroic;
 pub mod steam;
 mod support;
@@ -420,7 +419,6 @@ pub enum SourceRegistryBuildError {
 pub fn production_source_registry() -> Result<SourceRegistry, SourceRegistryBuildError> {
     let mut registry = SourceRegistry::new();
     registry.register(steam::SteamSource::new()?)?;
-    registry.register(bottles::BottlesSource::new()?)?;
     registry.register(heroic::HeroicSource::new()?)?;
     Ok(registry)
 }
@@ -509,9 +507,9 @@ mod tests {
     fn production_registry_excludes_retired_lutris_source() {
         let registry = production_source_registry().expect("production registry");
 
-        assert_eq!(registry.len(), 3);
+        assert_eq!(registry.len(), 2);
         assert!(registry.get(&source_id("steam")).is_some());
-        assert!(registry.get(&source_id("bottles")).is_some());
+        assert!(registry.get(&source_id("bottles")).is_none());
         assert!(registry.get(&source_id("heroic")).is_some());
         assert!(registry.get(&source_id("lutris")).is_none());
     }

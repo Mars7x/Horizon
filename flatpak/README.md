@@ -86,19 +86,17 @@ Launching does not require access to `/usr/bin/steam` or the Flatpak Steam comma
 
 ## Phase 9 provider metadata access
 
-Bottles and Heroic follow the same Flatpak rule as Steam: Horizon receives only read-only access to launcher-owned metadata roots needed for local discovery.
+Heroic follows the same Flatpak rule as Steam: Horizon receives only read-only access to launcher-owned metadata roots needed for local discovery.
 
 ```text
---filesystem=xdg-data/bottles:ro
---filesystem=~/.var/app/com.usebottles.bottles:ro
 --filesystem=xdg-config/heroic:ro
 --filesystem=xdg-config/legendary:ro
 --filesystem=~/.var/app/com.heroicgameslauncher.hgl:ro
 ```
 
-Do not replace these with `--filesystem=home` or `--filesystem=host`. Bottles external-location placeholders may intentionally remain unreadable; that degrades the Bottles snapshot to partial rather than expanding Horizon's sandbox.
+Do not replace these with `--filesystem=home` or `--filesystem=host`.
 
-Bottles/Heroic launch through their registered URI schemes via the existing XDG OpenURI portal. The Flatpak does not need access to host launcher binaries and must not gain `flatpak-spawn --host` merely to launch Phase 9 sources.
+Heroic launches through its registered URI scheme via the existing XDG OpenURI portal. The Flatpak does not need access to host launcher binaries and must not gain `flatpak-spawn --host` merely to launch Phase 9 sources.
 
 ## Managed-session host helper
 

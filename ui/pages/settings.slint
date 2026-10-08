@@ -681,7 +681,7 @@ export component SettingsPage inherits Rectangle {
             Text {
                 x: 89px; y: 30px;
                 width: parent.width - 115px; height: 34px;
-                text: root.refresh-running ? "Refreshing artwork…"
+                text: root.refresh-running ? "Refreshing artwork"
                     : (root.refresh-error == "" ? "Refresh complete" : "Refresh interrupted");
                 color: Theme.foreground;
                 font-size: Typography.heading-size;
@@ -703,7 +703,9 @@ export component SettingsPage inherits Rectangle {
                 width: parent.width - 58px; height: 6px;
                 border-radius: 3px;
                 background: Theme.divider;
+                clip: true;
                 Rectangle {
+                    x: 0px; y: 0px;
                     width: root.refresh-total > 0
                         ? parent.width * min(1.0, root.refresh-completed * 1.0 / root.refresh-total)
                         : 0px;

@@ -39,9 +39,14 @@ const MIGRATIONS: &[Migration] = &[
         name: "activity_session_checkpoints",
         sql: include_str!("migrations/0006_activity_session_checkpoints.sql"),
     },
+    Migration {
+        version: 7,
+        name: "remove_bottles_source",
+        sql: include_str!("migrations/0007_remove_bottles_source.sql"),
+    },
 ];
 
-pub(crate) const LATEST_SCHEMA_VERSION: i64 = 6;
+pub(crate) const LATEST_SCHEMA_VERSION: i64 = 7;
 
 const MIGRATION_LEDGER_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations (

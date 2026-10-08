@@ -41,8 +41,6 @@ finish-args:
   # Additional provider metadata is read-only and scoped to each launcher's
   # own native XDG tree or Flatpak app-data tree. Do not replace these with
   # broad home/host access.
-  - --filesystem=xdg-data/bottles:ro
-  - --filesystem=~/.var/app/com.usebottles.bottles:ro
   - --filesystem=xdg-config/heroic:ro
   - --filesystem=xdg-config/legendary:ro
   - --filesystem=~/.var/app/com.heroicgameslauncher.hgl:ro
