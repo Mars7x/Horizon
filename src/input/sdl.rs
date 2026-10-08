@@ -8,6 +8,7 @@ use sdl3::{
     EventPump, GamepadSubsystem, Sdl,
     event::Event,
     gamepad::{Axis, Button, Gamepad},
+    joystick::PowerLevel,
 };
 use slint::{Timer, TimerMode};
 use thiserror::Error;
@@ -16,6 +17,9 @@ use tracing::{debug, info, warn};
 use super::actions::{UiAction, UiActionEvent};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(8);
+// Battery can become available shortly after hotplug; keep this inexpensive
+// status query responsive without putting it in the 8ms input hot path.
+const CONTROLLER_BATTERY_INTERVAL: Duration = Duration::from_secs(2);
 
 // Left-stick navigation uses hysteresis: a stronger threshold enters a
 // direction and a lower threshold releases it. This prevents small stick drift
@@ -31,6 +35,16 @@ const DIGITAL_REPEAT_INTERVAL: Duration = Duration::from_millis(115);
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ControllerStatus {
     pub connected_gamepads: usize,
+    pub battery: Option<ControllerBattery>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ControllerBattery {
+    pub percent: u8,
+    pub charging: bool,
+    // SDL can know the percentage but return PowerLevel::Unknown. In that
+    // case a corroborating UPower gaming-input report may supply charging.
+    pub charging_known: bool,
 }
 
 #[derive(Debug, Error)]
@@ -71,6 +85,7 @@ impl SdlGamepadInput {
             gamepad_subsystem,
             event_pump,
             open_gamepads: Vec::new(),
+            last_power_poll: Instant::now(),
             enabled: true,
             analog_navigation: AnalogNavigation::default(),
             digital_navigation: DigitalNavigation::default(),
@@ -114,6 +129,7 @@ struct SdlState {
     gamepad_subsystem: GamepadSubsystem,
     event_pump: EventPump,
     open_gamepads: Vec<Gamepad>,
+    last_power_poll: Instant,
     enabled: bool,
     analog_navigation: AnalogNavigation,
     digital_navigation: DigitalNavigation,
@@ -359,8 +375,30 @@ impl SdlState {
     fn status(&self) -> ControllerStatus {
         ControllerStatus {
             connected_gamepads: self.open_gamepads.len(),
+            // Prefer player one; otherwise use the first physical controller
+            // which actually reports a meaningful battery level.
+            battery: self.open_gamepads.iter().find_map(|pad| {
+                let reading = pad.power_info();
+                battery_from_sdl(reading.state, reading.percentage)
+            }),
         }
     }
+}
+
+// The SDL power state can be Unknown even when a backend supplies a valid
+// percentage (notably some HIDAPI gamepads). Treat the percentage as usable,
+// but never infer charging from an unknown state. Do not invent a percentage
+// for an unsupported dongle (SDL reports -1 in that case).
+fn battery_from_sdl(state: PowerLevel, percentage: i32) -> Option<ControllerBattery> {
+    if !(0..=100).contains(&percentage) ||
+        matches!(state, PowerLevel::NoBattery | PowerLevel::Error) {
+        return None;
+    }
+    Some(ControllerBattery {
+        percent: percentage as u8,
+        charging: matches!(state, PowerLevel::Charging),
+        charging_known: !matches!(state, PowerLevel::Unknown),
+    })
 }
 
 fn poll_gamepad_events(
@@ -431,6 +469,12 @@ fn poll_gamepad_events(
         }
     }
 
+    // Power information changes without gamepad hotplug events. Poll slowly,
+    // rather than querying controllers on the 8ms input loop.
+    if state.last_power_poll.elapsed() >= CONTROLLER_BATTERY_INTERVAL {
+        state.last_power_poll = Instant::now();
+        status_changed = true;
+    }
     if status_changed {
         status_sink(state.status());
     }
@@ -592,3 +636,29 @@ mod tests {
     }
 }
 
+
+#[cfg(test)]
+mod battery_tests {
+    use super::{battery_from_sdl, ControllerBattery};
+    use sdl3::joystick::PowerLevel;
+
+    #[test]
+    fn valid_unknown_state_does_not_discard_reported_percent() {
+        assert_eq!(battery_from_sdl(PowerLevel::Unknown, 46),
+            Some(ControllerBattery { percent: 46, charging: false, charging_known: false }));
+    }
+
+    #[test]
+    fn unsupported_gamepad_does_not_fake_a_battery() {
+        assert_eq!(battery_from_sdl(PowerLevel::Unknown, -1), None);
+        assert_eq!(battery_from_sdl(PowerLevel::NoBattery, 50), None);
+        assert_eq!(battery_from_sdl(PowerLevel::Error, 50), None);
+        assert_eq!(battery_from_sdl(PowerLevel::Charging, 102), None);
+    }
+
+    #[test]
+    fn charging_from_sdl_is_preserved() {
+        assert_eq!(battery_from_sdl(PowerLevel::Charging, 39),
+            Some(ControllerBattery { percent: 39, charging: true, charging_known: true }));
+    }
+}

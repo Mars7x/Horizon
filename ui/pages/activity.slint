@@ -38,6 +38,8 @@ component SummaryCard inherits Rectangle {
 
 export component ActivityPage inherits Rectangle {
     in property <string> total-playtime: "0 min";
+    in property <string> reported-playtime: "—";
+    in property <[ActivityGameData]> reported-games;
     in property <string> session-count: "0";
     in property <string> game-count: "0";
     in property <[ActivitySessionData]> recent-sessions;
@@ -62,7 +64,7 @@ export component ActivityPage inherits Rectangle {
         y: 78px;
         width: parent.width - Metrics.page-margin * 2;
         height: 28px;
-        text: "Horizon-observed sessions";
+        text: "Observed sessions and source-reported playtime";
         color: Theme.secondary-foreground;
         font-size: Typography.body-size;
         font-weight: Typography.body-weight;
@@ -71,7 +73,7 @@ export component ActivityPage inherits Rectangle {
 
     private property <length> summary-gap: 16px;
     private property <length> summary-width:
-        (root.width - Metrics.page-margin * 2 - root.summary-gap * 2) / 3;
+        (root.width - Metrics.page-margin * 2 - root.summary-gap * 3) / 4;
 
     SummaryCard {
         x: Metrics.page-margin;
@@ -87,12 +89,21 @@ export component ActivityPage inherits Rectangle {
         y: 122px;
         width: root.summary-width;
         height: 104px;
+        label: "Reported lifetime";
+        value: root.reported-playtime;
+    }
+
+    SummaryCard {
+        x: Metrics.page-margin + (root.summary-width + root.summary-gap) * 2;
+        y: 122px;
+        width: root.summary-width;
+        height: 104px;
         label: "Completed sessions";
         value: root.session-count;
     }
 
     SummaryCard {
-        x: Metrics.page-margin + (root.summary-width + root.summary-gap) * 2;
+        x: Metrics.page-margin + (root.summary-width + root.summary-gap) * 3;
         y: 122px;
         width: root.summary-width;
         height: 104px;
@@ -209,7 +220,7 @@ export component ActivityPage inherits Rectangle {
             y: 14px;
             width: parent.width - 44px;
             height: 34px;
-            text: "Most played";
+            text: "Most played · observed";
             color: Theme.foreground;
             font-size: Typography.heading-size;
             font-weight: Typography.heading-weight;
@@ -229,6 +240,7 @@ export component ActivityPage inherits Rectangle {
         }
 
         for game[index] in root.top-games : Rectangle {
+            visible: index < 3;
             x: 18px;
             y: 58px + index * 72px;
             width: parent.width - 36px;
@@ -258,6 +270,63 @@ export component ActivityPage inherits Rectangle {
                 color: Theme.secondary-foreground;
                 font-size: Typography.caption-size;
                 font-weight: Typography.body-weight;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+        }
+
+        Text {
+            x: 22px;
+            y: 288px;
+            width: parent.width - 44px;
+            height: 32px;
+            text: "Source-reported lifetime";
+            color: Theme.foreground;
+            font-size: Typography.heading-size;
+            font-weight: Typography.heading-weight;
+            vertical-alignment: center;
+        }
+
+        if root.reported-games.length == 0 : Text {
+            x: 22px;
+            y: 333px;
+            width: parent.width - 44px;
+            height: 50px;
+            text: "No source-reported playtime available.";
+            color: Theme.secondary-foreground;
+            font-size: Typography.body-size;
+            wrap: word-wrap;
+        }
+
+        for game[index] in root.reported-games : Rectangle {
+            visible: index < 3;
+            x: 18px;
+            y: 327px + index * 68px;
+            width: parent.width - 36px;
+            height: 62px;
+            background: index == 0 ? Theme.accent-subtle.with-alpha(0.50) : transparent;
+            border-radius: Metrics.radius-sm;
+
+            Text {
+                x: 12px;
+                y: 5px;
+                width: parent.width - 24px;
+                height: 24px;
+                text: game.title;
+                color: Theme.foreground;
+                font-size: Typography.body-size;
+                font-weight: Typography.emphasis-weight;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+            Text {
+                x: 12px;
+                y: 30px;
+                width: parent.width - 24px;
+                height: 20px;
+                text: game.playtime + " · " + game.sessions;
+                color: Theme.secondary-foreground;
+                font-size: Typography.caption-size;
                 overflow: elide;
                 vertical-alignment: center;
             }

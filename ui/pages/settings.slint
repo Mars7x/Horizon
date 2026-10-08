@@ -22,28 +22,23 @@ component SettingsRow inherits Rectangle {
     accessible-checked: root.checked;
     accessible-enabled: root.enabled;
 
-    // Pointer feedback stays neutral. Accent colour is reserved for the
-    // selection outline, not the row's interior.
+    // Only focus reveal is animated; continuous brightness changes must not
+    // repeatedly restart `animate border-color` and freeze the idle pulse.
+    private property <float> focus-reveal: root.focused && root.enabled ? 1.0 : 0.0;
+    animate focus-reveal { duration: Motion.focus-duration; easing: ease-in-out; }
+    // Slint mix weights its FIRST brush by factor. Use 1-reveal so an
+    // unfocused row stays neutral, while focused rows receive the live accent.
+    // One outline for controller focus: no oversized overlay can cross rows.
     background: (touch.pressed || touch.has-hover) && root.enabled
         ? Theme.surface-raised : Theme.surface;
     border-radius: Metrics.radius-lg;
-    // Hide the base stroke when the shared focus ring is visible, preventing
-    // a second faint border underneath the animated accent ring.
-    border-width: root.focused && root.enabled ? 0px : (Theme.high-contrast ? 2px : 1px);
-    border-color: Theme.divider.with-alpha(0.68);
+    border-width: root.focused && root.enabled ? (Theme.high-contrast ? 3px : 2px)
+        : (Theme.high-contrast ? 2px : 1px);
+    border-color: Theme.divider.with-alpha(0.68).mix(Motion.menu-focus-color, 1.0 - root.focus-reveal);
+    animate border-width { duration: Motion.focus-duration; easing: ease-in-out; }
     animate background { duration: Motion.hover-duration; easing: ease-in-out; }
+    // The Settings category row is the visual reference for every other focus.
 
-    // Uses the same full-outline accent colour rhythm as utility/game focus.
-    // No selected-row tint, halo or traveling segment; row content never moves.
-    SelectionFocusSurface {
-        x: -2px; y: -2px;
-        width: parent.width + 4px; height: parent.height + 4px;
-        corner-radius: Metrics.radius-lg + 2px;
-        focused: root.focused && root.enabled;
-        reveal-duration: Motion.reduced-motion ? 0ms : 190ms;
-        filled: false;
-        soft-shadow: false;
-    }
     Text {
         x: 24px; y: 15px;
         width: parent.width - (root.toggle ? 154px : 252px);
@@ -117,7 +112,7 @@ component SettingsButton inherits Rectangle {
     accessible-enabled: root.enabled;
     border-radius: Metrics.radius-md;
     border-width: 1px;
-    border-color: root.primary ? Theme.accent : Theme.divider;
+    border-color: root.focused ? transparent : (root.primary ? Theme.accent : Theme.divider);
     background: root.primary ? (touch.pressed ? Theme.accent-pressed
         : touch.has-hover ? Theme.accent-hover : Theme.accent)
         : ((touch.pressed || touch.has-hover) ? Theme.surface-raised : Theme.surface);
@@ -133,7 +128,7 @@ component SettingsButton inherits Rectangle {
         width: parent.width + 10px; height: parent.height + 10px;
         corner-radius: Metrics.radius-md + 5px;
         focused: root.focused && root.enabled;
-        reveal-duration: Motion.reduced-motion ? 0ms : 190ms;
+        reveal-duration: Motion.focus-duration;
         filled: false;
         soft-shadow: false;
     }
@@ -153,8 +148,93 @@ component SettingsButton inherits Rectangle {
     }
 }
 
+// A saved Theme preference is expressed by accent-coloured text, not an
+// additional checked border or checkmark. The ONLY border highlight is focus.
+component AppearanceChoice inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected: false;
+    in property <bool> focused: false;
+    callback activated();
+
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-description: root.selected ? "Selected" : "Select";
+    private property <float> focus-reveal: root.focused ? 1.0 : 0.0;
+    animate focus-reveal { duration: Motion.focus-duration; easing: ease-in-out; }
+    background: pointer.has-hover || pointer.pressed ? Theme.surface-raised : Theme.surface;
+    border-radius: Metrics.radius-md;
+    border-width: root.focused ? (Theme.high-contrast ? 3px : 2px) : 1px;
+    border-color: Theme.divider.with-alpha(0.60).mix(Motion.menu-focus-color, 1.0 - root.focus-reveal);
+    animate border-width { duration: Motion.focus-duration; easing: ease-in-out; }
+    animate background { duration: Motion.hover-duration; easing: ease-in-out; }
+    // Focus is the single stroke on this card, never a second ring.
+    Text {
+        x: 8px; y: 0px; width: parent.width - 16px; height: parent.height;
+        text: root.label;
+        color: root.selected ? Theme.accent : Theme.foreground;
+        font-size: Typography.body-size;
+        font-weight: root.selected ? Typography.emphasis-weight : Typography.body-weight;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    pointer := TouchArea {
+        width: parent.width; height: parent.height;
+        clicked => { root.activated(); }
+    }
+}
+
+// Keep a real gap between the colour disc and the single focus/selection ring.
+// The ring follows the existing live focus colour, while the disc remains still.
+component AccentSwatch inherits Rectangle {
+    in property <string> label;
+    in property <color> swatch-color;
+    in property <bool> selected: false;
+    in property <bool> focused: false;
+    callback activated();
+
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-description: root.selected ? "Selected accent" : "Select accent";
+    private property <float> focus-reveal: root.focused ? 1.0 : 0.0;
+    animate focus-reveal { duration: Motion.focus-duration; easing: ease-in-out; }
+    background: transparent;
+    focus-ring := Rectangle {
+        width: 48px;
+        height: 48px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        border-radius: self.width / 2;
+        background: transparent;
+        border-width: Theme.high-contrast ? 3px : 2px;
+        border-color: Theme.foreground.mix(Motion.menu-focus-color, 1.0 - root.focus-reveal);
+        opacity: root.selected ? 1.0 : root.focus-reveal;
+    }
+    swatch := Rectangle {
+        width: root.selected || root.focused ? 36px : 31px;
+        height: self.width;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        border-radius: self.width / 2;
+        background: root.swatch-color;
+        // The preview follows the resolved theme, including White becoming grey.
+        animate background { duration: Motion.reduced-motion ? 0ms : 260ms; easing: ease-in-out; }
+        border-width: 1px;
+        border-color: Theme.divider;
+        animate width { duration: Motion.focus-duration; easing: ease-in-out; }
+    }
+    pointer := TouchArea {
+        width: parent.width; height: parent.height;
+        clicked => { root.activated(); }
+    }
+}
+
 export component SettingsPage inherits Rectangle {
-    in property <int> view: 0; // 0 = Settings, 1 = Third-Party
+    in property <int> view: 0; // 0 Settings, 1 Appearance, 2 Third-Party
+    in property <int> theme-index: 0; // System, Light, Dark
+    in property <int> accent-index: 0; // System, nine spectrum colours
+    in property <bool> ui-sounds-enabled: true;
+    in property <string> appearance-feedback: "";
     in property <int> selection: 0;
     in property <bool> key-present: false;
     in property <bool> prefer-artwork: false;
@@ -217,7 +297,7 @@ export component SettingsPage inherits Rectangle {
     Text {
         x: Metrics.page-margin; y: 31px;
         width: root.content-width; height: 47px;
-        text: root.view == 0 ? "Settings" : "Third-Party";
+        text: root.view == 0 ? "Settings" : root.view == 1 ? "Appearance" : "Third-Party";
         color: Theme.foreground;
         font-size: Typography.title-size;
         font-weight: Typography.title-weight;
@@ -232,28 +312,241 @@ export component SettingsPage inherits Rectangle {
     settings-home := Rectangle {
         x: Metrics.page-margin + (root.view == 0 ? 0px : -12px);
         y: 112px;
-        width: root.content-width; height: 100px;
+        width: root.content-width;
+        height: 202px;
         background: transparent;
         opacity: root.view == 0 ? 1.0 : 0.0;
         visible: self.opacity > 0.01;
         animate x { duration: Motion.page-duration; easing: ease-in-out; }
         animate opacity { duration: Motion.page-duration; }
-        SettingsRow {
-            width: parent.width; height: 96px;
-            heading: "Third-Party";
-            summary: "Artwork providers and external integrations";
-            trailing: "Open  ›";
-            focused: root.view == 0 && root.selection == 0;
-            activated => { root.activate(0); }
+
+        VerticalLayout {
+            width: parent.width;
+            height: parent.height;
+            spacing: 14px;
+            SettingsRow {
+                width: parent.width;
+                height: 94px;
+                heading: "Appearance";
+                summary: "Theme, accent colour and UI sounds";
+                trailing: "Open  ›";
+                focused: root.view == 0 && root.selection == 0;
+                activated => { if (root.view == 0 && !root.editing-key && !root.refresh-open) { root.activate(0); } }
+            }
+            SettingsRow {
+                width: parent.width;
+                height: 94px;
+                heading: "Third-Party";
+                summary: "Artwork providers and external integrations";
+                trailing: "Open  ›";
+                focused: root.view == 0 && root.selection == 1;
+                activated => { if (root.view == 0 && !root.editing-key && !root.refresh-open) { root.activate(1); } }
+            }
         }
     }
 
-    third-party := Rectangle {
+    appearance := Rectangle {
         x: Metrics.page-margin + (root.view == 1 ? 0px : 12px);
         y: 109px;
         width: root.content-width; height: root.height - 109px;
         background: transparent;
         opacity: root.view == 1 ? 1.0 : 0.0;
+        visible: self.opacity > 0.01;
+        animate x { duration: Motion.page-duration; easing: ease-in-out; }
+        animate opacity { duration: Motion.page-duration; }
+
+        Text {
+            x: 0px; y: 0px; width: parent.width; height: 26px;
+            text: "Settings  /  Appearance";
+            color: Theme.secondary-foreground;
+            font-size: Typography.caption-size;
+            vertical-alignment: center;
+        }
+        Text {
+            x: 0px; y: 35px; width: parent.width; height: 31px;
+            text: "Theme";
+            color: Theme.foreground;
+            font-size: Typography.heading-size;
+            font-weight: Typography.heading-weight;
+        }
+        Text {
+            x: 0px; y: 68px; width: parent.width; height: 23px;
+            text: "System follows your desktop's Light or Dark mode.";
+            color: Theme.secondary-foreground;
+            font-size: Typography.caption-size;
+        }
+        // A compact three-way selector instead of full-width, double-outlined cards.
+        theme-choices := Rectangle {
+            x: 0px; y: 102px;
+            width: min(parent.width, 780px); height: 66px;
+            background: transparent;
+            AppearanceChoice {
+                x: (parent.width - 24px) / 3 * 0 + 0px;
+                y: 0px;
+                width: (parent.width - 24px) / 3; height: 66px;
+                label: "System";
+                selected: root.theme-index == 0;
+                focused: root.view == 1 && root.selection == 0;
+                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(0); } }
+            }
+            AppearanceChoice {
+                x: (parent.width - 24px) / 3 * 1 + 12px;
+                y: 0px;
+                width: (parent.width - 24px) / 3; height: 66px;
+                label: "Light";
+                selected: root.theme-index == 1;
+                focused: root.view == 1 && root.selection == 1;
+                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(1); } }
+            }
+            AppearanceChoice {
+                x: (parent.width - 24px) / 3 * 2 + 24px;
+                y: 0px;
+                width: (parent.width - 24px) / 3; height: 66px;
+                label: "Dark";
+                selected: root.theme-index == 2;
+                focused: root.view == 1 && root.selection == 2;
+                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(2); } }
+            }
+        }
+        Text {
+            x: 0px; y: 204px; width: parent.width; height: 31px;
+            text: "Accent colour";
+            color: Theme.foreground;
+            font-size: Typography.heading-size;
+            font-weight: Typography.heading-weight;
+        }
+        Text {
+            x: 0px; y: 236px; width: parent.width; height: 23px;
+            text: "Follow the system colour or choose a custom accent.";
+            color: Theme.secondary-foreground;
+            font-size: Typography.caption-size;
+        }
+        // GNOME-inspired small palette, using Horizon's own focus + radius tokens.
+        // Keeps all nine colours named for accessibility without visible labels.
+        accent-palette := Rectangle {
+            x: 0px; y: 278px;
+            width: min(parent.width, 710px); height: 72px;
+            background: Theme.surface;
+            border-radius: Metrics.radius-lg;
+            AppearanceChoice {
+                x: 8px; y: 8px;
+                width: 104px; height: 56px;
+                label: "System";
+                selected: root.accent-index == 0;
+                focused: root.view == 1 && root.selection == 3;
+                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(3); } }
+            }
+            AccentSwatch {
+                x: 130px; y: 11px;
+                width: 48px; height: 50px;
+                label: "Red";
+                swatch-color: #e5484d;
+                selected: root.accent-index == 1;
+                focused: root.view == 1 && root.selection == 4;
+                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(4); } }
+            }
+            AccentSwatch {
+                x: 192px; y: 11px;
+                width: 48px; height: 50px;
+                label: "Orange";
+                swatch-color: #f28c28;
+                selected: root.accent-index == 2;
+                focused: root.view == 1 && root.selection == 5;
+                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(5); } }
+            }
+            AccentSwatch {
+                x: 254px; y: 11px;
+                width: 48px; height: 50px;
+                label: "Yellow";
+                swatch-color: #f2c94c;
+                selected: root.accent-index == 3;
+                focused: root.view == 1 && root.selection == 6;
+                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(6); } }
+            }
+            AccentSwatch {
+                x: 316px; y: 11px;
+                width: 48px; height: 50px;
+                label: "Green";
+                swatch-color: #3cb978;
+                selected: root.accent-index == 4;
+                focused: root.view == 1 && root.selection == 7;
+                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(7); } }
+            }
+            AccentSwatch {
+                x: 378px; y: 11px;
+                width: 48px; height: 50px;
+                label: "Teal";
+                swatch-color: #24b6a8;
+                selected: root.accent-index == 5;
+                focused: root.view == 1 && root.selection == 8;
+                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(8); } }
+            }
+            AccentSwatch {
+                x: 440px; y: 11px;
+                width: 48px; height: 50px;
+                label: "Blue";
+                swatch-color: #3584e4;
+                selected: root.accent-index == 6;
+                focused: root.view == 1 && root.selection == 9;
+                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(9); } }
+            }
+            AccentSwatch {
+                x: 502px; y: 11px;
+                width: 48px; height: 50px;
+                label: "Purple";
+                swatch-color: #8b5cf6;
+                selected: root.accent-index == 7;
+                focused: root.view == 1 && root.selection == 10;
+                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(10); } }
+            }
+            AccentSwatch {
+                x: 564px; y: 11px;
+                width: 48px; height: 50px;
+                label: "Pink";
+                swatch-color: #e65da7;
+                selected: root.accent-index == 8;
+                focused: root.view == 1 && root.selection == 11;
+                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(11); } }
+            }
+            AccentSwatch {
+                x: 626px; y: 11px;
+                width: 48px; height: 50px;
+                label: "White";
+                // This is the same contrast-adjusted white/grey as the actual
+                // app accent for the current Light/Dark/High Contrast setting.
+                swatch-color: Theme.appearance-white-swatch;
+                selected: root.accent-index == 9;
+                focused: root.view == 1 && root.selection == 12;
+                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(12); } }
+            }
+        }
+        Text {
+            x: 0px; y: 366px;
+            width: parent.width; height: 26px;
+            text: root.appearance-feedback != "" ? root.appearance-feedback
+                : "Accent colours adapt for readable contrast in both Light and Dark themes.";
+            color: root.appearance-feedback != "" ? Theme.foreground : Theme.secondary-foreground;
+            font-size: Typography.caption-size;
+            vertical-alignment: center;
+        }
+        SettingsRow {
+            x: 0px; y: 408px;
+            width: parent.width; height: 86px;
+            heading: "UI Sounds";
+            summary: "Play sounds when navigating, confirming, and going back";
+            toggle: true;
+            checked: root.ui-sounds-enabled;
+            focused: root.view == 1 && root.selection == 13;
+            activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(13); } }
+        }
+    }
+
+    third-party := Rectangle {
+        x: Metrics.page-margin + (root.view == 2 ? 0px : 12px);
+        y: 109px;
+        width: root.content-width; height: root.height - 109px;
+        background: transparent;
+        opacity: root.view == 2 ? 1.0 : 0.0;
         visible: self.opacity > 0.01;
         animate x { duration: Motion.page-duration; easing: ease-in-out; }
         animate opacity { duration: Motion.page-duration; }
@@ -281,8 +574,8 @@ export component SettingsPage inherits Rectangle {
             heading: "API key";
             summary: root.key-present ? "Saved locally · key hidden" : "Not configured";
             trailing: root.key-present ? "Replace  ›" : "Add key  ›";
-            focused: root.selection == 0;
-            activated => { root.activate(0); }
+            focused: root.view == 2 && root.selection == 0;
+            activated => { if (root.view == 2 && !root.editing-key && !root.refresh-open) { root.activate(0); } }
         }
         SettingsRow {
             x: 0px; y: 200px;
@@ -292,8 +585,8 @@ export component SettingsPage inherits Rectangle {
             toggle: true;
             accessible-role: switch;
             checked: root.prefer-artwork;
-            focused: root.selection == 1;
-            activated => { root.activate(1); }
+            focused: root.view == 2 && root.selection == 1;
+            activated => { if (root.view == 2 && !root.editing-key && !root.refresh-open) { root.activate(1); } }
         }
         SettingsRow {
             x: 0px; y: 304px;
@@ -302,8 +595,8 @@ export component SettingsPage inherits Rectangle {
             summary: "Check SteamGridDB for updated square covers";
             trailing: root.key-present ? "Refresh  ›" : "Unavailable";
             enabled: root.key-present;
-            focused: root.selection == 2;
-            activated => { root.activate(2); }
+            focused: root.view == 2 && root.selection == 2;
+            activated => { if (root.view == 2 && !root.editing-key && !root.refresh-open) { root.activate(2); } }
         }
         SettingsRow {
             x: 0px; y: 408px;
@@ -312,8 +605,8 @@ export component SettingsPage inherits Rectangle {
             summary: root.key-present ? "Disconnect SteamGridDB and keep cached files" : "No key is currently saved";
             trailing: root.key-present ? "Remove  ›" : "Unavailable";
             enabled: root.key-present;
-            focused: root.selection == 3;
-            activated => { root.activate(3); }
+            focused: root.view == 2 && root.selection == 3;
+            activated => { if (root.view == 2 && !root.editing-key && !root.refresh-open) { root.activate(3); } }
         }
 
     }
@@ -373,7 +666,7 @@ export component SettingsPage inherits Rectangle {
                     width: parent.width + 6px; height: parent.height + 6px;
                     corner-radius: Metrics.radius-md + 3px;
                     focused: root.editor-target == 0;
-                    reveal-duration: Motion.reduced-motion ? 0ms : 190ms;
+                    reveal-duration: Motion.focus-duration;
                     // Keep the key entry neutral inside: only the focus stroke
                     // animates, with no accent fill or tinted drop shadow.
                     filled: false;
@@ -528,7 +821,7 @@ export component SettingsPage inherits Rectangle {
                         width: parent.width + 4px; height: parent.height + 4px;
                         corner-radius: Metrics.radius-md + 2px;
                         focused: root.editor-target == 1;
-                        reveal-duration: Motion.reduced-motion ? 0ms : 190ms;
+                        reveal-duration: Motion.focus-duration;
                         filled: false;
                         soft-shadow: false;
                     }

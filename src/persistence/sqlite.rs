@@ -11,6 +11,7 @@ use crate::{
     services::{
         activity::{
             ActivityOverview, ActivityRepository, GameActivitySummary, RecentActivitySession,
+            ReportedGameSummary,
         },
         library::{DiscoveredGame, LibraryRepository},
     },
@@ -559,6 +560,35 @@ impl ActivityRepository for SqliteLibraryRepository {
             ));
         }
 
+        // Provider totals are independent snapshots, never included in the
+        // observed session aggregate above. Currently Heroic is the only
+        // provider of lifetime playtime; each (game, provider) is one row.
+        let raw_reported_total: i64 = self.connection.query_row(
+            "SELECT COALESCE(SUM(lifetime_seconds), 0) FROM source_lifetime_playtime",
+            [], |row| row.get(0),
+        )?;
+        let reported_total = Self::activity_value(
+            "source_lifetime_playtime.lifetime_seconds",
+            PlaytimeSeconds::new(raw_reported_total),
+        )?;
+        let mut reported_statement = self.connection.prepare(
+            "SELECT g.title, sl.source_id, sl.lifetime_seconds \
+             FROM source_lifetime_playtime AS sl \
+             JOIN games AS g ON g.id = sl.game_id \
+             ORDER BY sl.lifetime_seconds DESC, g.title ASC LIMIT ?1",
+        )?;
+        let reported_rows = reported_statement.query_map([top_limit], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?))
+        })?;
+        let mut reported_games = Vec::new();
+        for row in reported_rows {
+            let (title, source_id, lifetime) = row?;
+            reported_games.push(ReportedGameSummary::new(
+                Self::domain_value("games.title", GameTitle::new(title))?,
+                Self::domain_value("source_lifetime_playtime.source_id", SourceId::new(source_id))?,
+                Self::activity_value("source_lifetime_playtime.lifetime_seconds", PlaytimeSeconds::new(lifetime))?,
+            ));
+        }
         Ok(ActivityOverview::new(
             observed_playtime,
             completed_sessions,
@@ -566,7 +596,8 @@ impl ActivityRepository for SqliteLibraryRepository {
             recent_sessions,
             top_games,
         )
-        .with_active_sessions(active_sessions))
+        .with_active_sessions(active_sessions)
+        .with_source_reported(reported_total, reported_games))
     }
 
     fn upsert_source_lifetime_playtime(
@@ -915,9 +946,19 @@ mod tests {
             ))
             .expect("report");
 
+        let source_id = SourceId::new("steam").expect("source");
+        let session = repository.begin_play_session(
+            game_id, &source_id, 100, SessionTrackingMethod::SourceRuntime,
+        ).expect("observed session");
+        repository.complete_play_session(session, 160).expect("completed");
         let overview = repository.activity_overview(8, 4).expect("overview");
-        assert_eq!(overview.observed_playtime().get(), 0);
-        assert_eq!(overview.completed_sessions(), 0);
+        assert_eq!(overview.observed_playtime().get(), 60);
+        assert_eq!(overview.completed_sessions(), 1);
+        // 50,000 provider seconds are not added to the 60 observed seconds.
+        assert_eq!(overview.reported_playtime().get(), 50_000);
+        assert_eq!(overview.reported_games().len(), 1);
+        assert_eq!(overview.reported_games()[0].title().as_str(), "Reported");
+        assert_eq!(overview.reported_games()[0].source_id().as_str(), "steam");
     }
 
     #[test]

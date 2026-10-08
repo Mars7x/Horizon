@@ -8,11 +8,12 @@ use std::{
     error::Error,
     fmt,
     path::PathBuf,
+    time::SystemTime,
 };
 
 use thiserror::Error;
 
-use crate::domain::{DomainValidationError, ExternalGameId, GameTitle, SourceId};
+use crate::domain::{DomainValidationError, ExternalGameId, GameTitle, PlaytimeSeconds, SourceId};
 
 pub mod heroic;
 pub mod steam;
@@ -378,6 +379,28 @@ pub trait GameSource: Send + Sync {
         _external_id: &ExternalGameId,
     ) -> Result<Option<SourceRuntimeState>, SourceError> {
         Ok(None)
+    }
+
+    /// Observe a launch associated with one newly armed Horizon observation.
+    ///
+    /// Sources with non-authoritative, persisted runtime traces should ignore
+    /// evidence predating this observation. The default retains existing
+    /// semantics for sources with authoritative current-process state.
+    fn runtime_state_for_observation(
+        &self,
+        external_id: &ExternalGameId,
+        _armed_at: SystemTime,
+    ) -> Result<Option<SourceRuntimeState>, SourceError> {
+        self.runtime_state(external_id)
+    }
+
+    /// Read a provider-reported cumulative playtime snapshot. This is NOT a
+    /// live session signal and MUST NOT be combined with Horizon-observed time.
+    /// Adapters advertising LifetimePlaytime must normalize values to seconds.
+    fn lifetime_playtime_snapshot(
+        &self,
+    ) -> Result<Vec<(ExternalGameId, PlaytimeSeconds)>, SourceError> {
+        Ok(Vec::new())
     }
 
     /// An authoritative cross-catalog identifier, if this adapter knows one.

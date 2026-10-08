@@ -1008,3 +1008,69 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
 - Cache version `square-v6` invalidates older normalized files that may already
   contain smoothed pixel art.
 - ADR 0055 records this rule.
+
+## Phase 9.5.44.60 universal focus and directional navigation invariant
+
+- All focusable controls use the shared single-stroke, accent-coloured focus
+  language, including animated focus enter/exit via `Motion.focus-duration`
+  and Reduced Motion=0. Menu buttons/rows/swatches and header utility icons
+  use `SelectionFocusSurface`. The special Home cover retains its ONE authored
+  accent focus bracket layer with the same timing. No duplicate focused border,
+  extra ring or halo. A saved selection does not imply keyboard/gamepad focus.
+- ALL directional focus inputs preserve `UiActionEvent.repeated` through
+  presentation. The pure `navigation::step_with_edge_wrap` helper owns row/list
+  wrap rules: **held/repeated directions clamp at an edge**; only a fresh
+  directional press **from an already-focused boundary item** may wrap.
+  This overrides older unconditional Appearance list wraps and older top
+  utility clamping for fresh edge presses. Preserve natural 2-D spatial moves
+  in Appearance/editor and source-independent Home focus memory.
+- New UI sections MUST reuse these conventions. Sound only on actual focus
+  changes. All controller/keyboard/analog paths share the policy.
+- See ADR 0117. Avoid experimental focus styles that desynchronize routes.
+
+
+## Phase 9.5.44.61 — menu focus and feedback policy
+
+- **Visual reference:** The original Settings root menu and utility focus use
+  a single accent-coloured outline whose *entire perimeter gently pulses in
+  brightness* between two intensities of the same hue. This is the universal
+  focused-control treatment, shared by menu rows, Appearance choices, dialogs,
+  utilities, and Home bracket geometry. Never use rotating gradients, orbiting
+  highlights, glints, multiple rings, tinted focus backgrounds or a stationary
+  plain outline in place of the pulse. Fade in/out smoothly; Reduced Motion and
+  High Contrast keep a static full-strength single outline.
+- **Utility icons:** On focus, the icon and its single focus ring BOTH move
+  upward together by exactly 2px, with the SAME `Motion.focus-duration` and
+  easing. Unfocus reverses both in sync. Their centres must coincide at every
+  animation frame; the fixed 40px navigation cell/hit area must not move.
+  Reduced Motion cancels the lift. Utility backgrounds stay transparent: no
+  accent tint, no additional focus layer or artwork recolouring. See ADR 0119.
+  The 2px coupled lift is intentional; do not remove it to correct alignment.
+- **Interaction feedback:** Up/Down/Left/Right emit the navigation cue only
+  when focus actually changes. Successful menu confirmation emits OK; genuine
+  back/dismissal emits Back. Do not play on ignored input or game launch;
+  keyboard, gamepad and pointer must share the same action handlers. Honor the
+  persisted UI Sounds toggle; an Off toggle silences playback immediately.
+- **Repeat/wrap:** Keep Phase 9.5.44.60 fresh-edge-press wrap semantics, never
+  wrap automatically as a held direction repeats.
+
+## Phase 9.5.44.63 — preserve Home focus; responsive menu audio
+
+- **Do not modify or replace Home's authored game-card `FocusFrame`** when
+  adjusting menu focus. The last stable Home implementation (Phase 9.5.44.38,
+  cycle refined in .39) includes the original rounded vector corners, gentle
+  expansion, accent-derived brightness cycle, and soft bracket emission.
+  This behavior is intentional and distinct from full-border menu controls.
+- All *other* focused menu outlines must share Home's actual 3.2-second
+  accent-to-highlight **colour** breathing, not a nearly invisible opacity
+  fluctuation. The Settings root, Theme choices, swatches, editor controls,
+  dialog actions and utility rings use one shared color clock. Do not animate
+  their `border-color` directly every frame: animate focus visibility/strength,
+  allowing the color binding to update continuously.
+- Utility ring/icon share the 2px focus lift. No rotating highlight, tint or
+  duplicate focus outline.
+- Audio: prepare one SDL stream during early UI idle rather than waiting for
+  the first key, prime with **silent** data and flush each short sound; keep all
+  user WAV bytes, original gain, semantic gating, and the UI Sounds setting.
+  Correct successful OK/Back cues should be queued before potentially costly
+  UI publishing, but do not play success feedback for an unsuccessful action.

@@ -4,6 +4,9 @@
 //! route and shell focus, but route history, utility destinations, and focus
 //! movement policy are owned by Rust.
 
+mod edge_step;
+pub use edge_step::step_with_edge_wrap;
+
 /// Full-shell submenu pages opened from the six top utility icons.
 ///
 /// These are real navigation destinations, not modal overlays. Grouping them
@@ -372,20 +375,16 @@ impl ShellFocus {
         changed
     }
 
-    /// Move horizontally inside the utility strip. Header navigation clamps at
-    /// the ends; unlike the game carousel, it never wraps. Any actual utility
-    /// move invalidates the exact return anchor from the originating game.
-    pub fn move_utility(&mut self, delta: i32) -> bool {
+    /// Move horizontally inside the utility strip with the same boundary
+    /// policy as Home and Settings. A held direction clamps; a fresh press
+    /// already at the edge wraps. A real move clears the return anchor.
+    pub fn move_utility(&mut self, delta: i32, repeated: bool) -> bool {
         if self.region != ShellFocusRegion::TopUtilities || delta == 0 {
             return false;
         }
 
-        let next = self
-            .utility
-            .index()
-            .saturating_add(delta)
-            .clamp(0, TopUtility::COUNT - 1);
-        let Some(next) = TopUtility::from_index(next) else {
+        let index = step_with_edge_wrap(self.utility.index(), 0, TopUtility::COUNT - 1, delta, repeated);
+        let Some(next) = TopUtility::from_index(index) else {
             return false;
         };
         if next == self.utility {
@@ -647,7 +646,7 @@ mod tests {
         assert_eq!(focus.utility(), TopUtility::Activity);
 
         assert!(focus.enter_utilities());
-        assert!(focus.move_utility(1));
+        assert!(focus.move_utility(1, false));
         assert_eq!(focus.utility(), TopUtility::Web);
         assert!(focus.leave_utilities());
         assert!(focus.enter_utilities());
@@ -655,17 +654,18 @@ mod tests {
     }
 
     #[test]
-    fn utility_strip_clamps_instead_of_wrapping() {
+    fn utility_strip_held_repeat_clamps_but_fresh_edge_press_wraps() {
         let mut focus = ShellFocus::default();
         focus.enter_utilities();
 
-        assert!(focus.move_utility(-2));
+        assert!(focus.move_utility(-2, true));
         assert_eq!(focus.utility(), TopUtility::Friends);
-        assert!(!focus.move_utility(-1));
-
-        assert!(focus.move_utility(99));
+        assert!(!focus.move_utility(-1, true));
+        assert!(focus.move_utility(-1, false));
         assert_eq!(focus.utility(), TopUtility::Shop);
-        assert!(!focus.move_utility(1));
+        assert!(!focus.move_utility(1, true));
+        assert!(focus.move_utility(1, false));
+        assert_eq!(focus.utility(), TopUtility::Friends);
     }
 
     #[test]
@@ -699,7 +699,7 @@ mod tests {
         let mut focus = ShellFocus::default();
 
         assert!(focus.enter_utilities_from_content(TopUtility::Album, 3));
-        assert!(focus.move_utility(1));
+        assert!(focus.move_utility(1, false));
         assert_eq!(focus.utility(), TopUtility::Activity);
         assert_eq!(focus.content_anchor_index(), None);
     }
@@ -709,7 +709,7 @@ mod tests {
         let mut focus = ShellFocus::default();
 
         assert!(focus.enter_utilities_from_content(TopUtility::Album, 3));
-        assert!(focus.move_utility(1));
+        assert!(focus.move_utility(1, false));
         assert_eq!(focus.utility(), TopUtility::Activity);
 
         assert!(focus.leave_utilities_to_content(5));

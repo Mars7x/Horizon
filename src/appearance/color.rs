@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Rgb {
     pub red: u8,
     pub green: u8,
@@ -25,6 +25,8 @@ impl Rgb {
             mix_channel(self.blue, other.blue),
         )
     }
+
+    pub fn contrast_against(self, other: Self) -> f64 { contrast_ratio(self, other) }
 
     pub fn best_foreground(self) -> Self {
         let white_contrast = contrast_ratio(self, Self::WHITE);

@@ -2,7 +2,22 @@ use super::Rgb;
 
 pub const DEFAULT_ACCENT: Rgb = Rgb::new(53, 132, 228);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// UI order follows the colour wheel from warm to cool; pink and white end it.
+/// Values are visual swatches, not necessarily the contrast-adjusted focus token.
+pub const ACCENT_PRESETS: [(&str, Rgb); 9] = [
+    ("Red", Rgb::new(229, 72, 77)),
+    ("Orange", Rgb::new(242, 140, 40)),
+    ("Yellow", Rgb::new(242, 201, 76)),
+    ("Green", Rgb::new(60, 185, 120)),
+    ("Teal", Rgb::new(36, 182, 168)),
+    ("Blue", Rgb::new(53, 132, 228)),
+    ("Purple", Rgb::new(139, 92, 246)),
+    ("Pink", Rgb::new(230, 93, 167)),
+    ("White", Rgb::WHITE),
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ThemePreference {
     #[default]
     System,
@@ -10,7 +25,8 @@ pub enum ThemePreference {
     Dark,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AccentPreference {
     #[default]
     System,
@@ -23,10 +39,28 @@ pub enum EffectiveTheme {
     Dark,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct AppearancePreferences {
     pub theme: ThemePreference,
     pub accent: AccentPreference,
+    // Default-on, including configs written before sound settings existed.
+    pub ui_sounds_enabled: bool,
+}
+
+impl AppearancePreferences {
+    pub fn theme_index(self) -> i32 {
+        match self.theme { ThemePreference::System => 0, ThemePreference::Light => 1, ThemePreference::Dark => 2 }
+    }
+
+    pub fn accent_index(self) -> i32 {
+        match self.accent {
+            AccentPreference::System => 0,
+            AccentPreference::Custom(color) => ACCENT_PRESETS.iter()
+                .position(|(_, preset)| *preset == color)
+                .map_or(0, |index| index as i32 + 1),
+        }
+    }
 }
 
 impl Default for AppearancePreferences {
@@ -34,6 +68,7 @@ impl Default for AppearancePreferences {
         Self {
             theme: ThemePreference::System,
             accent: AccentPreference::System,
+            ui_sounds_enabled: true,
         }
     }
 }
@@ -110,6 +145,12 @@ impl AppearanceState {
 }
 
 impl Palette {
+    /// Swatch preview uses precisely the same contrast adjustment as focus and
+    /// controls, even when the user has selected another accent colour.
+    pub fn preview_accent(theme: EffectiveTheme, raw: Rgb, high_contrast: bool) -> Rgb {
+        Self::new(theme, raw, high_contrast).accent
+    }
+
     fn new(theme: EffectiveTheme, accent: Rgb, high_contrast: bool) -> Self {
         let (
             background,
@@ -153,6 +194,17 @@ impl Palette {
             ),
         };
 
+        // Accents are used for text and focus strokes across differently toned
+        // surfaces. A white or yellow swatch on light mode cannot also be its
+        // readable focus token; shade it while preserving the chosen hue.
+        // 4.5:1 also exceeds the 3:1 non-text focus contrast requirement.
+        let threshold = if high_contrast { 7.0 } else { 4.5 };
+        let target = match theme { EffectiveTheme::Light => Rgb::BLACK, EffectiveTheme::Dark => Rgb::WHITE };
+        let accent = (0..=100).map(|step| accent.mix(target, step as f32 / 100.0))
+            .find(|candidate| [background, surface, surface_raised].iter()
+                .all(|surface| candidate.contrast_against(*surface) >= threshold))
+            .unwrap_or(target);
+
         let (accent_hover, accent_pressed, accent_subtle) = match theme {
             EffectiveTheme::Light => (
                 accent.mix(Rgb::BLACK, 0.08),
@@ -187,14 +239,45 @@ impl Palette {
 mod tests {
     use super::{
         AccentPreference, AppearanceState, EffectiveTheme, Rgb, SystemAppearance, ThemePreference,
-        DEFAULT_ACCENT,
+        DEFAULT_ACCENT, Palette,
     };
+
+    #[test]
+    fn all_preset_accents_remain_readable_on_all_theme_surfaces() {
+        for theme in [EffectiveTheme::Light, EffectiveTheme::Dark] {
+            for high_contrast in [false, true] {
+                for (_, swatch) in super::ACCENT_PRESETS {
+                    let palette = super::Palette::new(theme, swatch, high_contrast);
+                    let min_ratio = if high_contrast { 7.0 } else { 4.5 };
+                    for background in [palette.background, palette.surface, palette.surface_raised] {
+                        assert!(palette.accent.contrast_against(background) >= min_ratio,
+                            "accent {:?} on {:?}: insufficient contrast", swatch, background);
+                    }
+                    assert!(palette.accent_foreground.contrast_against(palette.accent) >= 4.5);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn white_preset_preview_is_the_effective_accent_in_each_theme() {
+        for high_contrast in [false, true] {
+            let light = Palette::preview_accent(EffectiveTheme::Light, Rgb::WHITE, high_contrast);
+            let dark = Palette::preview_accent(EffectiveTheme::Dark, Rgb::WHITE, high_contrast);
+            assert_eq!(dark, Rgb::WHITE);
+            assert!(light.red < 255);
+            assert_eq!(light.red, light.green);
+            assert_eq!(light.green, light.blue);
+            let surface = Palette::new(EffectiveTheme::Light, Rgb::WHITE, high_contrast).surface;
+            assert!(light.contrast_against(surface) >= if high_contrast { 7.0 } else { 4.5 });
+        }
+    }
 
     #[test]
     fn system_defaults_are_deterministic_without_a_portal_preference() {
         let resolved = AppearanceState::default().resolve();
         assert_eq!(resolved.theme, EffectiveTheme::Light);
-        assert_eq!(resolved.palette.accent, DEFAULT_ACCENT);
+        assert_eq!(resolved.palette.accent, Palette::new(EffectiveTheme::Light, DEFAULT_ACCENT, false).accent);
     }
 
     #[test]
@@ -236,6 +319,7 @@ mod tests {
         };
         state.preferences.accent = AccentPreference::Custom(custom);
 
-        assert_eq!(state.resolve().palette.accent, custom);
+        assert_eq!(state.preferences.accent, AccentPreference::Custom(custom));
+        assert!(state.resolve().palette.accent.contrast_against(state.resolve().palette.background) >= 4.5);
     }
 }

@@ -11,6 +11,7 @@ use std::os::unix::fs::PermissionsExt;
 const APP_DATA_DIR: &str = "io.github.Mars7x.Horizon";
 const DATABASE_FILE: &str = "library.sqlite3";
 const SETTINGS_FILE: &str = "third-party.json";
+const APPEARANCE_FILE: &str = "appearance.json";
 
 #[derive(Debug, Error)]
 pub enum DataPathError {
@@ -48,6 +49,14 @@ pub fn library_database_path() -> Result<PathBuf, DataPathError> {
 /// Settings are kept separate from the library database and within the
 /// app-specific XDG configuration directory (Flatpak gets its own XDG_CONFIG_HOME).
 pub fn third_party_settings_path() -> Result<PathBuf, DataPathError> {
+    config_file_path(SETTINGS_FILE)
+}
+
+pub fn appearance_settings_path() -> Result<PathBuf, DataPathError> {
+    config_file_path(APPEARANCE_FILE)
+}
+
+fn config_file_path(filename: &str) -> Result<PathBuf, DataPathError> {
     let config_home = non_empty_env("XDG_CONFIG_HOME").map(PathBuf::from);
     let home = non_empty_env("HOME").map(PathBuf::from);
     let root = resolve_config_root(config_home.as_deref(), home.as_deref())?;
@@ -58,7 +67,7 @@ pub fn third_party_settings_path() -> Result<PathBuf, DataPathError> {
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).map_err(|source| {
         DataPathError::CreateConfigDirectory { path: dir.clone(), source }
     })?;
-    Ok(dir.join(SETTINGS_FILE))
+    Ok(dir.join(filename))
 }
 
 fn resolve_config_root(config_home: Option<&Path>, home: Option<&Path>) -> Result<PathBuf, DataPathError> {

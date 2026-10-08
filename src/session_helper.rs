@@ -68,6 +68,7 @@ struct RuntimeObservation {
     source_id: SourceId,
     external_id: ExternalGameId,
     created_at: Instant,
+    armed_at: SystemTime,
     started_at: Option<i64>,
     ended_at: Option<i64>,
     failed: Option<String>,
@@ -79,6 +80,7 @@ impl RuntimeObservation {
             source_id,
             external_id,
             created_at: Instant::now(),
+            armed_at: SystemTime::now(),
             started_at: None,
             ended_at: None,
             failed: None,
@@ -112,7 +114,7 @@ impl RuntimeObservation {
             return;
         }
 
-        match source.runtime_state(&self.external_id) {
+        match source.runtime_state_for_observation(&self.external_id, self.armed_at) {
             Ok(Some(SourceRuntimeState::Running)) => {
                 if self.started_at.is_none() {
                     self.started_at = Some(unix_timestamp());

@@ -91,8 +91,14 @@ Heroic follows the same Flatpak rule as Steam: Horizon receives only read-only a
 ```text
 --filesystem=xdg-config/heroic:ro
 --filesystem=xdg-config/legendary:ro
+--filesystem=~/.local/state/Heroic/logs:ro
 --filesystem=~/.var/app/com.heroicgameslauncher.hgl:ro
 ```
+
+The native Heroic state grant is required for automatic launch-log observation;
+the broad Flatpak app-data grant already includes its private state directory.
+`xdg-state` is not a Flatpak filesystem alias. Custom `HOST_XDG_STATE_HOME`
+locations need an explicit user-granted read-only path.
 
 Do not replace these with `--filesystem=home` or `--filesystem=host`.
 
@@ -127,3 +133,27 @@ Lutris is no longer a supported Horizon source. Its native and Flatpak metadata
 filesystem grants were removed rather than left dormant. Historical Activity
 rows remain in Horizon's database, but the sandbox no longer receives access to
 Lutris-owned metadata trees.
+
+### System status access (Phase 9.5.44.67)
+
+The runtime requests narrowly scoped system-bus access to
+`org.freedesktop.NetworkManager` and `org.freedesktop.UPower` for read-only
+status observation. NetworkManager supplies Ethernet/Wi-Fi state and signal
+strength. UPower supplies the composite host battery, never peripheral batteries.
+The normal Polkit checks still govern privileged operations; Horizon does not
+invoke them. SDL3 reads gamepad power from controllers already opened for input.
+No host filesystem access, host process spawning, or broad D-Bus session permission
+is required. Rebuild/reinstall the Flatpak after changing the manifest.
+
+## Controller battery fallback (Phase 9.5.44.71)
+
+Horizon can read Bluetooth controller charge exposed by BlueZ `Battery1`,
+and game controller charge exposed by UPower `Gaming Input` devices. These are
+read-only system bus queries. Rebuild and reinstall Horizon to apply the
+additional narrow `--system-talk-name=org.bluez` permission.
+
+SDL3 controller power remains the preferred measurement. The BlueZ/UPower
+readings appear only when a gamepad is connected to Horizon. On a PC with a
+battery the host reading takes precedence. An 8BitDo Ultimate 2 on a 2.4 GHz
+receiver may report its battery via SDL's HIDAPI DInput backend, but its XInput
+mode may not expose battery status; Horizon never estimates missing values.

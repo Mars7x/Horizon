@@ -93,14 +93,20 @@ export component AppWindow inherits Window {
     // Activity is persisted/application-owned data. The Activity page only
     // formats and renders these models; it never queries SQLite directly.
     in property <string> activity-total-playtime: "0 min";
+    in property <string> activity-reported-playtime: "—";
+    in property <[ActivityGameData]> activity-reported-games;
     in property <string> activity-session-count: "0";
     in property <string> activity-game-count: "0";
     in property <[ActivitySessionData]> activity-recent-sessions;
     in property <[ActivityGameData]> activity-top-games;
 
-    // Partial Settings > Third-Party route, with Rust-owned focus/state.
+    // Settings: root, Appearance, Third-Party. All selection and persistence Rust-owned.
     in property <int> settings-view: 0;
     in property <int> settings-selection: 0;
+    in property <int> settings-theme-index: 0; // System, Light, Dark
+    in property <int> settings-accent-index: 0; // System, spectrum presets
+    in property <bool> settings-ui-sounds-enabled: true;
+
     in property <bool> settings-key-present: false;
     in property <bool> settings-prefer-artwork: false;
     in property <bool> settings-editing-key: false;
@@ -111,6 +117,7 @@ export component AppWindow inherits Window {
     in property <bool> settings-synthetic-key-insertion: false;
     in-out property <string> settings-key-draft: "";
     in property <string> settings-feedback: "";
+    in property <string> settings-appearance-feedback: "";
     in property <string> settings-artwork-status: "";
     in property <bool> settings-refresh-open: false;
     in property <bool> settings-refresh-running: false;
@@ -119,6 +126,12 @@ export component AppWindow inherits Window {
     in property <string> settings-refresh-error: "";
 
     in property <int> connected-controller-count: 0;
+    in property <int> status-network-kind: 0;
+    in property <int> status-wifi-strength: 0;
+    in property <bool> status-network-limited: false;
+    in property <bool> status-battery-visible: false;
+    in property <int> status-battery-percent: 0;
+    in property <bool> status-battery-charging: false;
     in property <string> clock-time: "";
     in property <string> clock-suffix: "";
 
@@ -282,6 +295,8 @@ export component AppWindow inherits Window {
                     width: parent.width;
                     height: parent.height;
                     total-playtime: root.activity-total-playtime;
+                    reported-playtime: root.activity-reported-playtime;
+                    reported-games: root.activity-reported-games;
                     session-count: root.activity-session-count;
                     game-count: root.activity-game-count;
                     recent-sessions: root.activity-recent-sessions;
@@ -318,6 +333,10 @@ export component AppWindow inherits Window {
                     height: parent.height;
                     view: root.settings-view;
                     selection: root.settings-selection;
+                    theme-index: root.settings-theme-index;
+                    accent-index: root.settings-accent-index;
+                    ui-sounds-enabled: root.settings-ui-sounds-enabled;
+                    appearance-feedback: root.settings-appearance-feedback;
                     key-present: root.settings-key-present;
                     prefer-artwork: root.settings-prefer-artwork;
                     editing-key: root.settings-editing-key;
@@ -384,10 +403,17 @@ export component AppWindow inherits Window {
                 visible: root.shell-chrome-visible;
                 utility-focus-visible: root.top-utilities-focused;
                 focused-utility-index: root.focused-utility-index;
+                network-kind: root.status-network-kind;
+                wifi-strength: root.status-wifi-strength;
+                network-limited: root.status-network-limited;
+                battery-visible: root.status-battery-visible;
+                battery-percent: root.status-battery-percent;
+                battery-charging: root.status-battery-charging;
                 utility-activated(index) => { root.activate-utility(index); }
             }
 
             Footer {
+                icon-render-scale: root.ui-scale;
                 x: 0px;
                 y: parent.height - Metrics.footer-height;
                 width: parent.width;

@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 use crate::{
+    appearance::store::AppearanceStoreError,
     persistence::{PersistenceError, settings::SettingsStoreError},
     platform::data_paths::DataPathError,
     services::import::SourceImportError,
@@ -17,6 +18,8 @@ pub enum AppError {
     Persistence(#[from] PersistenceError),
     #[error(transparent)]
     Settings(#[from] SettingsStoreError),
+    #[error(transparent)]
+    Appearance(#[from] AppearanceStoreError),
     #[error(transparent)]
     SourceRegistryBuild(#[from] SourceRegistryBuildError),
     #[error(transparent)]

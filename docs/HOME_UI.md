@@ -260,9 +260,9 @@ A zero-game library uses a dedicated Home empty state. `GameCarousel` is instant
 
 ## Phase 7.0.5 launch feedback
 
-A fresh Accept on a source-backed Home game immediately enters source-neutral launch feedback before `GameLaunchService` dispatch. The selected title pill keeps the same fixed geometry and shows a second-line `Launching…` status. The selected card performs a restrained press-in by changing its real target width/height from the normal selected scale to `Metrics.game-launch-pressed-scale`; it does not transform-scale an already rasterized subtree.
+A fresh Accept on a source-backed Home game triggers a brief 125 ms source-neutral press animation before the selected cover springs back over 230 ms. A successful `GameLaunchService` dispatch shows a compact, separate `Playing` pill beside the unmodified game-title label instead of `Launching…` as a second title line. `Playing` denotes a successful launcher dispatch, not independently verified process state for external URI launches. The press uses real width/height geometry (`Metrics.game-launch-pressed-scale`), not a bitmap transform.
 
-While launch handoff is pending, Home suppresses duplicate Accept and Left/Right carousel actions. A synchronous dispatch error changes the status to `Launch failed`. Pending feedback clears when Horizon loses OS window activation to the launched game/another application. `Motion.launch-press-duration` respects Reduced Motion. See ADR 0043.
+While launch handoff is pending, Home suppresses duplicate Accept and Left/Right carousel actions. A synchronous dispatch error continues to show `Launch failed`. The Playing pill clears when Horizon loses OS activation, when navigation resets it, or when a managed session terminates. Both `Motion.launch-press-duration` and `Motion.launch-release-duration` respect Reduced Motion. See ADR 0043 (historical), ADR 0101.
 
 
 ## Phase 8 launch-to-activity handoff
@@ -273,7 +273,7 @@ If launch feedback is cancelled before that handoff (for example by abandoning t
 
 ## Phase 9.5 managed launch feedback
 
-Home keeps the existing source-neutral `Launching…` acknowledgement for both external and managed launches. A managed receipt adds only an opaque `ManagedSessionId` to Rust launch feedback so an unusually early helper/session failure can clear or fail that acknowledgement; no helper, Gamescope, or provider command detail enters Slint.
+Home uses the separate source-neutral `Playing` pill after successful external or managed launch dispatch. A managed receipt adds only an opaque `ManagedSessionId` to Rust feedback so unusually early helper/session failure can clear or fail that acknowledgement; no helper, Gamescope, or provider command detail enters Slint.
 
 ## Phase 9.5.5 selected-title marquee polish
 
@@ -383,3 +383,183 @@ Phase 9.5.22 intentionally removes the image-backed marquee path and returns
 surface-overlay fades. This restores crisp glyphs, smooth motion, and the
 existing delayed one-way marquee behavior while preserving the current 2.4 s
 end hold.
+
+## Phase 9.5.44.45 Playing badge lifecycle and placement
+
+The Playing badge belongs to the game card, centered just inside the lower
+artwork edge rather than beside the selected-title pill. It follows card scale
+without depending on game selection, Home focus, or window activation.
+
+The badge now appears only for runtime-observed games after the source emits a
+confirmed Started event or for a genuinely managed session after launch. The
+exact matching terminal event clears it, including an unknown/lost lifecycle.
+Overlapping game sessions are tracked independently. Steam runtime observation
+can therefore keep a badge visible while a game is running even when Horizon
+is not the foreground window. Heroic's currently external-only dispatch does
+not claim a confirmed Playing state; launch dispatch alone is insufficient.
+
+Transient launch handoff/press feedback is separate from this lifecycle state.
+Artwork refreshes preserve the badge. This supersedes ADR 0101's decision to
+display Playing immediately on dispatch and clear it on window deactivation.
+
+## Phase 9.5.44.50 — Animated Playing badge transitions
+
+The Playing badge remains anchored just above the game card's lower artwork edge,
+independent of selection and Home focus. The card keeps the badge component in
+its Slint tree even when `is-playing` is false; binding its existence to `if`
+would discard it before an exit animation can run. Instead, only `opacity` and
+`y` respond to the existing source-driven session state.
+
+The pill enters with a 210 ms fade and gentle 7 px rise. It exits with a
+155 ms fade and sink, remaining in place and fully readable while the game runs.
+An interrupted transition reverses to the new target rather than restarting a
+separate timer. Both motions use `Motion` tokens and resolve instantly when
+Reduced Motion is enabled. The pill uses a Switch-inspired dark neutral fill,
+white lettering, and no border or accent-coloured outline; only the small dot
+uses the selected accent. The capsule stays legible in High Contrast. Card
+geometry, launch/session semantics, and source permissions remain unchanged.
+
+## Phase 9.5.44.51 — Reduce Playing badge drift during focus scaling
+
+The active Playing capsule should not noticeably jump when its cover is
+selected or deselected. The game art still grows smoothly from 220 px to
+242 px at 1.10× selection, but a layout-only badge anchor compensates for
+40% of that growth. As a result the pill moves approximately 2.2 px rather
+than 11 px vertically during this focus transition. The badge remains centered
+and comfortably inset inside the cover, keeps its constant 90×30 px size and
+borderless neutral appearance, and does not obstruct focus brackets.
+
+The Playing lifecycle animation now occurs inside that anchor, not on the
+anchor itself. Its separate 210 ms enter/155 ms exit fade-and-slide continues
+to respond only to `is-playing` and honours Reduced Motion. Shell geometry,
+selection animation, title pill, Steam/Heroic observation, and persistence are
+unchanged. See ADR 0108.
+
+## Phase 9.5.44.52 — Eliminate Playing-label end-of-animation popping
+
+The pill's background still rises 7 px/fades in over 210 ms and sinks/fades
+over 155 ms. Its white `Playing` label and accent dot now live in a sibling,
+stationary layer instead of following the background's animated `y` coordinate.
+The content opacity animates over 160 ms on entry and 120 ms on exit, allowing
+the text to settle before the capsule's final movement frames. This prevents
+subpixel-baseline text re-rasterization at the end of the transition.
+
+The card-growth compensation is now exactly 50%, keeping the label's baseline
+stationary while the art expands or contracts on focus; the earlier residual
+2.2 px drift is removed. The pill remains borderless, bottom-centred, and
+Switch-inspired. All four animation durations honor Reduced Motion. No changes
+to game lifecycle, Heroic/Steam runtime observation, or playtime recording.
+See ADR 0109.
+
+
+## Phase 9.5.44.54 — Keep Playing badge anchored to the artwork
+
+Selection expands a game card symmetrically around its centre. The earlier
+50% growth compensation from Phase 9.5.44.52 kept the Playing label fixed in
+screen space, but unintentionally made the badge travel **relative to the
+artwork** as its height changed. Phase 9.5.44.54 reverses that policy.
+
+The persistent Playing overlay is now a child of `artwork-frame`, clipped
+within the same rounded artwork viewport. Its horizontal centre and 12 px
+bottom inset are defined directly against the artwork's actual animated
+bounds. Consequently, the cover and badge travel together while focus or
+launch-press changes card size, without any counter-transform or extra
+focus-induced `y` animation. The badge remains a fixed 90×30 px capsule.
+
+The independent Playing-state transitions from Phase 9.5.44.52 remain intact:
+the background fades/slides on session start/stop, and the white text and
+accent dot only fade within the badge's artwork-local coordinates. The text
+no longer moves *within the pill* during its entrance/exit, although both the
+text and pill follow their parent artwork when the artwork itself resizes.
+The dark borderless styling, Reduced Motion, and Steam/Heroic tracking are
+unchanged. See ADR 0111.
+
+## Focus and boundary consistency (Phase 9.5.44.60)
+
+The authored single-layer Home game focus bracket remains visually distinct
+for the game carousel, but uses the same `Theme.focus`, 140 ms focus transition
+and Reduced Motion behaviour as menu focus. Header utilities now use the same
+outline-only focus treatment as Settings (rounded to each icon's geometry).
+Directional repeat NEVER wraps. A new discrete Left/Right press when already
+at the game/header row boundary MAY wrap to the opposite end; the same press
+that reaches an edge does not wrap. Keyboard, controller D-pad and analog share
+one Rust policy. See ADR 0117.
+
+
+### Phase 9.5.44.61 utility focus alignment
+
+The top utility outline uses the same stroke-and-colour animation as Settings
+root, with a circular 48px radius-matched frame. Each 40px utility icon
+remains precisely centred in its 40px focus cell through focus and defocus.
+The previous quiet perimeter-highlight sweep remains, without an upward lift or background tint. The existing navigation sound,
+edge-wrap rules and game artwork-specific focus treatment are unchanged.
+
+
+### Phase 9.5.44.62 — Coupled utility focus lift
+
+Phase 9.5.44.61 kept both utility icons and their circular focus strokes
+stationary. The preferred earlier effect was a subtle **2px upward lift** of
+the focused utility; the defect was that the outline did not follow the icon.
+
+Each utility cell now exports one focus-owned lift offset applied to both the
+40px authored icon and its 48px, transparent, single-stroke selection outline.
+Their `y` transitions use identical `Motion.focus-duration` and `ease-in-out`
+so the icon remains centered **inside its moving focus ring** on focus and
+defocus, not necessarily at the stationary cell centre. The layout cell and
+pointer hit target stay fixed; no utility tint, icon scale, or recolouring is
+introduced. Reduced Motion disables the displacement. No other menu focus
+style, navigation policy, or OK/Back sound is changed. See ADR 0119.
+
+
+### Phase 9.5.44.62 — uniform pulse + coupled utility lift
+
+The focus reference is **one stationary, full-perimeter accent stroke** whose
+brightness rises and falls uniformly (3200ms cycle, 86%-100%). Neither the
+utility outline nor the Home game's authored corner brackets use a rotating
+highlight or sweeping gradient. The utilities and their matching rings rise
+**together by 2px** on focus, keeping their centres aligned throughout the
+140ms transition. The background remains transparent, icon SVG colours stay
+unchanged, and the pointer hit area does not move. Reduced Motion/High Contrast
+suppress the idle brightness pulse; Reduced Motion also suppresses the lift.
+
+## Phase 9.5.44.63 — Home focus preservation
+
+Phase 9.5.44.62 incorrectly replaced the Home game-card focus with an
+alpha-only pulse. The *exact* native vector focus frame from Phase 9.5.44.38
+is restored (with the Phase 9.5.44.39 3200 ms shared cycle). It retains the
+four corner paths, their subtle size motion, the accent-derived highlight, and
+the soft Gaussian emission. No Home focus geometry or animation style was
+intended to change; other menus now adopt its brightness rhythm rather than
+Home adopting their border style. See ADR 0120.
+
+## Live system status (Phase 9.5.44.67)
+
+The top-right network and battery glyphs are data-driven, not decoration.
+NetworkManager reports active wired/Wi-Fi connections and the strength of the
+associated access point. When disconnected or inaccessible, the indicator shows
+an offline slash rather than fictional full Wi-Fi. Limited/portal connectivity
+is distinguished with an exclamation point. See `docs/STATUS.md`.
+
+UPower's composite *host* battery has priority (laptop and handheld hardware),
+followed by the first SDL-connected gamepad that actually reports power.
+The battery icon disappears when neither has valid information, without leaving
+an empty battery-shaped slot. Charging adds a bolt. Neither source is inferred
+from window focus or program launch; all readings may be hardware estimates.
+
+### Peripheral presence motion (Phase 9.5.44.73)
+
+Top-right battery and bottom-left controller symbol use the same restrained
+status-motion family: 7px or less directional slide with alpha fade, 220ms on
+appearance and 155ms on disappearance. Indicator elements are persistent, not
+conditionally removed at the end of a connection; this preserves animated exit.
+They remain independent of the GameCard focus-bracket design. With Reduced
+Motion both the opacity and position change immediately.
+
+### Peripheral presence motion (Phase 9.5.44.73)
+
+Top-right battery and bottom-left controller symbol use the same restrained
+status-motion family: 7px or less directional slide with alpha fade, 220ms on
+appearance and 155ms on disappearance. Indicator elements are persistent, not
+conditionally removed at the end of a connection; this preserves animated exit.
+They remain independent of the GameCard focus-bracket design. With Reduced
+Motion both the opacity and position change immediately.

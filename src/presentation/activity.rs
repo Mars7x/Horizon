@@ -43,6 +43,19 @@ impl ActivityController {
         .unwrap_or_else(|_| overview.observed_playtime());
 
         ui.set_activity_total_playtime(format_duration(display_total).into());
+        ui.set_activity_reported_playtime(if overview.reported_games().is_empty() {
+            "—".into()
+        } else {
+            format_duration(overview.reported_playtime()).into()
+        });
+        let reported = overview.reported_games().iter().take(3).map(|entry| {
+            ActivityGameData {
+                title: entry.title().as_str().into(),
+                playtime: format_duration(entry.lifetime()).into(),
+                sessions: format!("{} · reported", source_display_name(entry.source_id().as_str())).into(),
+            }
+        }).collect::<Vec<_>>();
+        ui.set_activity_reported_games(ModelRc::from(Rc::new(VecModel::from(reported))));
         ui.set_activity_session_count(overview.completed_sessions().to_string().into());
         ui.set_activity_game_count(overview.played_games().to_string().into());
 
@@ -95,6 +108,13 @@ impl ActivityController {
             .collect::<Vec<_>>();
         ui.set_activity_top_games(ModelRc::from(Rc::new(VecModel::from(top_games))));
     }
+}
+
+fn source_display_name(source: &str) -> String {
+    let mut chars = source.chars();
+    chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().collect::<String>() + chars.as_str()
+    })
 }
 
 fn tracking_method_label(method: SessionTrackingMethod) -> &'static str {

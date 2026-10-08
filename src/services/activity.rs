@@ -84,6 +84,23 @@ impl GameActivitySummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReportedGameSummary {
+    title: GameTitle,
+    source_id: SourceId,
+    lifetime: PlaytimeSeconds,
+}
+
+impl ReportedGameSummary {
+    pub fn new(title: GameTitle, source_id: SourceId, lifetime: PlaytimeSeconds) -> Self {
+        Self { title, source_id, lifetime }
+    }
+
+    pub fn title(&self) -> &GameTitle { &self.title }
+    pub fn source_id(&self) -> &SourceId { &self.source_id }
+    pub const fn lifetime(&self) -> PlaytimeSeconds { self.lifetime }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActivityOverview {
     observed_playtime: PlaytimeSeconds,
     completed_sessions: usize,
@@ -91,6 +108,8 @@ pub struct ActivityOverview {
     active_sessions: Vec<RecentActivitySession>,
     recent_sessions: Vec<RecentActivitySession>,
     top_games: Vec<GameActivitySummary>,
+    reported_playtime: PlaytimeSeconds,
+    reported_games: Vec<ReportedGameSummary>,
 }
 
 impl ActivityOverview {
@@ -108,7 +127,27 @@ impl ActivityOverview {
             active_sessions: Vec::new(),
             recent_sessions,
             top_games,
+            reported_playtime: PlaytimeSeconds::new(0).expect("zero duration"),
+            reported_games: Vec::new(),
         }
+    }
+
+    pub fn with_source_reported(
+        mut self,
+        reported_playtime: PlaytimeSeconds,
+        reported_games: Vec<ReportedGameSummary>,
+    ) -> Self {
+        self.reported_playtime = reported_playtime;
+        self.reported_games = reported_games;
+        self
+    }
+
+    pub const fn reported_playtime(&self) -> PlaytimeSeconds {
+        self.reported_playtime
+    }
+
+    pub fn reported_games(&self) -> &[ReportedGameSummary] {
+        &self.reported_games
     }
 
     pub fn with_active_sessions(mut self, active_sessions: Vec<RecentActivitySession>) -> Self {

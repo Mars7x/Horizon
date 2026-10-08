@@ -1,11 +1,11 @@
 use std::{
-    cell::RefCell, rc::Rc, sync::{Arc, atomic::{AtomicU64, Ordering}, mpsc::{self, Receiver, Sender}},
-    path::PathBuf,
+    cell::{Cell, RefCell}, collections::BTreeMap, rc::Rc, sync::{Arc, atomic::{AtomicU64, Ordering}, mpsc::{self, Receiver, Sender}},
+    path::PathBuf, time::Duration,
 };
 
 use slint::{
     Color, ComponentHandle, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString,
-    VecModel,
+    VecModel, Timer,
 };
 use tracing::{debug, warn};
 
@@ -13,6 +13,7 @@ use crate::{
     AppWindow, GameCardData,
     domain::LibraryGame,
     input::{UiAction, UiActionEvent},
+    navigation::step_with_edge_wrap,
     services::{
         activity::LaunchActivitySink,
         artwork::{ArtworkService, SquareArtwork},
@@ -20,6 +21,7 @@ use crate::{
         settings::ArtworkPreferences,
         steamgriddb::SteamGridDbLookup,
         steamgriddb_artwork::{self, ArtworkLookupJob, ArtworkWorkerEvent},
+        runtime::{RuntimeObservationEvent, RuntimeObservationId},
         session::ManagedSessionId,
     },
 };
@@ -52,16 +54,9 @@ impl HomeState {
         }
 
         let max_index = game_count.saturating_sub(1) as i32;
-        if allow_wrap && delta < 0 && self.selected_index == 0 {
-            self.selected_index = max_index;
-        } else if allow_wrap && delta > 0 && self.selected_index == max_index {
-            self.selected_index = 0;
-        } else {
-            self.selected_index = self
-                .selected_index
-                .saturating_add(delta)
-                .clamp(0, max_index);
-        }
+        self.selected_index = step_with_edge_wrap(
+            self.selected_index, 0, max_index, delta, !allow_wrap,
+        );
 
         self.selected_index
     }
@@ -73,29 +68,68 @@ enum LaunchFeedbackState {
     Idle,
     Launching {
         index: i32,
+    },
+    // Dispatch is not a confirmed running process. Keep this transient state
+    // separate from the per-card runtime/managed lifecycle badge.
+    Dispatched {
         managed_session: Option<ManagedSessionId>,
     },
     Failed,
 }
 
 impl LaunchFeedbackState {
-    fn is_launching(self) -> bool {
-        matches!(self, Self::Launching { .. })
-    }
-
-    fn launching_index(self) -> i32 {
-        match self {
-            Self::Launching { index, .. } => index,
-            Self::Idle | Self::Failed => -1,
-        }
+    fn handoff_pending(self) -> bool {
+        matches!(self, Self::Launching { .. } | Self::Dispatched { .. })
     }
 
     fn status_text(self) -> &'static str {
         match self {
-            Self::Idle => "",
-            Self::Launching { .. } => "Launching…",
             Self::Failed => "Launch failed",
+            Self::Idle | Self::Launching { .. } | Self::Dispatched { .. } => "",
         }
+    }
+}
+
+// Runtime start/stop events own the Playing label, not window activation,
+// title selection, launch success, or the visual press timer. Keeping the
+// observation identity also handles concurrent games and overlapping launches.
+#[derive(Debug, Default)]
+struct PlayingState {
+    pending_runtime: BTreeMap<RuntimeObservationId, i32>,
+    running_runtime: BTreeMap<RuntimeObservationId, i32>,
+    managed: BTreeMap<ManagedSessionId, i32>,
+}
+
+impl PlayingState {
+    fn arm_runtime(&mut self, observation_id: RuntimeObservationId, index: i32) {
+        self.pending_runtime.insert(observation_id, index);
+    }
+
+    fn runtime_event(&mut self, event: &RuntimeObservationEvent) -> Option<i32> {
+        match event {
+            RuntimeObservationEvent::Started { observation_id, .. } => {
+                let index = self.pending_runtime.remove(observation_id)?;
+                self.running_runtime.insert(*observation_id, index);
+                Some(index)
+            }
+            RuntimeObservationEvent::Terminal { observation_id, .. } => {
+                self.pending_runtime.remove(observation_id)
+                    .or_else(|| self.running_runtime.remove(observation_id))
+            }
+        }
+    }
+
+    fn managed_started(&mut self, session_id: ManagedSessionId, index: i32) {
+        self.managed.insert(session_id, index);
+    }
+
+    fn managed_ended(&mut self, session_id: ManagedSessionId) -> Option<i32> {
+        self.managed.remove(&session_id)
+    }
+
+    fn is_playing(&self, index: i32) -> bool {
+        self.running_runtime.values().any(|running| *running == index)
+            || self.managed.values().any(|running| *running == index)
     }
 }
 
@@ -118,6 +152,10 @@ pub struct HomeController {
     launch_activity: Rc<dyn LaunchActivitySink>,
     state: RefCell<HomeState>,
     launch_feedback: RefCell<LaunchFeedbackState>,
+    playing: RefCell<PlayingState>,
+    // Invalidates an old press-release callback on failure, navigation or a
+    // subsequent launch; the visual press is independent of session lifetime.
+    press_generation: Rc<Cell<u64>>,
 }
 
 impl HomeController {
@@ -160,6 +198,8 @@ impl HomeController {
             launch_activity,
             state: RefCell::new(HomeState::default()),
             launch_feedback: RefCell::new(LaunchFeedbackState::default()),
+            playing: RefCell::new(PlayingState::default()),
+            press_generation: Rc::new(Cell::new(0)),
         });
 
         controller.select_index(ui, 0);
@@ -193,7 +233,7 @@ impl HomeController {
         let generation = self.artwork_generation.fetch_add(1, Ordering::AcqRel) + 1;
         if !force_refresh {
             for (index, card) in self.source_cards.iter().enumerate() {
-                self.cards.set_row_data(index, card.clone());
+                self.publish_card(index, card.clone());
             }
         }
         let Some(api_key) = preferences.api_key else { return; };
@@ -219,7 +259,7 @@ impl HomeController {
                     card.pixelated_artwork = result.artwork.pixelated();
                     card.artwork = square_artwork_to_slint(result.artwork);
                     card.has_artwork = true;
-                    self.cards.set_row_data(result.index, card);
+                    self.publish_card(result.index, card);
                 }
                 ArtworkWorkerEvent::RefreshProgress { generation, completed, total,
                     finished, error } => {
@@ -262,8 +302,8 @@ impl HomeController {
         self.select_index(ui, requested_index);
     }
 
-    /// Clear transient launch feedback when Horizon yields foreground ownership
-    /// to the launched game (or another application).
+    /// Window activation ends only temporary launch handoff feedback, never
+    /// source-verified Playing state.
     pub fn handle_application_active_changed(&self, ui: &AppWindow, active: bool) {
         if !active {
             self.clear_launch_feedback(ui);
@@ -279,9 +319,13 @@ impl HomeController {
         session_id: ManagedSessionId,
         failed: bool,
     ) {
+        let ended_index = self.playing.borrow_mut().managed_ended(session_id);
+        if let Some(index) = ended_index {
+            self.refresh_playing_card(index);
+        }
         let matches_session = matches!(
             *self.launch_feedback.borrow(),
-            LaunchFeedbackState::Launching {
+            LaunchFeedbackState::Dispatched {
                 managed_session: Some(current),
                 ..
             } if current == session_id
@@ -300,8 +344,30 @@ impl HomeController {
         );
     }
 
+    /// Consume the same lifecycle events used by Activity, including terminal
+    /// errors/loss. The UI does not infer running status from focus or a URI.
+    pub fn handle_runtime_observation_event(&self, event: &RuntimeObservationEvent) {
+        let changed_index = self.playing.borrow_mut().runtime_event(event);
+        if let Some(index) = changed_index {
+            self.refresh_playing_card(index);
+        }
+    }
+
+    fn publish_card(&self, index: usize, mut card: GameCardData) {
+        card.is_playing = self.playing.borrow().is_playing(index as i32);
+        self.cards.set_row_data(index, card);
+    }
+
+    fn refresh_playing_card(&self, index: i32) {
+        let Ok(index) = usize::try_from(index) else { return; };
+        if let Some(mut card) = self.cards.row_data(index) {
+            card.is_playing = self.playing.borrow().is_playing(index as i32);
+            self.cards.set_row_data(index, card);
+        }
+    }
+
     pub fn handle_action(&self, ui: &AppWindow, event: UiActionEvent) {
-        if self.launch_feedback.borrow().is_launching()
+        if self.launch_feedback.borrow().handoff_pending()
             && matches!(event.action, UiAction::Left | UiAction::Right | UiAction::Accept)
         {
             debug!(
@@ -340,15 +406,12 @@ impl HomeController {
 
         self.set_launch_feedback(
             ui,
-            LaunchFeedbackState::Launching {
-                index,
-                managed_session: None,
-            },
+            LaunchFeedbackState::Launching { index },
         );
 
         match self.launch_service.launch_game(game) {
             Ok(receipt) => {
-                match receipt.mode() {
+                let managed_session = match receipt.mode() {
                     GameLaunchMode::External => {
                         self.launch_activity
                             .launch_dispatched(game.game().id(), receipt.source_id().clone());
@@ -358,8 +421,10 @@ impl HomeController {
                             source = %receipt.source_id(),
                             "external game launch dispatched; waiting for foreground handoff"
                         );
+                        None
                     }
                     GameLaunchMode::Observed(observation_id) => {
+                        self.playing.borrow_mut().arm_runtime(observation_id, index);
                         self.launch_activity.runtime_observation_armed(
                             observation_id,
                             game.game().id(),
@@ -372,15 +437,11 @@ impl HomeController {
                             observation_id = observation_id.get(),
                             "external game launch dispatched with source runtime observation"
                         );
+                        None
                     }
                     GameLaunchMode::Managed(session_id) => {
-                        self.set_launch_feedback(
-                            ui,
-                            LaunchFeedbackState::Launching {
-                                index,
-                                managed_session: Some(session_id),
-                            },
-                        );
+                        self.playing.borrow_mut().managed_started(session_id, index);
+                        self.refresh_playing_card(index);
                         self.launch_activity.managed_session_started(
                             session_id,
                             game.game().id(),
@@ -393,8 +454,15 @@ impl HomeController {
                             session_id = session_id.get(),
                             "managed game session started"
                         );
+                        Some(session_id)
                     }
-                }
+                };
+                // Handoff/press feedback stays transient; source-confirmed
+                // runtime and managed lifecycles drive per-card Playing.
+                self.set_launch_feedback(ui, LaunchFeedbackState::Dispatched {
+                    managed_session,
+                });
+                self.schedule_press_release(ui);
             }
             Err(error) => {
                 self.set_launch_feedback(ui, LaunchFeedbackState::Failed);
@@ -410,15 +478,41 @@ impl HomeController {
 
     fn set_launch_feedback(&self, ui: &AppWindow, state: LaunchFeedbackState) {
         *self.launch_feedback.borrow_mut() = state;
-        ui.set_launching_game_index(state.launching_index());
+        match state {
+            LaunchFeedbackState::Launching { index } => {
+                self.press_generation.set(self.press_generation.get().wrapping_add(1));
+                ui.set_launching_game_index(index);
+            }
+            LaunchFeedbackState::Dispatched { .. } => {
+                // Keep the short press held until the release timer fires.
+            }
+            LaunchFeedbackState::Idle | LaunchFeedbackState::Failed => {
+                self.press_generation.set(self.press_generation.get().wrapping_add(1));
+                ui.set_launching_game_index(-1);
+            }
+        }
         ui.set_launch_feedback_text(state.status_text().into());
+    }
+
+    fn schedule_press_release(&self, ui: &AppWindow) {
+        let press_generation = Rc::clone(&self.press_generation);
+        let current = press_generation.get();
+        let ui_weak = ui.as_weak();
+        // Give the press-in frame time to render before releasing it. The card
+        // springs back without modifying a game's lifecycle-backed pill.
+        Timer::single_shot(Duration::from_millis(125), move || {
+            if press_generation.get() != current { return; }
+            if let Some(ui) = ui_weak.upgrade() {
+                ui.set_launching_game_index(-1);
+            }
+        });
     }
 
     fn clear_launch_feedback(&self, ui: &AppWindow) {
         if *self.launch_feedback.borrow() == LaunchFeedbackState::Idle {
             return;
         }
-        if self.launch_feedback.borrow().is_launching() {
+        if self.launch_feedback.borrow().handoff_pending() {
             self.launch_activity.cancel_pending_launch();
         }
         self.set_launch_feedback(ui, LaunchFeedbackState::Idle);
@@ -434,7 +528,7 @@ impl HomeController {
     }
 
     fn select_index(&self, ui: &AppWindow, requested_index: i32) {
-        if self.launch_feedback.borrow().is_launching() {
+        if self.launch_feedback.borrow().handoff_pending() {
             return;
         }
         self.clear_launch_feedback(ui);
@@ -478,6 +572,7 @@ fn game_card(game: &LibraryGame, artwork_service: &ArtworkService) -> GameCardDa
         artwork: artwork.unwrap_or_default(),
         has_artwork,
         pixelated_artwork,
+        is_playing: false,
         cover_primary: rgb(primary),
         cover_secondary: rgb(secondary),
         cover_highlight: rgb(highlight),
@@ -550,7 +645,9 @@ fn rgb((red, green, blue): (u8, u8, u8)) -> Color {
 
 #[cfg(test)]
 mod tests {
-    use super::{HomeState, LaunchFeedbackState, monogram, needs_external_artwork};
+    use super::{HomeState, LaunchFeedbackState, PlayingState, monogram, needs_external_artwork};
+    use crate::services::runtime::{RuntimeObservationEvent, RuntimeObservationId, RuntimeObservationTerminalState};
+    use crate::services::session::ManagedSessionId;
 
     #[test]
     fn artwork_precedence_skips_external_when_source_present_by_default() {
@@ -569,18 +666,82 @@ mod tests {
     }
 
     #[test]
-    fn launch_feedback_distinguishes_pending_and_failed_states_without_source_details() {
-        let launching = LaunchFeedbackState::Launching {
-            index: 3,
-            managed_session: None,
-        };
-        assert!(launching.is_launching());
-        assert_eq!(launching.launching_index(), 3);
-        assert_eq!(launching.status_text(), "Launching…");
+    fn launch_feedback_distinguishes_dispatch_and_failed_states_without_source_details() {
+        let launching = LaunchFeedbackState::Launching { index: 3 };
+        assert!(launching.handoff_pending());
+        assert_eq!(launching.status_text(), "");
 
-        assert!(!LaunchFeedbackState::Failed.is_launching());
-        assert_eq!(LaunchFeedbackState::Failed.launching_index(), -1);
+        let dispatched = LaunchFeedbackState::Dispatched { managed_session: None };
+        assert!(dispatched.handoff_pending());
+        assert_eq!(dispatched.status_text(), "");
+
+        assert!(!LaunchFeedbackState::Failed.handoff_pending());
         assert_eq!(LaunchFeedbackState::Failed.status_text(), "Launch failed");
+    }
+
+    #[test]
+    fn playing_requires_running_event_and_ends_at_runtime_terminal() {
+        let mut state = PlayingState::default();
+        let id = RuntimeObservationId::new(7).unwrap();
+        state.arm_runtime(id, 3);
+        assert!(!state.is_playing(3));
+        assert_eq!(state.runtime_event(&RuntimeObservationEvent::Started {
+            observation_id: id, started_at: 12,
+        }), Some(3));
+        assert!(state.is_playing(3));
+        assert!(!state.is_playing(2));
+        assert_eq!(state.runtime_event(&RuntimeObservationEvent::Terminal {
+            observation_id: id,
+            terminal: RuntimeObservationTerminalState::Exited { started_at: 12, ended_at: 30 },
+        }), Some(3));
+        assert!(!state.is_playing(3));
+    }
+
+    #[test]
+    fn concurrent_running_observations_do_not_clear_each_other() {
+        let mut state = PlayingState::default();
+        for value in [1, 2] {
+            let id = RuntimeObservationId::new(value).unwrap();
+            state.arm_runtime(id, 4);
+            state.runtime_event(&RuntimeObservationEvent::Started { observation_id: id, started_at: 1 });
+        }
+        let first = RuntimeObservationId::new(1).unwrap();
+        state.runtime_event(&RuntimeObservationEvent::Terminal {
+            observation_id: first, terminal: RuntimeObservationTerminalState::Lost,
+        });
+        assert!(state.is_playing(4));
+    }
+
+    #[test]
+    fn managed_session_badge_is_cleared_by_matching_completion_only() {
+        let mut badge = PlayingState::default();
+        let first = ManagedSessionId::new(3).unwrap();
+        let second = ManagedSessionId::new(4).unwrap();
+        badge.managed_started(first, 2);
+        badge.managed_started(second, 5);
+        assert!(badge.is_playing(2));
+        assert!(badge.is_playing(5));
+        assert_eq!(badge.managed_ended(first), Some(2));
+        assert!(!badge.is_playing(2));
+        assert!(badge.is_playing(5));
+    }
+
+    #[test]
+    fn playing_indicator_ignores_handoff_reset_and_clears_on_lost_lifecycle() {
+        let mut badge = PlayingState::default();
+        let mut handoff = LaunchFeedbackState::Launching { index: 6 };
+        let id = RuntimeObservationId::new(11).unwrap();
+        assert!(handoff.handoff_pending());
+        badge.arm_runtime(id, 6);
+        badge.runtime_event(&RuntimeObservationEvent::Started { observation_id: id, started_at: 100 });
+        handoff = LaunchFeedbackState::Idle; // app loses focus
+        assert!(!handoff.handoff_pending());
+        assert!(badge.is_playing(6));
+        badge.runtime_event(&RuntimeObservationEvent::Terminal {
+            observation_id: id,
+            terminal: RuntimeObservationTerminalState::Lost,
+        });
+        assert!(!badge.is_playing(6));
     }
 
     #[test]

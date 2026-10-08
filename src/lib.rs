@@ -1,6 +1,7 @@
 slint::include_modules!();
 
 pub mod app;
+pub mod audio;
 pub mod appearance;
 pub mod domain;
 pub mod error;

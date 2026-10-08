@@ -10,6 +10,11 @@ export global Theme {
     in-out property <color> divider: #dadae0;
     in-out property <color> shadow: #00000026;
 
+    // The Playing capsule stays dark/neutral over any cover artwork in both
+    // themes; only the small status dot follows the current accent colour.
+    in-out property <color> playing-pill-background: #202126;
+    in-out property <color> playing-pill-foreground: #ffffff;
+
     in-out property <color> accent: #3584e4;
     in-out property <color> accent-hover: #317acb;
     in-out property <color> accent-pressed: #2d70b8;
@@ -17,6 +22,9 @@ export global Theme {
     in-out property <color> accent-foreground: #ffffff;
     in-out property <color> focus: #3584e4;
     in-out property <color> focus-highlight: #62a0ea;
+    // Picker preview of the White preset uses the very same contrast-adjusted
+    // focus colour chosen by the Rust appearance resolver for Light/Dark.
+    in-out property <color> appearance-white-swatch: #ffffff;
 
 }
 
@@ -78,6 +86,9 @@ export global Metrics {
     out property <length> game-stride: 250px;
     out property <length> game-slot-height: 320px;
     out property <float> game-selected-scale: 1.10;
+    // Bottom inset measured inside the actual artwork frame; unlike a
+    // screen-space compensation this stays constant while the art grows.
+    out property <length> playing-pill-artwork-bottom-inset: 12px;
     out property <float> game-launch-pressed-scale: 1.055;
     out property <length> game-shell-radius: 30px;
     out property <length> game-art-inset: 20px;
@@ -116,15 +127,33 @@ export global Motion {
     in-out property <bool> reduced-motion: false;
 
     out property <duration> focus-duration: reduced-motion ? 0ms : 140ms;
+    // Peripheral HUD status, not menu focus. No motion with Reduced Motion.
+    out property <duration> status-enter-duration: reduced-motion ? 0ms : 220ms;
+    out property <duration> status-exit-duration: reduced-motion ? 0ms : 155ms;
+    out property <length> status-slide-distance: reduced-motion ? 0px : 7px;
 
-    // One shared idle rhythm for game brackets, circular utilities, and
-    // Settings focus. All three use the same clock and accent-derived colour.
-    // Reduced Motion / High Contrast still suppress idle animation at each
-    // focus component's own eligibility check.
+    // Preserve the existing Home game bracket cadence and its accent-derived
+    // colour breathing; menu strokes share that same single clock/brush.
+    // Unlike alpha-only changes, colour mixing stays visible on opaque surfaces.
     out property <duration> focus-idle-cycle: 3200ms;
     out property <float> focus-idle-highlight-strength: 0.80;
+    out property <color> menu-focus-color:
+        reduced-motion || Theme.high-contrast ? Theme.focus
+        : Theme.focus.mix(Theme.focus-highlight,
+            1.0 - focus-idle-highlight-strength
+                * (0.5 - 0.5 * cos(animation-tick() / focus-idle-cycle * 360deg)));
     out property <length> game-focus-idle-expansion: 2.2px;
     out property <duration> launch-press-duration: reduced-motion ? 0ms : 90ms;
+    out property <duration> launch-release-duration: reduced-motion ? 0ms : 230ms;
+    // Playing badges are persistent card overlays. Fade/slide both directions;
+    // never tie these presentation timings to the source's session lifecycle.
+    out property <duration> playing-pill-enter-duration: reduced-motion ? 0ms : 210ms;
+    out property <duration> playing-pill-exit-duration: reduced-motion ? 0ms : 155ms;
+    // Fade the stationary text/dot slightly faster than the travelling capsule,
+    // so the glyphs are fully settled before the final movement frames.
+    out property <duration> playing-pill-label-enter-duration: reduced-motion ? 0ms : 160ms;
+    out property <duration> playing-pill-label-exit-duration: reduced-motion ? 0ms : 120ms;
+    out property <length> playing-pill-travel: reduced-motion ? 0px : 7px;
     out property <duration> carousel-duration: reduced-motion ? 0ms : 190ms;
     out property <duration> page-duration: reduced-motion ? 0ms : 220ms;
     out property <duration> hover-duration: reduced-motion ? 0ms : 100ms;

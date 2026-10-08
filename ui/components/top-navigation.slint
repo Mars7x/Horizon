@@ -1,5 +1,6 @@
 import { Theme, Metrics, Motion } from "../theme/theme.slint";
 import { SelectionFocusSurface } from "selection-focus-surface.slint";
+import { NetworkStatusGlyph } from "network-status-glyph.slint";
 import { FriendsIcon, AlbumIcon, ActivityIcon, WebIcon, SettingsIcon, ShopIcon } from "utility-icons.slint";
 
 component Separator inherits Rectangle {
@@ -8,100 +9,191 @@ component Separator inherits Rectangle {
     background: Theme.divider.with-alpha(0.78);
 }
 
-component WifiIndicator inherits Rectangle {
+// Standard GNOME network-wired 16-unit geometry, optically fitted to the
+// existing 22px wired slot. Integer-aligned bars and stems are drawn directly
+// at the target size; repeatedly resampling the original 16px SVG produced
+// softened edges. The upstream SVG is retained unchanged for provenance.
+// This pixel-snapped adaptation follows GNOME Adwaita CC BY-SA 3.0 US.
+component PixelAlignedWiredSymbol inherits Rectangle {
+    width: 22px;
+    height: 22px;
+    background: transparent;
+    // Primary socket, central stem, and T junction.
+    Rectangle {
+        x: 7px; y: 0px; width: 8px; height: 7px;
+        border-radius: 2px; background: Theme.foreground;
+    }
+    Rectangle { x: 10px; y: 6px; width: 2px; height: 5px; background: Theme.foreground; }
+    Rectangle { x: 0px; y: 10px; width: 22px; height: 3px; background: Theme.foreground; }
+    // Downlinks overlap the rounded terminal nodes, leaving no one-pixel seams.
+    Rectangle { x: 3px; y: 12px; width: 3px; height: 5px; background: Theme.foreground; }
+    Rectangle { x: 16px; y: 12px; width: 3px; height: 5px; background: Theme.foreground; }
+    Rectangle {
+        x: 0px; y: 16px; width: 8px; height: 6px;
+        border-radius: 2px; background: Theme.foreground;
+    }
+    Rectangle {
+        x: 14px; y: 16px; width: 8px; height: 6px;
+        border-radius: 2px; background: Theme.foreground;
+    }
+}
+
+// GNOME's wired artwork visually fills more of its SVG viewbox than Wi-Fi.
+// Keep both wired variants in their 22px optical slot, and paint the normal
+// wired icon directly at whole-pixel positions. Other states use the same
+// scale-aware original SVGs as before.
+component NetworkSymbol inherits Rectangle {
+    in property <int> glyph-id: 0;
+    in property <float> render-scale: 1.0;
+    private property <length> glyph-size: root.glyph-id == 1 || root.glyph-id == 2 ? 22px : 26px;
     width: 30px;
     height: 28px;
     background: transparent;
-
-    Path {
-        x: 1px;
-        y: 2px;
-        width: 28px;
-        height: 24px;
-        viewbox-width: 24;
-        viewbox-height: 24;
-        commands: "M 2 8 C 7 3 17 3 22 8 M 5 12 C 9 8 15 8 19 12 M 8.5 16 C 10.5 14 13.5 14 15.5 16 M 12 20 L 12.01 20";
-        fill: transparent;
-        stroke: Theme.foreground;
-        stroke-width: 2.15px;
-        stroke-line-cap: round;
-        stroke-line-join: round;
+    // Direct scene geometry avoids a 16->22px SVG raster step plus a second
+    // fullscreen scale transform on the normal Ethernet icon.
+    if root.glyph-id == 1 : PixelAlignedWiredSymbol {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+    }
+    // The limited/no-route GNOME mark has curved question geometry and uses
+    // the original SVG renderer; all Wi-Fi glyphs remain exactly as before.
+    if root.glyph-id != 1 : NetworkStatusGlyph {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: root.glyph-size;
+        height: root.glyph-size;
+        glyph-id: root.glyph-id;
+        render-scale: root.render-scale;
     }
 }
 
 component BatteryIndicator inherits Rectangle {
-    width: 35px;
-    height: 24px;
-    background: transparent;
-
+    in property <int> percent: 0;
+    in property <bool> charging: false;
+    // Actual battery level, not the theme accent, determines the warning.
+    // Both variants remain distinct from their Light/Dark backgrounds.
+    private property <color> indicator-ink: root.percent <= 20
+        ? (Theme.is-dark ? #ff6875 : #b42318) : Theme.foreground;
+    width: 35px; height: 24px; background: transparent;
     Path {
-        x: 0px;
-        y: 1px;
-        width: 34px;
-        height: 22px;
-        viewbox-width: 30;
-        viewbox-height: 20;
+        x: 0px; y: 1px; width: 34px; height: 22px;
+        viewbox-width: 30; viewbox-height: 20;
         commands: "M 3 4 H 23 Q 26 4 26 7 V 13 Q 26 16 23 16 H 3 Q 1 16 1 13 V 7 Q 1 4 3 4 M 28 8 V 12";
-        fill: transparent;
-        stroke: Theme.foreground;
-        stroke-width: 1.8px;
-        stroke-line-cap: round;
-        stroke-line-join: round;
+        fill: transparent; stroke: root.indicator-ink;
+        stroke-width: 1.8px; stroke-line-cap: round; stroke-line-join: round;
     }
-
+    // Discrete fill avoids a blurry fractional-pixel right edge.
     Rectangle {
-        x: 5px;
-        y: 8px;
-        width: 18px;
-        height: 8px;
-        border-radius: 2px;
-        background: Theme.foreground;
+        x: 5px; y: 8px;
+        width: root.percent >= 95 ? 18px : root.percent >= 75 ? 14px
+            : root.percent >= 50 ? 10px : root.percent >= 25 ? 6px
+            : root.percent > 0 ? 2px : 0px;
+        height: 8px; border-radius: 1px;
+        background: root.indicator-ink;
+    }
+    if root.charging : Path {
+        x: 8px; y: 1px; width: 17px; height: 21px;
+        viewbox-width: 16; viewbox-height: 20;
+        commands: "M 10 0 L 3 10 H 8 L 6 20 L 14 8 H 9 Z";
+        // Solid bolt with a surface-coloured clearance stroke. The previous
+        // hollow/background-filled bolt was difficult to see at small sizes.
+        fill: root.indicator-ink; stroke: Theme.background;
+        stroke-width: 1.8px; stroke-line-join: round;
     }
 }
 
 component StatusCluster inherits Rectangle {
-    width: 113px;
+    in property <float> render-scale: 1.0;
+    in property <int> network-kind: 0; // 0=offline, 1=Ethernet, 2=Wi-Fi
+    in property <int> wifi-strength: 0;
+    in property <bool> network-limited: false;
+    in property <bool> battery-visible: false;
+    in property <int> battery-percent: 0;
+    in property <bool> battery-charging: false;
+    width: root.battery-visible ? 113px : 66px;
+    animate width { duration: root.battery-visible ? Motion.status-enter-duration : Motion.status-exit-duration; easing: ease-in-out; }
     height: 30px;
     background: transparent;
 
-    Separator {
-        x: 0px;
-        y: (parent.height - self.height) / 2;
+    Separator { x: 0px; y: (parent.height - self.height) / 2; }
+    // No active physical connection: never claim a wired disconnection, since
+    // NetworkManager has not identified which interface would be disconnected.
+    if root.network-kind == 0 : NetworkSymbol {
+        x: 28px; y: (parent.height - self.height) / 2;
+        render-scale: root.render-scale;
+        glyph-id: 0;
     }
-
-    WifiIndicator {
-        x: 28px;
-        y: (parent.height - self.height) / 2;
+    if root.network-kind == 1 : NetworkSymbol {
+        x: 28px; y: (parent.height - self.height) / 2;
+        render-scale: root.render-scale;
+        glyph-id: root.network-limited ? 2 : 1;
     }
-
-    BatteryIndicator {
+    if root.network-kind == 2 : NetworkSymbol {
+        x: 28px; y: (parent.height - self.height) / 2;
+        // GNOME's radiowaves numbering is strong (1) to weakest (4).
+        render-scale: root.render-scale;
+        glyph-id: root.network-limited ? 7
+            : root.wifi-strength >= 75 ? 3
+            : root.wifi-strength >= 50 ? 4
+            : root.wifi-strength >= 25 ? 5 : 6;
+    }
+    // Other/unknown networks are not assumed to be Ethernet.
+    if root.network-kind == 3 : NetworkSymbol {
+        x: 28px; y: (parent.height - self.height) / 2;
+        render-scale: root.render-scale;
+        glyph-id: 7;
+    }
+    // Keep the indicator mounted so *both* appear and disappear animate.
+    // Its right edge stays anchored to the cluster during width changes,
+    // with a separate small slide/fade only for its own visibility.
+    battery-slot := Rectangle {
         x: parent.width - self.width;
         y: (parent.height - self.height) / 2;
+        width: 35px;
+        height: 24px;
+        background: transparent;
+        // This slot follows the animated status cluster's width without a
+        // second x-animation fighting that continuously moving position.
+        battery-status := BatteryIndicator {
+            x: root.battery-visible ? 0px : Motion.status-slide-distance;
+            y: root.battery-visible ? 0px : 3px;
+            opacity: root.battery-visible ? 1.0 : 0.0;
+            animate x, y, opacity {
+                duration: root.battery-visible ? Motion.status-enter-duration : Motion.status-exit-duration;
+                easing: ease-in-out;
+            }
+            percent: root.battery-percent;
+            charging: root.battery-charging;
+        }
     }
 }
 
+// The icon and its single-stroke focus ring rise together by 2px on focus.
+// The 40px layout cell stays fixed, preserving navigation hit geometry.
 component UtilityFocusSurface inherits Rectangle {
     in property <bool> focused: false;
+    out property <length> focus-lift: root.focused && !Motion.reduced-motion ? -2px : 0px;
     background: transparent;
     z: root.focused ? 2 : 0;
 
-    // Same focus ring/gradient as Settings, with circular utility geometry.
-    // Keep the existing -2px lift of the ring and icon; the cell's layout
-    // footprint and spatial-navigation center do not change.
     SelectionFocusSurface {
-        x: (root.width - self.width) / 2;
-        y: (root.height - self.height) / 2
-            + (root.focused && !Motion.reduced-motion ? -2px : 0px);
-        width: 48px;
-        height: 48px;
+        x: -4px;
+        y: -4px + root.focus-lift;
+        width: 48px; height: 48px;
         corner-radius: 24px;
         focused: root.focused;
-        animate y { duration: Motion.focus-duration; easing: ease-out; }
+        animate y { duration: Motion.focus-duration; easing: ease-in-out; }
     }
 }
 
 export component TopNavigation inherits Rectangle {
     in property <float> icon-render-scale: 1.0;
+    in property <int> network-kind: 0;
+    in property <int> wifi-strength: 0;
+    in property <bool> network-limited: false;
+    in property <bool> battery-visible: false;
+    in property <int> battery-percent: 0;
+    in property <bool> battery-charging: false;
     in property <bool> utility-focus-visible: false;
     in property <int> focused-utility-index: 2;
     callback utility-activated(int);
@@ -163,11 +255,10 @@ export component TopNavigation inherits Rectangle {
             FriendsIcon {
                 render-scale: root.icon-render-scale;
                 x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2
-                    + (parent.focused && !Motion.reduced-motion ? -2px : 0px);
+                y: (parent.height - self.height) / 2 + parent.focus-lift;
                 width: Metrics.utility-cell-size;
                 height: Metrics.utility-cell-size;
-                animate y { duration: Motion.focus-duration; easing: ease-out; }
+                animate y { duration: Motion.focus-duration; easing: ease-in-out; }
             }
             TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(0); } }
         }
@@ -177,11 +268,10 @@ export component TopNavigation inherits Rectangle {
             AlbumIcon {
                 render-scale: root.icon-render-scale;
                 x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2
-                    + (parent.focused && !Motion.reduced-motion ? -2px : 0px);
+                y: (parent.height - self.height) / 2 + parent.focus-lift;
                 width: Metrics.utility-cell-size;
                 height: Metrics.utility-cell-size;
-                animate y { duration: Motion.focus-duration; easing: ease-out; }
+                animate y { duration: Motion.focus-duration; easing: ease-in-out; }
             }
             TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(1); } }
         }
@@ -191,11 +281,10 @@ export component TopNavigation inherits Rectangle {
             ActivityIcon {
                 render-scale: root.icon-render-scale;
                 x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2
-                    + (parent.focused && !Motion.reduced-motion ? -2px : 0px);
+                y: (parent.height - self.height) / 2 + parent.focus-lift;
                 width: Metrics.utility-cell-size;
                 height: Metrics.utility-cell-size;
-                animate y { duration: Motion.focus-duration; easing: ease-out; }
+                animate y { duration: Motion.focus-duration; easing: ease-in-out; }
             }
             TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(2); } }
         }
@@ -205,11 +294,10 @@ export component TopNavigation inherits Rectangle {
             WebIcon {
                 render-scale: root.icon-render-scale;
                 x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2
-                    + (parent.focused && !Motion.reduced-motion ? -2px : 0px);
+                y: (parent.height - self.height) / 2 + parent.focus-lift;
                 width: Metrics.utility-cell-size;
                 height: Metrics.utility-cell-size;
-                animate y { duration: Motion.focus-duration; easing: ease-out; }
+                animate y { duration: Motion.focus-duration; easing: ease-in-out; }
             }
             TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(3); } }
         }
@@ -219,11 +307,10 @@ export component TopNavigation inherits Rectangle {
             SettingsIcon {
                 render-scale: root.icon-render-scale;
                 x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2
-                    + (parent.focused && !Motion.reduced-motion ? -2px : 0px);
+                y: (parent.height - self.height) / 2 + parent.focus-lift;
                 width: Metrics.utility-cell-size;
                 height: Metrics.utility-cell-size;
-                animate y { duration: Motion.focus-duration; easing: ease-out; }
+                animate y { duration: Motion.focus-duration; easing: ease-in-out; }
             }
             TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(4); } }
         }
@@ -233,18 +320,24 @@ export component TopNavigation inherits Rectangle {
             ShopIcon {
                 render-scale: root.icon-render-scale;
                 x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2
-                    + (parent.focused && !Motion.reduced-motion ? -2px : 0px);
+                y: (parent.height - self.height) / 2 + parent.focus-lift;
                 width: Metrics.utility-cell-size;
                 height: Metrics.utility-cell-size;
-                animate y { duration: Motion.focus-duration; easing: ease-out; }
+                animate y { duration: Motion.focus-duration; easing: ease-in-out; }
             }
             TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(5); } }
         }
     }
 
     StatusCluster {
+        render-scale: root.icon-render-scale;
         x: parent.width - Metrics.top-edge-inset - self.width;
         y: root.content-center-y - self.height / 2;
+        network-kind: root.network-kind;
+        wifi-strength: root.wifi-strength;
+        network-limited: root.network-limited;
+        battery-visible: root.battery-visible;
+        battery-percent: root.battery-percent;
+        battery-charging: root.battery-charging;
     }
 }

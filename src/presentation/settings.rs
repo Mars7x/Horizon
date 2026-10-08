@@ -2,12 +2,24 @@
 use std::{cell::RefCell, rc::Rc, sync::{Arc, atomic::{AtomicU64, Ordering}}};
 use slint::ComponentHandle;
 
-use crate::{AppWindow, input::{UiAction, UiActionEvent}, platform::wayland_clipboard::WaylandClipboard, services::settings::{SettingsService, ArtworkPreferences}};
+use crate::{AppWindow,
+    audio::UiSoundCue,
+    appearance::{ThemePreference, ACCENT_PRESETS},
+    input::{UiAction, UiActionEvent},
+    navigation::step_with_edge_wrap,
+    platform::wayland_clipboard::WaylandClipboard,
+    presentation::appearance::AppearanceController,
+    services::settings::{SettingsService, ArtworkPreferences}};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum SettingsView { #[default] Root, Appearance, ThirdParty }
 
 #[derive(Default)]
 struct PageState {
-    third_party_open: bool,
+    view: SettingsView,
     selected: i32,
+    // Restore the same swatch when returning from UI Sounds or the Theme row.
+    last_accent_selection: Option<i32>,
     editing_key: bool,
     editor_target: i32,
     feedback: String,
@@ -16,19 +28,25 @@ struct PageState {
 pub struct SettingsController {
     page: RefCell<PageState>,
     service: RefCell<SettingsService>,
+    appearance: AppearanceController,
     artwork_changed: RefCell<Option<Rc<dyn Fn(ArtworkPreferences)>>>,
     artwork_refresh: RefCell<Option<Rc<dyn Fn(ArtworkPreferences)>>>,
+    sound_changed: RefCell<Option<Rc<dyn Fn(bool)>>>,
+    action_sound: RefCell<Option<Rc<dyn Fn(UiSoundCue)>>>,
     wayland_clipboard: RefCell<Option<Arc<WaylandClipboard>>>,
     paste_generation: Arc<AtomicU64>,
 }
 
 impl SettingsController {
-    pub fn new(ui: &AppWindow, service: SettingsService) -> Rc<Self> {
+    pub fn new(ui: &AppWindow, service: SettingsService, appearance: AppearanceController) -> Rc<Self> {
         let controller = Rc::new(Self {
             page: RefCell::new(PageState::default()),
             service: RefCell::new(service),
+            appearance,
             artwork_changed: RefCell::new(None),
             artwork_refresh: RefCell::new(None),
+            sound_changed: RefCell::new(None),
+            action_sound: RefCell::new(None),
             wayland_clipboard: RefCell::new(None),
             paste_generation: Arc::new(AtomicU64::new(0)),
         });
@@ -46,6 +64,32 @@ impl SettingsController {
     /// changes continue to reuse valid cached artwork.
     pub fn set_artwork_refresh(&self, callback: Rc<dyn Fn(ArtworkPreferences)>) {
         *self.artwork_refresh.borrow_mut() = Some(callback);
+    }
+
+    pub fn set_sound_changed(&self, callback: Rc<dyn Fn(bool)>) {
+        *self.sound_changed.borrow_mut() = Some(callback);
+    }
+
+    pub fn set_action_sound(&self, callback: Rc<dyn Fn(UiSoundCue)>) {
+        *self.action_sound.borrow_mut() = Some(callback);
+    }
+
+    fn cue(&self, cue: UiSoundCue) {
+        if let Some(callback) = self.action_sound.borrow().as_ref() { callback(cue); }
+    }
+
+    fn set_ui_sounds_enabled(&self, ui: &AppWindow, enabled: bool) {
+        if self.appearance.preferences().ui_sounds_enabled == enabled { return; }
+        let result = self.appearance.set_ui_sounds_enabled(ui, enabled);
+        if result.is_ok() {
+            if let Some(callback) = self.sound_changed.borrow().as_ref() { callback(enabled); }
+            // Off mutes immediately; On can confirm with an OK cue.
+            self.cue(UiSoundCue::Ok);
+        }
+        self.page.borrow_mut().feedback = if result.is_ok() {
+            String::new()
+        } else { "Could not save UI sound preference.".into() };
+        self.publish(ui);
     }
 
     pub fn artwork_preferences(&self) -> ArtworkPreferences {
@@ -85,6 +129,7 @@ impl SettingsController {
         if ui.get_settings_refresh_open() {
             if action == UiAction::Back || (action == UiAction::Accept && !event.repeated) {
                 ui.set_settings_refresh_open(false);
+                self.cue(if action == UiAction::Back { UiSoundCue::Back } else { UiSoundCue::Ok });
             } else if action == UiAction::Home {
                 ui.set_settings_refresh_open(false);
                 return false;
@@ -128,16 +173,33 @@ impl SettingsController {
                 let mut page = self.page.borrow_mut();
                 // An unavailable remove action is never included in focus wrap.
                 let count = selection_count(
-                    page.third_party_open,
+                    page.view,
                     self.service.borrow().has_steamgriddb_key(),
                 );
                 let delta = if action == UiAction::Up { -1 } else { 1 };
-                page.selected = (page.selected + delta + count) % count;
+                page.selected = if page.view == SettingsView::Appearance {
+                    appearance_step_vertical(page.selected, action, page.last_accent_selection.unwrap_or(3), event.repeated)
+                } else { step_with_edge_wrap(page.selected, 0, count - 1, delta, event.repeated) };
+                if page.view == SettingsView::Appearance && (3..=12).contains(&page.selected) {
+                    page.last_accent_selection = Some(page.selected);
+                }
             }
             UiAction::Left | UiAction::Right => {
-                if self.page.borrow().third_party_open && self.page.borrow().selected == 1 {
+                let page = self.page.borrow();
+                if page.view == SettingsView::ThirdParty && page.selected == 1 {
                     let preferred = action == UiAction::Right;
+                    drop(page);
                     self.set_preference(ui, preferred);
+                } else if page.view == SettingsView::Appearance && page.selected == 13 {
+                    drop(page);
+                    self.set_ui_sounds_enabled(ui, action == UiAction::Right);
+                } else if page.view == SettingsView::Appearance {
+                    drop(page);
+                    let mut page = self.page.borrow_mut();
+                    page.selected = appearance_step_horizontal(page.selected, action, event.repeated);
+                    if (3..=12).contains(&page.selected) {
+                        page.last_accent_selection = Some(page.selected);
+                    }
                 }
             }
             UiAction::Accept if !event.repeated => {
@@ -163,8 +225,9 @@ impl SettingsController {
             if let Some(ui) = weak.upgrade() { controller.back_inside(&ui); }
         });
         let weak = ui.as_weak();
+        let controller = Rc::clone(self);
         ui.on_settings_dismiss_refresh(move || {
-            if let Some(ui) = weak.upgrade() { ui.set_settings_refresh_open(false); }
+            if let Some(ui) = weak.upgrade() { controller.back_inside(&ui); }
         });
         let weak = ui.as_weak();
         let controller = Rc::clone(self);
@@ -194,15 +257,50 @@ impl SettingsController {
 
     fn activate(&self, ui: &AppWindow, selected: i32) {
         if self.page.borrow().editing_key { return; }
-        if !self.page.borrow().third_party_open {
-            if selected == 0 {
+        let view = self.page.borrow().view;
+        match view {
+            SettingsView::Root => {
+                if !(0..=1).contains(&selected) { return; }
                 let mut page = self.page.borrow_mut();
-                page.third_party_open = true;
+                page.view = root_destination(selected).expect("root selection checked above");
                 page.selected = 0;
                 page.feedback.clear();
+                drop(page);
+                self.cue(UiSoundCue::Ok);
+                self.publish(ui);
+                return;
             }
-            self.publish(ui);
-            return;
+            SettingsView::Appearance => {
+                if !(0..=13).contains(&selected) { return; }
+                {
+                    let mut page = self.page.borrow_mut();
+                    page.selected = selected;
+                    if (3..=12).contains(&selected) {
+                        page.last_accent_selection = Some(selected);
+                    }
+                }
+                if selected == 13 {
+                    let enabled = !self.appearance.preferences().ui_sounds_enabled;
+                    self.set_ui_sounds_enabled(ui, enabled);
+                    return;
+                }
+                let result = match selected {
+                    0 => self.appearance.set_theme_preference(ui, ThemePreference::System),
+                    1 => self.appearance.set_theme_preference(ui, ThemePreference::Light),
+                    2 => self.appearance.set_theme_preference(ui, ThemePreference::Dark),
+                    3 => self.appearance.use_system_accent(ui),
+                    _ => self.appearance.set_custom_accent(ui, ACCENT_PRESETS[(selected - 4) as usize].1),
+                };
+                self.page.borrow_mut().feedback = if result.is_ok() {
+                    String::new()
+                } else {
+                    "Could not save appearance settings.".into()
+                };
+                if result.is_ok() { self.cue(UiSoundCue::Ok); }
+                self.publish(ui);
+                return;
+            }
+            SettingsView::ThirdParty => {}
         }
         if !(0..=3).contains(&selected) { return; }
         self.page.borrow_mut().selected = selected;
@@ -215,6 +313,7 @@ impl SettingsController {
                 page.feedback.clear();
                 drop(page);
                 ui.set_settings_key_draft("".into());
+                self.cue(UiSoundCue::Ok);
             }
             1 => {
                 let next = !self.service.borrow().prefer_steamgriddb_artwork();
@@ -231,6 +330,7 @@ impl SettingsController {
                         ui.set_settings_refresh_open(true);
                         self.page.borrow_mut().feedback.clear();
                         callback(self.artwork_preferences());
+                        self.cue(UiSoundCue::Ok);
                     }
                 }
             }
@@ -239,6 +339,7 @@ impl SettingsController {
                     let result = self.service.borrow_mut().remove_steamgriddb_key();
                     if result.is_ok() {
                         self.notify_artwork_changed();
+                        self.cue(UiSoundCue::Ok);
                         // Move focus to a usable control after removing the key.
                         self.page.borrow_mut().selected = 0;
                     }
@@ -346,7 +447,10 @@ impl SettingsController {
             return;
         }
         let result = self.service.borrow_mut().set_prefer_steamgriddb_artwork(preferred);
-        if result.is_ok() { self.notify_artwork_changed(); }
+        if result.is_ok() {
+            self.notify_artwork_changed();
+            self.cue(UiSoundCue::Ok);
+        }
         self.page.borrow_mut().feedback = if result.is_ok() {
             "Artwork source preference saved.".into()
         } else {
@@ -366,6 +470,7 @@ impl SettingsController {
                 self.page.borrow_mut().feedback = "SteamGridDB API key saved locally.".into();
                 ui.set_settings_editing_key(false);
                 ui.set_settings_key_draft("".into());
+                self.cue(UiSoundCue::Ok);
             }
             Err(message) => { self.page.borrow_mut().feedback = message; }
         }
@@ -373,6 +478,8 @@ impl SettingsController {
     }
 
     fn cancel_key(&self, ui: &AppWindow) {
+        if !self.page.borrow().editing_key { return; }
+        self.cue(UiSoundCue::Back);
         self.paste_generation.fetch_add(1, Ordering::Relaxed);
         let mut page = self.page.borrow_mut();
         page.editing_key = false;
@@ -386,18 +493,20 @@ impl SettingsController {
     fn back_inside(&self, ui: &AppWindow) -> bool {
         if ui.get_settings_refresh_open() {
             ui.set_settings_refresh_open(false);
+            self.cue(UiSoundCue::Back);
             return true;
         }
         if self.page.borrow().editing_key {
             self.cancel_key(ui);
             return true;
         }
-        if !self.page.borrow().third_party_open { return false; }
+        if self.page.borrow().view == SettingsView::Root { return false; }
         let mut page = self.page.borrow_mut();
-        page.third_party_open = false;
+        page.view = SettingsView::Root;
         page.selected = 0;
         page.feedback.clear();
         drop(page);
+        self.cue(UiSoundCue::Back);
         self.publish(ui);
         true
     }
@@ -405,7 +514,16 @@ impl SettingsController {
     fn publish(&self, ui: &AppWindow) {
         let page = self.page.borrow();
         let settings = self.service.borrow();
-        ui.set_settings_view(i32::from(page.third_party_open));
+        ui.set_settings_view(match page.view {
+            SettingsView::Root => 0, SettingsView::Appearance => 1, SettingsView::ThirdParty => 2
+        });
+        let prefs = self.appearance.preferences();
+        ui.set_settings_theme_index(prefs.theme_index());
+        ui.set_settings_accent_index(prefs.accent_index());
+        ui.set_settings_ui_sounds_enabled(prefs.ui_sounds_enabled);
+        ui.set_settings_appearance_feedback(if page.view == SettingsView::Appearance {
+            page.feedback.clone().into()
+        } else { "".into() });
         ui.set_settings_selection(page.selected);
         ui.set_settings_key_present(settings.has_steamgriddb_key());
         ui.set_settings_prefer_artwork(settings.prefer_steamgriddb_artwork());
@@ -416,8 +534,58 @@ impl SettingsController {
 }
 
 /// Keep controller focus within visible/enabled Third-Party actions.
-fn selection_count(third_party_open: bool, has_key: bool) -> i32 {
-    if !third_party_open { 1 } else if has_key { 4 } else { 2 }
+fn selection_count(view: SettingsView, has_key: bool) -> i32 {
+    match view {
+        SettingsView::Root => 2,
+        SettingsView::Appearance => 14,
+        SettingsView::ThirdParty => if has_key { 4 } else { 2 },
+    }
+}
+
+
+/// A root category's explicit choice is authoritative. Pointer clicks pass
+/// their row index directly, while controller Accept uses the Rust focus index.
+fn root_destination(index: i32) -> Option<SettingsView> {
+    match index {
+        0 => Some(SettingsView::Appearance),
+        1 => Some(SettingsView::ThirdParty),
+        _ => None,
+    }
+}
+
+// Two horizontal focus rows match the visible Appearance layout:
+// Theme (System, Light, Dark), then Accent (System + nine swatches).
+// The UI Sounds switch is a separate full-width row. Do not separate the
+// System accent from the swatches: they share the same y coordinate.
+fn appearance_step_horizontal(index: i32, direction: UiAction, repeated: bool) -> i32 {
+    let (first, last) = match index {
+        0..=2 => (0, 2),
+        3..=12 => (3, 12),
+        _ => return index, // UI Sounds uses Left/Right to switch Off/On.
+    };
+    let delta = if direction == UiAction::Left { -1 } else { 1 };
+    step_with_edge_wrap(index, first, last, delta, repeated)
+}
+
+// Vertical movement follows approximate horizontal positions of the visual
+// controls, preserving the last accent on a return trip. The accent layout is
+// fixed: System + Red/Orange align to Theme System, Yellow through Blue to
+// Theme Light, and Purple/Pink/White to Theme Dark.
+fn appearance_step_vertical(index: i32, direction: UiAction, last_accent: i32, repeated: bool) -> i32 {
+    let last_accent = if (3..=12).contains(&last_accent) { last_accent } else { 3 };
+    match (index, direction) {
+        (0, UiAction::Down) => if (3..=5).contains(&last_accent) { last_accent } else { 3 },
+        (1, UiAction::Down) => if (6..=9).contains(&last_accent) { last_accent } else { 8 },
+        (2, UiAction::Down) => if (10..=12).contains(&last_accent) { last_accent } else { 12 },
+        (0..=2, UiAction::Up) => if repeated { index } else { 13 },
+        (3..=5, UiAction::Up) => 0,
+        (6..=9, UiAction::Up) => 1,
+        (10..=12, UiAction::Up) => 2,
+        (3..=12, UiAction::Down) => 13,
+        (13, UiAction::Up) => last_accent,
+        (13, UiAction::Down) => if repeated { 13 } else { 0 },
+        _ => index,
+    }
 }
 
 /// Semantic controller grid for the API-key modal (not a real text cursor).
@@ -440,7 +608,7 @@ fn next_editor_target(target: i32, direction: UiAction, can_save: bool) -> i32 {
 
 #[cfg(test)]
 mod editor_navigation_tests {
-    use super::next_editor_target;
+    use super::{next_editor_target, SettingsView, appearance_step_horizontal, appearance_step_vertical};
     use crate::input::UiAction;
 
     #[test]
@@ -453,14 +621,80 @@ mod editor_navigation_tests {
 
     #[test]
     fn refresh_row_is_included_only_with_saved_key() {
-        assert_eq!(super::selection_count(false, false), 1);
-        assert_eq!(super::selection_count(true, false), 2);
-        assert_eq!(super::selection_count(true, true), 4);
+        assert_eq!(super::selection_count(SettingsView::Root, false), 2);
+        assert_eq!(super::selection_count(SettingsView::Appearance, false), 14);
+        assert_eq!(super::selection_count(SettingsView::ThirdParty, false), 2);
+        assert_eq!(super::selection_count(SettingsView::ThirdParty, true), 4);
+    }
+
+    #[test]
+    fn appearance_navigation_respects_visual_rows() {
+        use UiAction::{Down, Left, Right, Up};
+        assert_eq!(appearance_step_horizontal(0, Left, false), 2);
+        assert_eq!(appearance_step_horizontal(2, Right, false), 0);
+
+        // System accent is in the SAME horizontal row as the nine swatches.
+        let mut focus = 3;
+        for expected in 4..=12 {
+            focus = appearance_step_horizontal(focus, Right, false);
+            assert_eq!(focus, expected);
+        }
+        assert_eq!(appearance_step_horizontal(12, Right, false), 3);
+        assert_eq!(appearance_step_horizontal(3, Left, false), 12);
+        assert_eq!(appearance_step_horizontal(4, Left, false), 3);
+        for accent in 3..=12 {
+            let next = appearance_step_horizontal(accent, Right, false);
+            assert_eq!(appearance_step_horizontal(next, Left, false), accent);
+        }
+
+        // Up/Down uses spatial columns and reverses when returning to a swatch.
+        for accent in 3..=12 {
+            let theme = appearance_step_vertical(accent, Up, accent, false);
+            let expected_theme = if accent <= 5 { 0 } else if accent <= 9 { 1 } else { 2 };
+            assert_eq!(theme, expected_theme);
+            assert_eq!(appearance_step_vertical(theme, Down, accent, false), accent);
+            assert_eq!(appearance_step_vertical(accent, Down, accent, false), 13);
+            assert_eq!(appearance_step_vertical(13, Up, accent, false), accent);
+        }
+        assert_eq!(appearance_step_vertical(0, Down, 8, false), 3);
+        assert_eq!(appearance_step_vertical(1, Down, 3, false), 8);
+        assert_eq!(appearance_step_vertical(2, Down, 3, false), 12);
+        assert_eq!(appearance_step_vertical(13, Up, 0, false), 3);
+        assert_eq!(appearance_step_vertical(13, Down, 8, false), 0);
+        assert_eq!(appearance_step_horizontal(13, Left, false), 13);
+        assert_eq!(appearance_step_horizontal(13, Right, false), 13);
+    }
+
+    #[test]
+    fn held_navigation_never_wraps_in_settings() {
+        use UiAction::{Down, Left, Right, Up};
+        assert_eq!(appearance_step_horizontal(2, Right, true), 2);
+        assert_eq!(appearance_step_horizontal(0, Left, true), 0);
+        assert_eq!(appearance_step_horizontal(12, Right, true), 12);
+        assert_eq!(appearance_step_horizontal(3, Left, true), 3);
+        assert_eq!(appearance_step_horizontal(11, Right, true), 12);
+        assert_eq!(appearance_step_vertical(0, Up, 3, true), 0);
+        assert_eq!(appearance_step_vertical(13, Down, 3, true), 13);
+        assert_eq!(appearance_step_vertical(0, Up, 3, false), 13);
+        assert_eq!(appearance_step_vertical(13, Down, 3, false), 0);
     }
 
     #[test]
     fn disabled_save_is_skipped() {
         assert_eq!(next_editor_target(1, UiAction::Down, false), 2);
         assert_eq!(next_editor_target(2, UiAction::Right, false), 2);
+    }
+}
+
+#[cfg(test)]
+mod root_activation_regressions {
+    use super::{root_destination, SettingsView};
+
+    #[test]
+    fn root_category_clicks_open_the_corresponding_page() {
+        assert_eq!(root_destination(0), Some(SettingsView::Appearance));
+        assert_eq!(root_destination(1), Some(SettingsView::ThirdParty));
+        assert_eq!(root_destination(-1), None);
+        assert_eq!(root_destination(2), None);
     }
 }

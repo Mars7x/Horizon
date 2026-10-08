@@ -5,10 +5,11 @@
 
 mod color;
 mod model;
+pub mod store;
 pub mod portal;
 
 pub use color::Rgb;
 pub use model::{
     AccentPreference, AppearancePreferences, AppearanceState, EffectiveTheme, Palette,
-    ResolvedAppearance, SystemAppearance, ThemePreference,
+    ResolvedAppearance, SystemAppearance, ThemePreference, ACCENT_PRESETS,
 };

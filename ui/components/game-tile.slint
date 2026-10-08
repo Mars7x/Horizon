@@ -1,4 +1,4 @@
-import { Theme, Metrics, Motion } from "../theme/theme.slint";
+import { Theme, Metrics, Motion, Typography } from "../theme/theme.slint";
 import { FocusFrame } from "focus-frame.slint";
 import { FallbackCover } from "fallback-cover.slint";
 import { GameCardData } from "../models/game-card.slint";
@@ -8,6 +8,28 @@ export component GameTile inherits Rectangle {
     in property <bool> selected: false;
     in property <bool> launching: false;
     in property <bool> focus-visible: true;
+    private property <bool> releasing-press: false;
+
+    // The spring easing belongs only to the release, not ordinary carousel
+    // navigation. Keep the previous 140ms selected-card focus transition.
+    changed launching => {
+        if (!root.launching) {
+            root.releasing-press = true;
+            release-timer.restart();
+        } else {
+            release-timer.stop();
+            root.releasing-press = false;
+        }
+    }
+
+    release-timer := Timer {
+        running: false;
+        interval: Motion.launch-release-duration;
+        triggered => {
+            self.stop();
+            root.releasing-press = false;
+        }
+    }
     in property <int> item-index: 0;
     callback activated(int);
 
@@ -20,6 +42,7 @@ export component GameTile inherits Rectangle {
         ? (root.launching ? Metrics.game-launch-pressed-scale : Metrics.game-selected-scale)
         : 1.0;
 
+    // Release the compressed press with a short, overshooting spring curve.
     // Render the selected card at its real target dimensions instead of scaling
     // an already-rasterized subtree. This keeps procedural fallback text and
     // shapes crisp at fullscreen/HiDPI sizes. Internal fallback typography
@@ -33,12 +56,14 @@ export component GameTile inherits Rectangle {
         background: transparent;
 
         animate width {
-            duration: root.launching ? Motion.launch-press-duration : Motion.focus-duration;
-            easing: ease-out;
+            duration: root.launching ? Motion.launch-press-duration :
+                (root.releasing-press ? Motion.launch-release-duration : Motion.focus-duration);
+            easing: root.releasing-press ? ease-out-back : ease-out;
         }
         animate height {
-            duration: root.launching ? Motion.launch-press-duration : Motion.focus-duration;
-            easing: ease-out;
+            duration: root.launching ? Motion.launch-press-duration :
+                (root.releasing-press ? Motion.launch-release-duration : Motion.focus-duration);
+            easing: root.releasing-press ? ease-out-back : ease-out;
         }
 
         shell := Rectangle {
@@ -76,7 +101,93 @@ export component GameTile inherits Rectangle {
                     height: parent.height;
                     game: root.game;
                 }
+
+                // Parent the Playing overlay to the clipped cover artwork, not
+                // the scaling shell. The 12px artwork-edge inset is invariant
+                // when selection, launch press, or spring release resize the
+                // shell. Keep both layers mounted for their exit fades; content
+                // does not ride the capsule's 7px Playing-state translation.
+                playing-pill-anchor := Rectangle {
+                    x: (parent.width - self.width) / 2;
+                    y: parent.height - self.height - Metrics.playing-pill-artwork-bottom-inset;
+                    width: 90px;
+                    height: 30px;
+                    background: transparent;
+
+                    // Move only the rounded capsule on Playing state changes.
+                    // The label and dot have no extra local y animation.
+                    playing-pill-surface := Rectangle {
+                        x: 0px;
+                        y: root.game.is-playing ? 0px : Motion.playing-pill-travel;
+                        opacity: root.game.is-playing ? 1.0 : 0.0;
+                        width: parent.width;
+                        height: parent.height;
+
+                        // A calm rise/fade on entry and a shorter sink/fade on exit.
+                        // Both transitions reverse smoothly when state changes quickly.
+                        animate y {
+                            duration: root.game.is-playing
+                                ? Motion.playing-pill-enter-duration
+                                : Motion.playing-pill-exit-duration;
+                            easing: ease-out;
+                        }
+                        animate opacity {
+                            duration: root.game.is-playing
+                                ? Motion.playing-pill-enter-duration
+                                : Motion.playing-pill-exit-duration;
+                            easing: ease-out;
+                        }
+                        border-radius: 15px;
+                        // Switch-like neutral capsule: no accent-coloured perimeter.
+                        // A dark fill and light label stay readable over bright cover art.
+                        background: Theme.high-contrast
+                            ? Theme.playing-pill-background
+                            : Theme.playing-pill-background.with-alpha(0.92);
+                        border-width: 0px;
+                    }
+
+                    playing-pill-content := Rectangle {
+                        x: 0px;
+                        y: 0px;
+                        width: parent.width;
+                        height: parent.height;
+                        background: transparent;
+                        opacity: root.game.is-playing ? 1.0 : 0.0;
+
+                        // Text reaches its final alpha ahead of the background's
+                        // last few slide frames; avoid any end-of-ease font pop.
+                        // Unlike the capsule, its baseline does not animate locally.
+                        animate opacity {
+                            duration: root.game.is-playing
+                                ? Motion.playing-pill-label-enter-duration
+                                : Motion.playing-pill-label-exit-duration;
+                            easing: ease-out;
+                        }
+
+                        Rectangle {
+                            x: 12px;
+                            y: (parent.height - self.height) / 2;
+                            width: 7px;
+                            height: 7px;
+                            border-radius: 4px;
+                            background: Theme.accent;
+                        }
+                        Text {
+                            x: 25px;
+                            width: parent.width - 29px;
+                            height: parent.height;
+                            text: "Playing";
+                            color: Theme.playing-pill-foreground;
+                            font-family: Typography.family;
+                            font-size: Typography.caption-size;
+                            font-weight: Typography.emphasis-weight;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
             }
+
+
         }
 
         focus := FocusFrame {
@@ -89,7 +200,7 @@ export component GameTile inherits Rectangle {
 
             animate opacity {
                 duration: Motion.focus-duration;
-                easing: ease-out;
+                easing: ease-in-out;
             }
         }
     }

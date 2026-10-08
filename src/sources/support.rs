@@ -16,15 +16,15 @@ pub(super) fn host_config_home() -> Option<PathBuf> {
     }
 }
 
-pub(super) fn host_data_home() -> Option<PathBuf> {
+pub(super) fn host_state_home() -> Option<PathBuf> {
     if env::var_os("FLATPAK_ID").is_some() {
-        env::var_os("HOST_XDG_DATA_HOME")
+        env::var_os("HOST_XDG_STATE_HOME")
             .map(PathBuf::from)
-            .or_else(|| home_dir().map(|home| home.join(".local/share")))
+            .or_else(|| home_dir().map(|home| home.join(".local/state")))
     } else {
-        env::var_os("XDG_DATA_HOME")
+        env::var_os("XDG_STATE_HOME")
             .map(PathBuf::from)
-            .or_else(|| home_dir().map(|home| home.join(".local/share")))
+            .or_else(|| home_dir().map(|home| home.join(".local/state")))
     }
 }
 

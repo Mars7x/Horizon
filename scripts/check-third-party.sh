@@ -6,6 +6,14 @@ notice="$root/THIRD_PARTY_NOTICES.md"
 
 required_assets=(
   "applications-games-symbolic.svg"
+  "status/radiowaves-1-symbolic.svg"
+  "status/radiowaves-2-symbolic.svg"
+  "status/radiowaves-3-symbolic.svg"
+  "status/radiowaves-4-symbolic.svg"
+  "status/radiowaves-x-symbolic.svg"
+  "status/radiowaves-question-symbolic.svg"
+  "status/network-wired-symbolic.svg"
+  "status/network-wired-no-route-symbolic.svg"
 )
 
 required_licenses=(
@@ -28,7 +36,8 @@ grep -Fq "rusqlite / libsqlite3-sys" "$notice" || { echo "rusqlite provenance mi
 grep -Fq "SQLite core" "$notice" || { echo "SQLite provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
 grep -Fq "steam-vdf-parser 0.1.2" "$notice" || { echo "steam-vdf-parser provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
 grep -Fq "serde 1.x / serde_json 1.x" "$notice" || { echo "Serde provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
-grep -Fq "yaml_serde 0.10" "$notice" || { echo "yaml_serde provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
+# The retired Bottles adapter no longer uses yaml_serde. Do not require a
+# phantom dependency notice for a crate absent from Cargo.toml/Cargo.lock.
 grep -Fq "zbus 5.x" "$notice" || { echo "zbus provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
 
 for license in "${required_licenses[@]}"; do

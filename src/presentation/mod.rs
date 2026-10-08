@@ -5,3 +5,4 @@ pub mod home;
 pub mod navigation;
 
 pub mod settings;
+pub mod status;

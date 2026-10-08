@@ -6,7 +6,8 @@ use tracing::{debug, warn};
 use crate::{
     AppWindow, Motion, Theme,
     appearance::{
-        AccentPreference, AppearanceState, Rgb, SystemAppearance, ThemePreference,
+        AccentPreference, AppearancePreferences, AppearanceState, Palette, Rgb, SystemAppearance, ThemePreference,
+        store::{AppearanceStore, AppearanceStoreError},
         portal::{PortalMonitor, PortalMonitorError},
     },
 };
@@ -14,15 +15,29 @@ use crate::{
 #[derive(Clone)]
 pub struct AppearanceController {
     state: Arc<Mutex<AppearanceState>>,
+    store: Arc<AppearanceStore>,
 }
 
 impl AppearanceController {
-    pub fn new(ui: &AppWindow) -> Self {
+    pub fn new(ui: &AppWindow, store: AppearanceStore) -> Result<Self, AppearanceStoreError> {
+        let preferences = store.load()?;
         let controller = Self {
-            state: Arc::new(Mutex::new(AppearanceState::default())),
+            state: Arc::new(Mutex::new(AppearanceState { preferences, ..AppearanceState::default() })),
+            store: Arc::new(store),
         };
         controller.apply(ui);
-        controller
+        Ok(controller)
+    }
+
+    pub fn preferences(&self) -> AppearancePreferences { lock_state(&self.state).preferences }
+
+    pub fn set_preferences(&self, ui: &AppWindow, preferences: AppearancePreferences)
+        -> Result<(), AppearanceStoreError> {
+        if self.preferences() == preferences { return Ok(()); }
+        self.store.save(&preferences)?; // Never render a preference that failed to save.
+        lock_state(&self.state).preferences = preferences;
+        self.apply(ui);
+        Ok(())
     }
 
     pub fn start_portal_monitor(
@@ -48,28 +63,30 @@ impl AppearanceController {
         })
     }
 
-    pub fn set_theme_preference(&self, ui: &AppWindow, preference: ThemePreference) {
-        {
-            let mut state = lock_state(&self.state);
-            state.preferences.theme = preference;
-        }
-        self.apply(ui);
+    pub fn set_theme_preference(&self, ui: &AppWindow, preference: ThemePreference)
+        -> Result<(), AppearanceStoreError> {
+        let mut next = self.preferences();
+        next.theme = preference;
+        self.set_preferences(ui, next)
     }
 
-    pub fn use_system_accent(&self, ui: &AppWindow) {
-        {
-            let mut state = lock_state(&self.state);
-            state.preferences.accent = AccentPreference::System;
-        }
-        self.apply(ui);
+    pub fn set_ui_sounds_enabled(&self, ui: &AppWindow, enabled: bool)
+        -> Result<(), AppearanceStoreError> {
+        let mut next = self.preferences();
+        next.ui_sounds_enabled = enabled;
+        self.set_preferences(ui, next)
     }
 
-    pub fn set_custom_accent(&self, ui: &AppWindow, color: Rgb) {
-        {
-            let mut state = lock_state(&self.state);
-            state.preferences.accent = AccentPreference::Custom(color);
-        }
-        self.apply(ui);
+    pub fn use_system_accent(&self, ui: &AppWindow) -> Result<(), AppearanceStoreError> {
+        let mut next = self.preferences();
+        next.accent = AccentPreference::System;
+        self.set_preferences(ui, next)
+    }
+
+    pub fn set_custom_accent(&self, ui: &AppWindow, color: Rgb) -> Result<(), AppearanceStoreError> {
+        let mut next = self.preferences();
+        next.accent = AccentPreference::Custom(color);
+        self.set_preferences(ui, next)
     }
 
     pub fn update_system_appearance(&self, ui: &AppWindow, system: SystemAppearance) {
@@ -105,6 +122,9 @@ fn apply_resolved(ui: &AppWindow, appearance: crate::appearance::ResolvedAppeara
         crate::appearance::EffectiveTheme::Dark
     ));
     theme.set_high_contrast(appearance.high_contrast);
+    theme.set_appearance_white_swatch(to_slint_color(
+        Palette::preview_accent(appearance.theme, Rgb::WHITE, appearance.high_contrast),
+    ));
     theme.set_background(to_slint_color(palette.background));
     theme.set_surface(to_slint_color(palette.surface));
     theme.set_surface_raised(to_slint_color(palette.surface_raised));

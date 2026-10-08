@@ -83,11 +83,11 @@ A successful source snapshot is persisted as one repository batch. The SQLite ad
 All production providers use the same registry/import/persistence/launch path:
 
 - **Steam** — local VDF/app manifests and `steam://rungameid/<appid>`; see `STEAM.md` and ADR 0039.
-- **Heroic** — Phase 9 imports installed Epic/Legendary entries from local Heroic/Legendary metadata and launches with the Heroic protocol; see `HEROIC.md`.
+- **Heroic** — Phase 9 imports installed Epic/Legendary entries from local Heroic/Legendary metadata and launches with the Heroic protocol; Phase 9.5.44.53 adds its `gui=false` window-hiding parameter (Heroic 2.22.0+). Phase 9.5.44.46 also reads lifetime playtime; see `HEROIC.md`, ADR 0103, and ADR 0110.
 
 ADR 0045 records the multi-provider decisions. The adapters may use different local schemas and identity namespaces, but `SourceImportService`, SQLite persistence, `GameLaunchService`, Home presentation, launch feedback, and Activity remain provider-neutral.
 
-Phase 8's source-reported lifetime-playtime boundary is unchanged. None of the current adapters advertises `LifetimePlaytime` until a reliable provider value is deliberately implemented. Production artwork is now available through the generic `Artwork` capability, with Steam as the first provider.
+Phase 9.5.44.46 activates `LifetimePlaytime` for Heroic only: its adapter normalizes Heroic's local `timestamp.json` cumulative minutes to seconds. The source-neutral `SourcePlaytimeSync` coordinates with the existing Activity service and lifetime persistence table. Source-reported totals remain separate from Horizon-observed sessions. Steam still does not advertise `LifetimePlaytime`. Production artwork is available through the generic `Artwork` capability, with Steam as the first provider.
 
 ## Phase 9 local-only rule
 
@@ -175,3 +175,29 @@ no eligible square      -> FallbackCover
 
 Steam remains the first provider to implement the capability. Heroic
 continues to use the procedural fallback until it can expose genuine 1:1 artwork.
+
+### Phase 9.5.44.48 — Automatic Heroic runtime observation
+
+The Phase 9.5.44.47 manual wrapper approach is superseded by an automatic
+Heroic log/timestamp observer. Heroic owns the launch, and the Heroic adapter
+alone interprets its `launch.log` activity and `timestamp.json` completion.
+Generic launch, Activity and Home continue to consume the unchanged
+`SourceRuntimeState` boundary. This is best-effort launch-session observation,
+not proof that Heroic's game process is alive: unfinished logs expire after
+18 hours, and failed/detached launches can create false/early transitions.
+
+The Flatpak gains a narrow native-state read-only grant for Heroic logs; the
+existing Heroic Flatpak app-data grant is already sufficient. There are no
+helper installs, manual per-game settings, process scans or new dependencies.
+See `docs/HEROIC.md` and ADR 0105.
+
+
+### Phase 9.5.44.49: Launch-scoped runtime observation
+
+`GameSource::runtime_state_for_observation` is an optional, source-neutral
+observation-time boundary. The default delegates to `runtime_state` so
+providers with authoritative runtime status, including Steam, do not change.
+Heroic uses the observation's wall-clock arming time to reject earlier
+incomplete log files and selects the newest native/Flatpak log generation
+instead of OR-ing possibly stale game states. This is best-effort rather than
+verified game-process supervision; see `docs/HEROIC.md` and ADR 0106.

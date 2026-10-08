@@ -84,7 +84,7 @@ Historical activity retains the logical `games` row even after the final active 
 
 Future adapters may support more precise process/session tracking. Add those as explicit `SessionTrackingMethod` variants rather than changing the meaning of `ForegroundHandoff`.
 
-A future source that reports lifetime playtime should write that value through the source-neutral Activity service and the separate lifetime table. Do not back-fill it into observed sessions or combine the counters.
+Heroic now reports lifetime playtime through the source-neutral Activity service and the separate lifetime table. Never back-fill that provider value into observed sessions or combine the counters; the two totals can refer to the same gameplay.
 
 
 ## Managed sessions (Phase 9.5)
@@ -200,3 +200,47 @@ This intentionally loses the small uncheckpointed tail rather than inventing
 playtime after Horizon's last proof of life. With a five-second cadence the
 normal loss window is less than one interval, subject to filesystem/storage
 durability. SQLite synchronous mode is explicitly `FULL` for these commits.
+
+
+## Phase 9.5.44.46 — Heroic source lifetime
+
+Heroic's `timestamp.json` supplies cumulative time in **minutes**, including
+play outside Horizon. Horizon stores this data separately from its observed
+session timeline. The Activity page now shows both totals independently; it
+never adds them. Provider-reported totals only update after Heroic completes a
+launch and writes its store, so the approximately 20-second polling interval
+applies **after that write**, not as live process/session detection.
+
+The right-side Activity panel distinguishes Most played (observed) from
+Source-reported lifetime. A provider lifetime row cannot reconstruct individual
+historic Heroic sessions, nor prove a game is currently playing.
+
+## Phase 9.5.44.48 — Automatic Heroic launch-session observation
+
+The manual per-game wrapper of Phase 9.5.44.47 is retired. The Heroic adapter
+now observes its own per-game `launch.log` start/close state, cross-checked
+against the matching installation's `timestamp.json` `lastPlayed` completion
+record, without setup or Heroic settings changes. The existing generic
+source-runtime state machine drives Playing and stores Horizon-observed
+sessions. Logs without a completion record expire after 18 hours.
+
+Unlike Steam gameprocess logs or a supervised command wrapper, Heroic's game
+log starts while launch preparation runs, **not necessarily when the game
+process starts**. Runtime observations may therefore include startup work or
+short-lived failed launches; a detached game process can produce an early
+completion. Treat Heroic-observed sessions as estimates; the independent
+Heroic-reported lifetime counter remains authoritative for the provider's
+own total and is never added to observed seconds. See ADR 0105.
+
+
+## Phase 9.5.44.49 — Heroic observed-session accuracy
+
+Each Horizon-initiated observed session now carries an arming timestamp across
+the source-neutral runtime boundary. Steam continues using its existing
+runtime state. Heroic rejects launch log generations predating the arming time
+by more than 45 seconds, and resolves multiple Heroic installations by the
+newest game-log generation. This prevents most previously orphaned open logs
+from being recorded as a new game session, while preserving the recorded
+terminal `lastPlayed` check. The clock tolerance does not turn Heroic logs
+into reliable game-process telemetry. Heroic-reported lifetime and
+Horizon-observed session times remain distinct, never additive counters.

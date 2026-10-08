@@ -20,6 +20,8 @@ finish-args:
   # Flatpak cannot restrict --share=network to a single host.
   - --share=network
   - --socket=wayland
+  # Native SDL3 playback through the host PulseAudio/PipeWire-Pulse server.
+  - --socket=pulseaudio
   # Wayland-only UI. Do not add X11/XWayland socket permissions to work
   # around missing GNOME Wayland clipboard support.
   - --device=dri
@@ -30,6 +32,13 @@ finish-args:
   # Horizon's narrow session D-Bus API; it does not expose flatpak-spawn or
   # arbitrary host command execution.
   - --talk-name=io.github.Mars7x.Horizon.Session1
+  # Read-only status queries over the host system bus: active Ethernet/Wi-Fi
+  # connection and signal strength, plus host laptop/handheld battery level.
+  # NetworkManager/UPower retain their usual polkit restrictions for writes.
+  - --system-talk-name=org.freedesktop.NetworkManager
+  - --system-talk-name=org.freedesktop.UPower
+  # Read-only Bluetooth controller Battery1 fallback. No configuration writes.
+  - --system-talk-name=org.bluez
   # Read only Steam-owned metadata locations. Native Steam stays limited to
   # its XDG data roots. Flatpak Steam needs its app-data root exposed as one
   # read-only subtree because real installations may resolve Steam metadata
@@ -43,6 +52,10 @@ finish-args:
   # broad home/host access.
   - --filesystem=xdg-config/heroic:ro
   - --filesystem=xdg-config/legendary:ro
+  # Heroic 2.x keeps game launch logs under host XDG_STATE_HOME rather than
+  # XDG_CONFIG_HOME. Flatpak has no xdg-state filesystem alias, so grant only
+  # the standard native path, not the host state directory as a whole.
+  - --filesystem=~/.local/state/Heroic/logs:ro
   - --filesystem=~/.var/app/com.heroicgameslauncher.hgl:ro
 
 modules:

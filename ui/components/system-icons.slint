@@ -1,28 +1,35 @@
-// Third-party geometry provenance:
-// Controller geometry derives from applications-games-symbolic.svg from the
-// GNOME Symbolic Icon Theme, attributed to the GNOME Project under
-// CC-BY-SA-3.0-US. See ../../THIRD_PARTY_NOTICES.md and ../../docs/LICENSING.md.
-
+// GNOME's unmodified source SVGs remain in ui/assets. The same adaptive
+// SVG rendering policy used by utility-icons.slint is also used for status
+// symbols: render at logical size for normal/smaller UI scales and increase
+// raster resolution only when AppWindow enlarges the scene, capped at 4x.
+// Tint is applied to the SVG mask, not by editing the original artwork.
+// License: GNOME Project CC-BY-SA-3.0-US; see THIRD_PARTY_NOTICES.md.
 import { Theme } from "../theme/theme.slint";
 
-// Geometry is transcribed from the supplied applications-games-symbolic.svg.
-// The source SVG remains unchanged in ui/assets; this Slint Path rendering keeps
-// the icon vector-crisp at every scale and lets the footer color follow Theme.
-export component ControllerIcon inherits Rectangle {
+export component SymbolicSvgIcon inherits Rectangle {
+    in property <image> artwork;
+    in property <float> render-scale: 1.0;
     in property <color> tint: Theme.foreground;
     background: transparent;
 
-    Path {
-        width: parent.width; height: parent.height;
-        viewbox-width: 16; viewbox-height: 16;
-        commands: "M0 11v2.5C0 14.878906 1.121094 16 2.5 16H3c1.105469 0 2-.894531 2-2s.894531-2 2-2 2 .894531 2 2c.136719 1.242188 1.257812 2.136719 2.5 2 1.378906 0 2.5-1.117188 2.5-2.5V11c0-2.210938-1.789062-4-4-4H4c-2.210938 0-4 1.789062-4 4m3.25-2h.5c.136719 0 .25.113281.25.25V10h.75c.136719 0 .25.113281.25.25v.5c0 .140625-.113281.25-.25.25H4v.75c0 .140625-.113281.25-.25.25h-.5c-.140625 0-.25-.109375-.25-.25V11h-.75c-.140625 0-.25-.109375-.25-.25v-.5c0-.136719.109375-.25.25-.25H3v-.75c0-.136719.109375-.25.25-.25m6.25.75c.414062 0 .75.335938.75.75s-.335938.75-.75.75-.75-.335938-.75-.75.335938-.75.75-.75m2 1c.414062 0 .75.335938.75.75s-.335938.75-.75.75-.75-.335938-.75-.75.335938-.75.75-.75m0 0";
-        fill: root.tint;
-    }
+    private property <float> internal-render-scale:
+        root.render-scale > 1.0
+            ? (root.render-scale < 4.0 ? root.render-scale : 4.0)
+            : 1.0;
 
-    Path {
-        width: parent.width; height: parent.height;
-        viewbox-width: 16; viewbox-height: 16;
-        commands: "M2 3.015625C2.007812 4.671875 3.359375 6.007812 5.015625 6h7.96875C14.648438 6 16 4.648438 16 2.984375 15.992188 1.328125 14.640625-.007812 12.984375 0h-7.96875C3.351562 0 2 1.351562 2 3.015625M5.21875 1h.5c.136719 0 .25.113281.25.25V2h.75c.136719 0 .25.113281.25.25v.5c0 .140625-.113281.25-.25.25h-.75v.75c0 .140625-.113281.25-.25.25h-.5c-.140625 0-.25-.109375-.25-.25V3h-.75c-.140625 0-.25-.109375-.25-.25v-.5c0-.136719.109375-.25.25-.25h.75v-.75c0-.136719.109375-.25.25-.25m6.25.75c.414062 0 .75.335938.75.75s-.335938.75-.75.75-.75-.335938-.75-.75.335938-.75.75-.75m2 .03125c.414062 0 .75.335938.75.75s-.335938.75-.75.75-.75-.335938-.75-.75.335938-.75.75-.75m0 0";
-        fill: root.tint;
+    Image {
+        x: 0px;
+        y: 0px;
+        width: root.width * root.internal-render-scale;
+        height: root.height * root.internal-render-scale;
+        source: root.artwork;
+        image-fit: contain;
+        colorize: root.tint;
+        transform-origin: { x: 0px, y: 0px };
+        transform-scale: 1.0 / root.internal-render-scale;
     }
+}
+
+export component ControllerIcon inherits SymbolicSvgIcon {
+    artwork: @image-url("../assets/applications-games-symbolic.svg");
 }

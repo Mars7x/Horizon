@@ -6,11 +6,14 @@ use tracing_subscriber::EnvFilter;
 
 use crate::{
     AppWindow,
+    appearance::store::AppearanceStore,
+    audio::{UiSoundCue, UiSounds},
     error::AppError,
-    input::{ControllerStatus, InputManager, UiActionEvent},
+    input::{ControllerStatus, InputManager, UiAction, UiActionEvent},
     persistence::{SqliteLibraryRepository, settings::SettingsStore},
     platform::{
         data_paths,
+        system_status::{StatusMonitor, SystemStatus},
         launcher::PortalLaunchExecutor,
         session_helper::DbusManagedSessionExecutor,
         slint_backend,
@@ -18,6 +21,7 @@ use crate::{
     presentation::{
         activity::ActivityController, appearance::AppearanceController, clock::ClockController,
         home::HomeController, navigation::NavigationController, settings::SettingsController,
+        status::StatusController,
     },
     services::{
         activity::{ActivityService, ActivitySessionTransition, LaunchActivitySink},
@@ -26,6 +30,7 @@ use crate::{
         launch::GameLaunchService,
         library::LibraryService,
         runtime::{RuntimeObservationExecutor, SourceRuntimeObservationExecutor},
+        source_playtime::SourcePlaytimeSync,
         session::{ManagedSessionExecutor, ManagedSessionTerminalState},
         settings::SettingsService,
     },
@@ -33,6 +38,7 @@ use crate::{
 };
 
 const APP_ID: &str = "io.github.Mars7x.Horizon";
+const SOURCE_PLAYTIME_REFRESH_INTERVAL: Duration = Duration::from_secs(20);
 
 pub fn run() -> Result<(), AppError> {
     tracing_subscriber::fmt()
@@ -42,7 +48,7 @@ pub fn run() -> Result<(), AppError> {
         )
         .init();
 
-    info!("starting Horizon phase 9.5.43");
+    info!("starting Horizon phase 9.5.44.47");
 
     let database_path = data_paths::library_database_path()?;
     let repository = SqliteLibraryRepository::open(&database_path)?;
@@ -96,6 +102,11 @@ pub fn run() -> Result<(), AppError> {
     // connection without leaking SQLite into presentation code.
     let runtime_repository = Rc::new(RefCell::new(library.into_repository()));
     let activity_service = Rc::new(ActivityService::new(Rc::clone(&runtime_repository)));
+    let source_playtime_sync = Rc::new(SourcePlaytimeSync::default());
+    if let Err(error) = source_playtime_sync.refresh(&registry, &library_games, &activity_service) {
+        warn!(%error, "source-reported playtime import failed; observed sessions are unaffected");
+    }
+
     let interrupted_sessions = activity_service.recover_interrupted_sessions()?;
     if interrupted_sessions > 0 {
         warn!(
@@ -110,7 +121,8 @@ pub fn run() -> Result<(), AppError> {
     slint::set_xdg_app_id(APP_ID)?;
 
     let ui = AppWindow::new()?;
-    let appearance = AppearanceController::new(&ui);
+    let appearance = AppearanceController::new(&ui,
+        AppearanceStore::new(data_paths::appearance_settings_path()?))?;
     let _appearance_monitor = match appearance.start_portal_monitor(&ui) {
         Ok(monitor) => Some(monitor),
         Err(error) => {
@@ -140,6 +152,29 @@ pub fn run() -> Result<(), AppError> {
     );
 
     let registry = Rc::new(registry);
+    let source_playtime_timer = Timer::default();
+    let sync_registry = Rc::clone(&registry);
+    let sync_activity = Rc::clone(&activity_service);
+    let sync_worker = Rc::clone(&source_playtime_sync);
+    let sync_games = library_games.clone();
+    let sync_ui = ui.as_weak();
+    source_playtime_timer.start(TimerMode::Repeated, SOURCE_PLAYTIME_REFRESH_INTERVAL, move || {
+        match sync_worker.refresh(&sync_registry, &sync_games, &sync_activity) {
+            Ok(true) => {
+                if let Some(ui) = sync_ui.upgrade() {
+                    match sync_activity.overview(
+                        ActivityController::recent_session_limit(),
+                        ActivityController::top_game_limit(),
+                    ) {
+                        Ok(overview) => ActivityController::publish(&ui, &overview),
+                        Err(error) => warn!(%error, "source playtime overview could not refresh"),
+                    }
+                }
+            }
+            Ok(false) => {}
+            Err(error) => warn!(%error, "source playtime refresh failed"),
+        }
+    });
     let artwork_service = ArtworkService::new(Rc::clone(&registry));
     let mut launch_service = GameLaunchService::new(
         Rc::clone(&registry),
@@ -185,7 +220,20 @@ pub fn run() -> Result<(), AppError> {
 
     let settings_path = data_paths::third_party_settings_path()?;
     let settings_service = SettingsService::load(SettingsStore::new(settings_path))?;
-    let settings = SettingsController::new(&ui, settings_service);
+    let settings = SettingsController::new(&ui, settings_service, appearance.clone());
+    let navigation_sound = Rc::new(RefCell::new(UiSounds::new(
+        appearance.preferences().ui_sounds_enabled,
+    )));
+    // Give the window its first frame, then warm SDL playback once while idle.
+    // The first actual menu cue should not pay audio-device opening latency.
+    let warm_sounds = Rc::clone(&navigation_sound);
+    Timer::single_shot(Duration::from_millis(75), move || {
+        warm_sounds.borrow_mut().prepare();
+    });
+    let settings_sound = Rc::clone(&navigation_sound);
+    settings.set_sound_changed(Rc::new(move |enabled| {
+        settings_sound.borrow_mut().set_enabled(enabled);
+    }));
     let initial_preferences = settings.artwork_preferences();
     ui.set_settings_artwork_status(if initial_preferences.api_key.is_some() {
         "Checking SteamGridDB artwork…".into()
@@ -214,6 +262,12 @@ pub fn run() -> Result<(), AppError> {
         }
     });
     let navigation = NavigationController::new(&ui, Rc::clone(&home), settings);
+    // The very same semantic handlers cover gamepad/keyboard and pointer
+    // activation. A failed or ignored menu action never emits a cue.
+    let cue_sounds = Rc::clone(&navigation_sound);
+    navigation.set_action_sound(Rc::new(move |cue| {
+        cue_sounds.borrow_mut().play(cue);
+    }));
     info!(
         route = ?navigation.current_route(),
         "Phase 4.7 hardened navigation shell initialized"
@@ -221,22 +275,64 @@ pub fn run() -> Result<(), AppError> {
 
     let ui_weak = ui.as_weak();
     let action_navigation = Rc::clone(&navigation);
+    let action_sound = Rc::clone(&navigation_sound);
     let action_sink: Rc<dyn Fn(UiActionEvent)> = Rc::new(move |event| {
-        let Some(ui) = ui_weak.upgrade() else {
-            return;
-        };
+        let Some(ui) = ui_weak.upgrade() else { return; };
+        // Snapshot semantic focus, not raw key presses: blocked directions and
+        // unchanged focus should never make a navigation cue. OK/Back are
+        // emitted by the semantic menu handlers; game launching stays silent.
+        let before = (
+            ui.get_current_route(), ui.get_selected_index(),
+            ui.get_top_utilities_focused(), ui.get_focused_utility_index(),
+            ui.get_settings_view(), ui.get_settings_selection(),
+            ui.get_settings_editor_target(),
+        );
         action_navigation.handle_action(&ui, event);
+        let after = (
+            ui.get_current_route(), ui.get_selected_index(),
+            ui.get_top_utilities_focused(), ui.get_focused_utility_index(),
+            ui.get_settings_view(), ui.get_settings_selection(),
+            ui.get_settings_editor_target(),
+        );
+        if matches!(event.action, UiAction::Up | UiAction::Down | UiAction::Left | UiAction::Right)
+            && before != after {
+            action_sound.borrow_mut().play(UiSoundCue::Navigation);
+        }
     });
 
+    // SDL reports controller batteries from its input timer; the host status
+    // observer runs blocking NetworkManager/UPower queries on its own worker.
+    // Neither source can block keyboard, controller, animation, or frame input.
+    let host_status = Rc::new(RefCell::new(SystemStatus::default()));
+    let controller_status = Rc::new(RefCell::new(ControllerStatus::default()));
     let status_ui = ui.as_weak();
+    let status_host = Rc::clone(&host_status);
+    let status_controller = Rc::clone(&controller_status);
     let status_sink: Rc<dyn Fn(ControllerStatus)> = Rc::new(move |status| {
-        let Some(ui) = status_ui.upgrade() else {
-            return;
-        };
-        ui.set_connected_controller_count(status.connected_gamepads as i32);
+        *status_controller.borrow_mut() = status;
+        if let Some(ui) = status_ui.upgrade() {
+            StatusController::publish(&ui, *status_host.borrow(), status);
+        }
     });
 
     let input = InputManager::new(action_sink, status_sink);
+
+    let system_monitor = StatusMonitor::start();
+    let system_status_timer = Timer::default();
+    let system_ui = ui.as_weak();
+    let system_controller = Rc::clone(&controller_status);
+    let system_host = Rc::clone(&host_status);
+    system_status_timer.start(TimerMode::Repeated, Duration::from_millis(50), move || {
+        if let Some(fresh) = system_monitor.latest() {
+            // Controller hotplug/power updates publish from this same cache.
+            // Keep it synchronized or they briefly overwrite a live Ethernet
+            // reading with the initial disconnected default.
+            *system_host.borrow_mut() = fresh;
+            if let Some(ui) = system_ui.upgrade() {
+                StatusController::publish(&ui, fresh, *system_controller.borrow());
+            }
+        }
+    });
 
     // SDL gamepad events are process-global, unlike keyboard events delivered
     // by the focused Slint window. Bind semantic controller ownership to the
@@ -312,6 +408,7 @@ pub fn run() -> Result<(), AppError> {
     let runtime_observation_timer = Timer::default();
     let runtime_launch_service = Rc::clone(&launch_service);
     let runtime_activity = Rc::clone(&activity_service);
+    let runtime_home = Rc::clone(&home);
     let runtime_ui = ui.as_weak();
     runtime_observation_timer.start(TimerMode::Repeated, Duration::from_millis(500), move || {
         let events = runtime_launch_service.poll_runtime_observations();
@@ -321,6 +418,9 @@ pub fn run() -> Result<(), AppError> {
 
         let mut refresh_activity = false;
         for event in events {
+            // Playing belongs to the exact same source-verified lifecycle as
+            // Activity; neither focus changes nor launch dispatch set it.
+            runtime_home.handle_runtime_observation_event(&event);
             match runtime_activity.handle_runtime_observation_event(&event) {
                 Ok(transition) => refresh_activity |= transition.changed(),
                 Err(error) => {
@@ -450,6 +550,8 @@ pub fn run() -> Result<(), AppError> {
     let _input = input;
     let _foreground_return_timer = foreground_return_timer;
     let _runtime_observation_timer = runtime_observation_timer;
+    let _source_playtime_timer = source_playtime_timer;
+    let _source_playtime_sync = source_playtime_sync;
     let _live_activity_timer = live_activity_timer;
     let _activity_checkpoint_timer = activity_checkpoint_timer;
     let _managed_session_timer = managed_session_timer;

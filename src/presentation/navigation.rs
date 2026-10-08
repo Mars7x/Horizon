@@ -5,6 +5,7 @@ use tracing::debug;
 
 use crate::{
     AppRouteView, AppWindow,
+    audio::UiSoundCue,
     input::{UiAction, UiActionEvent},
     navigation::{
         AppRoute, Navigator, RouteFocusMemory, ShellFocus, ShellFocusRegion, ShellMenuState,
@@ -26,6 +27,7 @@ pub struct NavigationController {
     shell_menu: RefCell<ShellMenuState>,
     home: Rc<HomeController>,
     settings: Rc<SettingsController>,
+    action_sound: RefCell<Option<Rc<dyn Fn(UiSoundCue)>>>,
 }
 
 impl NavigationController {
@@ -37,12 +39,22 @@ impl NavigationController {
             shell_menu: RefCell::new(ShellMenuState::default()),
             home,
             settings,
+            action_sound: RefCell::new(None),
         });
         controller.publish_route(ui);
         controller.publish_focus(ui);
         controller.publish_shell_menu(ui);
         controller.bind_ui_callbacks(ui);
         controller
+    }
+
+    pub fn set_action_sound(&self, callback: Rc<dyn Fn(UiSoundCue)>) {
+        self.settings.set_action_sound(Rc::clone(&callback));
+        *self.action_sound.borrow_mut() = Some(callback);
+    }
+
+    fn cue(&self, cue: UiSoundCue) {
+        if let Some(callback) = self.action_sound.borrow().as_ref() { callback(cue); }
     }
 
     pub fn current_route(&self) -> AppRoute {
@@ -148,6 +160,7 @@ impl NavigationController {
 
     fn handle_back(&self, ui: &AppWindow) {
         if self.close_shell_menu(ui) {
+            self.cue(UiSoundCue::Back);
             debug!("Back closed shell menu");
             return;
         }
@@ -159,6 +172,8 @@ impl NavigationController {
             debug!(?from, ?to, "Back restored previous route and focus");
             if from == AppRoute::Utility(UtilityPage::Settings) { self.settings.on_leave(ui); }
             if to == AppRoute::Utility(UtilityPage::Settings) { self.settings.on_enter(ui); }
+            // Queue feedback before potentially expensive route redraws.
+            self.cue(UiSoundCue::Back);
             self.publish_route_change(ui, from, to);
             self.restore_focus_for_route(ui, to);
         } else {
@@ -198,6 +213,7 @@ impl NavigationController {
     fn handle_menu(&self, ui: &AppWindow) {
         let open = self.shell_menu.borrow_mut().toggle();
         debug!(open, route = ?self.current_route(), "global shell menu toggled");
+        self.cue(if open { UiSoundCue::Ok } else { UiSoundCue::Back });
         self.publish_shell_menu(ui);
     }
 
@@ -205,7 +221,7 @@ impl NavigationController {
         match event.action {
             UiAction::Left | UiAction::Right => {
                 let delta = if event.action == UiAction::Left { -1 } else { 1 };
-                if self.focus.borrow_mut().move_utility(delta) {
+                if self.focus.borrow_mut().move_utility(delta, event.repeated) {
                     debug!(utility = ?self.focus.borrow().utility(), "top utility focus moved");
                     self.publish_focus(ui);
                 }
@@ -267,6 +283,10 @@ impl NavigationController {
     fn activate_utility(&self, ui: &AppWindow, utility: TopUtility) {
         let route = utility.route();
         let from = self.current_route();
+        if route == from { return; }
+        // The destination is a known valid utility route. Dispatch OK before
+        // synchronous on_enter() and route publishing, not after them.
+        self.cue(UiSoundCue::Ok);
         self.navigate_to(ui, route);
         if self.current_route() != from {
             debug!(?from, to = ?route, ?utility, "utility submenu opened");

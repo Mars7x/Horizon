@@ -1,0 +1,24 @@
+// Original GNOME Symbolic and Adwaita SVGs are preserved byte-for-byte.
+// Use the same scale-aware SVG rasterization as Horizon's utility icons,
+// retaining the authored Wi-Fi signal arcs and the two wired variants.
+// Theme tint comes from SymbolicSvgIcon. See THIRD_PARTY_NOTICES.md.
+import { SymbolicSvgIcon } from "system-icons.slint";
+
+export component NetworkStatusGlyph inherits SymbolicSvgIcon {
+    in property <int> glyph-id: 0;
+    artwork: root.glyph-id == 1
+        ? @image-url("../assets/status/network-wired-symbolic.svg")
+        : root.glyph-id == 2
+            ? @image-url("../assets/status/network-wired-no-route-symbolic.svg")
+            : root.glyph-id == 3
+                ? @image-url("../assets/status/radiowaves-1-symbolic.svg")
+                : root.glyph-id == 4
+                    ? @image-url("../assets/status/radiowaves-2-symbolic.svg")
+                    : root.glyph-id == 5
+                        ? @image-url("../assets/status/radiowaves-3-symbolic.svg")
+                        : root.glyph-id == 6
+                            ? @image-url("../assets/status/radiowaves-4-symbolic.svg")
+                            : root.glyph-id == 7
+                                ? @image-url("../assets/status/radiowaves-question-symbolic.svg")
+                                : @image-url("../assets/status/radiowaves-x-symbolic.svg");
+}

@@ -1,4 +1,4 @@
-import { Theme, Metrics, Typography } from "../theme/theme.slint";
+import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { ControllerIcon } from "system-icons.slint";
 
 component ClockReadout inherits Rectangle {
@@ -36,6 +36,7 @@ component ClockReadout inherits Rectangle {
 }
 
 export component Footer inherits Rectangle {
+    in property <float> icon-render-scale: 1.0;
     in property <int> connected-controller-count: 0;
     in property <string> clock-time: "";
     in property <string> clock-suffix: "";
@@ -44,18 +45,28 @@ export component Footer inherits Rectangle {
 
     // Every footer control resolves from the same vertical midpoint. No local
     // optical lift is applied, so shortening the footer cannot misalign groups.
-    if root.connected-controller-count > 0 : ControllerIcon {
-        x: Metrics.page-margin;
+    // Persistent widgets animate hotplug in *both* directions; conditional
+    // construction would instantly destroy the icon on controller removal.
+    controller-symbol := ControllerIcon {
+        render-scale: root.icon-render-scale;
+        x: Metrics.page-margin - (root.connected-controller-count > 0 ? 0px : Motion.status-slide-distance);
         y: (parent.height - self.height) / 2;
+        opacity: root.connected-controller-count > 0 ? 1.0 : 0.0;
         width: 34px;
         height: 34px;
+        animate x, opacity {
+            duration: root.connected-controller-count > 0 ? Motion.status-enter-duration : Motion.status-exit-duration;
+            easing: ease-in-out;
+        }
     }
 
-    if root.connected-controller-count > 0 : Rectangle {
+    Rectangle {
         x: Metrics.page-margin + 56px;
         y: (parent.height - 30px) / 2;
         width: 1px;
         height: 30px;
+        opacity: root.connected-controller-count > 0 ? 1.0 : 0.0;
+        animate opacity { duration: Motion.status-enter-duration; easing: ease-in-out; }
         background: Theme.divider;
     }
 
