@@ -24,7 +24,6 @@ const OVERSCAN_ROWS: usize = 2;
 #[derive(Debug, Clone, Copy)]
 struct GridLayout {
     columns: usize,
-    card_size: f32,
     stride: f32,
 }
 
@@ -43,7 +42,7 @@ impl GridLayout {
         // viewport width: width - HORIZONTAL_GUTTER.
         let available = width - HORIZONTAL_GUTTER - 2.0 * GRID_PAD + CARD_GAP;
         let columns = ((available / stride).floor() as usize).clamp(1, maximum_columns);
-        Self { columns, card_size, stride }
+        Self { columns, stride }
     }
 }
 
@@ -167,6 +166,7 @@ struct State {
     metadata_game_id: Option<i64>,
     metadata_sequence: i32,
     browse_sequence: i32,
+    browse_transition_kind: i32, // 0 none, 1 Source, 2 Sort
 }
 impl Default for State {
     fn default() -> Self {
@@ -175,6 +175,7 @@ impl Default for State {
             selection: 0, scroll_top: 0, mounted_start: 0, mounted_len: 0,
             window_dirty: true, metadata_game_id: None, metadata_sequence: 0,
             browse_sequence: 0,
+            browse_transition_kind: 0,
         }
     }
 }
@@ -292,6 +293,7 @@ impl LibraryController {
         }
         let metadata_sequence = s.metadata_sequence;
         let browse_sequence = s.browse_sequence;
+        let browse_transition_kind = s.browse_transition_kind;
         let cards: Vec<LibraryCardData> = if refresh_window {
             s.order[start..end].iter().enumerate().filter_map(|(i, &original)| {
                 self.home.card_at(original).map(|card| LibraryCardData {
@@ -318,6 +320,7 @@ impl LibraryController {
         // Signal the new arrangement before mutating the model/scroll offsets.
         // This lets Slint choose an instant camera reposition while the two
         // stationary snapshots crossfade rather than also sliding the grid.
+        ui.set_library_browse_transition_kind(browse_transition_kind);
         ui.set_library_browse_sequence(browse_sequence);
         if refresh_window { self.rows.set_vec(cards); }
         ui.set_library_grid_columns(columns as i32);
@@ -403,6 +406,7 @@ impl LibraryController {
         {
             let mut s = self.state.borrow_mut();
             s.source_index = (s.source_index + 1) % (self.sources.len() + 1);
+            s.browse_transition_kind = 1;
             s.browse_sequence = s.browse_sequence.wrapping_add(1);
         }
         self.rebuild(ui, selected_id);
@@ -414,6 +418,7 @@ impl LibraryController {
         {
             let mut s = self.state.borrow_mut();
             s.sort = s.sort.next();
+            s.browse_transition_kind = 2;
             s.browse_sequence = s.browse_sequence.wrapping_add(1);
         }
         self.rebuild(ui, selected_id);
@@ -504,7 +509,7 @@ mod tests {
             let layout = GridLayout::for_width(width);
             let gallery = layout.columns as f32 * layout.stride - CARD_GAP + 2.0 * GRID_PAD;
             assert!(gallery <= width - 48.0, "gallery exceeds viewport at {width}");
-            assert!(layout.card_size >= 132.0);
+            assert!(layout.stride - CARD_GAP >= 132.0);
         }
         assert_eq!(source_title("heroic"), "Heroic");
     }

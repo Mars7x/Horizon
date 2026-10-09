@@ -5,8 +5,8 @@ import { GameCardData } from "models/game-card.slint";
 export { GameCardData }
 import { LibraryCardData } from "models/library.slint";
 export { LibraryCardData }
-import { ActivitySessionData, ActivityGameData } from "models/activity.slint";
-export { ActivitySessionData, ActivityGameData }
+import { ActivitySessionData, ActivityGameData, ActivityCoverData, ActivityDayData, ActivityHistoryRowData } from "models/activity.slint";
+export { ActivitySessionData, ActivityGameData, ActivityCoverData, ActivityDayData, ActivityHistoryRowData }
 
 import { AppRouteView } from "models/navigation.slint";
 export { AppRouteView }
@@ -18,6 +18,7 @@ import { Footer } from "components/footer.slint";
 import { HomePage } from "pages/home.slint";
 import { LibraryPage } from "pages/library.slint";
 import { ActivityPage } from "pages/activity.slint";
+import { ActivityGameDetailsPage } from "pages/activity-game-details.slint";
 import { SettingsPage } from "pages/settings.slint";
 import { UtilitySubmenuPage } from "pages/utility.slint";
 
@@ -92,6 +93,7 @@ export component AppWindow inherits Window {
     in property <bool> library-has-previous-grid: false;
     in property <int> library-selected-index: 0;
     in property <int> library-browse-sequence: 0;
+    in property <int> library-browse-transition-kind: 0;
     in property <string> library-filter-text: "All sources";
     in property <string> library-sort-text: "Alphabetical";
     in property <int> library-total-count: 0;
@@ -105,7 +107,7 @@ export component AppWindow inherits Window {
     out property <float> logical-viewport-height-px: root.logical-height / 1px;
     callback library-layout-changed();
     changed logical-width => { root.library-layout-changed(); }
-    changed logical-height => { root.library-layout-changed(); }
+    changed logical-height => { root.library-layout-changed(); root.activity-detail-layout-changed(); }
     in-out property <int> selected-index: 0;
     in property <string> selected-title: "";
     in-out property <int> launching-game-index: -1;
@@ -120,6 +122,30 @@ export component AppWindow inherits Window {
     in property <string> activity-game-count: "0";
     in property <[ActivitySessionData]> activity-recent-sessions;
     in property <[ActivityGameData]> activity-top-games;
+    in property <[ActivityCoverData]> activity-covers;
+    in property <[ActivityDayData]> activity-days;
+    in property <string> activity-week-total: "0 min";
+    in property <string> activity-month-total: "0 min";
+    in property <int> activity-selected-index: 0;
+    in-out property <int> activity-pressed-index: -1;
+    out property <bool> activity-reduced-motion: Motion.reduced-motion;
+    in property <bool> activity-details-visible: false;
+    in property <GameCardData> activity-detail-game;
+    in property <string> activity-detail-source;
+    in property <string> activity-detail-last-played: "—";
+    in property <string> activity-detail-observed: "0 min";
+    in property <string> activity-detail-provider-label: "Source lifetime";
+    in property <string> activity-detail-provider-time: "Not available";
+    in property <string> activity-detail-sessions-summary: "0 sessions";
+    in property <string> activity-detail-longest: "—";
+    in property <string> activity-detail-average: "—";
+    in property <[ActivityHistoryRowData]> activity-detail-rows;
+    in property <int> activity-detail-session-count: 0;
+    in property <int> activity-detail-first-row: 0;
+    out property <int> activity-detail-visible-rows: activity-details-page.visible-rows;
+    callback activity-detail-layout-changed();
+
+
 
     // Settings: root, Appearance, Third-Party. All selection and persistence Rust-owned.
     in property <int> settings-view: 0;
@@ -163,6 +189,8 @@ export component AppWindow inherits Window {
     callback library-cycle-sort();
     callback library-scroll-rows(int);
     callback library-back();
+    callback activity-choose(int);
+    callback activity-detail-back();
     callback activate-utility(int);
     callback settings-activate(int);
     callback settings-back();
@@ -284,6 +312,7 @@ export component AppWindow inherits Window {
                     count-text: root.library-count-text;
                     collection-count: root.library-collection-count;
                     browse-sequence: root.library-browse-sequence;
+                    browse-transition-kind: root.library-browse-transition-kind;
                     filter-text: root.library-filter-text;
                     sort-text: root.library-sort-text;
                     selected-title: root.library-selected-title;
@@ -352,13 +381,47 @@ export component AppWindow inherits Window {
                 ActivityPage {
                     width: parent.width;
                     height: parent.height;
-                    total-playtime: root.activity-total-playtime;
-                    reported-playtime: root.activity-reported-playtime;
-                    reported-games: root.activity-reported-games;
-                    session-count: root.activity-session-count;
-                    game-count: root.activity-game-count;
-                    recent-sessions: root.activity-recent-sessions;
-                    top-games: root.activity-top-games;
+                    // Historical Activity models remain application-owned but
+                    // aren't rendered by this controller-first overview.
+                    covers: root.activity-covers;
+                    days: root.activity-days;
+                    week-total: root.activity-week-total;
+                    month-total: root.activity-month-total;
+                    selected-index: root.activity-selected-index;
+                    pressed-index: root.activity-pressed-index;
+                    details-open: root.activity-details-visible;
+                    focus-visible: root.current-route == AppRouteView.activity && !root.activity-details-visible;
+                    opacity: root.activity-details-visible ? 0.0 : 1.0;
+                    x: root.activity-details-visible ? -12px : 0px;
+                    visible: self.opacity > 0.01;
+                    animate x {
+                        duration: Motion.reduced-motion ? 0ms : Motion.page-duration;
+                        easing: ease-in-out;
+                    }
+                    animate opacity {
+                        duration: Motion.reduced-motion ? 0ms : Motion.page-duration;
+                        easing: ease-in-out;
+                    }
+                    choose-game(index) => {
+                        if (root.current-route == AppRouteView.activity) { root.activity-choose(index); }
+                    }
+                }
+                activity-details-page := ActivityGameDetailsPage {
+                    width: parent.width;
+                    height: parent.height;
+                    active: root.activity-details-visible;
+                    game: root.activity-detail-game;
+                    source-name: root.activity-detail-source;
+                    last-played: root.activity-detail-last-played;
+                    observed-time: root.activity-detail-observed;
+                    provider-label: root.activity-detail-provider-label;
+                    provider-time: root.activity-detail-provider-time;
+                    sessions-summary: root.activity-detail-sessions-summary;
+                    longest-session: root.activity-detail-longest;
+                    average-session: root.activity-detail-average;
+                    rows: root.activity-detail-rows;
+                    session-count: root.activity-detail-session-count;
+                    back => { root.activity-detail-back(); }
                 }
             }
 

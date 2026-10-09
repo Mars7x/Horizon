@@ -1,0 +1,330 @@
+import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
+import { GameCardData } from "../models/game-card.slint";
+import { ActivityHistoryRowData } from "../models/activity.slint";
+import { FallbackCover } from "../components/fallback-cover.slint";
+
+// Nested Activity detail destination, not a new shell route. The history is
+// read-only and scrolls with Up/Down; no session row receives focus.
+// Game launch is deliberately not available.
+// Horizon-observed and source-reported playtime remain distinct measurements.
+export component ActivityGameDetailsPage inherits Rectangle {
+    in property <bool> active: false;
+    in property <GameCardData> game;
+    in property <string> source-name;
+    in property <string> last-played;
+    in property <string> observed-time;
+    in property <string> provider-label;
+    in property <string> provider-time;
+    in property <string> sessions-summary;
+    in property <string> longest-session;
+    in property <string> average-session;
+    in property <[ActivityHistoryRowData]> rows;
+    in property <int> session-count: 0;
+    callback back();
+
+    background: Theme.background;
+    // Settings-style page handoff: crossfade + 12px settle. Keep the outgoing
+    // page mounted long enough for its reverse animation to complete.
+    opacity: root.active ? 1.0 : 0.0;
+    x: root.active ? 0px : 12px;
+    visible: self.opacity > 0.01;
+    animate opacity { duration: Motion.reduced-motion ? 0ms : Motion.page-duration; easing: ease-in-out; }
+    animate x { duration: Motion.reduced-motion ? 0ms : Motion.page-duration; easing: ease-in-out; }
+
+    private property <bool> split: root.width >= 1080px && root.height >= 620px;
+    private property <length> inset: Metrics.page-margin;
+    private property <length> content-width: max(1px, root.width - 2 * root.inset);
+    private property <length> cover-size: root.split ? 140px : 90px;
+    private property <length> hero-y: root.split ? 78px : 55px;
+    private property <length> gap: 24px;
+    private property <length> summary-width: root.split
+        ? min(510px, root.content-width * 0.43) : root.content-width;
+    private property <length> history-x: root.split
+        ? root.inset + root.summary-width + root.gap : root.inset;
+    private property <length> history-width: root.split
+        ? max(1px, root.content-width - root.summary-width - root.gap)
+        : root.content-width;
+    private property <length> history-heading-y: root.split ? 265px : 270px;
+    private property <length> list-top: root.split ? 303px : 307px;
+    private property <length> row-height: root.split ? 70px : 56px;
+    private property <length> list-height: max(0px, root.height - root.list-top - 22px);
+    out property <int> visible-rows: max(1, Math.floor(
+        root.list-height / root.row-height));
+
+    Text {
+        x: root.inset; y: root.split ? 17px : 8px;
+        width: min(230px, root.content-width); height: 31px;
+        text: "‹  Activity";
+        color: Theme.secondary-foreground;
+        font-size: Typography.body-size;
+        vertical-alignment: center;
+    }
+    TouchArea {
+        x: root.inset; y: root.split ? 10px : 2px;
+        width: 230px; height: 40px;
+        enabled: root.active;
+        clicked => { root.back(); }
+    }
+
+    // A restrained hero with the exact same rounded cover shell as Library.
+    Rectangle {
+        x: root.inset; y: root.hero-y;
+        width: root.cover-size; height: root.cover-size;
+        border-radius: root.cover-size * (20.0 / 148.0);
+        background: Theme.surface-raised;
+        border-width: Theme.high-contrast ? 2px : 1px;
+        border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.42);
+        drop-shadow-offset-y: 3px;
+        drop-shadow-blur: 10px;
+        drop-shadow-color: Theme.shadow.with-alpha(0.62);
+        Rectangle {
+            x: root.cover-size * 0.085; y: self.x;
+            width: root.cover-size - 2 * self.x; height: self.width;
+            border-radius: root.cover-size * (12.0 / 148.0);
+            clip: true;
+            if root.game.has-artwork : Image {
+                width: parent.width; height: parent.height;
+                source: root.game.artwork;
+                image-fit: contain;
+                image-rendering: root.game.pixelated-artwork ? pixelated : smooth;
+            }
+            if !root.game.has-artwork : FallbackCover {
+                width: parent.width; height: parent.height;
+                game: root.game;
+            }
+        }
+    }
+    Rectangle {
+        x: root.inset + root.cover-size + 24px;
+        y: root.hero-y + (root.split ? 8px : 3px);
+        width: max(1px, root.content-width - root.cover-size - 24px);
+        height: root.cover-size;
+        background: transparent;
+        Text {
+            x: 0px; y: 0px;
+            width: parent.width; height: root.split ? 47px : 35px;
+            text: root.game.title; overflow: elide;
+            color: Theme.foreground;
+            font-size: root.split ? Typography.title-size : Typography.heading-size;
+            font-weight: Typography.title-weight;
+        }
+        Text {
+            x: 0px; y: root.split ? 52px : 36px;
+            width: parent.width; height: 24px;
+            text: root.source-name;
+            color: Theme.secondary-foreground;
+            font-size: Typography.body-size;
+            overflow: elide;
+        }
+        Text {
+            x: 0px; y: root.split ? 92px : 66px;
+            width: parent.width; height: 22px;
+            text: "Last played  " + root.last-played;
+            color: Theme.secondary-foreground;
+            font-size: Typography.caption-size;
+            overflow: elide;
+        }
+    }
+
+    // On wider windows two quiet stat sections balance the tall history list.
+    // Compact windows use one compressed read-only summary above the list.
+    Text {
+        x: root.inset; y: root.split ? 265px : 155px;
+        width: root.summary-width; height: 29px;
+        text: "Playtime";
+        color: Theme.foreground;
+        font-size: Typography.heading-size;
+        font-weight: Typography.heading-weight;
+    }
+    Rectangle {
+        x: root.inset; y: root.split ? 303px : 188px;
+        width: root.summary-width; height: root.split ? 124px : 69px;
+        background: Theme.surface;
+        border-radius: Metrics.radius-lg;
+        border-width: Theme.high-contrast ? 2px : 1px;
+        border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.40);
+        Rectangle {
+            x: 18px; y: 0px; width: (parent.width - 48px) / 2; height: parent.height;
+            background: transparent;
+            Text {
+                x: 0px; y: root.split ? 21px : 9px;
+                width: parent.width; height: 23px;
+                text: "Tracked by Horizon";
+                color: Theme.secondary-foreground;
+                font-size: Typography.caption-size;
+                overflow: elide;
+            }
+            Text {
+                x: 0px; y: root.split ? 58px : 32px;
+                width: parent.width; height: 32px;
+                text: root.observed-time;
+                color: Theme.foreground;
+                font-size: Typography.heading-size;
+                font-weight: Typography.heading-weight;
+                overflow: elide;
+            }
+        }
+        Rectangle {
+            x: parent.width / 2 + 8px;
+            width: max(1px, parent.width / 2 - 26px);
+            height: parent.height; background: transparent;
+            Text {
+                x: 0px; y: root.split ? 21px : 9px;
+                width: parent.width; height: 23px;
+                text: root.provider-label;
+                color: Theme.secondary-foreground;
+                font-size: Typography.caption-size;
+                overflow: elide;
+            }
+            Text {
+                x: 0px; y: root.split ? 58px : 32px;
+                width: parent.width; height: 32px;
+                text: root.provider-time;
+                color: Theme.foreground;
+                font-size: Typography.heading-size;
+                font-weight: Typography.heading-weight;
+                overflow: elide;
+            }
+        }
+    }
+    if root.split : Text {
+        x: root.inset; y: 452px;
+        width: root.summary-width; height: 29px;
+        text: "Session summary";
+        color: Theme.foreground;
+        font-size: Typography.heading-size;
+        font-weight: Typography.heading-weight;
+    }
+    if root.split : Rectangle {
+        x: root.inset; y: 489px;
+        width: root.summary-width; height: 105px;
+        background: Theme.surface;
+        border-radius: Metrics.radius-lg;
+        border-width: Theme.high-contrast ? 2px : 1px;
+        border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.40);
+        Rectangle {
+            x: 0px; width: parent.width / 3; height: parent.height;
+            background: transparent;
+            Text {
+                x: 14px; y: 18px; width: parent.width - 28px; height: 23px;
+                text: "Recorded"; color: Theme.secondary-foreground;
+                font-size: Typography.caption-size;
+            }
+            Text {
+                x: 14px; y: 50px; width: parent.width - 28px; height: 32px;
+                text: root.sessions-summary; overflow: elide;
+                color: Theme.foreground; font-size: Typography.heading-size;
+                font-weight: Typography.heading-weight;
+            }
+        }
+        Rectangle {
+            x: parent.width / 3; width: parent.width / 3; height: parent.height;
+            background: transparent;
+            Text {
+                x: 14px; y: 18px; width: parent.width - 28px; height: 23px;
+                text: "Longest"; color: Theme.secondary-foreground;
+                font-size: Typography.caption-size;
+            }
+            Text {
+                x: 14px; y: 50px; width: parent.width - 28px; height: 32px;
+                text: root.longest-session; overflow: elide;
+                color: Theme.foreground; font-size: Typography.heading-size;
+                font-weight: Typography.heading-weight;
+            }
+        }
+        Rectangle {
+            x: parent.width * 2 / 3; width: parent.width / 3; height: parent.height;
+            background: transparent;
+            Text {
+                x: 14px; y: 18px; width: parent.width - 28px; height: 23px;
+                text: "Average"; color: Theme.secondary-foreground;
+                font-size: Typography.caption-size;
+            }
+            Text {
+                x: 14px; y: 50px; width: parent.width - 28px; height: 32px;
+                text: root.average-session; overflow: elide;
+                color: Theme.foreground; font-size: Typography.heading-size;
+                font-weight: Typography.heading-weight;
+            }
+        }
+    }
+
+    // Read-only history: scroll the bounded visible window with Up/Down.
+    // All rows remain available in Rust without mounting every row in Slint.
+    Text {
+        x: root.history-x; y: root.history-heading-y;
+        width: root.history-width * 0.63; height: 30px;
+        text: "Session history";
+        color: Theme.foreground;
+        font-size: Typography.heading-size;
+        font-weight: Typography.heading-weight;
+    }
+    Text {
+        x: root.history-x + root.history-width * 0.64;
+        y: root.history-heading-y + 4px;
+        width: root.history-width * 0.36; height: 23px;
+        text: root.sessions-summary;
+        color: Theme.secondary-foreground;
+        font-size: Typography.caption-size;
+        horizontal-alignment: right;
+        overflow: elide;
+    }
+    Rectangle {
+        x: root.history-x; y: root.list-top;
+        width: root.history-width; height: root.list-height;
+        background: transparent;
+        clip: true;
+        if root.session-count == 0 : Text {
+            x: 4px; y: 17px; width: parent.width - 8px;
+            text: "No sessions recorded by Horizon yet.";
+            color: Theme.secondary-foreground;
+            font-size: Typography.body-size;
+        }
+        for record[index] in root.rows : Rectangle {
+            y: index * root.row-height;
+            width: parent.width;
+            height: root.row-height - 8px;
+            border-radius: Metrics.radius-lg;
+            background: Theme.surface;
+            border-width: Theme.high-contrast ? 2px : 1px;
+            border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.45);
+            Text {
+                x: 16px; y: root.split ? 9px : 4px;
+                width: parent.width * 0.61 - 16px; height: 24px;
+                text: record.date;
+                color: Theme.foreground;
+                font-size: Typography.body-size;
+                overflow: elide;
+            }
+            Text {
+                x: 16px; y: root.split ? 34px : 27px;
+                width: parent.width * 0.61 - 16px; height: 22px;
+                text: record.times;
+                color: Theme.secondary-foreground;
+                font-size: Typography.caption-size;
+                overflow: elide;
+            }
+            Text {
+                x: parent.width * 0.63;
+                y: root.split ? 10px : 5px;
+                width: parent.width * 0.33; height: 24px;
+                text: record.duration;
+                color: Theme.foreground;
+                font-size: Typography.body-size;
+                font-weight: Typography.emphasis-weight;
+                horizontal-alignment: right;
+                overflow: elide;
+            }
+            Text {
+                x: parent.width * 0.63;
+                y: root.split ? 34px : 27px;
+                width: parent.width * 0.33; height: 22px;
+                text: record.status;
+                color: Theme.secondary-foreground;
+                font-size: Typography.caption-size;
+                horizontal-alignment: right;
+                overflow: elide;
+            }
+        }
+    }
+}

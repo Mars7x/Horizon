@@ -59,17 +59,68 @@ An open session can survive in SQLite if Horizon exits or crashes while the game
 
 Interrupted sessions do not contribute to observed playtime totals. Unknown is preferable to fabricated time.
 
-## Activity page
+## Activity page (Phase 10.3.0)
 
-The Activity route is now a real full-shell page. It shows only completed Horizon-observed sessions:
+The Activity route is a controller-first, full-shell playtime overview using the
+same background, square-cover pipeline, typography, and tile-local FocusFrame
+as Home and Library. It has **one** focusable region: a horizontal selection row
+of up to 12 most-played games, ranked by persisted Horizon-observed seconds.
+Left/Right moves within that row and clamps at the ends; Home and Back retain
+normal shell navigation. Pointer selection is supported. Since Phase 10.3.2,
+Accept opens that game's full Activity history, without an in-page game
+launch action (Phase 10.3.2.1).
 
-- total observed playtime;
-- completed session count;
-- number of games with completed sessions;
-- recent sessions;
-- most-played games by observed time.
+The header shows observed time during the rolling **last seven local calendar
+days** and the **current local calendar month**. The Playtime panel displays
+seven real calendar-day buckets, with completed/recovered session durations
+clipped to each day's local-midnight boundaries (including DST changes). Open
+sessions do not enter these finalized period totals before persistence; ongoing
+activity is reflected after it is committed. This deliberately avoids inventing
+or extrapolating playtime. The other lower panel is a muted **Milestones / Coming
+later** placeholder, with no focus, achievements, progress logic, or fake data.
 
-The page labels the data as Horizon-observed. It must not silently present approximate foreground time as exact source lifetime playtime.
+The cover row reuses Home's locally cached, normalized square artwork rather
+than launching another source-specific artwork pipeline. A cover's caption is
+**Horizon-observed playtime** only, not an unlabelled sum of source lifetime and
+observed sessions. Reported Steam/Heroic lifetime time remains persisted and
+independent for future game detail views. The page uses fixed, adaptive regions
+rather than a large dashboard or a secondary navigation sidebar. Since Phase
+10.3.2 the row spans the full shell width, with covers aligned to the page
+margins at rest and a single smoothly moved strip camera. It no longer clips
+covers within a narrower inset centered viewport. Offscreen movement clips
+only at the actual window boundary.
+
+The existing source-neutral Activity service and SQLite session schema remain
+unchanged, except for one **read-only** interval aggregation query. No new
+permissions, authentication, D-Bus contract, or database migration are needed.
+
+## Individual-game Activity details (Phase 10.3.2)
+
+Accept/Enter on the selected cover opens a nested Activity details page without
+changing the Activity shell route. It shows the existing square artwork,
+source-reported lifetime total when available, separately measured Horizon
+sessions, last played date, and longest/average finished session. The
+Phase 10.3.2.1 interface removes the original Play Game action; review is
+strictly read-only and cannot launch a game.
+
+Session history is **complete**, newest-first and scoped by the durable
+`GameId`, with a date, start/end local clock times, source/recovered/active
+status, and recorded duration for every persisted session. The repository
+returns the complete list; Rust retains it and Slint renders a bounded slice
+that follows controller Up/Down navigation. This keeps hundreds of historic
+sessions browseable without mounting hundreds of simultaneous UI rows. An open
+session is shown as *In progress* until it has a persisted end/checkpoint;
+no missing duration is guessed. Back returns to the overview with the same
+cover selected. Home retains its existing global semantics.
+
+No per-game graph or milestones are added. Reported lifetime snapshots are
+not decomposed into artificial sessions and are never summed with the
+Horizon-observed sessions. The main overview's Milestones panel remains an
+inert placeholder.
+
+This phase adds a source-neutral, read-only repository query and a nested
+presentation state only. No migration, network permission, source adapter,
+or new runtime dependency is required.
 
 ## Persistence
 
@@ -215,32 +266,132 @@ The right-side Activity panel distinguishes Most played (observed) from
 Source-reported lifetime. A provider lifetime row cannot reconstruct individual
 historic Heroic sessions, nor prove a game is currently playing.
 
-## Phase 9.5.44.48 — Automatic Heroic launch-session observation
 
-The manual per-game wrapper of Phase 9.5.44.47 is retired. The Heroic adapter
-now observes its own per-game `launch.log` start/close state, cross-checked
-against the matching installation's `timestamp.json` `lastPlayed` completion
-record, without setup or Heroic settings changes. The existing generic
-source-runtime state machine drives Playing and stores Horizon-observed
-sessions. Logs without a completion record expire after 18 hours.
+## Phase 10.3.1.1 — Immediate Activity covers and complete-card navigation
 
-Unlike Steam gameprocess logs or a supervised command wrapper, Heroic's game
-log starts while launch preparation runs, **not necessarily when the game
-process starts**. Runtime observations may therefore include startup work or
-short-lived failed launches; a detached game process can produce an early
-completion. Treat Heroic-observed sessions as estimates; the independent
-Heroic-reported lifetime counter remains authoritative for the provider's
-own total and is never added to observed seconds. See ADR 0105.
+The Activity showcase is constructed from the persisted overview and Home's
+already resolved artwork before the UI's first route activation. On each entry
+into Activity, a synchronous refresh updates the overview *before* the Activity
+page becomes the active route; returning to Activity never waits for the
+three-second Home recents timer to populate the game row.
+
+Activity retains a single `VecModel<ActivityCoverData>` for its lifetime.
+When the observed game ordering is unchanged, the refresh updates only changed
+playtime labels instead of remounting the model. A Home artwork resolution is
+forwarded directly to the corresponding Activity row, without waiting for the
+periodic refresh. If the ordering changes, the selection is restored by
+`GameId`, not by the old visual index.
+
+The horizontal cover strip renders **complete game covers only** at rest, with
+no permanent partially clipped cover, chevron, or scrollbar. Its up-to-12
+cards remain mounted inside one clipped camera viewport, and the entire strip
+animates horizontally with Home's existing carousel easing. This avoids the
+previous immediate hide/show of cards and flashing left/right arrows under
+rapid controller repeats. The strip stays centered within the Activity page;
+Left/Right controller navigation and tile-local FocusFrame remain unchanged.
+Movement alone communicates additional offscreen games. Under Reduced Motion,
+the established carousel animation duration collapses to an immediate camera
+update. No new route, extra panel, or Milestones functionality is introduced.
+
+## Activity selection lifetime (Phase 10.3.2)
+
+Opening Activity from another route selects the first displayed game, rather
+than restoring the last selection from a previous Activity visit. This reset
+occurs before the entry refresh publishes the game row. Opening a game's detail
+view and backing out does **not** reset the selection: the same cover remains
+selected for the current visit. This also applies to Global Home and Back
+leaving Activity; a subsequent entry starts at the first game.
+
+## Phase 10.3.2.1 — Gallery and history view polish
+
+The overview carousel intentionally reveals about one fifth of the next cover
+at the physical shell edge, so additional games are discoverable without
+arrows. The camera remains stationary for all initially fully visible tiles;
+when focus advances beyond the last fully visible cover, the complete strip
+scrolls with the existing Home camera duration and easing. The preview is an
+actual partial card, not a separate mask or navigation target. Left/Right
+clamps at the first/last game, while leaving and reopening Activity resets to
+its first game as before.
+
+A selected cover's long title uses Home's established marquee pacing: two
+seconds of rest, distance-sensitive linear movement, a 2.4-second end hold,
+then an invisible reset and repeat. The clipped label fades at its viewport
+edges without segmented glyph slices. Unselected titles use the ordinary
+ellipsis. Reduced Motion prevents automatic text movement.
+
+Per-game Activity details use Horizon's normal solid background and a balanced
+two-column design when space permits: cover, game information, separately
+labelled observed/source playtime and session summary on the left; complete
+Horizon-recorded session history on the right. At small window sizes the
+summary compresses above the history. The page uses Settings-style 220 ms
+crossfade and 12 px settling motion; the selected session row animates its
+outline and surface as focus moves. Back restores the same cover in Activity.
+
+There is **no Play Game action**, per-game graph, milestone tracking, or extra
+focusable controls. The history list itself is the sole controller focus
+region within details, with Up/Down scrolling through every persisted record.
+The session model remains bounded to a visible window rather than mounting the
+full history in Slint. No stored data or tracking semantics change.
+
+The Phase 10.3.2 description above is retained as a historical record. Its
+Play Game control and complete-cover-at-rest cue have been superseded by this
+phase; the current interface intentionally has neither the launch action nor
+an all-whole-covers carousel layout.
+
+## Phase 10.3.2.2 — Cover focus parity and Activity activation feedback
+
+The Activity overview uses Home’s existing `Metrics.game-selected-scale`
+for the selected game cover, rather than leaving the artwork shell static. The
+original Home `FocusFrame` is reused unchanged. Its origin and dimensions
+are now anchored to the *animated cover shell*, with about six logical pixels
+of clearance, instead of a frame attached to an unscaled card box. This
+keeps the corner brackets close to the artwork even at the smallest part of
+the press feedback, while preserving Library’s compact focus-gap language.
+The carousel’s vertical clipping allowance expands to contain the larger
+selected artwork and focus corners without moving the row itself.
+
+Accept/A on a selected cover or pointer activation now uses the same short
+press-in rhythm as Home: the selected cover contracts from Home’s 1.10 scale
+toward 1.025 for 125 ms, then releases into the existing Settings-style
+details page transition. Activation requests are ignored while a press is
+pending, and moving focus, leaving Activity, or exiting the route cancels
+stale requests. Under Reduced Motion, the details view opens immediately
+with no delayed press feedback. This is a **details-open animation**, not a
+game launch: the Activity detail screen still has no Play Game control.
+Home, Library, source data, session history and Milestones are unchanged.
+
+## Phase 10.3.2.3 — Static clipped titles and read-only scrolling history
+
+Activity overview game titles **never** show an ellipsis. Every long title
+rests at its beginning with a clipped, softly faded trailing edge, including
+unselected games. The selected game's title retains the original Home-timed
+marquee (2-second initial hold, distance-sensitive travel, 2.4-second end
+hold and invisible reset); Reduced Motion keeps it stationary. Short titles
+remain fully visible and never auto-scroll.
+
+In individual-game Activity details, the session history is **read-only**:
+there is no selected session, active border, or clickable session row. Up and
+Down scroll its virtualized row window directly, one session at a time, and
+clamp at the top and bottom. If all recorded sessions fit, Up/Down does nothing.
+Resizing clamps the current viewport rather than choosing a focused row.
+No session records or lifetime playtime calculations are changed.
+
+On wide screens the `Session history` and `Playtime` headings share the same
+y coordinate, as do the first history row and first Playtime stat panel.
+At compact widths the two sections stack to avoid overlapping content.
+The rest of Activity and the inert Milestones placeholder are unchanged.
 
 
-## Phase 9.5.44.49 — Heroic observed-session accuracy
+## Phase 10.3.2.4 — Cover/caption spacing
 
-Each Horizon-initiated observed session now carries an arming timestamp across
-the source-neutral runtime boundary. Steam continues using its existing
-runtime state. Heroic rejects launch log generations predating the arming time
-by more than 45 seconds, and resolves multiple Heroic installations by the
-newest game-log generation. This prevents most previously orphaned open logs
-from being recorded as a new game session, while preserving the recorded
-terminal `lastPlayed` check. The clock tolerance does not turn Heroic logs
-into reliable game-process telemetry. Heroic-reported lifetime and
-Horizon-observed session times remain distinct, never additive counters.
+Activity captions are positioned against the maximum Home-selected cover
+footprint, *including* the actual animated focus frame, not against the
+unselected artwork slot. At every focus state a 22px baseline clearance below
+the bracket bounds separates the cover from the title, with a further 11px
+between the title's 25px line box and the recorded-time caption. Labels share
+one fixed baseline through selection/press transitions; they never move into
+or beneath the focused frame. The heading and `Tracked by Horizon` legend are also moved above the
+expanded focus bracket top edge to prevent upper-caption collisions. The
+carousel's clip area includes both caption lines. The chart and inert Milestones panels follow the caption stack with
+28px breathing room instead of being laid out at a conflicting fixed Y value.
+No artwork, animation timing, session data, or controller behavior changes.

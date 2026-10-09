@@ -1,6 +1,6 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, time::Duration};
 
-use slint::ComponentHandle;
+use slint::{ComponentHandle, Model};
 use tracing::debug;
 
 use crate::{
@@ -13,7 +13,7 @@ use crate::{
     },
 };
 
-use super::{home::HomeController, library::LibraryController, settings::SettingsController};
+use super::{activity::ActivityDetailsActions, home::HomeController, library::LibraryController, settings::SettingsController};
 
 /// Bridges pure Rust navigation/focus state to Slint presentation state.
 ///
@@ -28,6 +28,8 @@ pub struct NavigationController {
     library: Rc<LibraryController>,
     settings: Rc<SettingsController>,
     action_sound: RefCell<Option<Rc<dyn Fn(UiSoundCue)>>>,
+    activity_on_enter: RefCell<Option<Rc<dyn Fn(&AppWindow)>>>,
+    activity_details: RefCell<Option<Rc<dyn ActivityDetailsActions>>>,
 }
 
 impl NavigationController {
@@ -40,6 +42,8 @@ impl NavigationController {
             library,
             settings,
             action_sound: RefCell::new(None),
+            activity_on_enter: RefCell::new(None),
+            activity_details: RefCell::new(None),
         });
         controller.publish_route(ui);
         controller.publish_focus(ui);
@@ -50,6 +54,15 @@ impl NavigationController {
     pub fn set_action_sound(&self, callback: Rc<dyn Fn(UiSoundCue)>) {
         self.settings.set_action_sound(Rc::clone(&callback));
         *self.action_sound.borrow_mut() = Some(callback);
+    }
+
+    /// Refresh Activity's visible data before publishing the new page route.
+    pub fn set_activity_on_enter(&self, callback: Rc<dyn Fn(&AppWindow)>) {
+        *self.activity_on_enter.borrow_mut() = Some(callback);
+    }
+
+    pub fn set_activity_details(&self, actions: Rc<dyn ActivityDetailsActions>) {
+        *self.activity_details.borrow_mut() = Some(actions);
     }
 
     fn cue(&self, cue: UiSoundCue) {
@@ -74,6 +87,17 @@ impl NavigationController {
             if from == AppRoute::Utility(UtilityPage::Settings) { self.settings.on_leave(ui); }
             if route == AppRoute::Utility(UtilityPage::Settings) { self.settings.on_enter(ui); }
             if route == AppRoute::Library { self.library.on_enter(ui); }
+            if route == AppRoute::Utility(UtilityPage::Activity) {
+                ui.set_activity_pressed_index(-1);
+                // An Activity visit always starts at the first game. Do this
+                // before refreshing the showcase so the retained-GameId logic
+                // cannot restore a selection from the previous visit. Back
+                // from nested game details does not enter this route again.
+                ui.set_activity_selected_index(0);
+                if let Some(refresh) = self.activity_on_enter.borrow().as_ref() {
+                    refresh(ui);
+                }
+            }
             self.publish_route_change(ui, from, route);
             self.restore_focus_for_route(ui, route);
         }
@@ -99,7 +123,8 @@ impl NavigationController {
                 && self.home.library_tile_selected() => {
                 self.open_library(ui);
             }
-            _ if self.focus.borrow().region() == ShellFocusRegion::TopUtilities => {
+            _ if self.current_route().uses_shell_chrome()
+                && self.focus.borrow().region() == ShellFocusRegion::TopUtilities => {
                 self.handle_utility_action(ui, event)
             }
             UiAction::Up if self.current_route().uses_shell_chrome() => {
@@ -219,6 +244,38 @@ impl NavigationController {
                 }
             }
         });
+        // Activity has exactly one controller focus region (the cover strip).
+        // Charts and the Milestones placeholder never capture navigation.
+        let weak = ui.as_weak();
+        let controller = Rc::clone(self);
+        ui.on_activity_choose(move |index| {
+            if let Some(ui) = weak.upgrade() {
+                if controller.current_route() == AppRoute::Utility(UtilityPage::Activity) {
+                    let len = ui.get_activity_covers().row_count() as i32;
+                    if index >= 0 && index < len && !ui.get_activity_details_visible() {
+                        ui.set_activity_selected_index(index);
+                        controller.begin_activity_details_open(&ui, index as usize);
+                    }
+                }
+            }
+        });
+        let weak = ui.as_weak();
+        let controller = Rc::clone(self);
+        ui.on_activity_detail_back(move || {
+            if let Some(ui) = weak.upgrade()
+                && controller.current_route() == AppRoute::Utility(UtilityPage::Activity)
+                && ui.get_activity_details_visible() {
+                controller.handle_back(&ui);
+            }
+        });
+        let weak = ui.as_weak();
+        let controller = Rc::clone(self);
+        ui.on_activity_detail_layout_changed(move || {
+            if let Some(ui) = weak.upgrade()
+                && let Some(details) = controller.activity_details.borrow().as_ref() {
+                details.refresh_visible_rows(&ui);
+            }
+        });
         // Each move closure takes ownership of its own Weak/AppWindow and Rc.
         let weak = ui.as_weak();
         let controller = Rc::clone(self);
@@ -231,6 +288,17 @@ impl NavigationController {
         });
     }
 
+    fn move_activity_selection(&self, ui: &AppWindow, delta: i32) {
+        let len = ui.get_activity_covers().row_count();
+        if len == 0 { return; }
+        let last = len.saturating_sub(1).min(i32::MAX as usize) as i32;
+        let next = ui.get_activity_selected_index().saturating_add(delta).clamp(0, last);
+        if next != ui.get_activity_selected_index() {
+            ui.set_activity_pressed_index(-1);
+        }
+        ui.set_activity_selected_index(next);
+    }
+
     fn open_library(&self, ui: &AppWindow) {
         if self.current_route() == AppRoute::Library { return; }
         self.cue(UiSoundCue::Ok);
@@ -238,6 +306,14 @@ impl NavigationController {
     }
 
     fn handle_back(&self, ui: &AppWindow) {
+        if self.current_route() == AppRoute::Utility(UtilityPage::Activity)
+            && ui.get_activity_details_visible() {
+            if let Some(details) = self.activity_details.borrow().as_ref() {
+                details.close(ui);
+                self.cue(UiSoundCue::Back);
+            }
+            return;
+        }
         let from = self.current_route();
         self.remember_focus_for_route(from);
         if self.navigator.borrow_mut().go_back() {
@@ -363,10 +439,75 @@ impl NavigationController {
         }
     }
 
+    /// Share the same Home-like press-in for controller Accept and pointer
+    /// activation. Wait just long enough for the selected cover to visibly
+    /// depress before the Settings-style details crossfade begins.
+    fn begin_activity_details_open(&self, ui: &AppWindow, index: usize) {
+        if self.current_route() != AppRoute::Utility(UtilityPage::Activity)
+            || ui.get_activity_details_visible()
+            || ui.get_activity_pressed_index() >= 0
+            || index >= ui.get_activity_covers().row_count()
+        {
+            return;
+        }
+
+        // Reduced Motion skips both the press timing and the visual transition.
+        if ui.get_activity_reduced_motion() {
+            if let Some(details) = self.activity_details.borrow().as_ref()
+                && details.open(ui, index) {
+                self.cue(UiSoundCue::Ok);
+            }
+            return;
+        }
+
+        ui.set_activity_pressed_index(index as i32);
+        let weak_ui = ui.as_weak();
+        let details = self.activity_details.borrow().as_ref().cloned();
+        let cue = self.action_sound.borrow().as_ref().cloned();
+        slint::Timer::single_shot(Duration::from_millis(125), move || {
+            let Some(ui) = weak_ui.upgrade() else { return };
+            if ui.get_activity_pressed_index() != index as i32 { return; }
+            ui.set_activity_pressed_index(-1);
+            // An earlier Back/Home/route change cancels the pending press.
+            if ui.get_current_route() != AppRouteView::Activity
+                || ui.get_activity_details_visible()
+                || ui.get_activity_selected_index() != index as i32
+            {
+                return;
+            }
+            if let Some(details) = details.as_ref()
+                && details.open(&ui, index)
+                && let Some(cue) = cue.as_ref()
+            {
+                cue(UiSoundCue::Ok);
+            }
+        });
+    }
+
     fn dispatch_to_active_page(&self, ui: &AppWindow, event: UiActionEvent) {
         match self.current_route() {
             AppRoute::Home => self.home.handle_action(ui, event),
             AppRoute::Library => self.library.handle_action(ui, event),
+            AppRoute::Utility(UtilityPage::Activity) => {
+                if ui.get_activity_details_visible() {
+                    if let Some(details) = self.activity_details.borrow().as_ref() {
+                        match event.action {
+                            UiAction::Up => details.scroll_rows(ui, -1),
+                            UiAction::Down => details.scroll_rows(ui, 1),
+                            _ => {}
+                        }
+                    }
+                } else {
+                    match event.action {
+                        UiAction::Left => self.move_activity_selection(ui, -1),
+                        UiAction::Right => self.move_activity_selection(ui, 1),
+                        UiAction::Accept if !event.repeated => {
+                            self.begin_activity_details_open(ui, ui.get_activity_selected_index().max(0) as usize);
+                        }
+                        _ => {}
+                    }
+                }
+            }
             route => {
                 debug!(
                     ?route,
@@ -400,6 +541,11 @@ impl NavigationController {
     /// Older outgoing pages are dropped immediately when rapid navigation
     /// retargets the shell, preventing several half-faded pages from stacking.
     fn publish_route_change(&self, ui: &AppWindow, from: AppRoute, to: AppRoute) {
+        if from == AppRoute::Utility(UtilityPage::Activity) && from != to {
+            if let Some(details) = self.activity_details.borrow().as_ref() {
+                details.close(ui);
+            }
+        }
         ui.set_transition_from_route(route_view(from));
         ui.set_current_route(route_view(to));
     }

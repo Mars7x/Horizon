@@ -1,6 +1,6 @@
 use std::{cell::RefCell, collections::BTreeMap, error::Error, rc::Rc};
 
-use chrono::Utc;
+use chrono::{Datelike, Duration as ChronoDuration, Local, TimeZone, Utc};
 use tracing::warn;
 
 use crate::{
@@ -110,6 +110,8 @@ pub struct ActivityOverview {
     top_games: Vec<GameActivitySummary>,
     reported_playtime: PlaytimeSeconds,
     reported_games: Vec<ReportedGameSummary>,
+    week_days: Vec<(String, i64)>,
+    month_seconds: i64,
 }
 
 impl ActivityOverview {
@@ -129,6 +131,8 @@ impl ActivityOverview {
             top_games,
             reported_playtime: PlaytimeSeconds::new(0).expect("zero duration"),
             reported_games: Vec::new(),
+            week_days: Vec::new(),
+            month_seconds: 0,
         }
     }
 
@@ -141,6 +145,17 @@ impl ActivityOverview {
         self.reported_games = reported_games;
         self
     }
+
+    /// Each day is a local calendar day, not a fixed UTC 24-hour block.
+    /// Only persisted completed/recovered time is included here.
+    pub fn with_calendar_playtime(mut self, week_days: Vec<(String, i64)>, month_seconds: i64) -> Self {
+        self.week_days = week_days;
+        self.month_seconds = month_seconds;
+        self
+    }
+
+    pub fn week_days(&self) -> &[(String, i64)] { &self.week_days }
+    pub fn month_seconds(&self) -> i64 { self.month_seconds }
 
     pub const fn reported_playtime(&self) -> PlaytimeSeconds {
         self.reported_playtime
@@ -199,6 +214,14 @@ impl LibrarySortMetrics {
     }
 }
 
+/// All Horizon-observed sessions for one game plus separate provider snapshots.
+/// No reported lifetime value is inferred from individual sessions.
+#[derive(Debug, Clone, Default)]
+pub struct GameActivityHistory {
+    pub sessions: Vec<PlaySession>,
+    pub reported: Vec<(SourceId, PlaytimeSeconds)>,
+}
+
 pub trait ActivityRepository {
     type Error: Error + 'static;
 
@@ -236,6 +259,18 @@ pub trait ActivityRepository {
 
     /// Returns per-game facts for Library ordering; does not affect Activity
     /// totals or provider snapshots. Legacy test repositories may omit it.
+    /// Seconds of persisted, non-overlapping session time inside each [start,end)
+    /// interval. Splitting sessions at local midnight prevents day-boundary errors.
+    fn observed_seconds_in_ranges(&self, ranges: &[(i64, i64)]) -> Result<Vec<i64>, Self::Error> {
+        Ok(vec![0; ranges.len()])
+    }
+
+    /// Full history ordered newest first. An empty result is valid for games
+    /// that were never played while Horizon was recording activity.
+    fn game_activity_history(&self, _game_id: GameId) -> Result<GameActivityHistory, Self::Error> {
+        Ok(GameActivityHistory::default())
+    }
+
     fn library_sort_metrics(&self) -> Result<Vec<LibrarySortMetrics>, Self::Error> {
         Ok(Vec::new())
     }
@@ -676,9 +711,35 @@ where
         recent_limit: usize,
         top_games_limit: usize,
     ) -> Result<ActivityOverview, R::Error> {
-        self.repository
-            .borrow()
-            .activity_overview(recent_limit, top_games_limit)
+        let now = Local::now();
+        let today = now.date_naive();
+        let start_of_day = |date: chrono::NaiveDate| {
+            let midnight = date.and_hms_opt(0, 0, 0).expect("midnight time");
+            Local.from_local_datetime(&midnight).earliest()
+                .or_else(|| Local.from_local_datetime(&midnight).latest())
+                .map(|datetime| datetime.timestamp())
+                .unwrap_or_else(|| midnight.and_utc().timestamp())
+        };
+        let days: Vec<_> = (0..7).rev().map(|offset| {
+            let date = today - ChronoDuration::days(offset);
+            let start = start_of_day(date);
+            let end = start_of_day(date + ChronoDuration::days(1));
+            (date.format("%a").to_string(), (start, end))
+        }).collect();
+        let month_start = start_of_day(today.with_day(1).expect("month has first day"));
+        let mut ranges = days.iter().map(|(_, range)| *range).collect::<Vec<_>>();
+        ranges.push((month_start, now.timestamp().saturating_add(1)));
+        let repo = self.repository.borrow();
+        let overview = repo.activity_overview(recent_limit, top_games_limit)?;
+        let mut totals = repo.observed_seconds_in_ranges(&ranges)?;
+        let month_seconds = totals.pop().unwrap_or_default();
+        let week_days = days.into_iter().zip(totals).map(|((label, _), seconds)|
+            (label, seconds.max(0))).collect();
+        Ok(overview.with_calendar_playtime(week_days, month_seconds.max(0)))
+    }
+
+    pub fn game_activity_history(&self, game_id: GameId) -> Result<GameActivityHistory, R::Error> {
+        self.repository.borrow().game_activity_history(game_id)
     }
 
     pub fn record_source_lifetime_playtime(

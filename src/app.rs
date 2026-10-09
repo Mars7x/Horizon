@@ -19,7 +19,7 @@ use crate::{
         slint_backend,
     },
     presentation::{
-        activity::ActivityController, appearance::AppearanceController, clock::ClockController,
+        activity::{ActivityController, ActivityShowcaseController, ActivityDetailsController, ActivityDetailsActions}, appearance::AppearanceController, clock::ClockController,
         home::HomeController, navigation::NavigationController, settings::SettingsController,
         status::StatusController,
     },
@@ -49,7 +49,7 @@ pub fn run() -> Result<(), AppError> {
         )
         .init();
 
-    info!("starting Horizon phase 10.1.0");
+    info!("starting Horizon phase 10.3.0");
 
     let database_path = data_paths::library_database_path()?;
     let repository = SqliteLibraryRepository::open(&database_path)?;
@@ -220,6 +220,11 @@ pub fn run() -> Result<(), AppError> {
         Rc::clone(&launch_service),
         launch_activity,
     );
+    // Mount a single stable Activity cover model before the UI is shown.
+    let activity_showcase = ActivityShowcaseController::new(
+        &ui, library_catalog.clone(), Rc::clone(&home),
+    );
+    activity_showcase.refresh(&ui, &activity_overview);
     info!(recent_games = recent_ids.len(), "Home recent carousel initialized");
     // Changes are discovered from durable sessions, never by guessing on launch.
     // A small read-only DB query is cheap and keeps Home current after returns
@@ -228,19 +233,46 @@ pub fn run() -> Result<(), AppError> {
     let recents_home = Rc::clone(&home);
     let recents_activity = Rc::clone(&activity_service);
     let recents_ui = ui.as_weak();
+    let recents_showcase = Rc::clone(&activity_showcase);
     recent_refresh_timer.start(TimerMode::Repeated, Duration::from_secs(3), move || {
         let Some(ui) = recents_ui.upgrade() else { return; };
         match recents_activity.recent_game_ids(HOME_RECENT_LIMIT) {
             Ok(ids) => recents_home.refresh_recent_games(&ui, &ids),
             Err(error) => warn!(%error, "Home recent history refresh failed"),
         }
+        if ui.get_current_route() == crate::AppRouteView::Activity {
+            match recents_activity.overview(
+                ActivityController::recent_session_limit(),
+                ActivityController::top_game_limit(),
+            ) {
+                Ok(overview) => {
+                    ActivityController::publish(&ui, &overview);
+                    recents_showcase.refresh(&ui, &overview);
+                }
+                Err(error) => warn!(%error, "Activity overview refresh failed"),
+            }
+        }
     });
+    let activity_details: Rc<dyn ActivityDetailsActions> = ActivityDetailsController::new(
+        Rc::clone(&activity_service), Rc::clone(&activity_showcase),
+    );
     let library_controller = crate::presentation::library::LibraryController::new(
         &ui, library_catalog, Rc::clone(&home), Rc::clone(&activity_service),
     );
     let library_updates = Rc::downgrade(&library_controller);
+    let activity_artwork_updates = Rc::downgrade(&activity_showcase);
+    let details_artwork = Rc::clone(&activity_details);
+    let detail_artwork_ui = ui.as_weak();
     home.set_card_changed(Rc::new(move |index, card| {
-        if let Some(library) = library_updates.upgrade() { library.on_card_updated(index, card); }
+        if let Some(library) = library_updates.upgrade() {
+            library.on_card_updated(index, card.clone());
+        }
+        if let Some(activity) = activity_artwork_updates.upgrade() {
+            activity.on_card_updated(index, card.clone());
+        }
+        if let Some(ui) = detail_artwork_ui.upgrade() {
+            details_artwork.update_artwork(&ui, index, card);
+        }
     }));
 
     let settings_path = data_paths::third_party_settings_path()?;
@@ -287,6 +319,23 @@ pub fn run() -> Result<(), AppError> {
         }
     });
     let navigation = NavigationController::new(&ui, Rc::clone(&home), Rc::clone(&library_controller), settings);
+    navigation.set_activity_details(Rc::clone(&activity_details));
+    // Prepare Activity synchronously on navigation, before PageTransitionLayer
+    // exposes it. Do not depend on the 3-second recents refresh after entry.
+    let on_enter_activity = Rc::clone(&activity_service);
+    let on_enter_showcase = Rc::clone(&activity_showcase);
+    navigation.set_activity_on_enter(Rc::new(move |ui| {
+        match on_enter_activity.overview(
+            ActivityController::recent_session_limit(),
+            ActivityController::top_game_limit(),
+        ) {
+            Ok(overview) => {
+                ActivityController::publish(ui, &overview);
+                on_enter_showcase.refresh(ui, &overview);
+            }
+            Err(error) => warn!(%error, "Activity entry refresh failed; retaining cached covers"),
+        }
+    }));
     // The very same semantic handlers cover gamepad/keyboard and pointer
     // activation. A failed or ignored menu action never emits a cue.
     let cue_sounds = Rc::clone(&navigation_sound);
@@ -312,6 +361,7 @@ pub fn run() -> Result<(), AppError> {
             ui.get_settings_view(), ui.get_settings_selection(),
             ui.get_settings_editor_target(), ui.get_library_selected_index(),
             ui.get_library_filter_text(), ui.get_library_sort_text(),
+            ui.get_activity_selected_index(),
         );
         action_navigation.handle_action(&ui, event);
         let after = (
@@ -320,6 +370,7 @@ pub fn run() -> Result<(), AppError> {
             ui.get_settings_view(), ui.get_settings_selection(),
             ui.get_settings_editor_target(), ui.get_library_selected_index(),
             ui.get_library_filter_text(), ui.get_library_sort_text(),
+            ui.get_activity_selected_index(),
         );
         if matches!(event.action, UiAction::Up | UiAction::Down | UiAction::Left | UiAction::Right)
             && before != after {

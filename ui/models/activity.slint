@@ -1,3 +1,20 @@
+import { GameCardData } from "game-card.slint";
+
+// The activity game row deliberately shares Home/Library cover data, not a
+// second artwork pipeline or a source-specific presentation model.
+export struct ActivityCoverData {
+    game: GameCardData,
+    observed-time: string,
+}
+
+export struct ActivityDayData {
+    label: string,
+    duration: string,
+    fraction: float,
+}
+
+// Retained for other presentation callers; the new Activity page no longer
+// uses session cards as a primary navigation surface.
 export struct ActivitySessionData {
     title: string,
     duration: string,
@@ -9,4 +26,13 @@ export struct ActivityGameData {
     title: string,
     playtime: string,
     sessions: string,
+}
+
+// One visible slice of the complete game session history. Rows are not
+// provider lifetime estimates; they originate only from persisted sessions.
+export struct ActivityHistoryRowData {
+    date: string,
+    times: string,
+    duration: string,
+    status: string,
 }

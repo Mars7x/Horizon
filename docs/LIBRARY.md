@@ -312,3 +312,33 @@ never overlaps artwork, and both light/dark themes show a subtle edge shadow.
   without an unnecessary entrance animation.
 - Frozen snapshots contain only previously mounted visible/overscan cards, so
   animation work stays bounded independently of the installed library size.
+
+### Phase 10.3.1 — Source and Sort animation separation
+
+- **Source (LB / click):** The frozen prior viewport fades away over 85ms.
+  Incoming card shells then fade in and settle upward 6px, revealing by
+  **column** at 7ms intervals. Each card starts at 97% shell size and eases
+  to full size over 145ms, finishing in approximately 230–293ms depending
+  on visible columns. The previous layout does not visibly overlap incoming
+  artwork; it never receives pointer events.
+- **Sort (RB / click):** The old layout fades/shrinks to 96% during 95ms,
+  then the new layout eases from 96% to 100% while appearing over 140ms.
+  Sort uses no stagger, keeping frequent changes quiet and predictable.
+- **Both:** Preserve selected GameId across changes where available, do not
+  translate the grid camera during a reorder, and retain per-tile Home focus
+  brackets. Ordinary controller navigation/scrolling is unchanged. Source/Sort
+  label animations and changed game-count animations remain independent.
+  Reduced Motion switches both layouts immediately. These are purely visual
+  changes; source queries, sorting criteria and Steam/Heroic playtime stay intact.
+
+
+## Phase 10.3.2.4 — Home focus parity in the Library grid
+
+Library selected shells now use the exact Home `Metrics.game-selected-scale`
+(1.10) instead of the separate 1.045 scale. The existing `FocusFrame` keeps its
+Home-authored path size and stroke thickness at its default scale factor, and
+its position/bounds follow the *animated shell* with `Metrics.focus-offset` on
+all sides. This applies to the live grid and its outgoing source/sort snapshot,
+so the expanded and contracted focus states have consistent bracket spacing
+through selection and reorder transitions. Do not modify Home's `GameTile` or
+`FocusFrame`; no independent focus animation or new asset is introduced.

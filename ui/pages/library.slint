@@ -30,6 +30,9 @@ export component LibraryPage inherits Rectangle {
     in property <int> scroll-row: 0;
     in property <int> metadata-sequence: 0;
     in property <int> browse-sequence: 0;
+    // 0 = no reorder, 1 = Source, 2 = Sort. The controller sets this
+    // before browse-sequence so Slint starts the correct transition.
+    in property <int> browse-transition-kind: 0;
     private property <string> visible-filter: "All sources";
     private property <string> old-filter: "All sources";
     private property <string> visible-sort: "Alphabetical";
@@ -47,9 +50,22 @@ export component LibraryPage inherits Rectangle {
     private property <float> count-progress: Motion.reduced-motion || !root.focus-visible
         || root.old-count == "" || root.old-count == root.visible-count
         ? 1.0 : min(1.0, max(0.0, (animation-tick() - root.count-changed-at) / 190ms));
-    private property <float> browse-progress: Motion.reduced-motion || !root.focus-visible
-        || !root.has-previous-grid
-        ? 1.0 : min(1.0, max(0.0, (animation-tick() - root.browse-changed-at) / 230ms));
+    // These animations do not overlap the outgoing and incoming artwork.
+    // Source: old grid clears in 85ms, then covers reveal left-to-right
+    // (145ms each, 7ms per column), about 230-293ms overall.
+    // Sort: old grid fades/shrinks in 95ms, then new grid grows/fades for
+    // 140ms. This avoids a prolonged ghosted overlay of two full grids.
+    private property <bool> reorder-enabled: !Motion.reduced-motion
+        && root.focus-visible && root.browse-sequence != 0
+        && root.browse-transition-kind != 0;
+    private property <duration> browse-age: animation-tick() - root.browse-changed-at;
+    private property <float> outgoing-progress: !root.reorder-enabled || !root.has-previous-grid
+        ? 1.0 : min(1.0, max(0.0,
+            root.browse-age / (root.browse-transition-kind == 1 ? 85ms : 95ms)));
+    private property <float> sort-arrival-progress: !root.reorder-enabled
+        ? 1.0 : min(1.0, max(0.0, (root.browse-age - 95ms) / 140ms));
+    private property <bool> grid-reordering: root.reorder-enabled && root.browse-age
+        < (root.browse-transition-kind == 1 ? 300ms : 235ms);
     changed filter-text => {
         root.old-filter = root.visible-filter;
         root.visible-filter = root.filter-text;
@@ -287,13 +303,13 @@ export component LibraryPage inherits Rectangle {
         // offset. No pointer targets, no sliding brackets, and no model updates
         // after the transition begins. It disappears automatically as the
         // timeline reaches its end (or immediately for Reduced Motion).
-        if root.has-previous-grid && root.browse-progress < 1.0 : Rectangle {
+        if root.has-previous-grid && root.outgoing-progress < 1.0 : Rectangle {
             width: root.previous-grid-columns * root.card-stride
                 - (root.card-stride - root.card-size) + 2 * root.grid-pad;
             x: max(0px, (parent.width - self.width) / 2);
             y: root.peek-limit - root.previous-scroll-row * root.row-stride;
             height: parent.height;
-            opacity: 1.0 - root.browse-progress;
+            opacity: 1.0 - root.outgoing-progress;
             background: transparent;
             for old[index] in root.previous-cards : Rectangle {
                 x: root.grid-pad + Math.mod(old.absolute-index, root.previous-grid-columns) * root.card-stride;
@@ -302,11 +318,13 @@ export component LibraryPage inherits Rectangle {
                 background: transparent;
                 private property <bool> was-selected:
                     root.previous-selected-index == old.absolute-index;
-                Rectangle {
+                old-shell := Rectangle {
                     x: (parent.width - self.width) / 2;
                     y: (parent.height - self.height) / 2;
-                    width: root.card-size * (parent.was-selected ? 1.045 : 1.0);
-                    height: root.card-size * (parent.was-selected ? 1.045 : 1.0);
+                    width: root.card-size * (parent.was-selected ? Metrics.game-selected-scale : 1.0)
+                        * (root.browse-transition-kind == 2 ? 1.0 - 0.04 * root.outgoing-progress : 1.0);
+                    height: root.card-size * (parent.was-selected ? Metrics.game-selected-scale : 1.0)
+                        * (root.browse-transition-kind == 2 ? 1.0 - 0.04 * root.outgoing-progress : 1.0);
                     border-radius: root.card-size * (20.0 / 148.0);
                     background: Theme.surface-raised;
                     border-width: Theme.high-contrast ? 2px : 1px;
@@ -332,11 +350,13 @@ export component LibraryPage inherits Rectangle {
                         }
                     }
                 }
+                // The outgoing focus outline follows the outgoing shell too.
+                // Keep the exact Home bracket geometry while Sort shrinks it.
                 FocusFrame {
-                    x: -10px; y: -10px;
-                    width: root.card-size + 20px;
-                    height: root.card-size + 20px;
-                    scale-factor: (root.card-size + 20px) / Metrics.game-tile-size;
+                    x: old-shell.x - Metrics.focus-offset;
+                    y: old-shell.y - Metrics.focus-offset;
+                    width: old-shell.width + Metrics.focus-offset * 2;
+                    height: old-shell.height + Metrics.focus-offset * 2;
                     active: root.focus-visible && parent.was-selected;
                     opacity: parent.was-selected ? 1.0 : 0.0;
                 }
@@ -350,33 +370,46 @@ export component LibraryPage inherits Rectangle {
             height: max(1, Math.floor((root.total-count + root.grid-columns - 1) / root.grid-columns))
                 * root.row-stride + 2 * root.grid-pad;
             background: transparent;
-            opacity: root.browse-progress;
-            // Full outgoing/incoming crossfade. The original per-card Home
-            // FocusFrame still never slides between unrelated game positions.
-            // Match Home's camera feel rather than using a separate grid timing.
+            // Incoming artwork animates per cover instead of fading an entire
+            // model at once. Row-to-row navigation retains Home camera easing.
             animate y {
-                duration: root.has-previous-grid && root.browse-progress < 1.0
-                    ? 0ms : Motion.carousel-duration;
+                duration: root.grid-reordering ? 0ms : Motion.carousel-duration;
                 easing: ease-out;
             }
 
             for row[index] in root.cards : Rectangle {
+                // Source staggers by column, irrespective of virtualized rows.
+                // Express the 7ms delay as a dimensionless fraction of 145ms;
+                // this keeps the duration arithmetic accepted by Slint 1.18.
+                private property <float> reveal-linear: !root.reorder-enabled ? 1.0
+                    : root.browse-transition-kind == 1
+                    ? min(1.0, max(0.0, (root.browse-age - 85ms) / 145ms
+                        - Math.mod(row.absolute-index, root.grid-columns) * (7.0 / 145.0)))
+                    : root.sort-arrival-progress;
+                private property <float> reveal-eased: 1.0 - (1.0 - self.reveal-linear)
+                    * (1.0 - self.reveal-linear) * (1.0 - self.reveal-linear);
+                private property <float> reveal-size: (root.browse-transition-kind == 1 ? 0.97 : 0.96)
+                    + (root.browse-transition-kind == 1 ? 0.03 : 0.04) * self.reveal-eased;
                 x: root.grid-pad + Math.mod(row.absolute-index, root.grid-columns) * root.card-stride;
-                y: root.grid-pad + Math.floor(row.absolute-index / root.grid-columns) * root.row-stride;
+                y: root.grid-pad + Math.floor(row.absolute-index / root.grid-columns) * root.row-stride
+                    + (root.browse-transition-kind == 1 ? 6px * (1.0 - self.reveal-eased) : 0px);
                 width: root.card-size; height: root.card-size;
                 background: transparent;
+                opacity: self.reveal-eased;
                 clip: false;
                 private property <bool> selected: root.focus-visible
                     && root.selected-index == row.absolute-index;
-                private property <float> card-scale: self.selected ? 1.045 : 1.0;
+                private property <float> card-scale: self.selected ? Metrics.game-selected-scale : 1.0;
 
+                // Selection size and focus outline now both follow Home's
+                // 1.10x focus rhythm instead of a separate 1.045x grid rule.
                 // The same two-layer Home cover composition: a rounded shell
                 // surrounding inset art, rather than edge-to-edge cover squares.
                 shell := Rectangle {
                     x: (parent.width - self.width) / 2;
                     y: (parent.height - self.height) / 2;
-                    width: root.card-size * parent.card-scale;
-                    height: root.card-size * parent.card-scale;
+                    width: root.card-size * parent.card-scale * parent.reveal-size;
+                    height: root.card-size * parent.card-scale * parent.reveal-size;
                     border-radius: root.card-size * (20.0 / 148.0);
                     background: Theme.surface-raised;
                     border-width: Theme.high-contrast ? 2px : 1px;
@@ -384,7 +417,13 @@ export component LibraryPage inherits Rectangle {
                     drop-shadow-offset-y: parent.selected ? 5px : 3px;
                     drop-shadow-blur: parent.selected ? 16px : 11px;
                     drop-shadow-color: Theme.shadow.with-alpha(parent.selected ? 0.90 : 0.68);
-                    animate width, height { duration: Motion.focus-duration; easing: ease-out; }
+                    // Per-card reveal already drives width/height. Disabling
+                    // implicit animation during a reorder avoids double easing;
+                    // normal Home-style focus lifting remains animated.
+                    animate width, height {
+                        duration: root.grid-reordering ? 0ms : Motion.focus-duration;
+                        easing: ease-out;
+                    }
 
                     artwork := Rectangle {
                         x: root.art-inset; y: root.art-inset;
@@ -409,12 +448,15 @@ export component LibraryPage inherits Rectangle {
                 // selected brackets fade in in-place rather than sliding between
                 // arbitrary grid positions or diagonally across row boundaries.
                 FocusFrame {
-                    x: -10px; y: -10px;
-                    width: root.card-size + 20px;
-                    height: root.card-size + 20px;
-                    scale-factor: (root.card-size + 20px) / Metrics.game-tile-size;
+                    // Home's frame is attached to the scaling tile, not its
+                    // fixed navigation slot. Keep the same 9px token gap and
+                    // original 1x bracket paths/stroke through both motions.
+                    x: shell.x - Metrics.focus-offset;
+                    y: shell.y - Metrics.focus-offset;
+                    width: shell.width + Metrics.focus-offset * 2;
+                    height: shell.height + Metrics.focus-offset * 2;
                     active: parent.selected;
-                    opacity: parent.selected ? root.browse-progress : 0.0;
+                    opacity: parent.selected ? 1.0 : 0.0;
                     animate opacity { duration: Motion.focus-duration; easing: ease-in-out; }
                 }
                 TouchArea {

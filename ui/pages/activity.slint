@@ -1,335 +1,455 @@
-import { Theme, Metrics, Typography } from "../theme/theme.slint";
-import { ActivitySessionData, ActivityGameData } from "../models/activity.slint";
+import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
+import { FallbackCover } from "../components/fallback-cover.slint";
+import { FocusFrame } from "../components/focus-frame.slint";
+import { ActivityCoverData, ActivityDayData } from "../models/activity.slint";
 
-component SummaryCard inherits Rectangle {
-    in property <string> label;
-    in property <string> value;
+// Matches Home's selected title pacing: 2s hold, distance-sensitive linear
+// travel, 2.4s end hold, then an invisible reset. Short titles never move.
+// Long titles remain clipped without an ellipsis for all tiles, selected or
+// not. Only the selected title runs the Home-paced marquee; static titles
+// use the same right-edge fade as the beginning of the selected marquee.
+component ActivityCoverTitle inherits Rectangle {
+    in property <string> title;
+    in property <bool> selected: false;
+    background: transparent;
+    private property <length> natural-width: text-measure.preferred-width;
+    private property <bool> overflows: root.natural-width > root.width;
+    private property <length> distance: root.overflows
+        ? root.natural-width - root.width + 4px : 0px;
+    private property <duration> travel-duration:
+        root.distance <= 16px ? 650ms :
+        root.distance <= 32px ? 850ms :
+        root.distance <= 56px ? 1100ms :
+        root.distance <= 90px ? 1450ms :
+        root.distance <= 140px ? 1900ms :
+        root.distance <= 200px ? 2500ms : 3100ms;
+    private property <length> offset: 0px;
+    private property <bool> animate-travel: false;
+    private property <bool> animate-fade: false;
+    private property <float> text-opacity: 1.0;
+    private property <bool> fade-left: root.offset > 3px;
+    private property <bool> fade-right: root.offset < root.distance - 3px;
+    clip: true;
 
-    background: Theme.surface;
-    border-radius: Metrics.radius-lg;
-    border-width: Theme.high-contrast ? 2px : 1px;
-    border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.55);
-
-    Text {
-        x: 22px;
-        y: 18px;
-        width: parent.width - 44px;
-        height: 26px;
-        text: root.label;
-        color: Theme.secondary-foreground;
-        font-size: Typography.caption-size;
-        font-weight: Typography.emphasis-weight;
-        vertical-alignment: center;
+    function restart() {
+        delay.stop(); travel.stop(); end-pause.stop(); fade-out.stop(); fade-in.stop();
+        root.animate-travel = false;
+        root.animate-fade = false;
+        root.offset = 0px;
+        root.text-opacity = 1.0;
+        if root.selected && root.overflows && !Motion.reduced-motion { delay.start(); }
     }
-
-    Text {
-        x: 22px;
-        y: 47px;
-        width: parent.width - 44px;
-        height: parent.height - 60px;
-        text: root.value;
-        color: Theme.foreground;
-        font-size: 30px;
-        font-weight: Typography.title-weight;
-        vertical-alignment: top;
-        overflow: elide;
+    init => { root.restart(); }
+    changed selected => { root.restart(); }
+    changed title => { root.restart(); }
+    changed width => { root.restart(); }
+    changed overflows => { root.restart(); }
+    text-measure := Text {
+        text: root.title;
+        font-family: Typography.family;
+        font-size: Typography.body-size;
+        font-weight: Typography.emphasis-weight;
+        opacity: 0.0;
+    }
+    Rectangle {
+        width: parent.width; height: parent.height;
+        background: transparent;
+        clip: true;
+        Text {
+            x: -root.offset;
+            y: 0px;
+            width: root.overflows ? root.natural-width : parent.width;
+            height: parent.height;
+            text: root.title;
+            overflow: clip;
+            color: Theme.foreground;
+            font-family: Typography.family;
+            font-size: Typography.body-size;
+            font-weight: Typography.emphasis-weight;
+            opacity: root.text-opacity;
+            animate opacity {
+                enabled: root.animate-fade && !Motion.reduced-motion;
+                duration: root.text-opacity < 0.5 ? 140ms : 180ms;
+                easing: ease-in-out;
+            }
+        }
+        // Same stationary edge treatment as the established Home marquee.
+        // This avoids segmented glyph slices (which previously produced seams).
+        if root.overflows && root.selected && root.fade-left : Rectangle {
+            x: 0px; width: min(19px, parent.width / 6); height: parent.height;
+            background: @linear-gradient(90deg,
+                Theme.background 0%, Theme.background.with-alpha(0.72) 35%,
+                transparent 100%);
+        }
+        if root.overflows && root.fade-right : Rectangle {
+            x: parent.width - self.width;
+            width: min(19px, parent.width / 6); height: parent.height;
+            background: @linear-gradient(90deg,
+                transparent 0%, Theme.background.with-alpha(0.72) 65%,
+                Theme.background 100%);
+        }
+    }
+    animate offset {
+        enabled: root.animate-travel && !Motion.reduced-motion;
+        duration: root.travel-duration;
+        easing: linear;
+    }
+    delay := Timer {
+        interval: 2s;
+        running: false;
+        triggered => {
+            self.stop();
+            if root.selected && root.overflows && !Motion.reduced-motion {
+                root.animate-travel = true;
+                root.offset = root.distance;
+                travel.start();
+            }
+        }
+    }
+    travel := Timer {
+        interval: root.travel-duration;
+        running: false;
+        triggered => { self.stop(); end-pause.start(); }
+    }
+    end-pause := Timer {
+        interval: 2.4s;
+        running: false;
+        triggered => {
+            self.stop();
+            if root.selected && root.overflows && !Motion.reduced-motion {
+                root.animate-fade = true; root.text-opacity = 0.0;
+                fade-out.start();
+            }
+        }
+    }
+    fade-out := Timer {
+        interval: 140ms;
+        running: false;
+        triggered => {
+            self.stop(); root.animate-travel = false;
+            root.offset = 0px;
+            root.text-opacity = 1.0;
+            fade-in.start();
+        }
+    }
+    fade-in := Timer {
+        interval: 180ms;
+        running: false;
+        triggered => {
+            self.stop(); root.animate-fade = false;
+            if root.selected && root.overflows && !Motion.reduced-motion { delay.start(); }
+        }
     }
 }
 
+// Phase 10.3.0: one controller focus region, shared cover/focus design from
+// Home, and two quiet informational panels. No fabricated milestones.
 export component ActivityPage inherits Rectangle {
-    in property <string> total-playtime: "0 min";
-    in property <string> reported-playtime: "—";
-    in property <[ActivityGameData]> reported-games;
-    in property <string> session-count: "0";
-    in property <string> game-count: "0";
-    in property <[ActivitySessionData]> recent-sessions;
-    in property <[ActivityGameData]> top-games;
-
+    in property <[ActivityCoverData]> covers;
+    in property <[ActivityDayData]> days;
+    in property <int> selected-index: 0;
+    in property <int> pressed-index: -1;
+    in property <bool> details-open: false;
+    in property <bool> focus-visible: false;
+    in property <string> week-total: "0 min";
+    in property <string> month-total: "0 min";
+    callback choose-game(int);
     background: Theme.background;
 
+    private property <length> card-size: root.width < 980px ? 142px
+        : root.width < 1600px ? 164px : 186px;
+    private property <length> card-gap: 24px;
+    private property <length> art-inset: root.card-size * 0.085;
+    // Captions begin BELOW the maximum selected shell and FocusFrame, not
+    // the unselected cover slot. The 22px visual clearance remains stable
+    // throughout selection, press-in, and unselected states.
+    private property <length> cover-label-top: root.card-size
+        + root.card-size * ((Metrics.game-selected-scale - 1.0) / 2.0)
+        + Metrics.focus-offset + 22px;
+    // Fill the full shell width; the old centred, fitted-width viewport left
+    // an artificial clipped/cut-off band within the screen. Keep the cover
+    // edges within the same side margins as the page heading when stationary.
+    // Widen the gaps only as needed to use the available row width; all cards
+    // are still mounted, and the camera clips only at the actual screen edge.
+    private property <length> covers-width: max(1px,
+        root.width - Metrics.page-margin * 2);
+    private property <length> card-stride-min: root.card-size + root.card-gap;
+    // Reserve approximately one fifth of the next cover as an intentional
+    // browse hint. No sidebar arrows, separate mask, or early camera motion.
+    private property <length> peek-width: root.card-size * 0.22;
+    private property <int> visible-cards: max(1, Math.floor(
+        (root.covers-width - root.peek-width + root.card-gap) / root.card-stride-min));
+    private property <int> layout-cards: max(1, min(root.visible-cards, root.covers.length));
+    private property <length> effective-gap: root.covers.length > root.visible-cards
+        ? min(72px, max(root.card-gap,
+            (root.covers-width - root.visible-cards * root.card-size - root.peek-width)
+                / root.visible-cards))
+        : root.card-gap;
+    private property <length> card-stride: root.card-size + root.effective-gap;
+    // Home-style edge-zone navigation: hold the camera on the first set of
+    // whole covers, then follow only after crossing the rightmost full tile.
+    private property <int> first-visible: max(0,
+        root.selected-index - root.visible-cards + 1);
+    private property <length> strip-width: root.covers.length * root.card-size
+        + max(0, root.covers.length - 1) * root.effective-gap;
+    private property <length> camera-offset: min(
+        root.first-visible * root.card-stride,
+        max(0px, root.strip-width - root.covers-width));
+    private property <length> covers-top: root.height < 630px ? 157px : 175px;
+    // The lower sections always begin after BOTH caption lines, with a
+    // comfortable 28px separation, even when focus enlarges the cover.
+    private property <length> panels-top: root.covers-top + root.cover-label-top
+        + 36px + 20px + 28px;
+    private property <length> panels-gap: 18px;
+    private property <length> panel-width: (root.width - Metrics.page-margin * 2 - root.panels-gap) / 2;
+    private property <length> panels-height: max(150px, root.height - root.panels-top - 25px);
+
     Text {
-        x: Metrics.page-margin;
-        y: 34px;
-        width: parent.width - Metrics.page-margin * 2;
-        height: 44px;
+        x: Metrics.page-margin; y: 12px;
         text: "Activity";
         color: Theme.foreground;
         font-size: Typography.title-size;
         font-weight: Typography.title-weight;
-        vertical-alignment: center;
+    }
+    Text {
+        x: Metrics.page-margin; y: 61px;
+        text: "Your play history";
+        color: Theme.secondary-foreground;
+        font-size: Typography.caption-size;
+    }
+
+    // Read-only period totals. No focusable statistic cards or giant counters.
+    Rectangle {
+        x: root.width - Metrics.page-margin - 346px;
+        y: 22px; width: 164px; height: 55px;
+        background: transparent;
+        Text {
+            text: "Last 7 days"; y: 0px; width: parent.width;
+            color: Theme.secondary-foreground; font-size: Typography.caption-size;
+        }
+        Text {
+            text: root.week-total; y: 23px; width: parent.width; height: 28px;
+            color: Theme.foreground; font-size: Typography.body-size;
+            font-weight: Typography.emphasis-weight; overflow: elide;
+        }
+    }
+    Rectangle {
+        x: root.width - Metrics.page-margin - 166px;
+        y: 22px; width: 166px; height: 55px;
+        background: transparent;
+        Text {
+            text: "This month"; y: 0px; width: parent.width;
+            color: Theme.secondary-foreground; font-size: Typography.caption-size;
+        }
+        Text {
+            text: root.month-total; y: 23px; width: parent.width; height: 28px;
+            color: Theme.foreground; font-size: Typography.body-size;
+            font-weight: Typography.emphasis-weight; overflow: elide;
+        }
     }
 
     Text {
-        x: Metrics.page-margin;
-        y: 78px;
-        width: parent.width - Metrics.page-margin * 2;
-        height: 28px;
-        text: "Observed sessions and source-reported playtime";
+        x: Metrics.page-margin; y: root.covers-top - 62px;
+        width: 440px; height: 28px;
+        text: "Most played";
+        color: Theme.foreground;
+        font-size: Typography.heading-size;
+        font-weight: Typography.heading-weight;
+    }
+    Text {
+        x: root.width - Metrics.page-margin - 270px; y: root.covers-top - 57px;
+        width: 270px; height: 24px; horizontal-alignment: right;
+        text: "Tracked by Horizon";
+        color: Theme.secondary-foreground;
+        font-size: Typography.caption-size;
+    }
+
+    if root.covers.length == 0 : Text {
+        x: Metrics.page-margin; y: root.covers-top + 42px;
+        width: root.width - 2 * Metrics.page-margin;
+        height: 65px; wrap: word-wrap;
+        text: "No observed playtime yet. Games will appear after a tracked session.";
         color: Theme.secondary-foreground;
         font-size: Typography.body-size;
-        font-weight: Typography.body-weight;
-        vertical-alignment: center;
     }
 
-    private property <length> summary-gap: 16px;
-    private property <length> summary-width:
-        (root.width - Metrics.page-margin * 2 - root.summary-gap * 3) / 4;
+    // Full-shell carousel viewport. At rest, a deliberate fraction of the next
+    // game is visible at the actual right edge; selection does not pan early.
+    gallery := Rectangle {
+        x: 0px;
+        // Leave room for the enlarged Home-scale selected shell and its
+        // attached frame without clipping the upper focus corner.
+        y: root.covers-top - 18px;
+        width: root.width;
+        // Include the label and playtime after the enlarged selected frame;
+        // otherwise the bottom of the caption can be clipped by the viewport.
+        height: 18px + root.cover-label-top + 36px + 20px + 4px;
+        background: transparent;
+        clip: true;
 
-    SummaryCard {
-        x: Metrics.page-margin;
-        y: 122px;
-        width: root.summary-width;
-        height: 104px;
-        label: "Observed playtime";
-        value: root.total-playtime;
+        // One camera and one mounted row for fast held navigation. The clipped
+        // next cover is the scroll cue, not a separate UI affordance.
+        strip := Rectangle {
+            x: Metrics.page-margin - root.camera-offset;
+            y: 0px;
+            width: max(root.card-size, root.strip-width);
+            height: parent.height;
+            background: transparent;
+            animate x { duration: Motion.carousel-duration; easing: ease-out; }
+            for cover[index] in root.covers : Rectangle {
+                // All game tiles remain mounted throughout quick repeat navigation.
+                // Clipping belongs to the viewport, not the individual cards.
+                x: index * root.card-stride;
+                y: 18px; width: root.card-size;
+                height: root.cover-label-top + 36px + 20px;
+                background: transparent;
+                private property <bool> selected: root.selected-index == index
+                    && (root.focus-visible || root.details-open);
+                private property <bool> pressed: self.selected && root.pressed-index == index;
+                // Home supplies the larger selected scale. Opening details
+                // briefly depresses the cover before the page crossfade.
+                private property <float> card-scale: !self.selected ? 1.0
+                    : self.pressed ? 1.025 : Metrics.game-selected-scale;
+                z: self.selected ? 2.0 : 1.0;
+
+                shell := Rectangle {
+                    x: (root.card-size - self.width) / 2;
+                    y: (root.card-size - self.height) / 2;
+                    width: root.card-size * parent.card-scale;
+                    height: root.card-size * parent.card-scale;
+                    animate width, height {
+                        duration: Motion.focus-duration;
+                        easing: ease-out;
+                    }
+                    border-radius: root.card-size * (20.0 / 148.0);
+                    background: Theme.surface-raised;
+                    border-width: Theme.high-contrast ? 2px : 1px;
+                    border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.42);
+                    drop-shadow-offset-y: parent.selected ? 5px : 3px;
+                    drop-shadow-blur: parent.selected ? 16px : 11px;
+                    drop-shadow-color: Theme.shadow.with-alpha(parent.selected ? 0.90 : 0.68);
+                    private property <length> art-inset: root.art-inset;
+                    Rectangle {
+                        x: parent.art-inset; y: parent.art-inset;
+                        width: parent.width - 2 * parent.art-inset;
+                        height: parent.height - 2 * parent.art-inset;
+                        border-radius: root.card-size * (12.0 / 148.0);
+                        background: transparent; clip: true;
+                        if cover.game.has-artwork : Image {
+                            width: parent.width; height: parent.height;
+                            source: cover.game.artwork;
+                            image-fit: contain;
+                            image-rendering: cover.game.pixelated-artwork ? pixelated : smooth;
+                        }
+                        if !cover.game.has-artwork : FallbackCover {
+                            width: parent.width; height: parent.height; game: cover.game;
+                        }
+                    }
+                }
+                FocusFrame {
+                    // Follow the actual animated shell rather than a fixed
+                    // unselected tile box. This maintains a Library-like
+                    // six-pixel clearance at every selected scale and at the
+                    // contracted point of the A-button press.
+                    x: shell.x - 6px; y: shell.y - 6px;
+                    width: shell.width + 12px; height: shell.height + 12px;
+                    scale-factor: (root.card-size + 20px) / Metrics.game-tile-size;
+                    active: parent.selected;
+                    opacity: parent.selected ? 1.0 : 0.0;
+                    animate opacity { duration: Motion.focus-duration; easing: ease-in-out; }
+                }
+                ActivityCoverTitle {
+                    x: 1px; y: root.cover-label-top;
+                    width: parent.width - 2px; height: 25px;
+                    title: cover.game.title;
+                    selected: parent.selected && root.focus-visible;
+                }
+                Text {
+                    x: 1px; y: root.cover-label-top + 36px;
+                    width: parent.width - 2px; height: 20px;
+                    text: cover.observed-time;
+                    color: Theme.secondary-foreground;
+                    font-size: Typography.caption-size;
+                }
+                TouchArea {
+                    x: 0px; y: 0px;
+                    width: root.card-size; height: root.card-size;
+                    enabled: root.focus-visible;
+                    clicked => { root.choose-game(index); }
+                }
+            }
+        }
     }
 
-    SummaryCard {
-        x: Metrics.page-margin + root.summary-width + root.summary-gap;
-        y: 122px;
-        width: root.summary-width;
-        height: 104px;
-        label: "Reported lifetime";
-        value: root.reported-playtime;
-    }
-
-    SummaryCard {
-        x: Metrics.page-margin + (root.summary-width + root.summary-gap) * 2;
-        y: 122px;
-        width: root.summary-width;
-        height: 104px;
-        label: "Completed sessions";
-        value: root.session-count;
-    }
-
-    SummaryCard {
-        x: Metrics.page-margin + (root.summary-width + root.summary-gap) * 3;
-        y: 122px;
-        width: root.summary-width;
-        height: 104px;
-        label: "Games played";
-        value: root.game-count;
-    }
-
-    private property <length> content-top: 264px;
-    private property <length> content-bottom: 36px;
-    private property <length> column-gap: 24px;
-    private property <length> left-width:
-        (root.width - Metrics.page-margin * 2 - root.column-gap) * 0.62;
-    private property <length> right-width:
-        root.width - Metrics.page-margin * 2 - root.column-gap - root.left-width;
-
+    // One restrained chart and one intentionally inert future-feature slot.
     Rectangle {
-        x: Metrics.page-margin;
-        y: root.content-top;
-        width: root.left-width;
-        height: parent.height - root.content-top - root.content-bottom;
+        x: Metrics.page-margin; y: root.panels-top;
+        width: root.panel-width; height: root.panels-height;
         background: Theme.surface;
         border-radius: Metrics.radius-lg;
         border-width: Theme.high-contrast ? 2px : 1px;
-        border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.55);
+        border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.48);
         clip: true;
-
         Text {
-            x: 22px;
-            y: 14px;
-            width: parent.width - 44px;
-            height: 34px;
-            text: "Recent sessions";
-            color: Theme.foreground;
+            x: 19px; y: 13px; text: "Playtime";
             font-size: Typography.heading-size;
-            font-weight: Typography.heading-weight;
-            vertical-alignment: center;
+            font-weight: Typography.heading-weight; color: Theme.foreground;
         }
-
-        if root.recent-sessions.length == 0 : Text {
-            x: 22px;
-            y: 70px;
-            width: parent.width - 44px;
-            height: 54px;
-            text: "Play a game from Home and your observed sessions will appear here.";
+        Text {
+            x: parent.width - 174px; width: 152px; y: 17px;
+            horizontal-alignment: right;
+            text: "Last 7 days";
             color: Theme.secondary-foreground;
-            font-size: Typography.body-size;
-            font-weight: Typography.body-weight;
-            wrap: word-wrap;
+            font-size: Typography.caption-size;
         }
-
-        for session[index] in root.recent-sessions : Rectangle {
-            x: 18px;
-            y: 58px + index * 58px;
-            width: parent.width - 36px;
-            height: 54px;
-            background: Math.mod(index, 2) == 0 ? Theme.surface-raised.with-alpha(0.72) : transparent;
-            border-radius: Metrics.radius-sm;
-
-            Text {
-                x: 12px;
-                y: 5px;
-                width: parent.width * 0.48;
-                height: 24px;
-                text: session.title;
-                color: Theme.foreground;
-                font-size: Typography.body-size;
-                font-weight: Typography.emphasis-weight;
-                overflow: elide;
-                vertical-alignment: center;
-            }
-
-            Text {
-                x: 12px;
-                y: 29px;
-                width: parent.width * 0.58;
-                height: 19px;
-                text: session.when + " · " + session.method;
-                color: Theme.secondary-foreground;
-                font-size: Typography.caption-size;
-                font-weight: Typography.body-weight;
-                overflow: elide;
-                vertical-alignment: center;
-            }
-
-            Text {
-                x: parent.width - 144px;
-                y: 0px;
-                width: 128px;
-                height: parent.height;
-                text: session.duration;
-                color: Theme.accent;
-                font-size: Typography.body-size;
-                font-weight: Typography.emphasis-weight;
-                horizontal-alignment: right;
-                vertical-alignment: center;
-                overflow: elide;
+        Rectangle {
+            x: 16px; y: 58px; width: parent.width - 32px;
+            height: parent.height - 71px;
+            background: transparent;
+            for day[index] in root.days : Rectangle {
+                private property <length> slot: parent.width / 7;
+                x: index * self.slot; width: self.slot; height: parent.height;
+                background: transparent;
+                Rectangle {
+                    x: (parent.width - self.width) / 2;
+                    width: min(39px, parent.width * 0.50);
+                    height: max(3px, (parent.height - 41px) * day.fraction);
+                    y: parent.height - 38px - self.height;
+                    background: index == root.days.length - 1
+                        ? Theme.accent : Theme.secondary-foreground.with-alpha(0.32);
+                    border-radius: Metrics.radius-sm;
+                    animate height { duration: Motion.carousel-duration; easing: ease-out; }
+                }
+                Text {
+                    y: parent.height - 30px; height: 19px; width: parent.width;
+                    horizontal-alignment: center;
+                    text: day.label;
+                    color: Theme.secondary-foreground;
+                    font-size: Typography.caption-size;
+                }
             }
         }
     }
 
     Rectangle {
-        x: Metrics.page-margin + root.left-width + root.column-gap;
-        y: root.content-top;
-        width: root.right-width;
-        height: parent.height - root.content-top - root.content-bottom;
+        x: Metrics.page-margin + root.panel-width + root.panels-gap;
+        y: root.panels-top; width: root.panel-width; height: root.panels-height;
         background: Theme.surface;
         border-radius: Metrics.radius-lg;
         border-width: Theme.high-contrast ? 2px : 1px;
-        border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.55);
-        clip: true;
-
+        border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.48);
         Text {
-            x: 22px;
-            y: 14px;
-            width: parent.width - 44px;
-            height: 34px;
-            text: "Most played · observed";
-            color: Theme.foreground;
-            font-size: Typography.heading-size;
+            x: 19px; y: 13px; text: "Milestones";
+            color: Theme.foreground; font-size: Typography.heading-size;
             font-weight: Typography.heading-weight;
-            vertical-alignment: center;
         }
-
-        if root.top-games.length == 0 : Text {
-            x: 22px;
-            y: 70px;
-            width: parent.width - 44px;
-            height: 54px;
-            text: "No completed sessions yet.";
+        Text {
+            x: 19px; y: (parent.height - 38px) / 2;
+            width: parent.width - 38px; height: 55px;
+            text: "Coming later";
             color: Theme.secondary-foreground;
             font-size: Typography.body-size;
-            font-weight: Typography.body-weight;
-            wrap: word-wrap;
-        }
-
-        for game[index] in root.top-games : Rectangle {
-            visible: index < 3;
-            x: 18px;
-            y: 58px + index * 72px;
-            width: parent.width - 36px;
-            height: 66px;
-            background: index == 0 ? Theme.accent-subtle.with-alpha(0.72) : transparent;
-            border-radius: Metrics.radius-sm;
-
-            Text {
-                x: 12px;
-                y: 7px;
-                width: parent.width - 24px;
-                height: 24px;
-                text: game.title;
-                color: Theme.foreground;
-                font-size: Typography.body-size;
-                font-weight: Typography.emphasis-weight;
-                overflow: elide;
-                vertical-alignment: center;
-            }
-
-            Text {
-                x: 12px;
-                y: 33px;
-                width: parent.width - 24px;
-                height: 22px;
-                text: game.playtime + " · " + game.sessions;
-                color: Theme.secondary-foreground;
-                font-size: Typography.caption-size;
-                font-weight: Typography.body-weight;
-                overflow: elide;
-                vertical-alignment: center;
-            }
-        }
-
-        Text {
-            x: 22px;
-            y: 288px;
-            width: parent.width - 44px;
-            height: 32px;
-            text: "Source-reported lifetime";
-            color: Theme.foreground;
-            font-size: Typography.heading-size;
-            font-weight: Typography.heading-weight;
-            vertical-alignment: center;
-        }
-
-        if root.reported-games.length == 0 : Text {
-            x: 22px;
-            y: 333px;
-            width: parent.width - 44px;
-            height: 50px;
-            text: "No source-reported playtime available.";
-            color: Theme.secondary-foreground;
-            font-size: Typography.body-size;
-            wrap: word-wrap;
-        }
-
-        for game[index] in root.reported-games : Rectangle {
-            visible: index < 3;
-            x: 18px;
-            y: 327px + index * 68px;
-            width: parent.width - 36px;
-            height: 62px;
-            background: index == 0 ? Theme.accent-subtle.with-alpha(0.50) : transparent;
-            border-radius: Metrics.radius-sm;
-
-            Text {
-                x: 12px;
-                y: 5px;
-                width: parent.width - 24px;
-                height: 24px;
-                text: game.title;
-                color: Theme.foreground;
-                font-size: Typography.body-size;
-                font-weight: Typography.emphasis-weight;
-                overflow: elide;
-                vertical-alignment: center;
-            }
-            Text {
-                x: 12px;
-                y: 30px;
-                width: parent.width - 24px;
-                height: 20px;
-                text: game.playtime + " · " + game.sessions;
-                color: Theme.secondary-foreground;
-                font-size: Typography.caption-size;
-                overflow: elide;
-                vertical-alignment: center;
-            }
+            horizontal-alignment: center; vertical-alignment: center;
         }
     }
 }
