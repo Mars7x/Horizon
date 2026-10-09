@@ -13,7 +13,7 @@ The Phase 7 Steam slice provides:
 - source-backed Home cards instead of the old demo catalog;
 - launch dispatch through the source-neutral launch service and XDG OpenURI portal.
 
-The original Phase 7 slice intentionally deferred Steam account authentication, Steam Web API calls, lifetime playtime, cloud data, achievements, and production artwork. Phase 9.5.29 now adds local square artwork through the generic `Artwork` capability without adding Steam authentication or general runtime network access.
+Steam now provides local-only lifetime playtime and artwork through the generic `LifetimePlaytime` and `Artwork` capabilities. Steam account authentication, Steam Web API calls, cloud data, and achievements are not implemented; no general runtime network access is needed.
 
 ## Local metadata
 
@@ -218,3 +218,15 @@ or D-Bus permission.
 The optional host helper remains unrelated to normal Steam runtime tracking; it
 is reserved for launch/session capabilities that genuinely require host-side
 execution such as managed Gamescope sessions.
+
+## Steam-reported lifetime playtime
+
+Steam advertises `LifetimePlaytime`. The adapter reads the cumulative `Playtime` (minutes) per app from the active account's local `userdata/<account>/config/localconfig.vdf` and normalizes it to seconds. No Steam login, Web API, or network access is involved.
+
+- The account is the one uniquely marked `MostRecent` in `config/loginusers.vdf` (SteamID64 minus `76561197960265728` gives the `userdata` folder name). Without a unique marker, a lone `userdata` account is accepted; with several accounts and no unambiguous marker, nothing is reported rather than guessed.
+- Key lookup is case-insensitive because Steam clients have varied key casing.
+- Zero, missing, malformed, or overflowing per-game entries are skipped; an unreadable or incomplete file is rejected without importing partial values, preserving previously persisted values.
+- Equivalent native/Flatpak paths to the same account file are read only once. If multiple clients have different active Steam accounts, only the first successfully read account contributes a snapshot; unrelated accounts are not merged. For repeated apps within that account, the first discovered root wins. Values are never summed.
+- The value is stored in `source_lifetime_playtime` through the existing `SourcePlaytimeSync` and is never added to Horizon-observed sessions (ADR 0044).
+- `localconfig.vdf` is written by Steam periodically and on exit, so the total can lag a just-finished session. The periodic sync picks up later writes.
+

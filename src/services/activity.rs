@@ -180,6 +180,25 @@ impl ActivityOverview {
     }
 }
 
+/// Persisted, source-neutral Library ordering facts. Provider-reported lifetime
+/// playtime and Horizon-observed sessions are independent measurements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LibrarySortMetrics {
+    pub game_id: GameId,
+    pub added_at: i64,
+    pub last_played_at: Option<i64>,
+    pub observed_seconds: i64,
+    pub reported_seconds: Option<i64>,
+}
+
+impl LibrarySortMetrics {
+    /// Prefer the provider's cumulative total when available; otherwise use
+    /// Horizon-observed time. Never add the two measures or distinct providers.
+    pub fn time_played_seconds(self) -> i64 {
+        self.reported_seconds.unwrap_or(self.observed_seconds)
+    }
+}
+
 pub trait ActivityRepository {
     type Error: Error + 'static;
 
@@ -206,11 +225,20 @@ pub trait ActivityRepository {
 
     fn interrupt_open_play_sessions(&mut self) -> Result<usize, Self::Error>;
 
+    /// Most recently played distinct installed games, newest first.
+    fn recent_game_ids(&self, limit: usize) -> Result<Vec<GameId>, Self::Error>;
+
     fn activity_overview(
         &self,
         recent_limit: usize,
         top_games_limit: usize,
     ) -> Result<ActivityOverview, Self::Error>;
+
+    /// Returns per-game facts for Library ordering; does not affect Activity
+    /// totals or provider snapshots. Legacy test repositories may omit it.
+    fn library_sort_metrics(&self) -> Result<Vec<LibrarySortMetrics>, Self::Error> {
+        Ok(Vec::new())
+    }
 
     fn upsert_source_lifetime_playtime(
         &mut self,
@@ -635,6 +663,14 @@ where
             .checkpoint_open_play_sessions(observed_at)
     }
 
+    pub fn recent_game_ids(&self, limit: usize) -> Result<Vec<GameId>, R::Error> {
+        self.repository.borrow().recent_game_ids(limit)
+    }
+
+    pub fn library_sort_metrics(&self) -> Result<Vec<LibrarySortMetrics>, R::Error> {
+        self.repository.borrow().library_sort_metrics()
+    }
+
     pub fn overview(
         &self,
         recent_limit: usize,
@@ -833,6 +869,17 @@ mod tests {
                 .expect("interrupted session");
             }
             Ok(interrupted)
+        }
+
+        fn recent_game_ids(&self, limit: usize) -> Result<Vec<GameId>, Self::Error> {
+            let mut latest = BTreeMap::<GameId, i64>::new();
+            for session in &self.sessions {
+                latest.entry(session.game_id()).and_modify(|time| *time = (*time).max(session.started_at()))
+                    .or_insert(session.started_at());
+            }
+            let mut values: Vec<_> = latest.into_iter().collect();
+            values.sort_by(|(a_id, a_time), (b_id, b_time)| b_time.cmp(a_time).then_with(|| a_id.cmp(b_id)));
+            Ok(values.into_iter().take(limit).map(|(id, _)| id).collect())
         }
 
         fn activity_overview(

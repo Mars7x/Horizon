@@ -11,7 +11,7 @@ use crate::{
     services::{
         activity::{
             ActivityOverview, ActivityRepository, GameActivitySummary, RecentActivitySession,
-            ReportedGameSummary,
+            ReportedGameSummary, LibrarySortMetrics,
         },
         library::{DiscoveredGame, LibraryRepository},
     },
@@ -256,6 +256,24 @@ impl LibraryRepository for SqliteLibraryRepository {
 
 
 impl ActivityRepository for SqliteLibraryRepository {
+    fn recent_game_ids(&self, limit: usize) -> Result<Vec<GameId>, Self::Error> {
+        let limit = i64::try_from(limit)
+            .map_err(|_| PersistenceError::InvalidCount(i64::MAX))?;
+        // Restrict to installed/source-backed games and use the latest real
+        // session start, never a source lifetime-total import timestamp.
+        let mut statement = self.connection.prepare(
+            "SELECT ps.game_id FROM play_sessions AS ps \
+             WHERE EXISTS (SELECT 1 FROM game_sources AS gs WHERE gs.game_id = ps.game_id) \
+             GROUP BY ps.game_id ORDER BY MAX(ps.started_at) DESC, ps.game_id ASC LIMIT ?1",
+        )?;
+        let rows = statement.query_map([limit], |row| row.get::<_, i64>(0))?;
+        let mut ids = Vec::new();
+        for row in rows {
+            ids.push(Self::domain_value("play_sessions.game_id", GameId::new(row?))?);
+        }
+        Ok(ids)
+    }
+
     type Error = PersistenceError;
 
     fn begin_play_session(
@@ -355,6 +373,40 @@ impl ActivityRepository for SqliteLibraryRepository {
                 [],
             )
             .map_err(Into::into)
+    }
+
+    fn library_sort_metrics(&self) -> Result<Vec<LibrarySortMetrics>, Self::Error> {
+        // Read-only query; no new tables, migrations or provider-specific joins.
+        // A game's multiple source totals MUST NOT be summed. Prefer the
+        // greatest reported lifetime when there are multiple source references.
+        let mut statement = self.connection.prepare(
+            "SELECT g.id, g.created_at, \
+             (SELECT MAX(ps.started_at) FROM play_sessions AS ps \
+                WHERE ps.game_id = g.id AND (ps.state = 'completed' \
+                   OR (ps.state = 'interrupted' AND ps.ended_at IS NOT NULL))), \
+             (SELECT COALESCE(SUM(ps.ended_at - ps.started_at), 0) \
+                FROM play_sessions AS ps WHERE ps.game_id = g.id \
+                AND (ps.state = 'completed' \
+                   OR (ps.state = 'interrupted' AND ps.ended_at IS NOT NULL))), \
+             (SELECT MAX(sl.lifetime_seconds) FROM source_lifetime_playtime AS sl \
+                WHERE sl.game_id = g.id) \
+             FROM games AS g WHERE EXISTS \
+                (SELECT 1 FROM game_sources AS gs WHERE gs.game_id = g.id)"
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?,
+                row.get::<_, Option<i64>>(2)?, row.get::<_, i64>(3)?,
+                row.get::<_, Option<i64>>(4)?))
+        })?;
+        let mut metrics = Vec::new();
+        for row in rows {
+            let (raw_game_id, added_at, last_played_at, observed_seconds, reported_seconds) = row?;
+            let game_id = Self::domain_value("games.id", GameId::new(raw_game_id))?;
+            metrics.push(LibrarySortMetrics {
+                game_id, added_at, last_played_at, observed_seconds, reported_seconds,
+            });
+        }
+        Ok(metrics)
     }
 
     fn activity_overview(
@@ -826,6 +878,26 @@ mod tests {
     }
 
     #[test]
+    fn home_recents_are_distinct_and_ordered_by_latest_play_not_total_time() {
+        let mut repository = SqliteLibraryRepository::open_in_memory().expect("repository");
+        let first = seed_game(&mut repository, "First", "steam", "101");
+        let second = seed_game(&mut repository, "Second", "steam", "102");
+        let third = seed_game(&mut repository, "Unplayed", "steam", "103");
+        let source = SourceId::new("steam").expect("source");
+        for (id, time) in [(first, 100), (second, 200), (first, 300)] {
+            let session = repository.begin_play_session(
+                id, &source, time, SessionTrackingMethod::SourceRuntime,
+            ).expect("begin");
+            repository.complete_play_session(session, time + 10).expect("complete");
+        }
+        assert_eq!(repository.recent_game_ids(15).expect("recents"), vec![first, second]);
+        assert_eq!(repository.recent_game_ids(1).expect("limit"), vec![first]);
+        assert!(!repository.recent_game_ids(15).expect("recents").contains(&third));
+        repository.synchronize_source_snapshot(&source, &[], &[]).expect("uninstall");
+        assert!(repository.recent_game_ids(15).expect("installed only").is_empty());
+    }
+
+    #[test]
     fn open_sessions_surface_as_live_without_entering_completed_totals() {
         let mut repository = SqliteLibraryRepository::open_in_memory().expect("repository");
         let game_id = seed_game(&mut repository, "Live Game", "steam", "10");
@@ -959,6 +1031,52 @@ mod tests {
         assert_eq!(overview.reported_games().len(), 1);
         assert_eq!(overview.reported_games()[0].title().as_str(), "Reported");
         assert_eq!(overview.reported_games()[0].source_id().as_str(), "steam");
+    }
+
+    #[test]
+    fn library_sort_metrics_keep_reported_and_observed_separate() {
+        let mut repository = SqliteLibraryRepository::open_in_memory().expect("repository");
+        let game_id = repository
+            .upsert_discovered_game(&discovered("steam", "10", "Test game"))
+            .expect("game");
+        // One imported game can legitimately have multiple provider entries.
+        repository.connection.execute(
+            "INSERT INTO game_sources(game_id, source_id, external_id, first_seen_at, last_seen_at) \
+             VALUES (?1, 'heroic', 'test-game', 0, 0)",
+            [game_id.get()],
+        ).expect("additional source");
+        for (source, seconds) in [("steam", 7200), ("heroic", 1800)] {
+            repository.upsert_source_lifetime_playtime(&SourceLifetimePlaytime::new(
+                game_id, SourceId::new(source).unwrap(),
+                PlaytimeSeconds::new(seconds).unwrap(), 123,
+            )).expect("provider report");
+        }
+        let first = repository.begin_play_session(
+            game_id, &SourceId::new("steam").unwrap(), 100,
+            SessionTrackingMethod::SourceRuntime,
+        ).expect("session");
+        repository.complete_play_session(first, 160).expect("complete session");
+        let rows = repository.library_sort_metrics().expect("sort metrics");
+        assert_eq!(rows.len(), 1, "multiple providers must not duplicate a game");
+        let item = rows[0];
+        assert_eq!(item.game_id, game_id);
+        assert_eq!(item.last_played_at, Some(100));
+        assert_eq!(item.observed_seconds, 60);
+        assert_eq!(item.reported_seconds, Some(7200));
+        assert_eq!(item.time_played_seconds(), 7200, "never sum source and observed time");
+
+        let no_report_id = repository.upsert_discovered_game(
+            &discovered("heroic", "20", "Without provider report")
+        ).expect("other game");
+        let fallback = repository.begin_play_session(
+            no_report_id, &SourceId::new("heroic").unwrap(), 200,
+            SessionTrackingMethod::SourceRuntime,
+        ).expect("fallback session");
+        repository.complete_play_session(fallback, 260).expect("complete fallback");
+        let rows = repository.library_sort_metrics().expect("sort metrics");
+        let fallback = rows.iter().find(|item| item.game_id == no_report_id).unwrap();
+        assert_eq!(fallback.reported_seconds, None);
+        assert_eq!(fallback.time_played_seconds(), 60);
     }
 
     #[test]

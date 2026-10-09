@@ -3,6 +3,8 @@ export { Theme, Metrics, Typography, Motion }
 
 import { GameCardData } from "models/game-card.slint";
 export { GameCardData }
+import { LibraryCardData } from "models/library.slint";
+export { LibraryCardData }
 import { ActivitySessionData, ActivityGameData } from "models/activity.slint";
 export { ActivitySessionData, ActivityGameData }
 
@@ -10,7 +12,7 @@ import { AppRouteView } from "models/navigation.slint";
 export { AppRouteView }
 
 import { TopNavigation } from "components/top-navigation.slint";
-import { ShellMenuOverlay } from "components/shell-menu-overlay.slint";
+
 import { PageTransitionLayer } from "components/page-transition-layer.slint";
 import { Footer } from "components/footer.slint";
 import { HomePage } from "pages/home.slint";
@@ -64,14 +66,11 @@ export component AppWindow inherits Window {
     in property <AppRouteView> transition-from-route: AppRouteView.home;
     in property <bool> top-utilities-focused: false;
     in property <int> focused-utility-index: 2;
-    in property <bool> shell-menu-open: false;
 
-    // Home and Library use the persistent shell. Every top-utility destination
-    // is a durable full-shell submenu route, so opening any of the six utility
-    // icons replaces both top navigation and footer chrome.
+    // Home alone owns its top utilities and status/footer chrome. Library is
+    // a durable full-shell destination, like Settings and other submenu routes.
     private property <bool> shell-chrome-visible:
-        root.current-route == AppRouteView.home
-        || root.current-route == AppRouteView.library;
+        root.current-route == AppRouteView.home;
 
     // Read-only geometry telemetry for Rust-owned spatial focus transfer.
     // Slint reports where the presentation actually rendered things; Rust
@@ -85,6 +84,28 @@ export component AppWindow inherits Window {
             + Metrics.game-stride / 2) / 1px;
 
     in property <[GameCardData]> games;
+    in property <[LibraryCardData]> library-cards;
+    in property <[LibraryCardData]> library-previous-cards;
+    in property <int> library-previous-grid-columns: 1;
+    in property <int> library-previous-scroll-row: 0;
+    in property <int> library-previous-selected-index: -1;
+    in property <bool> library-has-previous-grid: false;
+    in property <int> library-selected-index: 0;
+    in property <int> library-browse-sequence: 0;
+    in property <string> library-filter-text: "All sources";
+    in property <string> library-sort-text: "Alphabetical";
+    in property <int> library-total-count: 0;
+    in property <string> library-count-text: "0 games";
+    in property <int> library-collection-count: 0;
+    in property <string> library-selected-title: "";
+    in property <string> library-selected-source: "";
+    in property <int> library-grid-columns: 7;
+    in property <int> library-scroll-row: 0;
+    in property <int> library-metadata-sequence: 0;
+    out property <float> logical-viewport-height-px: root.logical-height / 1px;
+    callback library-layout-changed();
+    changed logical-width => { root.library-layout-changed(); }
+    changed logical-height => { root.library-layout-changed(); }
     in-out property <int> selected-index: 0;
     in property <string> selected-title: "";
     in-out property <int> launching-game-index: -1;
@@ -136,6 +157,12 @@ export component AppWindow inherits Window {
     in property <string> clock-suffix: "";
 
     callback select-game(int);
+    callback open-library();
+    callback library-select(int);
+    callback library-cycle-filter();
+    callback library-cycle-sort();
+    callback library-scroll-rows(int);
+    callback library-back();
     callback activate-utility(int);
     callback settings-activate(int);
     callback settings-back();
@@ -201,8 +228,8 @@ export component AppWindow inherits Window {
                 }
             }
 
-            // Home and Library retain the established central content bounds.
-            // All five utility submenu routes use the whole logical surface.
+            // Only Home occupies the centre between its persistent chrome.
+            // Library and utility pages own the full logical surface.
             // Retaining every route layer preserves crossfade overlap and local
             // presentation state without moving navigation ownership into Slint.
             PageTransitionLayer {
@@ -228,6 +255,7 @@ export component AppWindow inherits Window {
                     focus-visible: root.current-route == AppRouteView.home
                         && !root.top-utilities-focused;
                     select-game(index) => { root.select-game(index); }
+                    open-library => { if (root.current-route == AppRouteView.home) { root.open-library(); } }
                     carousel-geometry-changed(first-game-center-x-px) => {
                         root.home-first-game-center-x-px = first-game-center-x-px;
                     }
@@ -236,9 +264,8 @@ export component AppWindow inherits Window {
 
             PageTransitionLayer {
                 x: 0px;
-                base-y: Metrics.top-chrome-height;
                 width: parent.width;
-                height: root.shell-content-height;
+                height: parent.height;
                 active: root.current-route == AppRouteView.library;
                 outgoing: root.current-route != AppRouteView.library
                     && root.transition-from-route == AppRouteView.library;
@@ -246,6 +273,37 @@ export component AppWindow inherits Window {
                 LibraryPage {
                     width: parent.width;
                     height: parent.height;
+                    cards: root.library-cards;
+                    previous-cards: root.library-previous-cards;
+                    previous-grid-columns: root.library-previous-grid-columns;
+                    previous-scroll-row: root.library-previous-scroll-row;
+                    previous-selected-index: root.library-previous-selected-index;
+                    has-previous-grid: root.library-has-previous-grid;
+                    selected-index: root.library-selected-index;
+                    total-count: root.library-total-count;
+                    count-text: root.library-count-text;
+                    collection-count: root.library-collection-count;
+                    browse-sequence: root.library-browse-sequence;
+                    filter-text: root.library-filter-text;
+                    sort-text: root.library-sort-text;
+                    selected-title: root.library-selected-title;
+                    selected-source: root.library-selected-source;
+                    grid-columns: root.library-grid-columns;
+                    scroll-row: root.library-scroll-row;
+                    metadata-sequence: root.library-metadata-sequence;
+                    focus-visible: root.current-route == AppRouteView.library;
+                    choose-card(index) => {
+                        if (root.current-route == AppRouteView.library) { root.library-select(index); }
+                    }
+                    cycle-filter => {
+                        if (root.current-route == AppRouteView.library) { root.library-cycle-filter(); }
+                    }
+                    cycle-sort => {
+                        if (root.current-route == AppRouteView.library) { root.library-cycle-sort(); }
+                    }
+                    scroll-rows(direction) => {
+                        if (root.current-route == AppRouteView.library) { root.library-scroll-rows(direction); }
+                    }
                 }
             }
 
@@ -424,17 +482,6 @@ export component AppWindow inherits Window {
                 clock-suffix: root.clock-suffix;
             }
 
-            // Global Menu is a modal shell surface, not a route. It sits above
-            // page content and persistent chrome while Rust keeps the source
-            // route/focus untouched underneath.
-            ShellMenuOverlay {
-                x: 0px;
-                y: 0px;
-                width: parent.width;
-                height: parent.height;
-                z: 4.0;
-                open: root.shell-menu-open;
-            }
         }
     }
 }

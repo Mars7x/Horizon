@@ -563,3 +563,36 @@ appearance and 155ms on disappearance. Indicator elements are persistent, not
 conditionally removed at the end of a connection; this preserves animated exit.
 They remain independent of the GameCard focus-bracket design. With Reduced
 Motion both the opacity and position change immediately.
+
+### Phase 10.1.0 — Recent games and Library tile
+
+Home's original world-space carousel now shows at most fifteen distinct installed games with Horizon-observed play sessions, newest started session first. The final item is a permanent Library destination with the same card footprint, selected scaling, and original Home `FocusFrame`; there is no fake LibraryGame. The tile remains even when there is no observed game history. The full Library keeps its complete source-backed catalogue and card updates, independently of the Home subset. Main Menu/Start is a direct Library shortcut instead of opening the old modal menu.
+
+### Phase 10.1.1 — Alphabetical initial Home and unplayed fallback
+
+Home now fills up to **15 game cards** from currently imported games even when no
+Horizon-observed play sessions exist. The ordered, distinct games with actual
+play history remain first (newest session first). Remaining slots are filled
+from games **without** recorded play history, ordered case-insensitively A–Z
+(full title; no removal of articles). If no games have yet been played, all
+visible Home game cards are alphabetical. If at least 15 games have been played,
+only the 15 most recently played appear. With fewer than 15 imported games,
+every imported game appears. The permanent Library tile follows those cards;
+it is the only tile when the catalogue is empty.
+
+This affects only the Home presentation order. Neither the full Library data nor
+the source-backed launch/artwork/Playing identities change. As play sessions
+arrive, Home promotes their titles ahead of the alphabetical fallback, retaining
+focused game identity where still present. The original carousel and its
+`FocusFrame` animations are unchanged. See ADR 0136.
+
+### Phase 10.1.2 — Minimal system Library tile
+
+The final Home Library destination keeps exactly the same square shell footprint,
+selected-size animation, camera participation, pointer target, and original game
+`FocusFrame` as Phase 10.1.1. Inside its neutral art frame, the prominent 2×2
+foreground grid is now centered on both axes. The duplicate word “Library”
+was removed from inside the tile: the existing selected-title pill above the
+carousel remains its only visible name. There is no small caption, fake cover
+art, background pattern, gradient or extra focus layer. Other game-card
+components, recent ordering and input semantics remain unchanged. See ADR 0137.

@@ -18,7 +18,7 @@ pub fn action_for_key(text: &str, repeated: bool) -> Option<UiAction> {
         UiAction::Accept
     } else if key_matches(text, Key::Escape) || key_matches(text, Key::Back) {
         UiAction::Back
-    } else if key_matches(text, Key::Menu) {
+    } else if key_matches(text, Key::Menu) || key_matches(text, Key::F10) {
         UiAction::Menu
     } else if key_matches(text, Key::Home) {
         UiAction::Home
@@ -69,6 +69,10 @@ mod tests {
         );
         assert_eq!(
             action_for_key(encoded(Key::Menu).as_str(), false),
+            Some(UiAction::Menu)
+        );
+        assert_eq!(
+            action_for_key(encoded(Key::F10).as_str(), false),
             Some(UiAction::Menu)
         );
         assert_eq!(

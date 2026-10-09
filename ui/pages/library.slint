@@ -1,10 +1,509 @@
-import { PagePlaceholder } from "../components/page-placeholder.slint";
+import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
+import { FallbackCover } from "../components/fallback-cover.slint";
+import { FocusFrame } from "../components/focus-frame.slint";
+import { LibraryCardData } from "../models/library.slint";
 
+// Library is a durable, full-shell destination, never a panel beneath Home chrome.
+// Clean, shallow previews reveal collection continuity without a scrollbar.
+// Header/footer stay on the SAME Theme.background as the gallery; narrow, soft
+// elevation shadows indicate their stationary scroll boundaries without bands.
 export component LibraryPage inherits Rectangle {
-    PagePlaceholder {
-        width: parent.width;
-        height: parent.height;
-        title: "Library";
-        description: "Your unified game library will appear here.";
+    in property <[LibraryCardData]> cards;
+    // A frozen, bounded snapshot of the previous on-screen cards. The old
+    // arrangement must survive replacement of the current VecModel so a
+    // source/sort change can genuinely crossfade instead of blinking.
+    in property <[LibraryCardData]> previous-cards;
+    in property <int> previous-grid-columns: 1;
+    in property <int> previous-scroll-row: 0;
+    in property <int> previous-selected-index: -1;
+    in property <bool> has-previous-grid: false;
+    in property <int> selected-index: 0;
+    in property <bool> focus-visible: true;
+    in property <string> filter-text: "All sources";
+    in property <string> sort-text: "Alphabetical";
+    in property <int> total-count: 0;
+    in property <string> count-text: "0 games";
+    in property <int> collection-count: 0;
+    in property <string> selected-title: "";
+    in property <string> selected-source: "";
+    in property <int> grid-columns: 7;
+    in property <int> scroll-row: 0;
+    in property <int> metadata-sequence: 0;
+    in property <int> browse-sequence: 0;
+    private property <string> visible-filter: "All sources";
+    private property <string> old-filter: "All sources";
+    private property <string> visible-sort: "Alphabetical";
+    private property <string> old-sort: "Alphabetical";
+    private property <string> visible-count: "";
+    private property <string> old-count: "";
+    private property <duration> filter-changed-at: 0ms;
+    private property <duration> sort-changed-at: 0ms;
+    private property <duration> count-changed-at: 0ms;
+    private property <duration> browse-changed-at: 0ms;
+    private property <float> filter-progress: Motion.reduced-motion || !root.focus-visible
+        ? 1.0 : min(1.0, max(0.0, (animation-tick() - root.filter-changed-at) / 170ms));
+    private property <float> sort-progress: Motion.reduced-motion || !root.focus-visible
+        ? 1.0 : min(1.0, max(0.0, (animation-tick() - root.sort-changed-at) / 170ms));
+    private property <float> count-progress: Motion.reduced-motion || !root.focus-visible
+        || root.old-count == "" || root.old-count == root.visible-count
+        ? 1.0 : min(1.0, max(0.0, (animation-tick() - root.count-changed-at) / 190ms));
+    private property <float> browse-progress: Motion.reduced-motion || !root.focus-visible
+        || !root.has-previous-grid
+        ? 1.0 : min(1.0, max(0.0, (animation-tick() - root.browse-changed-at) / 230ms));
+    changed filter-text => {
+        root.old-filter = root.visible-filter;
+        root.visible-filter = root.filter-text;
+        root.filter-changed-at = animation-tick();
+    }
+    changed sort-text => {
+        root.old-sort = root.visible-sort;
+        root.visible-sort = root.sort-text;
+        root.sort-changed-at = animation-tick();
+    }
+    changed count-text => {
+        root.old-count = root.visible-count;
+        root.visible-count = root.count-text;
+        root.count-changed-at = animation-tick();
+    }
+    changed browse-sequence => { root.browse-changed-at = animation-tick(); }
+
+    // Snapshot the old/new metadata only when Rust publishes a NEW game ID.
+    // A sequence signal arrives after both current text properties are updated.
+    private property <string> presented-title: "";
+    private property <string> presented-source: "";
+    private property <string> departing-title: "";
+    private property <string> departing-source: "";
+    private property <duration> metadata-start: 0ms;
+    // Title and provider transition independently. Identical text never flashes.
+    private property <float> metadata-linear-progress: Motion.reduced-motion || !root.focus-visible
+        ? 1.0 : min(1.0, max(0.0, (animation-tick() - root.metadata-start) / 190ms));
+    private property <float> eased-metadata-progress: 1.0 - (1.0 - root.metadata-linear-progress)
+        * (1.0 - root.metadata-linear-progress) * (1.0 - root.metadata-linear-progress);
+    private property <float> title-progress: root.departing-title == ""
+        || root.departing-title == root.presented-title ? 1.0 : root.eased-metadata-progress;
+    private property <float> source-progress: root.departing-source == ""
+        || root.departing-source == root.presented-source ? 1.0 : root.eased-metadata-progress;
+    changed metadata-sequence => {
+        root.departing-title = root.presented-title;
+        root.departing-source = root.presented-source;
+        root.presented-title = root.selected-title;
+        root.presented-source = root.selected-source;
+        root.metadata-start = animation-tick();
+    }
+
+    callback choose-card(int);
+    callback cycle-filter();
+    callback cycle-sort();
+    callback scroll-rows(int);
+    background: Theme.background;
+
+    // Width bands are mirrored exactly in Rust GridLayout::for_width().
+    // Do not scale down covers just to squeeze seven/eight columns into a
+    // Switch-sized viewport; larger tiles and a calmer column count win.
+    private property <length> card-size: root.width < 800px ? 132px
+        : root.width < 1100px ? 156px
+        : root.width < 1450px ? 180px
+        : root.width < 2200px ? 206px
+        : root.width < 3000px ? 218px : 226px;
+    private property <length> card-stride: root.card-size + 28px;
+    private property <length> row-stride: root.card-size + 28px;
+    private property <length> art-inset: root.card-size * 0.085;
+    private property <length> grid-pad: 22px;
+    private property <length> top-content-inset: 99px;
+    private property <length> bottom-content-reserve: 73px;
+    // Keep exact parity with Rust LibraryController::visible_rows().
+    private property <int> displayed-rows: max(1, Math.floor(
+        (root.height - root.top-content-inset - root.bottom-content-reserve
+            - 2 * root.grid-pad + (root.row-stride - root.card-size)) / root.row-stride));
+    private property <length> grid-height: root.grid-pad * 2
+        + root.displayed-rows * root.row-stride - (root.row-stride - root.card-size);
+    private property <int> total-rows: max(0,
+        Math.floor((root.total-count + root.grid-columns - 1) / root.grid-columns));
+    // Mirror the gallery's continuation at BOTH ends. The cover preview is
+    // deliberately clean-cropped rather than fading into a muddy dark overlay.
+    // Keep the full-row calculation identical to LibraryController::visible_rows.
+    private property <length> available-grid-height:
+        root.height - root.top-content-inset - root.bottom-content-reserve;
+    private property <length> peek-limit:
+        min(54px, max(0px, (root.available-grid-height - root.grid-height) / 2 - 8px));
+
+    // Compact top chrome: title/count stay legible, but the collection gets
+    // the recovered vertical room. Elevation is drawn at the boundary BELOW,
+    // not as a separately painted header slab.
+
+    Text {
+        x: Metrics.page-margin; y: 11px;
+        text: "Library";
+        color: Theme.foreground;
+        font-size: Typography.title-size;
+        font-weight: Typography.title-weight;
+    }
+    Rectangle {
+        x: Metrics.page-margin; y: 52px;
+        height: 30px; width: 230px;
+        background: transparent; clip: true;
+        Text {
+            width: parent.width; height: parent.height;
+            y: -5px * root.count-progress;
+            text: root.old-count;
+            color: Theme.secondary-foreground;
+            font-size: Typography.caption-size;
+            vertical-alignment: center;
+            opacity: 1.0 - root.count-progress;
+        }
+        Text {
+            width: parent.width; height: parent.height;
+            y: 5px * (1.0 - root.count-progress);
+            text: root.visible-count;
+            color: Theme.secondary-foreground;
+            font-size: Typography.caption-size;
+            vertical-alignment: center;
+            opacity: root.count-progress;
+        }
+    }
+
+    // Separate, non-focusable pointer commands, laid out on an explicit grid.
+    // Stacked captions and left-aligned values prevent Source/Sort collisions,
+    // including when longer provider names are localized or displayed.
+    header-actions := Rectangle {
+        x: root.width - Metrics.page-margin - self.width;
+        y: 17px;
+        width: 360px; height: 57px;
+        background: transparent;
+
+        source-action := Rectangle {
+            x: 0px; y: 0px; width: 148px; height: parent.height;
+            border-radius: Metrics.radius-sm;
+            background: source-pointer.has-hover
+                ? Theme.surface.with-alpha(0.56) : transparent;
+            Text {
+                x: 10px; y: 5px; width: parent.width - 20px; height: 18px;
+                text: "Source";
+                color: Theme.secondary-foreground;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+            Rectangle {
+                x: 10px; y: 24px; width: parent.width - 20px; height: 29px;
+                background: transparent; clip: true;
+                Text {
+                    x: 0px; y: -4px * root.filter-progress;
+                    width: parent.width; height: parent.height;
+                    text: root.old-filter;
+                    color: Theme.foreground; font-size: 15px;
+                    vertical-alignment: center; overflow: elide;
+                    opacity: root.old-filter == root.visible-filter ? 0.0 : 1.0 - root.filter-progress;
+                }
+                Text {
+                    x: 0px; y: 4px * (1.0 - root.filter-progress);
+                    width: parent.width; height: parent.height;
+                    text: root.visible-filter;
+                    color: Theme.foreground; font-size: 15px;
+                    vertical-alignment: center; overflow: elide;
+                    opacity: root.filter-progress;
+                }
+            }
+            source-pointer := TouchArea {
+                width: parent.width; height: parent.height;
+                clicked => { root.cycle-filter(); }
+            }
+        }
+        sort-action := Rectangle {
+            x: 168px; y: 0px; width: 192px; height: parent.height;
+            border-radius: Metrics.radius-sm;
+            background: sort-pointer.has-hover
+                ? Theme.surface.with-alpha(0.56) : transparent;
+            Text {
+                x: 10px; y: 5px; width: parent.width - 20px; height: 18px;
+                text: "Sort";
+                color: Theme.secondary-foreground;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+            Rectangle {
+                x: 10px; y: 24px; width: parent.width - 20px; height: 29px;
+                background: transparent; clip: true;
+                Text {
+                    x: 0px; y: -4px * root.sort-progress;
+                    width: parent.width; height: parent.height;
+                    text: root.old-sort;
+                    color: Theme.foreground; font-size: 15px;
+                    vertical-alignment: center; overflow: elide;
+                    opacity: root.old-sort == root.visible-sort ? 0.0 : 1.0 - root.sort-progress;
+                }
+                Text {
+                    x: 0px; y: 4px * (1.0 - root.sort-progress);
+                    width: parent.width; height: parent.height;
+                    text: root.visible-sort;
+                    color: Theme.foreground; font-size: 15px;
+                    vertical-alignment: center; overflow: elide;
+                    opacity: root.sort-progress;
+                }
+            }
+            sort-pointer := TouchArea {
+                width: parent.width; height: parent.height;
+                clicked => { root.cycle-sort(); }
+            }
+        }
+    }
+
+    if root.collection-count == 0 : Text {
+        x: Metrics.page-margin; y: root.height / 2;
+        width: parent.width - Metrics.page-margin * 2;
+        horizontal-alignment: center;
+        text: "No games found. Install games in Steam or Heroic, then refresh your library.";
+        color: Theme.secondary-foreground; font-size: Typography.body-size;
+    }
+    if root.collection-count > 0 && root.total-count == 0 : Text {
+        x: Metrics.page-margin; y: root.height / 2;
+        width: parent.width - Metrics.page-margin * 2;
+        horizontal-alignment: center;
+        text: "No games match this source.";
+        color: Theme.secondary-foreground; font-size: Typography.body-size;
+    }
+
+    grid-viewport := Rectangle {
+        x: Metrics.page-margin - 16px;
+        // Stable viewport geometry: scrolling never shifts the clipping edges.
+        // At the beginning/end, the unused peek simply becomes empty space.
+        // Keep gallery slightly higher than dead-centre, especially in
+        // windows where only two full rows fit.
+        y: root.top-content-inset + max(0px,
+            (root.available-grid-height - root.grid-height) / 2 - 18px) - root.peek-limit;
+        width: parent.width - (Metrics.page-margin - 16px) * 2;
+        height: root.grid-height + 2 * root.peek-limit;
+        background: transparent;
+        clip: true;
+
+        TouchArea {
+            width: parent.width; height: parent.height;
+            scroll-event(event) => {
+                root.scroll-rows(event.delta-y > 0px ? 1 : -1);
+                accept
+            }
+        }
+
+        // Outgoing grid: one frozen overscan window at the previous scroll
+        // offset. No pointer targets, no sliding brackets, and no model updates
+        // after the transition begins. It disappears automatically as the
+        // timeline reaches its end (or immediately for Reduced Motion).
+        if root.has-previous-grid && root.browse-progress < 1.0 : Rectangle {
+            width: root.previous-grid-columns * root.card-stride
+                - (root.card-stride - root.card-size) + 2 * root.grid-pad;
+            x: max(0px, (parent.width - self.width) / 2);
+            y: root.peek-limit - root.previous-scroll-row * root.row-stride;
+            height: parent.height;
+            opacity: 1.0 - root.browse-progress;
+            background: transparent;
+            for old[index] in root.previous-cards : Rectangle {
+                x: root.grid-pad + Math.mod(old.absolute-index, root.previous-grid-columns) * root.card-stride;
+                y: root.grid-pad + Math.floor(old.absolute-index / root.previous-grid-columns) * root.row-stride;
+                width: root.card-size; height: root.card-size;
+                background: transparent;
+                private property <bool> was-selected:
+                    root.previous-selected-index == old.absolute-index;
+                Rectangle {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    width: root.card-size * (parent.was-selected ? 1.045 : 1.0);
+                    height: root.card-size * (parent.was-selected ? 1.045 : 1.0);
+                    border-radius: root.card-size * (20.0 / 148.0);
+                    background: Theme.surface-raised;
+                    border-width: Theme.high-contrast ? 2px : 1px;
+                    border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.42);
+                    drop-shadow-offset-y: parent.was-selected ? 5px : 3px;
+                    drop-shadow-blur: parent.was-selected ? 16px : 11px;
+                    drop-shadow-color: Theme.shadow.with-alpha(parent.was-selected ? 0.90 : 0.68);
+                    Rectangle {
+                        x: root.art-inset; y: root.art-inset;
+                        width: parent.width - 2 * root.art-inset;
+                        height: parent.height - 2 * root.art-inset;
+                        border-radius: root.card-size * (12.0 / 148.0);
+                        clip: true; background: transparent;
+                        if old.game.has-artwork : Image {
+                            width: parent.width; height: parent.height;
+                            source: old.game.artwork;
+                            image-fit: contain;
+                            image-rendering: old.game.pixelated-artwork ? pixelated : smooth;
+                        }
+                        if !old.game.has-artwork : FallbackCover {
+                            width: parent.width; height: parent.height;
+                            game: old.game;
+                        }
+                    }
+                }
+                FocusFrame {
+                    x: -10px; y: -10px;
+                    width: root.card-size + 20px;
+                    height: root.card-size + 20px;
+                    scale-factor: (root.card-size + 20px) / Metrics.game-tile-size;
+                    active: root.focus-visible && parent.was-selected;
+                    opacity: parent.was-selected ? 1.0 : 0.0;
+                }
+            }
+        }
+
+        gallery := Rectangle {
+            width: root.grid-columns * root.card-stride - (root.card-stride - root.card-size) + 2 * root.grid-pad;
+            x: max(0px, (parent.width - self.width) / 2);
+            y: root.peek-limit - (root.scroll-row * root.row-stride);
+            height: max(1, Math.floor((root.total-count + root.grid-columns - 1) / root.grid-columns))
+                * root.row-stride + 2 * root.grid-pad;
+            background: transparent;
+            opacity: root.browse-progress;
+            // Full outgoing/incoming crossfade. The original per-card Home
+            // FocusFrame still never slides between unrelated game positions.
+            // Match Home's camera feel rather than using a separate grid timing.
+            animate y {
+                duration: root.has-previous-grid && root.browse-progress < 1.0
+                    ? 0ms : Motion.carousel-duration;
+                easing: ease-out;
+            }
+
+            for row[index] in root.cards : Rectangle {
+                x: root.grid-pad + Math.mod(row.absolute-index, root.grid-columns) * root.card-stride;
+                y: root.grid-pad + Math.floor(row.absolute-index / root.grid-columns) * root.row-stride;
+                width: root.card-size; height: root.card-size;
+                background: transparent;
+                clip: false;
+                private property <bool> selected: root.focus-visible
+                    && root.selected-index == row.absolute-index;
+                private property <float> card-scale: self.selected ? 1.045 : 1.0;
+
+                // The same two-layer Home cover composition: a rounded shell
+                // surrounding inset art, rather than edge-to-edge cover squares.
+                shell := Rectangle {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    width: root.card-size * parent.card-scale;
+                    height: root.card-size * parent.card-scale;
+                    border-radius: root.card-size * (20.0 / 148.0);
+                    background: Theme.surface-raised;
+                    border-width: Theme.high-contrast ? 2px : 1px;
+                    border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.42);
+                    drop-shadow-offset-y: parent.selected ? 5px : 3px;
+                    drop-shadow-blur: parent.selected ? 16px : 11px;
+                    drop-shadow-color: Theme.shadow.with-alpha(parent.selected ? 0.90 : 0.68);
+                    animate width, height { duration: Motion.focus-duration; easing: ease-out; }
+
+                    artwork := Rectangle {
+                        x: root.art-inset; y: root.art-inset;
+                        width: parent.width - 2 * root.art-inset;
+                        height: parent.height - 2 * root.art-inset;
+                        background: transparent;
+                        border-radius: root.card-size * (12.0 / 148.0);
+                        clip: true;
+                        if row.game.has-artwork : Image {
+                            width: parent.width; height: parent.height;
+                            source: row.game.artwork;
+                            image-fit: contain;
+                            image-rendering: row.game.pixelated-artwork ? pixelated : smooth;
+                        }
+                        if !row.game.has-artwork : FallbackCover {
+                            width: parent.width; height: parent.height;
+                            game: row.game;
+                        }
+                    }
+                }
+                // As on Home, each cover owns its focus brackets; newly
+                // selected brackets fade in in-place rather than sliding between
+                // arbitrary grid positions or diagonally across row boundaries.
+                FocusFrame {
+                    x: -10px; y: -10px;
+                    width: root.card-size + 20px;
+                    height: root.card-size + 20px;
+                    scale-factor: (root.card-size + 20px) / Metrics.game-tile-size;
+                    active: parent.selected;
+                    opacity: parent.selected ? root.browse-progress : 0.0;
+                    animate opacity { duration: Motion.focus-duration; easing: ease-in-out; }
+                }
+                TouchArea {
+                    width: parent.width; height: parent.height;
+                    // Peeking rows signal vertical continuation; they are not
+                    // interactive until the camera brings them fully into view.
+                    enabled: row.absolute-index >= root.scroll-row * root.grid-columns
+                        && row.absolute-index < (root.scroll-row + root.displayed-rows) * root.grid-columns;
+                    clicked => { root.choose-card(row.absolute-index); }
+                    scroll-event(event) => {
+                        root.scroll-rows(event.delta-y > 0px ? 1 : -1);
+                        accept
+                    }
+                }
+            }
+
+        }
+
+    }
+
+    // Adwaita-like scroll-edge elevation, NOT a tinted toolbar surface or
+    // a rule. Only the 10px penumbra enters the gallery: the rest of the page
+    // remains exactly Theme.background. It does not intercept mouse input.
+    if root.total-count > 0 : Rectangle {
+        x: 0px; y: grid-viewport.y;
+        width: parent.width; height: 11px;
+        background: @linear-gradient(180deg,
+            Theme.shadow.with-alpha(Theme.is-dark ? 0.23 : 0.11) 0%,
+            Theme.shadow.with-alpha(0.0) 100%);
+    }
+    if root.total-count > 0 : Rectangle {
+        x: 0px; y: grid-viewport.y + grid-viewport.height - 11px;
+        width: parent.width; height: 11px;
+        background: @linear-gradient(180deg,
+            Theme.shadow.with-alpha(0.0) 0%,
+            Theme.shadow.with-alpha(Theme.is-dark ? 0.23 : 0.11) 100%);
+    }
+
+    // Metadata remains fixed below the gallery on the same background as the
+    // header and page. The viewport clips peeking covers above this region;
+    // no additional surface, fade, shadow, or divider is needed.
+    // Title and source have independent motion: unchanged strings stay still.
+    // The selected identity/revision is owned by Rust; no timers in Slint.
+    title-window := Rectangle {
+        x: Metrics.page-margin; y: root.height - 65px;
+        width: parent.width - Metrics.page-margin * 2;
+        height: 30px; clip: true; background: transparent;
+        Text {
+            x: 0px; y: -6px * root.title-progress;
+            width: parent.width; height: parent.height;
+            text: root.total-count > 0 ? root.departing-title : "";
+            color: Theme.foreground;
+            font-size: Typography.body-size;
+            font-weight: Typography.emphasis-weight;
+            overflow: elide; vertical-alignment: center;
+            opacity: 1.0 - root.title-progress;
+        }
+        Text {
+            x: 0px; y: 6px * (1.0 - root.title-progress);
+            width: parent.width; height: parent.height;
+            text: root.total-count > 0 ? root.presented-title : "";
+            color: Theme.foreground;
+            font-size: Typography.body-size;
+            font-weight: Typography.emphasis-weight;
+            overflow: elide; vertical-alignment: center;
+            opacity: root.title-progress;
+        }
+    }
+    source-window := Rectangle {
+        x: Metrics.page-margin; y: root.height - 34px;
+        width: parent.width - Metrics.page-margin * 2;
+        height: 24px; clip: true; background: transparent;
+        Text {
+            x: 0px; y: -4px * root.source-progress;
+            width: parent.width; height: parent.height;
+            text: root.total-count > 0 ? root.departing-source : "";
+            color: Theme.secondary-foreground;
+            font-size: Typography.caption-size;
+            vertical-alignment: center;
+            opacity: 1.0 - root.source-progress;
+        }
+        Text {
+            x: 0px; y: 4px * (1.0 - root.source-progress);
+            width: parent.width; height: parent.height;
+            text: root.total-count > 0 ? root.presented-source : "";
+            color: Theme.secondary-foreground;
+            font-size: Typography.caption-size;
+            vertical-alignment: center;
+            opacity: root.source-progress;
+        }
     }
 }

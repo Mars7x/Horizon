@@ -256,9 +256,9 @@ Implemented:
 - explicit back-stack and global Home reset semantics
 - `NavigationController` between semantic input and page controllers
 - active route published to Slint as presentation state
-- app-level top/footer chrome on Home and Library, suppressed by full-shell utility destinations
+- app-level top/footer chrome on Home only; Library and all utility destinations are full-shell routes
 - retained route layers with central Home/Library bounds and full-shell Friends/Album/Activity/Web/Settings/Shop bounds
-- presentation-only placeholder pages for Library, Friends, Album, Web, Settings, and Shop; Activity is now production-backed
+- production Phase 10 Library browsing, plus placeholder Friends, Album, Web and Shop; Settings and Activity are production-backed
 - route-local shell-focus restoration for Home, Library, and all six utility submenu routes
 - explicit global Back/Menu/Home policy with modal shell Menu state
 - tested keyboard/controller mappings for global shell actions
@@ -678,7 +678,7 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
 
 ## Phase 4.4 focus restoration invariants
 
-- Every route remembers a durable focus snapshot. Home/Library may restore content vs top utilities; every full-shell `Utility(...)` route is always restored as content focus while active.
+- Every route remembers a durable focus snapshot. Only Home may restore content vs top utilities; Library and every `Utility(...)` route restore content focus while active.
 - Route changes must save the source route's shell focus before switching and restore the destination route's saved focus afterward.
 - First visits default to content focus. Each utility route retains the identity of the utility that owns it, but no utility route may focus the hidden top row while active.
 - Temporary reciprocal Home↔utility anchors are never persisted across route changes.
@@ -801,7 +801,8 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
 - Shop is a normal durable `AppRoute::Utility(UtilityPage::Shop)` full-shell placeholder. It uses the same Back/Home history, route-local focus memory, page transition, and hidden shell-chrome semantics as the other utility routes.
 - `ui/assets/red-shop.svg` is Horizon-owned artwork supplied by the project owner and must be rendered directly through `AuthoredUtilityIcon` without recoloring or path transcription.
 - `data/io.github.Mars7x.Horizon.svg` is the current Horizon-owned application icon supplied by the project owner and is installed unchanged by the existing Flatpak icon rule.
-- Phase 10 — Library UX remains the next major phase.
+- Phase 10 — Library UX is underway: Phase 10.0 replaces the Library placeholder with a source-backed, bounded-grid browsing foundation. Its Rust controller owns selection, ordering, source filters and paging; it reuses Home's artwork/lifecycle card data and launch service. Future Phase 10 work includes search, list view, favorites/hide and richer management, without adding source logic to Slint.
+- Preserve the exact original Home game-bracket focus and breathing. Library/menu controls use the shared single-focus surface and fresh-press-only wrap convention.
 
 ## Phase 9.5.24 utility render-scale and launch-token invariant
 
@@ -1074,3 +1075,34 @@ with checksum-pinned immutable sources rather than restoring the incompatible so
   user WAV bytes, original gain, semantic gating, and the UI Sounds setting.
   Correct successful OK/Back cues should be queued before potentially costly
   UI publishing, but do not play success feedback for an unsuccessful action.
+
+## Phase 10 Home/Library interaction invariant
+
+Home shows up to 15 distinct imported games followed by a persistent Library tile, even when no play sessions exist. Actual Horizon-observed recently played games come first in descending latest session order; any remaining slots are filled with games lacking recorded play history, sorted case-insensitively by title A–Z. With no history, Home starts alphabetical; with 15+ played games, it shows just the 15 most recent. Missing history never implies a real recent play. Never truncate the full Library's source-backed catalogue. The Library tile is in the original carousel and carries the original game focus-bracket component unchanged. No modal Library shell menu. Keep Home positions separate from source-catalogue indices for all launches, artwork updates and Playing badges. Library artwork-first redesign remains Phase 10.2.0; see ADR 0136.
+
+## Phase 10.1.2 Home Library destination visual invariant
+
+- The final Home Library tile is a minimal neutral **system destination**, not a
+  faux game cover. Its art frame contains exactly the prominent centered 2×2
+  four-square icon; no inner “Library” title, small caption, background
+  decoration, glow, extra tint or secondary focus outline.
+- The existing external selected-title pill supplies “Library”. Preserve the
+  original GameTile-matching shell size, selected scaling, camera participation,
+  and **unchanged Home FocusFrame**. Route, keyboard/controller, click and
+  Home recent-played/alphabetical ordering are unchanged.
+- See ADR 0137.
+
+## Phase 10.2 Library focus and layout baseline
+
+Library game-cover selection MUST reuse the original Home `FocusFrame` component
+unmodified: its four bracket paths, breathing accent/glow and reduced-motion
+behaviour are intentional. The Library gallery is centred and responsive, not
+fixed at five left-aligned columns or ten items per page. Game titles appear in
+one dedicated selection-information region, not as truncated labels under all
+covers. Preserve bounded source-neutral browsing, absolute catalogue identity,
+smooth row scrolling, and fresh-press-only edge wrapping for future changes.
+
+### Phase 10.2.2 — Library route policy
+- **Only Home** renders the persistent top utilities/network/battery chrome and bottom controller/clock footer. Library is its own full-shell route with in-page title, Back, compact filters, and selected-game information, not a Home overlay.
+- Library cover cards have a subtle rounded Home-style shell and inset artwork; **do not modify the original `ui/components/focus-frame.slint`**. Its original vector/glow/breathing is the exact reference for the selected Library game.
+- Never leave a partially visible clipped artwork row in a settled Library grid. Leave safe insets around all four focus-bracket corners, and keep the visible-row formula synchronized between Rust and Slint. Continue bounded overscan/virtualization.

@@ -1,6 +1,7 @@
 import { Theme, Metrics, Motion } from "../theme/theme.slint";
 import { GameCardData } from "../models/game-card.slint";
 import { GameTile } from "game-tile.slint";
+import { LibraryTile } from "library-tile.slint";
 import { SelectedGameLabel } from "selected-game-label.slint";
 
 // The home carousel is modeled as a camera looking onto one larger scene.
@@ -15,10 +16,11 @@ export component GameCarousel inherits Rectangle {
     in property <string> launch-feedback-text;
     in property <bool> focus-visible: true;
     callback game-selected(int);
+    callback open-library();
     callback geometry-changed(float);
 
     private property <length> camera-offset: 0px;
-    private property <length> content-width: root.games.length * Metrics.game-stride;
+    private property <length> content-width: (root.games.length + 1) * Metrics.game-stride;
     private property <length> shelf-width:
         root.content-width + Metrics.carousel-content-padding * 2;
     private property <length> selected-center-world-x:
@@ -44,10 +46,7 @@ export component GameCarousel inherits Rectangle {
     clip: true;
 
     function ensure-selection-in-camera-zone() {
-        if root.games.length == 0 {
-            root.camera-offset = 0px;
-            return;
-        }
+        // The Library destination is present even when no recent games exist.
 
         let selected-screen-x = root.selected-center-world-x - root.camera-offset;
         let left-bound = Metrics.carousel-camera-edge-zone;
@@ -171,6 +170,13 @@ export component GameCarousel inherits Rectangle {
                 launching: index == root.launching-game-index;
                 focus-visible: root.focus-visible;
                 activated(index) => { root.game-selected(index); }
+            }
+            LibraryTile {
+                x: root.games.length * Metrics.game-stride;
+                y: 0px;
+                selected: root.focus-visible && root.selected-index == root.games.length;
+                focus-visible: root.focus-visible;
+                activated => { root.open-library(); }
             }
         }
     }

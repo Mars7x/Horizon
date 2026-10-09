@@ -1,5 +1,5 @@
 use std::{
-    cell::{Cell, RefCell}, collections::BTreeMap, rc::Rc, sync::{Arc, atomic::{AtomicU64, Ordering}, mpsc::{self, Receiver, Sender}},
+    cell::{Cell, RefCell}, collections::{BTreeMap, HashSet}, rc::Rc, sync::{Arc, atomic::{AtomicU64, Ordering}, mpsc::{self, Receiver, Sender}},
     path::PathBuf, time::Duration,
 };
 
@@ -11,7 +11,7 @@ use tracing::{debug, warn};
 
 use crate::{
     AppWindow, GameCardData,
-    domain::LibraryGame,
+    domain::{GameId, LibraryGame},
     input::{UiAction, UiActionEvent},
     navigation::step_with_edge_wrap,
     services::{
@@ -139,6 +139,8 @@ impl PlayingState {
 /// Rust so Accept can launch through the generic service/source boundary.
 pub struct HomeController {
     cards: Rc<VecModel<GameCardData>>,
+    home_cards: Rc<VecModel<GameCardData>>,
+    home_order: RefCell<Vec<usize>>,
     /// Immutable provider-owned fallbacks, never replaced by downloaded art.
     source_cards: Vec<GameCardData>,
     artwork_lookup_jobs: Vec<ArtworkLookupJob>,
@@ -156,12 +158,14 @@ pub struct HomeController {
     // Invalidates an old press-release callback on failure, navigation or a
     // subsequent launch; the visual press is independent of session lifetime.
     press_generation: Rc<Cell<u64>>,
+    card_changed: RefCell<Option<Rc<dyn Fn(usize, GameCardData)>>>,
 }
 
 impl HomeController {
     pub fn new(
         ui: &AppWindow,
         library_games: Vec<LibraryGame>,
+        recent_game_ids: &[GameId],
         artwork_service: &ArtworkService,
         registry: &crate::sources::SourceRegistry,
         launch_service: Rc<GameLaunchService>,
@@ -182,10 +186,16 @@ impl HomeController {
         let (artwork_sender, artwork_receiver) = mpsc::channel();
         let card_data_for_fallback = card_data.clone();
         let cards = Rc::new(VecModel::from(card_data));
-        ui.set_games(ModelRc::from(Rc::clone(&cards)));
+        let home_order = ordered_home_indices(&library_games, recent_game_ids);
+        let home_cards = Rc::new(VecModel::from(
+            home_order.iter().filter_map(|index| cards.row_data(*index)).collect::<Vec<_>>(),
+        ));
+        ui.set_games(ModelRc::from(Rc::clone(&home_cards)));
 
         let controller = Rc::new(Self {
             cards,
+            home_cards,
+            home_order: RefCell::new(home_order),
             source_cards: card_data_for_fallback,
             artwork_lookup_jobs,
             artwork_cache_root: artwork_service.steamgriddb_cache_root(),
@@ -200,6 +210,7 @@ impl HomeController {
             launch_feedback: RefCell::new(LaunchFeedbackState::default()),
             playing: RefCell::new(PlayingState::default()),
             press_generation: Rc::new(Cell::new(0)),
+            card_changed: RefCell::new(None),
         });
 
         controller.select_index(ui, 0);
@@ -278,8 +289,40 @@ impl HomeController {
         }
     }
 
+    pub fn refresh_recent_games(&self, ui: &AppWindow, ids: &[GameId]) {
+        let order = ordered_home_indices(&self.library_games, ids);
+        if *self.home_order.borrow() == order { return; }
+        let previous = self.state.borrow().selected_index as usize;
+        let previous_catalog_index = self.home_order.borrow().get(previous).copied();
+        let next_selection = previous_catalog_index
+            .and_then(|index| order.iter().position(|item| *item == index))
+            .unwrap_or_else(|| if previous == self.home_order.borrow().len() { order.len() } else { 0 });
+        self.home_cards.set_vec(order.iter().filter_map(|index| self.cards.row_data(*index)).collect::<Vec<_>>());
+        *self.home_order.borrow_mut() = order;
+        self.state.borrow_mut().select(next_selection as i32, self.home_item_count());
+        self.publish_selection(ui, self.state.borrow().selected_index);
+    }
+
+    fn home_item_count(&self) -> usize { self.home_order.borrow().len() + 1 }
+
+    pub fn library_tile_selected(&self) -> bool {
+        self.state.borrow().selected_index as usize == self.home_order.borrow().len()
+    }
+
+    pub fn card_at(&self, index: usize) -> Option<GameCardData> {
+        self.cards.row_data(index)
+    }
+
+    pub fn set_card_changed(&self, listener: Rc<dyn Fn(usize, GameCardData)>) {
+        *self.card_changed.borrow_mut() = Some(listener);
+    }
+
+    pub fn launch_from_library(&self, ui: &AppWindow, index: usize) {
+        self.launch_index(ui, index as i32);
+    }
+
     pub fn game_count(&self) -> usize {
-        self.cards.row_count()
+        self.home_item_count()
     }
 
     pub fn selected_index(&self) -> i32 {
@@ -292,7 +335,7 @@ impl HomeController {
         let selected_index = self
             .state
             .borrow_mut()
-            .reset_for_global_home(self.titles.len());
+            .reset_for_global_home(self.home_item_count());
         self.publish_selection(ui, selected_index);
     }
 
@@ -355,14 +398,22 @@ impl HomeController {
 
     fn publish_card(&self, index: usize, mut card: GameCardData) {
         card.is_playing = self.playing.borrow().is_playing(index as i32);
-        self.cards.set_row_data(index, card);
+        self.cards.set_row_data(index, card.clone());
+        if let Some(home_index) = self.home_order.borrow().iter().position(|item| *item == index) {
+            self.home_cards.set_row_data(home_index, card.clone());
+        }
+        if let Some(listener) = self.card_changed.borrow().as_ref() { listener(index, card); }
     }
 
     fn refresh_playing_card(&self, index: i32) {
         let Ok(index) = usize::try_from(index) else { return; };
         if let Some(mut card) = self.cards.row_data(index) {
             card.is_playing = self.playing.borrow().is_playing(index as i32);
-            self.cards.set_row_data(index, card);
+            self.cards.set_row_data(index, card.clone());
+        if let Some(home_index) = self.home_order.borrow().iter().position(|item| *item == index) {
+            self.home_cards.set_row_data(home_index, card.clone());
+        }
+            if let Some(listener) = self.card_changed.borrow().as_ref() { listener(index, card); }
         }
     }
 
@@ -396,6 +447,13 @@ impl HomeController {
 
     fn launch_selected(&self, ui: &AppWindow) {
         let index = self.state.borrow().selected_index;
+        if let Some(catalog_index) = self.home_order.borrow().get(index as usize).copied() {
+            self.launch_index(ui, catalog_index as i32);
+        }
+    }
+
+    fn launch_index(&self, ui: &AppWindow, index: i32) {
+        if self.launch_feedback.borrow().handoff_pending() { return; }
         let Some(game) = usize::try_from(index)
             .ok()
             .and_then(|index| self.library_games.get(index))
@@ -404,10 +462,9 @@ impl HomeController {
             return;
         };
 
-        self.set_launch_feedback(
-            ui,
-            LaunchFeedbackState::Launching { index },
-        );
+        let visual_index = self.home_order.borrow().iter().position(|item| *item == index as usize)
+            .map(|position| position as i32).unwrap_or(-1);
+        self.set_launch_feedback(ui, LaunchFeedbackState::Launching { index: visual_index });
 
         match self.launch_service.launch_game(game) {
             Ok(receipt) => {
@@ -523,7 +580,7 @@ impl HomeController {
         let selected_index = self
             .state
             .borrow_mut()
-            .move_by(delta, self.titles.len(), allow_wrap);
+            .move_by(delta, self.home_item_count(), allow_wrap);
         self.publish_selection(ui, selected_index);
     }
 
@@ -535,7 +592,7 @@ impl HomeController {
         let selected_index = self
             .state
             .borrow_mut()
-            .select(requested_index, self.titles.len());
+            .select(requested_index, self.home_item_count());
         self.publish_selection(ui, selected_index);
     }
 
@@ -544,11 +601,55 @@ impl HomeController {
 
         let title = usize::try_from(selected_index)
             .ok()
+            .and_then(|index| self.home_order.borrow().get(index).copied())
             .and_then(|index| self.titles.get(index))
             .cloned()
             .unwrap_or_default();
-        ui.set_selected_title(title.clone());
+        ui.set_selected_title(if self.library_tile_selected() {
+            "Library".into()
+        } else { title });
     }
+}
+
+
+const HOME_RECENT_LIMIT: usize = 15;
+
+/// Play history has priority; use an alphabetical catalogue fallback to keep
+/// Home useful before any sessions have been recorded. Neither group changes
+/// the original catalogue indices used for artwork, launches, or Playing.
+fn ordered_home_indices(catalog: &[LibraryGame], ids: &[GameId]) -> Vec<usize> {
+    let mut seen = HashSet::new();
+    let mut order = Vec::with_capacity(catalog.len().min(HOME_RECENT_LIMIT));
+
+    // Activity has already sorted these distinct game identities by most
+    // recent session, but dedupe defensively before projecting them to Home.
+    for id in ids {
+        if !seen.insert(*id) {
+            continue;
+        }
+        if let Some(index) = catalog.iter().position(|game| game.game().id() == *id) {
+            order.push(index);
+            if order.len() == HOME_RECENT_LIMIT {
+                return order;
+            }
+        }
+    }
+
+    // Never label an unplayed game as recently played. It occupies only an
+    // otherwise empty Home slot, in case-insensitive A–Z order.
+    let mut fallback: Vec<usize> = catalog.iter().enumerate()
+        .filter_map(|(index, game)| (!seen.contains(&game.game().id())).then_some(index))
+        .collect();
+    fallback.sort_by(|&left, &right| {
+        let lhs = catalog[left].game().title().as_str();
+        let rhs = catalog[right].game().title().as_str();
+        lhs.to_lowercase().cmp(&rhs.to_lowercase())
+            .then_with(|| lhs.cmp(rhs))
+            .then_with(|| catalog[left].game().id().cmp(&catalog[right].game().id()))
+    });
+
+    order.extend(fallback.into_iter().take(HOME_RECENT_LIMIT - order.len()));
+    order
 }
 
 fn needs_external_artwork(prefer_external: bool, has_source_artwork: bool) -> bool {
@@ -645,8 +746,18 @@ fn rgb((red, green, blue): (u8, u8, u8)) -> Color {
 
 #[cfg(test)]
 mod tests {
-    use super::{HomeState, LaunchFeedbackState, PlayingState, monogram, needs_external_artwork};
+    use super::{HomeState, LaunchFeedbackState, PlayingState, monogram, needs_external_artwork, ordered_home_indices, HOME_RECENT_LIMIT};
     use crate::services::runtime::{RuntimeObservationEvent, RuntimeObservationId, RuntimeObservationTerminalState};
+    use crate::domain::{Game, GameId, GameTitle, LibraryGame};
+
+    fn catalogue(titles: &[&str]) -> Vec<LibraryGame> {
+        titles.iter().enumerate().map(|(index, title)| {
+            LibraryGame::new(
+                Game::new(GameId::new(index as i64 + 1).unwrap(), GameTitle::new(*title).unwrap()),
+                vec![],
+            )
+        }).collect()
+    }
     use crate::services::session::ManagedSessionId;
 
     #[test]
@@ -742,6 +853,88 @@ mod tests {
             terminal: RuntimeObservationTerminalState::Lost,
         });
         assert!(!badge.is_playing(6));
+    }
+
+    #[test]
+    fn home_recent_projection_maps_to_full_catalogue_without_duplicate_entries() {
+        let games = (1..=18)
+            .map(|number| LibraryGame::new(
+                Game::new(GameId::new(number).unwrap(), GameTitle::new(format!("Game {number}")).unwrap()),
+                vec![],
+            ))
+            .collect::<Vec<_>>();
+        let ids = (1..=18).rev().map(|number| GameId::new(number).unwrap()).collect::<Vec<_>>();
+        let order = ordered_home_indices(&games, &ids);
+        assert_eq!(order.len(), HOME_RECENT_LIMIT);
+        assert_eq!(order[0], 17);
+        assert_eq!(order[14], 3);
+        assert_eq!(ordered_home_indices(&games, &[]).len(), HOME_RECENT_LIMIT);
+    }
+
+    #[test]
+    fn home_without_play_history_fills_fifteen_games_alphabetically() {
+        let games = catalogue(&[
+            "Zelda", "alpha", "Moss", "banana", "Delta", "game 7",
+            "Game 1", "Echo", "stardew", "Lunar", "Oxygen", "Quartz",
+            "Terraria", "Portal", "Cobalt", "Yonder", "Ridge",
+        ]);
+        let order = ordered_home_indices(&games, &[]);
+        assert_eq!(order.len(), HOME_RECENT_LIMIT);
+        let names = order.iter().map(|&index| games[index].game().title().as_str()).collect::<Vec<_>>();
+        assert_eq!(names, vec![
+            "alpha", "banana", "Cobalt", "Delta", "Echo", "Game 1", "game 7",
+            "Lunar", "Moss", "Oxygen", "Portal", "Quartz", "Ridge", "stardew", "Terraria",
+        ]);
+    }
+
+    #[test]
+    fn played_games_precede_alphabetical_fallback_without_duplicates() {
+        let games = catalogue(&["Zelda", "Alpha", "Mario", "stardew", "Terraria"]);
+        let ids = [GameId::new(5).unwrap(), GameId::new(3).unwrap(), GameId::new(5).unwrap()];
+        // Two distinct recently played games, then all three unplayed A–Z.
+        assert_eq!(ordered_home_indices(&games, &ids), vec![4, 2, 1, 3, 0]);
+    }
+
+    #[test]
+    fn partial_history_fills_remaining_slots_without_repeating_played_games() {
+        let titles = (0..20).map(|n| format!("Game {n:02}")).collect::<Vec<_>>();
+        let games = titles.iter().enumerate().map(|(index, title)| {
+            LibraryGame::new(
+                Game::new(GameId::new(index as i64 + 1).unwrap(), GameTitle::new(title.as_str()).unwrap()),
+                vec![],
+            )
+        }).collect::<Vec<_>>();
+        let played_ids = (7..=19).rev().map(|n| GameId::new(n).unwrap()).collect::<Vec<_>>();
+        let order = ordered_home_indices(&games, &played_ids);
+        assert_eq!(order.len(), HOME_RECENT_LIMIT);
+        assert_eq!(&order[..13], &(6..19).rev().collect::<Vec<_>>()[..]);
+        assert_eq!(&order[13..], &[0, 1]);
+    }
+
+    #[test]
+    fn only_currently_imported_ids_are_used_and_small_libraries_fill_all_slots() {
+        let games = catalogue(&["Zulu", "Bravo", "alpha"]);
+        let absent = GameId::new(999).unwrap();
+        assert_eq!(ordered_home_indices(&games, &[absent]), vec![2, 1, 0]);
+        assert_eq!(ordered_home_indices(&games, &[GameId::new(1).unwrap()]), vec![0, 2, 1]);
+        assert!(ordered_home_indices(&[], &[]).is_empty());
+    }
+
+    #[test]
+    fn a_newly_played_game_moves_to_front_and_evicts_the_last_fallback() {
+        let titles = (0..18).map(|n| format!("Game {n:02}")).collect::<Vec<_>>();
+        let games = titles.iter().enumerate().map(|(index, title)| {
+            LibraryGame::new(
+                Game::new(GameId::new(index as i64 + 1).unwrap(), GameTitle::new(title.as_str()).unwrap()),
+                vec![],
+            )
+        }).collect::<Vec<_>>();
+        let before = ordered_home_indices(&games, &[]);
+        let after = ordered_home_indices(&games, &[GameId::new(18).unwrap()]);
+        assert_eq!(before, (0..15).collect::<Vec<_>>());
+        assert_eq!(after[0], 17);
+        assert_eq!(&after[1..], &(0..14).collect::<Vec<_>>()[..]);
+        assert!(!after.contains(&14));
     }
 
     #[test]

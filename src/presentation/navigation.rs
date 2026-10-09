@@ -8,12 +8,12 @@ use crate::{
     audio::UiSoundCue,
     input::{UiAction, UiActionEvent},
     navigation::{
-        AppRoute, Navigator, RouteFocusMemory, ShellFocus, ShellFocusRegion, ShellMenuState,
+        AppRoute, Navigator, RouteFocusMemory, ShellFocus, ShellFocusRegion,
         TopUtility, UtilityPage, nearest_game_for_x, nearest_utility_for_x, utility_center_x,
     },
 };
 
-use super::{home::HomeController, settings::SettingsController};
+use super::{home::HomeController, library::LibraryController, settings::SettingsController};
 
 /// Bridges pure Rust navigation/focus state to Slint presentation state.
 ///
@@ -24,26 +24,25 @@ pub struct NavigationController {
     navigator: RefCell<Navigator>,
     focus: RefCell<ShellFocus>,
     focus_memory: RefCell<RouteFocusMemory>,
-    shell_menu: RefCell<ShellMenuState>,
     home: Rc<HomeController>,
+    library: Rc<LibraryController>,
     settings: Rc<SettingsController>,
     action_sound: RefCell<Option<Rc<dyn Fn(UiSoundCue)>>>,
 }
 
 impl NavigationController {
-    pub fn new(ui: &AppWindow, home: Rc<HomeController>, settings: Rc<SettingsController>) -> Rc<Self> {
+    pub fn new(ui: &AppWindow, home: Rc<HomeController>, library: Rc<LibraryController>, settings: Rc<SettingsController>) -> Rc<Self> {
         let controller = Rc::new(Self {
             navigator: RefCell::new(Navigator::default()),
             focus: RefCell::new(ShellFocus::default()),
             focus_memory: RefCell::new(RouteFocusMemory::default()),
-            shell_menu: RefCell::new(ShellMenuState::default()),
             home,
+            library,
             settings,
             action_sound: RefCell::new(None),
         });
         controller.publish_route(ui);
         controller.publish_focus(ui);
-        controller.publish_shell_menu(ui);
         controller.bind_ui_callbacks(ui);
         controller
     }
@@ -64,7 +63,6 @@ impl NavigationController {
     /// Entry point for shell/header callbacks. Route policy, history, and
     /// route-local shell-focus restoration remain Rust-owned.
     pub fn navigate_to(&self, ui: &AppWindow, route: AppRoute) {
-        self.close_shell_menu(ui);
         let from = self.current_route();
         if route == from {
             return;
@@ -75,6 +73,7 @@ impl NavigationController {
             debug!(?from, to = ?route, "route changed");
             if from == AppRoute::Utility(UtilityPage::Settings) { self.settings.on_leave(ui); }
             if route == AppRoute::Utility(UtilityPage::Settings) { self.settings.on_enter(ui); }
+            if route == AppRoute::Library { self.library.on_enter(ui); }
             self.publish_route_change(ui, from, route);
             self.restore_focus_for_route(ui, route);
         }
@@ -86,7 +85,6 @@ impl NavigationController {
             return;
         }
         if self.current_route() == AppRoute::Utility(UtilityPage::Settings)
-            && !self.shell_menu.borrow().is_open()
             && self.settings.handle_action(ui, event)
         {
             return;
@@ -95,11 +93,11 @@ impl NavigationController {
             UiAction::Back => self.handle_back(ui),
             UiAction::Home => self.handle_home(ui),
             UiAction::Menu => self.handle_menu(ui),
-            _ if self.shell_menu.borrow().is_open() => {
-                debug!(
-                    action = ?event.action,
-                    "shell menu is modal; action ignored until Back/Menu/Home"
-                );
+            UiAction::Accept if !event.repeated
+                && self.current_route() == AppRoute::Home
+                && self.focus.borrow().region() != ShellFocusRegion::TopUtilities
+                && self.home.library_tile_selected() => {
+                self.open_library(ui);
             }
             _ if self.focus.borrow().region() == ShellFocusRegion::TopUtilities => {
                 self.handle_utility_action(ui, event)
@@ -156,15 +154,90 @@ impl NavigationController {
             controller.publish_focus(&ui);
             controller.activate_utility(&ui, utility);
         });
+        let weak = ui.as_weak();
+        let controller = Rc::clone(self);
+        ui.on_open_library(move || {
+            if let Some(ui) = weak.upgrade() {
+                if controller.current_route() == AppRoute::Home { controller.open_library(&ui); }
+            }
+        });
+
+        // Pointer activation is routed through the shell too, so it restores
+        // content focus and cannot operate a retained/outgoing Library page.
+        let weak = ui.as_weak();
+        let controller = Rc::clone(self);
+        ui.on_library_select(move |index| {
+            if let Some(ui) = weak.upgrade() {
+                if controller.current_route() == AppRoute::Library {
+                    controller.focus.borrow_mut().leave_utilities();
+                    controller.publish_focus(&ui);
+                    controller.library.select_on_page(&ui, index);
+                }
+            }
+        });
+        let weak = ui.as_weak();
+        let controller = Rc::clone(self);
+        ui.on_library_cycle_filter(move || {
+            if let Some(ui) = weak.upgrade() {
+                if controller.current_route() == AppRoute::Library {
+                    controller.focus.borrow_mut().leave_utilities();
+                    controller.publish_focus(&ui);
+                    controller.cue(UiSoundCue::Ok);
+                    controller.library.cycle_filter(&ui);
+                }
+            }
+        });
+        let weak = ui.as_weak();
+        let controller = Rc::clone(self);
+        ui.on_library_cycle_sort(move || {
+            if let Some(ui) = weak.upgrade() {
+                if controller.current_route() == AppRoute::Library {
+                    controller.focus.borrow_mut().leave_utilities();
+                    controller.publish_focus(&ui);
+                    controller.cue(UiSoundCue::Ok);
+                    controller.library.cycle_sort(&ui);
+                }
+            }
+        });
+        let weak = ui.as_weak();
+        let controller = Rc::clone(self);
+        ui.on_library_scroll_rows(move |direction| {
+            if let Some(ui) = weak.upgrade() {
+                if controller.current_route() == AppRoute::Library {
+                    controller.focus.borrow_mut().leave_utilities();
+                    controller.publish_focus(&ui);
+                    controller.library.scroll_by_row(&ui, direction);
+                }
+            }
+        });
+        let weak = ui.as_weak();
+        let controller = Rc::clone(self);
+        ui.on_library_back(move || {
+            if let Some(ui) = weak.upgrade() {
+                if controller.current_route() == AppRoute::Library {
+                    controller.handle_back(&ui);
+                }
+            }
+        });
+        // Each move closure takes ownership of its own Weak/AppWindow and Rc.
+        let weak = ui.as_weak();
+        let controller = Rc::clone(self);
+        ui.on_library_layout_changed(move || {
+            if let Some(ui) = weak.upgrade() {
+                if controller.current_route() == AppRoute::Library {
+                    controller.library.on_viewport_changed(&ui);
+                }
+            }
+        });
+    }
+
+    fn open_library(&self, ui: &AppWindow) {
+        if self.current_route() == AppRoute::Library { return; }
+        self.cue(UiSoundCue::Ok);
+        self.navigate_to(ui, AppRoute::Library);
     }
 
     fn handle_back(&self, ui: &AppWindow) {
-        if self.close_shell_menu(ui) {
-            self.cue(UiSoundCue::Back);
-            debug!("Back closed shell menu");
-            return;
-        }
-
         let from = self.current_route();
         self.remember_focus_for_route(from);
         if self.navigator.borrow_mut().go_back() {
@@ -182,7 +255,6 @@ impl NavigationController {
     }
 
     fn handle_home(&self, ui: &AppWindow) {
-        self.close_shell_menu(ui);
 
         let from = self.current_route();
         self.remember_focus_for_route(from);
@@ -210,11 +282,9 @@ impl NavigationController {
         }
     }
 
+    // Menu/Start provides the same direct destination as the Home Library tile.
     fn handle_menu(&self, ui: &AppWindow) {
-        let open = self.shell_menu.borrow_mut().toggle();
-        debug!(open, route = ?self.current_route(), "global shell menu toggled");
-        self.cue(if open { UiSoundCue::Ok } else { UiSoundCue::Back });
-        self.publish_shell_menu(ui);
+        self.open_library(ui);
     }
 
     fn handle_utility_action(&self, ui: &AppWindow, event: UiActionEvent) {
@@ -293,17 +363,10 @@ impl NavigationController {
         }
     }
 
-    fn close_shell_menu(&self, ui: &AppWindow) -> bool {
-        if !self.shell_menu.borrow_mut().close() {
-            return false;
-        }
-        self.publish_shell_menu(ui);
-        true
-    }
-
     fn dispatch_to_active_page(&self, ui: &AppWindow, event: UiActionEvent) {
         match self.current_route() {
             AppRoute::Home => self.home.handle_action(ui, event),
+            AppRoute::Library => self.library.handle_action(ui, event),
             route => {
                 debug!(
                     ?route,
@@ -347,9 +410,6 @@ impl NavigationController {
         ui.set_focused_utility_index(focus.utility().index());
     }
 
-    fn publish_shell_menu(&self, ui: &AppWindow) {
-        ui.set_shell_menu_open(self.shell_menu.borrow().is_open());
-    }
 }
 
 fn route_view(route: AppRoute) -> AppRouteView {

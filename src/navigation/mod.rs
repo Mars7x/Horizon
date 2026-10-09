@@ -40,9 +40,8 @@ impl UtilityPage {
 
 /// Navigable destinations in Horizon's Phase 4 application shell.
 ///
-/// Home and Library use the persistent shell chrome. The six utility icons
-/// open durable full-shell submenu pages that participate in normal Back/Home
-/// history.
+/// Only Home uses persistent top/bottom shell chrome. Library and all six
+/// utility destinations are durable full-shell routes with Back/Home history.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AppRoute {
     #[default]
@@ -62,10 +61,9 @@ impl AppRoute {
         }
     }
 
-    /// Whether this route participates in the persistent Home/Library shell
-    /// chrome and can therefore move focus into the top utility row.
+    /// Only Home exposes top utilities; every other route owns full-screen focus.
     pub const fn uses_shell_chrome(self) -> bool {
-        matches!(self, Self::Home | Self::Library)
+        matches!(self, Self::Home)
     }
 
     pub const fn utility_page(self) -> Option<UtilityPage> {
@@ -454,43 +452,6 @@ pub fn nearest_game_for_x(
         .clamp(0.0, game_count.saturating_sub(1) as f32) as i32
 }
 
-/// Global shell-menu state.
-///
-/// The menu is modal presentation state rather than a route: opening it must
-/// not modify route history or route-local focus memory. Menu and Back can
-/// close it; Home also closes it before resetting navigation.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct ShellMenuState {
-    open: bool,
-}
-
-impl ShellMenuState {
-    pub const fn is_open(self) -> bool {
-        self.open
-    }
-
-    pub fn open(&mut self) -> bool {
-        if self.open {
-            return false;
-        }
-        self.open = true;
-        true
-    }
-
-    pub fn close(&mut self) -> bool {
-        if !self.open {
-            return false;
-        }
-        self.open = false;
-        true
-    }
-
-    pub fn toggle(&mut self) -> bool {
-        self.open = !self.open;
-        self.open
-    }
-}
-
 /// Pure Rust navigation state for Horizon's routed shell.
 ///
 /// `navigate_to` behaves like pushing a destination onto a back stack. The
@@ -548,14 +509,16 @@ impl Navigator {
 mod tests {
     use super::{
         AppRoute, FocusSnapshot, Navigator, RouteFocusMemory, ShellFocus, ShellFocusRegion,
-        ShellMenuState, TopUtility, UtilityPage, nearest_game_for_x, nearest_utility_for_x,
+        TopUtility, UtilityPage, nearest_game_for_x, nearest_utility_for_x,
         utility_center_x,
     };
 
     #[test]
-    fn only_home_and_library_use_persistent_shell_chrome() {
+    fn only_home_uses_persistent_shell_chrome() {
         assert!(AppRoute::Home.uses_shell_chrome());
-        assert!(AppRoute::Library.uses_shell_chrome());
+        assert!(!AppRoute::Library.uses_shell_chrome());
+        let library_focus = FocusSnapshot::for_route(AppRoute::Library);
+        assert_eq!(library_focus.normalized_for_route(AppRoute::Library).region(), ShellFocusRegion::Content);
 
         for page in [
             UtilityPage::Friends,
@@ -731,22 +694,6 @@ mod tests {
 
         assert_eq!(focus.anchored_utility_for_content(5), None);
         assert_eq!(focus.anchored_utility_for_content(4), None);
-    }
-
-    #[test]
-    fn shell_menu_toggle_and_close_are_history_independent_state() {
-        let mut menu = ShellMenuState::default();
-
-        assert!(!menu.is_open());
-        assert!(menu.open());
-        assert!(menu.is_open());
-        assert!(!menu.open());
-        assert!(!menu.toggle());
-        assert!(!menu.is_open());
-        assert!(menu.toggle());
-        assert!(menu.close());
-        assert!(!menu.is_open());
-        assert!(!menu.close());
     }
 
     #[test]

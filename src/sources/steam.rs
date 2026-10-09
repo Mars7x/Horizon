@@ -13,7 +13,7 @@ use thiserror::Error;
 use tracing::{debug, warn};
 use zip::ZipArchive;
 
-use crate::domain::{DomainValidationError, ExternalGameId, GameTitle, SourceId};
+use crate::domain::{DomainValidationError, ExternalGameId, GameTitle, PlaytimeSeconds, SourceId};
 
 use super::{
     GameSource, SourceArtworkCandidate, SourceCapability, SourceDescriptor, SourceDiscovery,
@@ -83,6 +83,7 @@ impl SteamSource {
             STEAM_DISPLAY_NAME,
             vec![
                 SourceCapability::Launch,
+                SourceCapability::LifetimePlaytime,
                 SourceCapability::RuntimeObservation,
                 SourceCapability::Artwork,
             ],
@@ -370,6 +371,76 @@ impl GameSource for SteamSource {
         .map_err(SteamDiscoveryError::from)
         .map_err(SourceError::new)?;
         Ok(SourceDiscovery::Available(snapshot))
+    }
+
+    /// Steam's own cumulative playtime, read from the active account's local
+    /// `localconfig.vdf`. No Steam login or network access is involved. The
+    /// value is provider-reported and is never combined with observed sessions.
+    fn lifetime_playtime_snapshot(
+        &self,
+    ) -> Result<Vec<(ExternalGameId, PlaytimeSeconds)>, SourceError> {
+        let mut reported = BTreeMap::<String, PlaytimeSeconds>::new();
+        let mut seen_paths = BTreeSet::new();
+        let mut selected_account: Option<String> = None;
+        for root in self.roots.iter().filter(|root| looks_like_steam_root(root)) {
+            let Some(path) = active_localconfig_path(root) else {
+                continue;
+            };
+            // Conventional Steam roots often alias one installation through
+            // symlinks. Do not read the same account cache more than once.
+            let identity = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+            if !seen_paths.insert(identity) {
+                continue;
+            }
+
+            let Some(account) = path
+                .parent()
+                .and_then(Path::parent)
+                .and_then(Path::file_name)
+                .and_then(|name| name.to_str())
+            else {
+                continue;
+            };
+            // Lifetime playtime is per Steam account. Two distinct clients
+            // may have different active accounts; never merge those totals.
+            if selected_account.as_deref().is_some_and(|selected| selected != account) {
+                warn!(path = %path.display(), account, "Steam root uses a different account; skipping its lifetime playtime");
+                continue;
+            }
+            let content = match fs::read_to_string(&path) {
+                Ok(content) => content,
+                Err(error) => {
+                    warn!(path = %path.display(), %error, "cannot read Steam lifetime playtime; keeping previous data");
+                    continue;
+                }
+            };
+            match parse_localconfig_playtime(&content) {
+                Ok(values) => {
+                    debug!(path = %path.display(), games = values.len(), "read Steam lifetime playtime");
+                    // Do not lock the account to a corrupt or unreadable root.
+                    if selected_account.is_none() {
+                        selected_account = Some(account.to_owned());
+                    }
+                    // The same app can appear under native and Flatpak Steam.
+                    // First root wins, matching discovery precedence; never sum.
+                    for (app_id, seconds) in values {
+                        reported.entry(app_id).or_insert(seconds);
+                    }
+                }
+                Err(message) => {
+                    warn!(path = %path.display(), %message, "invalid Steam localconfig; keeping previous data");
+                }
+            }
+        }
+
+        reported
+            .into_iter()
+            .map(|(app_id, seconds)| {
+                ExternalGameId::new(app_id)
+                    .map(|id| (id, seconds))
+                    .map_err(|error| SourceError::new(SteamDiscoveryError::from(error)))
+            })
+            .collect()
     }
 
     fn launch_target(
@@ -769,6 +840,167 @@ fn appinfo_common<'a, 'text>(app_obj: &'a Obj<'text>) -> Option<&'a Obj<'text>> 
                 .filter_map(|value| value.as_obj())
                 .find_map(|nested| nested.get("common").and_then(|value| value.as_obj()))
         })
+}
+
+/// Offset between a SteamID64 and the account id used for `userdata/` folders.
+const STEAM_ID64_ACCOUNT_BASE: u64 = 76_561_197_960_265_728;
+
+/// Chooses the `userdata/<account>/config/localconfig.vdf` to read. Prefers the
+/// account Steam marks `MostRecent` in `loginusers.vdf`; otherwise accepts a
+/// lone account. Ambiguity reports nothing rather than guessing.
+fn active_localconfig_path(root: &Path) -> Option<PathBuf> {
+    let userdata = root.join("userdata");
+    let accounts = fs::read_dir(&userdata)
+        .ok()?
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| {
+            let name = entry.file_name().to_str()?.to_owned();
+            // Account 0 is Steam's anonymous placeholder folder.
+            (name.parse::<u64>().ok()? > 0).then_some(name)
+        })
+        .collect::<BTreeSet<_>>();
+
+    let recent = fs::read_to_string(root.join("config/loginusers.vdf"))
+        .ok()
+        .and_then(|content| most_recent_account_id(&content))
+        .filter(|account| accounts.contains(account));
+
+    let account = match recent {
+        Some(account) => account,
+        None if accounts.len() == 1 => accounts.into_iter().next()?,
+        None => return None,
+    };
+    let path = userdata.join(account).join("config/localconfig.vdf");
+    path.is_file().then_some(path)
+}
+
+fn most_recent_account_id(content: &str) -> Option<String> {
+    let vdf = parse_text(content).ok()?;
+    let root = vdf.as_obj()?;
+    let users = vdf_key_ci(root, "users")
+        .and_then(|key| root.get(key.as_str()))
+        .and_then(|value| value.as_obj())
+        .unwrap_or(root);
+    let mut most_recent = None;
+    for (steam_id, value) in users.iter() {
+        let Some(entry) = value.as_obj() else { continue };
+        let Some(key) = vdf_key_ci(entry, "MostRecent") else { continue };
+        if entry.get(key.as_str()).and_then(|value| value.as_str()) != Some("1") {
+            continue;
+        }
+        let account = steam_id
+            .parse::<u64>()
+            .ok()
+            .and_then(|id| id.checked_sub(STEAM_ID64_ACCOUNT_BASE))
+            .filter(|account| *account != 0);
+        let Some(account) = account else { continue };
+        // Multiple MostRecent=1 entries are ambiguous. Do not let the VDF's
+        // enumeration order pick an arbitrary account.
+        if most_recent.replace(account.to_string()).is_some() {
+            return None;
+        }
+    }
+    most_recent
+}
+
+/// Case-insensitive key lookup; Steam has changed key casing between clients.
+fn vdf_key_ci(object: &Obj<'_>, key: &str) -> Option<String> {
+    object
+        .keys()
+        .find(|candidate| candidate.eq_ignore_ascii_case(key))
+        .map(|candidate| candidate.to_string())
+}
+
+/// Extracts `Playtime` (minutes) per numeric app id from `localconfig.vdf`,
+/// normalized to seconds. Zero or malformed entries are skipped.
+///
+/// `localconfig.vdf` is large and carries unrelated, heavily escaped values, so
+/// this uses a small tolerant scanner instead of the strict full-document parser.
+fn parse_localconfig_playtime(content: &str) -> Result<Vec<(String, PlaytimeSeconds)>, String> {
+    const APPS_PATH: [&str; 5] = ["UserLocalConfigStore", "Software", "Valve", "Steam", "apps"];
+
+    let mut stack: Vec<String> = Vec::new();
+    let mut pending_key: Option<String> = None;
+    let mut found_apps = false;
+    let mut values = BTreeMap::<String, PlaytimeSeconds>::new();
+
+    let mut chars = content.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' => {
+                let mut text = String::new();
+                loop {
+                    match chars.next() {
+                        Some('\\') => {
+                            let escaped = chars.next().ok_or("unterminated escape in Steam localconfig")?;
+                            text.push(escaped);
+                        }
+                        Some('"') => break,
+                        None => return Err("unterminated quoted string in Steam localconfig".to_owned()),
+                        Some(other) => text.push(other),
+                    }
+                }
+                match pending_key.take() {
+                    None => pending_key = Some(text),
+                    Some(key) => {
+                        let in_app = stack.len() == APPS_PATH.len() + 1
+                            && APPS_PATH
+                                .iter()
+                                .zip(&stack)
+                                .all(|(expected, actual)| actual.eq_ignore_ascii_case(expected));
+                        if in_app && key.eq_ignore_ascii_case("Playtime") {
+                            let app_id = &stack[APPS_PATH.len()];
+                            let seconds = text.trim().parse::<i64>().ok()
+                                .filter(|minutes| *minutes > 0)
+                                .and_then(|minutes| minutes.checked_mul(60))
+                                .and_then(|seconds| PlaytimeSeconds::new(seconds).ok());
+                            if app_id.parse::<u32>().is_ok()
+                                && let Some(seconds) = seconds
+                            {
+                                values.insert(app_id.clone(), seconds);
+                            }
+                        }
+                    }
+                }
+            }
+            '{' => {
+                stack.push(pending_key.take().unwrap_or_default());
+                if stack.len() == APPS_PATH.len()
+                    && APPS_PATH
+                        .iter()
+                        .zip(&stack)
+                        .all(|(expected, actual)| actual.eq_ignore_ascii_case(expected))
+                {
+                    found_apps = true;
+                }
+            }
+            '}' => {
+                if stack.pop().is_none() {
+                    return Err("unexpected closing brace in Steam localconfig".to_owned());
+                }
+                pending_key = None;
+            }
+            '/' if chars.peek() == Some(&'/') => {
+                for skipped in chars.by_ref() {
+                    if skipped == '\n' {
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if !found_apps {
+        return Err("missing UserLocalConfigStore/Software/Valve/Steam/apps".to_owned());
+    }
+    // Steam may write the file while Horizon reads it. An incomplete snapshot
+    // must not replace previously stored lifetime playtime values.
+    if !stack.is_empty() || pending_key.is_some() {
+        return Err("incomplete Steam localconfig".to_owned());
+    }
+    Ok(values.into_iter().collect())
 }
 
 fn looks_like_steam_root(root: &Path) -> bool {
@@ -1189,6 +1421,153 @@ mod tests {
                 .descriptor()
                 .supports(SourceCapability::ManagedSession)
         );
+    }
+
+    #[test]
+    fn steam_advertises_lifetime_playtime() {
+        let source = SteamSource::with_roots(vec![]).expect("source");
+        assert!(source.descriptor().supports(SourceCapability::LifetimePlaytime));
+    }
+
+    const LOCALCONFIG: &str = r#""UserLocalConfigStore"
+{
+    "Software"
+    {
+        "Valve"
+        {
+            "Steam"
+            {
+                "apps"
+                {
+                    "570" { "LastPlayed" "1700000000" "Playtime" "120" }
+                    "730" { "Playtime" "0" }
+                    "400" { "LastPlayed" "1" }
+                    "abc" { "Playtime" "5" }
+                    "220" { "Playtime" "oops" }
+                }
+            }
+        }
+    }
+}
+"#;
+
+    #[test]
+    fn localconfig_playtime_converts_minutes_and_skips_invalid_entries() {
+        let values = parse_localconfig_playtime(LOCALCONFIG).expect("playtime");
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0].0, "570");
+        assert_eq!(values[0].1.get(), 120 * 60);
+    }
+
+    #[test]
+    fn localconfig_without_apps_is_an_error_not_zero_playtime() {
+        assert!(parse_localconfig_playtime("\"UserLocalConfigStore\" { }").is_err());
+    }
+
+    #[test]
+    fn localconfig_rejects_incomplete_snapshots() {
+        // Steam rewrites this cache while running. Do not commit a truncated
+        // snapshot after successfully reading an earlier game's Playtime.
+        let truncated = LOCALCONFIG.trim_end().strip_suffix('}').expect("closing brace");
+        assert!(parse_localconfig_playtime(truncated).is_err());
+        assert!(parse_localconfig_playtime(&format!("{LOCALCONFIG}}}")).is_err());
+        assert!(parse_localconfig_playtime(&format!("{LOCALCONFIG}\"Unclosed")).is_err());
+    }
+
+    #[test]
+    fn localconfig_skips_overflow_and_tolerates_escaped_unrelated_values() {
+        let huge = LOCALCONFIG.replace("\"120\"", "\"9223372036854775807\"");
+        assert!(parse_localconfig_playtime(&huge).expect("valid snapshot").is_empty());
+
+        let escaped = LOCALCONFIG.replace(
+            "\"570\" {",
+            "\"Unrelated\" \"C:\\\\Games\\\\One\" // harmless comment\n                    \"570\" {",
+        );
+        let values = parse_localconfig_playtime(&escaped).expect("tolerant snapshot");
+        assert_eq!(values[0].1.get(), 120 * 60);
+    }
+
+    fn write_account(root: &Path, account: &str, minutes: u32) {
+        let config = root.join("userdata").join(account).join("config");
+        fs::create_dir_all(&config).expect("config dir");
+        fs::write(
+            config.join("localconfig.vdf"),
+            LOCALCONFIG.replace("\"120\"", &format!("\"{minutes}\"")),
+        )
+        .expect("localconfig");
+    }
+
+    #[test]
+    fn lifetime_snapshot_uses_most_recent_login_account() {
+        let root = temp_dir("lifetime-recent");
+        fs::create_dir_all(root.join("steamapps")).expect("steamapps");
+        fs::create_dir_all(root.join("config")).expect("config");
+        write_account(&root, "1000", 10);
+        write_account(&root, "2000", 30);
+        let id_2000 = STEAM_ID64_ACCOUNT_BASE + 2000;
+        let id_1000 = STEAM_ID64_ACCOUNT_BASE + 1000;
+        fs::write(
+            root.join("config/loginusers.vdf"),
+            format!(
+                "\"users\" {{ \"{id_1000}\" {{ \"MostRecent\" \"0\" }} \"{id_2000}\" {{ \"MostRecent\" \"1\" }} }}"
+            ),
+        )
+        .expect("loginusers");
+
+        let source = SteamSource::with_roots(vec![root.clone()]).expect("source");
+        let snapshot = source.lifetime_playtime_snapshot().expect("snapshot");
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].0.as_str(), "570");
+        assert_eq!(snapshot[0].1.get(), 30 * 60);
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn lifetime_snapshot_accepts_single_account_and_rejects_ambiguity() {
+        let single = temp_dir("lifetime-single");
+        fs::create_dir_all(single.join("steamapps")).expect("steamapps");
+        write_account(&single, "1000", 10);
+        let source = SteamSource::with_roots(vec![single.clone()]).expect("source");
+        assert_eq!(source.lifetime_playtime_snapshot().expect("snapshot").len(), 1);
+
+        let ambiguous = temp_dir("lifetime-ambiguous");
+        fs::create_dir_all(ambiguous.join("steamapps")).expect("steamapps");
+        write_account(&ambiguous, "1000", 10);
+        write_account(&ambiguous, "2000", 30);
+        let source = SteamSource::with_roots(vec![ambiguous.clone()]).expect("source");
+        assert!(source.lifetime_playtime_snapshot().expect("snapshot").is_empty());
+
+        fs::remove_dir_all(single).expect("cleanup");
+        fs::remove_dir_all(ambiguous).expect("cleanup");
+    }
+
+    #[test]
+    fn multiple_most_recent_markers_are_ambiguous() {
+        let id_1000 = STEAM_ID64_ACCOUNT_BASE + 1000;
+        let id_2000 = STEAM_ID64_ACCOUNT_BASE + 2000;
+        let loginusers = format!(
+            "\"users\" {{ \"{id_1000}\" {{ \"MostRecent\" \"1\" }} \"{id_2000}\" {{ \"MostRecent\" \"1\" }} }}"
+        );
+        assert_eq!(most_recent_account_id(&loginusers), None);
+    }
+
+    #[test]
+    fn lifetime_snapshot_deduplicates_roots_and_does_not_mix_accounts() {
+        let first = temp_dir("lifetime-first-root");
+        let second = temp_dir("lifetime-other-account");
+        fs::create_dir_all(first.join("steamapps")).expect("steamapps");
+        fs::create_dir_all(second.join("steamapps")).expect("steamapps");
+        write_account(&first, "1000", 10);
+        write_account(&second, "2000", 30);
+
+        let source = SteamSource::with_roots(vec![first.clone(), first.clone(), second.clone()])
+            .expect("source");
+        let snapshot = source.lifetime_playtime_snapshot().expect("snapshot");
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].1.get(), 10 * 60);
+
+        fs::remove_dir_all(first).expect("cleanup");
+        fs::remove_dir_all(second).expect("cleanup");
     }
 
     #[test]

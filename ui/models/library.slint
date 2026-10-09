@@ -1,0 +1,9 @@
+import { GameCardData } from "game-card.slint";
+
+// A bounded slice of the full library. Absolute position survives scrolling,
+// filtering, sorting and windowed rendering.
+export struct LibraryCardData {
+    game: GameCardData,
+    source: string,
+    absolute-index: int,
+}

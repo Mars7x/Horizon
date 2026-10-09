@@ -39,6 +39,7 @@ use crate::{
 
 const APP_ID: &str = "io.github.Mars7x.Horizon";
 const SOURCE_PLAYTIME_REFRESH_INTERVAL: Duration = Duration::from_secs(20);
+const HOME_RECENT_LIMIT: usize = 15;
 
 pub fn run() -> Result<(), AppError> {
     tracing_subscriber::fmt()
@@ -48,7 +49,7 @@ pub fn run() -> Result<(), AppError> {
         )
         .init();
 
-    info!("starting Horizon phase 9.5.44.47");
+    info!("starting Horizon phase 10.1.0");
 
     let database_path = data_paths::library_database_path()?;
     let repository = SqliteLibraryRepository::open(&database_path)?;
@@ -208,15 +209,39 @@ pub fn run() -> Result<(), AppError> {
     info!("in-process source-runtime observation initialized");
     let launch_service = Rc::new(launch_service);
     let launch_activity: Rc<dyn LaunchActivitySink> = activity_service.clone();
+    let library_catalog = library_games.clone();
+    let recent_ids = activity_service.recent_game_ids(HOME_RECENT_LIMIT)?;
     let home = HomeController::new(
         &ui,
         library_games,
+        &recent_ids,
         &artwork_service,
         &registry,
         Rc::clone(&launch_service),
         launch_activity,
     );
-    info!(games = home.game_count(), "source-backed Home library initialized");
+    info!(recent_games = recent_ids.len(), "Home recent carousel initialized");
+    // Changes are discovered from durable sessions, never by guessing on launch.
+    // A small read-only DB query is cheap and keeps Home current after returns
+    // from Steam/Heroic and when a source-owned session completes.
+    let recent_refresh_timer = Timer::default();
+    let recents_home = Rc::clone(&home);
+    let recents_activity = Rc::clone(&activity_service);
+    let recents_ui = ui.as_weak();
+    recent_refresh_timer.start(TimerMode::Repeated, Duration::from_secs(3), move || {
+        let Some(ui) = recents_ui.upgrade() else { return; };
+        match recents_activity.recent_game_ids(HOME_RECENT_LIMIT) {
+            Ok(ids) => recents_home.refresh_recent_games(&ui, &ids),
+            Err(error) => warn!(%error, "Home recent history refresh failed"),
+        }
+    });
+    let library_controller = crate::presentation::library::LibraryController::new(
+        &ui, library_catalog, Rc::clone(&home), Rc::clone(&activity_service),
+    );
+    let library_updates = Rc::downgrade(&library_controller);
+    home.set_card_changed(Rc::new(move |index, card| {
+        if let Some(library) = library_updates.upgrade() { library.on_card_updated(index, card); }
+    }));
 
     let settings_path = data_paths::third_party_settings_path()?;
     let settings_service = SettingsService::load(SettingsStore::new(settings_path))?;
@@ -261,7 +286,7 @@ pub fn run() -> Result<(), AppError> {
             artwork_home.collect_steamgriddb_results(&ui);
         }
     });
-    let navigation = NavigationController::new(&ui, Rc::clone(&home), settings);
+    let navigation = NavigationController::new(&ui, Rc::clone(&home), Rc::clone(&library_controller), settings);
     // The very same semantic handlers cover gamepad/keyboard and pointer
     // activation. A failed or ignored menu action never emits a cue.
     let cue_sounds = Rc::clone(&navigation_sound);
@@ -285,14 +310,16 @@ pub fn run() -> Result<(), AppError> {
             ui.get_current_route(), ui.get_selected_index(),
             ui.get_top_utilities_focused(), ui.get_focused_utility_index(),
             ui.get_settings_view(), ui.get_settings_selection(),
-            ui.get_settings_editor_target(),
+            ui.get_settings_editor_target(), ui.get_library_selected_index(),
+            ui.get_library_filter_text(), ui.get_library_sort_text(),
         );
         action_navigation.handle_action(&ui, event);
         let after = (
             ui.get_current_route(), ui.get_selected_index(),
             ui.get_top_utilities_focused(), ui.get_focused_utility_index(),
             ui.get_settings_view(), ui.get_settings_selection(),
-            ui.get_settings_editor_target(),
+            ui.get_settings_editor_target(), ui.get_library_selected_index(),
+            ui.get_library_filter_text(), ui.get_library_sort_text(),
         );
         if matches!(event.action, UiAction::Up | UiAction::Down | UiAction::Left | UiAction::Right)
             && before != after {
@@ -547,6 +574,8 @@ pub fn run() -> Result<(), AppError> {
     let _clock = clock;
     let _artwork_timer = artwork_timer;
     let _navigation = navigation;
+    let _library_controller = library_controller;
+    let _recent_refresh_timer = recent_refresh_timer;
     let _input = input;
     let _foreground_return_timer = foreground_return_timer;
     let _runtime_observation_timer = runtime_observation_timer;
