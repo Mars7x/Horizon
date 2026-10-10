@@ -1,0 +1,146 @@
+import { Theme, Typography, Motion } from "../theme/theme.slint";
+
+// The one long-text treatment for every page. Text never shows an ellipsis:
+// - active (the focused item): Home's marquee pacing. 2s hold, distance-sensitive
+//   linear travel, 2.4s end hold, then an invisible fade back to the start.
+// - inactive: clipped, with a soft fade at the right edge.
+// Short text never moves. Reduced Motion keeps it static.
+// `edge-color` must match whatever is painted behind the text (page background
+// or a row surface) so the edge fades blend in without a visible band.
+export component MarqueeText inherits Rectangle {
+    in property <string> text;
+    in property <bool> active: false;
+    in property <length> font-size: Typography.body-size;
+    in property <int> font-weight: Typography.body-weight;
+    in property <color> text-color: Theme.foreground;
+    in property <color> edge-color: Theme.background;
+    in property <TextHorizontalAlignment> horizontal-alignment: left;
+    background: transparent;
+    clip: true;
+
+    private property <length> natural-width: text-measure.preferred-width;
+    private property <bool> overflows: root.natural-width > root.width;
+    private property <length> distance: root.overflows
+        ? root.natural-width - root.width + 4px : 0px;
+    private property <duration> travel-duration:
+        root.distance <= 16px ? 650ms :
+        root.distance <= 32px ? 850ms :
+        root.distance <= 56px ? 1100ms :
+        root.distance <= 90px ? 1450ms :
+        root.distance <= 140px ? 1900ms :
+        root.distance <= 200px ? 2500ms : 3100ms;
+    private property <length> offset: 0px;
+    private property <bool> animate-travel: false;
+    private property <bool> animate-fade: false;
+    private property <float> text-opacity: 1.0;
+    private property <bool> fade-left: root.offset > 3px;
+    private property <bool> fade-right: root.offset < root.distance - 3px;
+    private property <bool> running: root.active && root.overflows && !Motion.reduced-motion;
+
+    function restart() {
+        delay.stop(); travel.stop(); end-pause.stop(); fade-out.stop(); fade-in.stop();
+        root.animate-travel = false;
+        root.animate-fade = false;
+        root.offset = 0px;
+        root.text-opacity = 1.0;
+        if root.running { delay.start(); }
+    }
+    init => { root.restart(); }
+    changed active => { root.restart(); }
+    changed text => { root.restart(); }
+    changed width => { root.restart(); }
+    changed overflows => { root.restart(); }
+
+    text-measure := Text {
+        text: root.text;
+        font-family: Typography.family;
+        font-size: root.font-size;
+        font-weight: root.font-weight;
+        opacity: 0.0;
+    }
+    Text {
+        x: -root.offset;
+        width: root.overflows ? root.natural-width : parent.width;
+        height: parent.height;
+        text: root.text;
+        overflow: clip;
+        color: root.text-color;
+        font-family: Typography.family;
+        font-size: root.font-size;
+        font-weight: root.font-weight;
+        horizontal-alignment: root.overflows ? TextHorizontalAlignment.left : root.horizontal-alignment;
+        vertical-alignment: center;
+        opacity: root.text-opacity;
+        animate opacity {
+            enabled: root.animate-fade && !Motion.reduced-motion;
+            duration: root.text-opacity < 0.5 ? 140ms : 180ms;
+            easing: ease-in-out;
+        }
+    }
+    // Stationary edge fades (not segmented glyph masks, which caused seams).
+    if root.overflows && root.active && root.fade-left : Rectangle {
+        x: 0px; width: min(19px, parent.width / 6); height: parent.height;
+        background: @linear-gradient(90deg,
+            root.edge-color 0%, root.edge-color.with-alpha(0.72) 35%, transparent 100%);
+    }
+    if root.overflows && root.fade-right : Rectangle {
+        x: parent.width - self.width;
+        width: min(19px, parent.width / 6); height: parent.height;
+        background: @linear-gradient(90deg,
+            transparent 0%, root.edge-color.with-alpha(0.72) 65%, root.edge-color 100%);
+    }
+    animate offset {
+        enabled: root.animate-travel && !Motion.reduced-motion;
+        duration: root.travel-duration;
+        easing: linear;
+    }
+    delay := Timer {
+        interval: 2s;
+        running: false;
+        triggered => {
+            self.stop();
+            if root.running {
+                root.animate-travel = true;
+                root.offset = root.distance;
+                travel.start();
+            }
+        }
+    }
+    travel := Timer {
+        interval: root.travel-duration;
+        running: false;
+        triggered => { self.stop(); end-pause.start(); }
+    }
+    end-pause := Timer {
+        interval: 2.4s;
+        running: false;
+        triggered => {
+            self.stop();
+            if root.running {
+                root.animate-fade = true;
+                root.text-opacity = 0.0;
+                fade-out.start();
+            }
+        }
+    }
+    fade-out := Timer {
+        interval: 140ms;
+        running: false;
+        triggered => {
+            self.stop();
+            root.animate-travel = false;
+            root.offset = 0px;
+            root.text-opacity = 1.0;
+            fade-in.start();
+        }
+    }
+    fade-in := Timer {
+        interval: 180ms;
+        running: false;
+        triggered => {
+            self.stop();
+            root.animate-fade = false;
+            if root.running { delay.start(); }
+        }
+    }
+}

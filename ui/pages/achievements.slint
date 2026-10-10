@@ -1,11 +1,13 @@
 import { Wheel } from "../components/wheel.slint";
 import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { AchievementGameData, AchievementEntryData } from "../models/achievements.slint";
+import { PageHeader, HeaderValue, Breadcrumb, ScrollEdgeShadow } from "../components/page-header.slint";
+import { ListRow, Surface } from "../components/list-row.slint";
+import { MarqueeText } from "../components/marquee-text.slint";
 
 // One full-width games list, then one full-width, read-only achievement list.
 // Both views remain mounted during the Settings-style crossfade/12px settle.
-// No artificially short viewport: rows scroll beneath the stationary header
-// and are naturally clipped only by the bottom of the actual page/window.
+// Lists run between the shared page header and the bottom bar.
 export component AchievementsPage inherits Rectangle {
     in property <[AchievementGameData]> games;
     in property <[AchievementEntryData]> entries;
@@ -40,14 +42,17 @@ export component AchievementsPage inherits Rectangle {
 
     private property <length> margin: Metrics.page-margin;
     private property <bool> narrow: root.width < 760px;
-    private property <length> row-stride: 88px;
-    private property <length> entry-stride: 92px;
-    private property <length> game-top: 226px;
-    private property <length> detail-top: 228px;
-    private property <length> game-viewport-height: max(0px, root.height - root.game-top);
-    private property <length> detail-viewport-height: max(0px, root.height - root.detail-top);
-    private property <int> visible-games: max(1, Math.floor(root.game-viewport-height / root.row-stride));
-    out property <int> visible-entries: max(1, Math.floor(root.detail-viewport-height / root.entry-stride));
+    private property <length> row-stride: Metrics.list-row-height + Metrics.list-row-gap;
+    private property <length> entry-stride: Metrics.list-row-height + Metrics.list-row-gap;
+    private property <length> list-bottom: root.height - Metrics.page-bottom-bar-height;
+    private property <length> game-top: Metrics.page-header-height;
+    // Breadcrumb, then the game's own heading, then its achievements.
+    private property <length> detail-heading-y: Metrics.page-header-height + Metrics.breadcrumb-height + Metrics.spacing-sm;
+    private property <length> detail-top: root.detail-heading-y + 64px;
+    private property <length> game-viewport-height: max(0px, root.list-bottom - root.game-top);
+    private property <length> detail-viewport-height: max(0px, root.list-bottom - root.detail-top);
+    private property <int> visible-games: max(1, Math.floor((root.game-viewport-height + Metrics.list-row-gap) / root.row-stride));
+    out property <int> visible-entries: max(1, Math.floor((root.detail-viewport-height + Metrics.list-row-gap) / root.entry-stride));
 
     // Remember the viewport, not merely the selected index. Otherwise moving
     // UP after scrolling down can leave the focused game offscreen entirely.
@@ -78,30 +83,49 @@ export component AchievementsPage inherits Rectangle {
     }
     private property <length> game-camera: root.first-game * root.row-stride;
     private property <length> entry-camera: root.first-entry * root.entry-stride;
-    // A held D-pad changes rows every ~115ms. The previous 190ms ease-in-out
-    // restarted before completing each step, causing a sticky scroll camera.
-    // Linear motion at that cadence keeps successive steps moving continuously.
+    // Linear, just under the 115ms held-input repeat: steps join smoothly.
     animate game-camera, entry-camera {
-        duration: Motion.reduced-motion ? 0ms : 110ms;
+        duration: Motion.list-camera-duration;
         easing: linear;
     }
 
     private property <float> detail-reveal: root.viewing-entries ? 1.0 : 0.0;
     animate detail-reveal { duration: Motion.page-duration; easing: ease-out; }
 
-    Text {
-        x: root.margin; y: 18px; height: 55px;
-        width: root.width - root.margin * 2;
-        text: "Achievements"; color: Theme.foreground;
-        font-size: Typography.title-size; font-weight: Typography.title-weight;
-        vertical-alignment: center;
+    PageHeader {
+        width: parent.width;
+        title: "Achievements";
+        HorizontalLayout {
+            width: 130px + 190px + Metrics.spacing-sm;
+            x: parent.width - Metrics.page-margin - self.width + Metrics.spacing-sm + 2px;
+            y: Metrics.page-accessory-y;
+            height: Metrics.page-accessory-height;
+            spacing: Metrics.spacing-sm;
+            // Both describe the games list; they step aside in a game's view.
+            HeaderValue {
+                width: 130px; label: "Collection"; value: root.game-count;
+                opacity: 1.0 - root.detail-reveal;
+            }
+            HeaderValue {
+                width: 190px; label: "Source"; value: root.source-label;
+                interactive: root.has-source-choice && !root.viewing-entries;
+                cycles: root.has-source-choice;
+                opacity: 1.0 - root.detail-reveal;
+                clicked => { root.cycle-source(1); }
+            }
+        }
     }
-    Text {
-        x: root.margin; y: 75px; height: 28px;
-        width: root.width - root.margin * 2;
-        text: "Your achievements across supported game services";
-        color: Theme.secondary-foreground; font-size: Typography.caption-size;
-        vertical-alignment: center;
+
+    // Bottom bar, left side: whether these are saved results.
+    if root.games.length > 0 && (root.loading || root.showing-saved-data) : MarqueeText {
+        x: Metrics.page-margin;
+        y: root.list-bottom;
+        width: (root.width - Metrics.page-margin * 2) / 2;
+        height: Metrics.page-bottom-bar-height;
+        text: root.showing-saved-data
+            ? (root.loading ? "Saved results · updating…" : "Saved results") : "Updating…";
+        text-color: Theme.secondary-foreground;
+        font-size: Typography.caption-size;
     }
 
     games-view := Rectangle {
@@ -110,57 +134,6 @@ export component AchievementsPage inherits Rectangle {
         background: transparent;
         opacity: 1.0 - root.detail-reveal;
 
-        // Library-style Source: text grouping with no permanent box/border,
-        // never a keyboard/controller focus target. LB/RB and pointer can cycle.
-        source-action := Rectangle {
-            x: root.margin; y: 117px; width: 175px; height: 52px;
-            background: source-pointer.has-hover && !root.viewing-entries
-                ? Theme.surface.with-alpha(0.56) : transparent;
-            border-radius: Metrics.radius-sm;
-            Text {
-                x: 10px; y: 5px; width: parent.width - 20px; height: 18px;
-                text: "Source"; color: Theme.secondary-foreground; font-size: 11px;
-            }
-            Text {
-                x: 10px; y: 25px; width: parent.width - 53px; height: 25px;
-                text: root.source-label; overflow: elide;
-                color: Theme.foreground; font-size: 15px;
-                vertical-alignment: center;
-            }
-            Text {
-                x: parent.width - 39px; y: 24px; width: 34px; height: 25px;
-                text: root.has-source-choice ? "‹ ›" : "";
-                color: Theme.secondary-foreground; font-size: 15px;
-                vertical-alignment: center;
-            }
-            source-pointer := TouchArea {
-                width: parent.width; height: parent.height;
-                enabled: !root.viewing-entries && root.has-source-choice;
-                clicked => { root.cycle-source(1); }
-            }
-        }
-        if root.loading || root.showing-saved-data : Text {
-            x: root.margin + 194px; y: 128px;
-            width: max(0px, root.width - root.margin * 2 - 194px);
-            height: 27px;
-            text: root.showing-saved-data
-                ? (root.loading ? "Saved results · updating…" : "Saved results") : root.status;
-            overflow: elide; color: Theme.secondary-foreground;
-            font-size: Typography.caption-size;
-        }
-        Text {
-            x: root.margin; y: 179px; height: 38px;
-            width: max(0px, root.width - root.margin * 2 - 205px);
-            text: "Games"; color: Theme.foreground;
-            font-size: Typography.heading-size; font-weight: Typography.heading-weight;
-            vertical-alignment: center;
-        }
-        Text {
-            x: root.width - root.margin - 195px; y: 181px;
-            width: 195px; height: 37px; horizontal-alignment: right;
-            text: root.game-count; color: Theme.secondary-foreground;
-            font-size: Typography.caption-size; vertical-alignment: center;
-        }
         game-viewport := Rectangle {
             x: root.margin; y: root.game-top;
             width: root.width - root.margin * 2;
@@ -177,45 +150,25 @@ export component AchievementsPage inherits Rectangle {
                     reject
                 }
             }
-            for game[i] in root.games : Rectangle {
+            for game[i] in root.games : ListRow {
                 private property <float> entrance: Motion.reduced-motion || i < root.previous-catalog-count
                     ? 1.0 : min(1.0, max(0.0, (animation-tick() - root.catalog-arrival-at) / 195ms));
                 opacity: self.entrance;
                 x: 1px + (1.0 - self.entrance) * 8px;
                 y: i * root.row-stride - root.game-camera + 2px;
                 width: parent.width - 2px - (1.0 - self.entrance) * 8px;
-                height: root.row-stride - 7px;
                 // Culling follows the ANIMATED camera, not the target index:
                 // never disappear while a rapid key/analog sequence is panning.
                 visible: i * root.row-stride >= root.game-camera - 4 * root.row-stride
                     && i * root.row-stride <= root.game-camera + root.game-viewport-height + 4 * root.row-stride;
-                border-radius: Metrics.radius-lg;
-                background: game-pointer.has-hover ? Theme.surface-raised : Theme.surface;
-                // Same focus reveal as the Settings rows: fade in and out over
-                // Motion.focus-duration (140ms, 0 under Reduced Motion). Only
-                // the reveal is animated so the idle pulse keeps running, and
-                // at the 115ms repeat cadence at most the previous row is
-                // still partly faded, as in Settings.
-                private property <float> focus-reveal: root.selected-index == i ? 1.0 : 0.0;
-                animate focus-reveal { duration: Motion.focus-duration; easing: ease-in-out; }
-                border-width: root.selected-index == i ? (Theme.high-contrast ? 3px : 2px) : 1px;
-                border-color: Theme.divider.with-alpha(0.65).mix(Motion.menu-focus-color, 1.0 - self.focus-reveal);
-                animate border-width { duration: Motion.focus-duration; easing: ease-in-out; }
-                animate background { duration: Motion.hover-duration; easing: ease-in-out; }
-                Text {
-                    x: 24px; y: 13px;
-                    width: max(50px, parent.width - (root.narrow ? 175px : 310px)); height: 31px;
-                    text: game.title; overflow: elide;
-                    color: Theme.foreground; font-size: Typography.heading-size;
-                    font-weight: Typography.heading-weight;
-                    vertical-alignment: center;
-                }
-                Text {
-                    x: 24px; y: 47px;
-                    width: max(40px, parent.width - (root.narrow ? 175px : 310px)); height: 23px;
-                    text: game.provider; color: Theme.secondary-foreground;
-                    font-size: Typography.caption-size;
-                }
+                title: game.title;
+                subtitle: game.provider;
+                focused: root.selected-index == i;
+                enabled: !root.viewing-entries;
+                trailing-width: root.narrow ? 175px : 300px;
+                activated => { root.choose-game(i); }
+                wheel(rows) => { root.pan-games(rows); }
+
                 Text {
                     x: parent.width - (root.narrow ? 158px : 273px); y: 17px;
                     width: root.narrow ? 119px : 231px; height: 29px;
@@ -225,7 +178,7 @@ export component AchievementsPage inherits Rectangle {
                     horizontal-alignment: right; vertical-alignment: center;
                 }
                 Rectangle {
-                    x: parent.width - (root.narrow ? 153px : 233px); y: 57px;
+                    x: parent.width - (root.narrow ? 153px : 233px); y: 55px;
                     width: root.narrow ? 112px : 192px;
                     height: 4px; border-radius: 2px;
                     background: Theme.divider.with-alpha(0.76);
@@ -237,39 +190,28 @@ export component AchievementsPage inherits Rectangle {
                     }
                 }
                 Text {
-                    x: parent.width - 28px; y: 22px;
+                    x: parent.width - 28px; y: 0px; height: parent.height;
                     text: "›"; color: Theme.secondary-foreground;
                     font-size: Typography.heading-size;
-                }
-                game-pointer := TouchArea {
-                    width: parent.width; height: parent.height;
-                    enabled: !root.viewing-entries;
-                    clicked => { root.choose-game(i); }
-                    scroll-event(event) => {
-                        if event.delta-y != 0px {
-                            root.pan-games(Wheel.rows(event.delta-y));
-                            return accept;
-                        }
-                        reject
-                    }
+                    vertical-alignment: center;
                 }
             }
             if root.games.length == 0 : Text {
-                x: 12px; y: 40px; width: parent.width - 24px;
+                x: 0px; y: Metrics.spacing-lg; width: parent.width;
                 text: root.loading ? "Retrieving achievements…" : root.status;
                 color: Theme.secondary-foreground; font-size: Typography.body-size;
                 wrap: word-wrap;
             }
         }
-        // A full-width header elevation only AFTER the list begins scrolling.
-        // The shadow uses the actual animated camera, so it fades in and out
-        // with movement and disappears completely at scroll offset zero.
-        if root.games.length > 0 : Rectangle {
-            x: 0px; y: root.game-top; width: root.width; height: 11px;
-            opacity: min(1.0, max(0.0, root.game-camera / root.row-stride));
-            background: @linear-gradient(180deg,
-                Theme.shadow.with-alpha(Theme.is-dark ? 0.23 : 0.11) 0%,
-                Theme.shadow.with-alpha(0.0) 100%);
+        if root.games.length > 0 : ScrollEdgeShadow {
+            x: 0px; y: root.game-top; width: root.width;
+            strength: root.game-camera / root.row-stride;
+        }
+        if root.games.length > 0 : ScrollEdgeShadow {
+            x: 0px; y: root.list-bottom - self.height; width: root.width;
+            bottom: true;
+            strength: (root.games.length * root.row-stride - Metrics.list-row-gap
+                - root.game-camera - root.game-viewport-height) / root.row-stride;
         }
     }
 
@@ -277,35 +219,37 @@ export component AchievementsPage inherits Rectangle {
         x: (1.0 - root.detail-reveal) * Metrics.page-transition-offset;
         width: root.width; height: root.height;
         background: transparent; opacity: root.detail-reveal;
-        Text {
-            x: root.margin; y: 117px; height: 35px; width: 148px;
-            text: "‹  Games"; color: Theme.secondary-foreground;
-            font-size: Typography.body-size; vertical-alignment: center;
+        Breadcrumb {
+            x: root.margin; y: Metrics.page-header-height;
+            width: root.width - root.margin * 2;
+            section: "Achievements";
+            page: root.selected-game-title;
+            back => { if (root.viewing-entries) { root.close-details(); } }
         }
-        TouchArea {
-            x: root.margin; y: 117px; width: 148px; height: 35px;
-            enabled: root.viewing-entries;
-            clicked => { root.close-details(); }
-        }
-        Text {
-            x: root.margin; y: 160px; height: 42px;
-            width: max(100px, root.width - root.margin * 2 - 220px);
-            text: root.selected-game-title; overflow: elide;
-            color: Theme.foreground; font-size: Typography.heading-size;
-            font-weight: Typography.heading-weight; vertical-alignment: center;
-        }
-        Text {
-            x: root.width - root.margin - 218px; y: 164px;
-            width: 218px; height: 32px; horizontal-alignment: right;
-            text: root.selected-game-progress; overflow: elide;
-            color: Theme.foreground; font-size: Typography.body-size;
-            vertical-alignment: center;
+        MarqueeText {
+            x: root.margin; y: root.detail-heading-y;
+            width: max(100px, root.width - root.margin * 2 - 240px);
+            height: 36px;
+            text: root.selected-game-title;
+            active: root.viewing-entries;
+            font-size: Typography.heading-size;
+            font-weight: Typography.heading-weight;
         }
         Text {
-            x: root.margin; y: 202px;
+            x: root.margin; y: root.detail-heading-y + 36px;
+            height: 22px;
             text: root.selected-game-provider;
             color: Theme.secondary-foreground;
             font-size: Typography.caption-size;
+            vertical-alignment: center;
+        }
+        Text {
+            x: root.width - root.margin - 232px; y: root.detail-heading-y;
+            width: 232px; height: 36px; horizontal-alignment: right;
+            text: root.selected-game-progress;
+            color: Theme.foreground; font-size: Typography.body-size;
+            font-weight: Typography.emphasis-weight;
+            vertical-alignment: center;
         }
         entry-viewport := Rectangle {
             x: root.margin; y: root.detail-top;
@@ -323,14 +267,14 @@ export component AchievementsPage inherits Rectangle {
                     reject
                 }
             }
-            for achievement[i] in root.entries : Rectangle {
+            // Read-only and unfocusable: the shared surface, no focus ring.
+            for achievement[i] in root.entries : Surface {
                 x: 1px; y: i * root.entry-stride - root.entry-camera + 2px;
-                width: parent.width - 2px; height: root.entry-stride - 8px;
+                width: parent.width - 2px; height: Metrics.list-row-height;
                 visible: i * root.entry-stride >= root.entry-camera - 4 * root.entry-stride
                     && i * root.entry-stride <= root.entry-camera + root.detail-viewport-height + 4 * root.entry-stride;
-                background: Theme.surface; border-radius: Metrics.radius-lg;
                 Rectangle {
-                    x: 15px; y: 13px; width: 58px; height: 58px;
+                    x: 13px; y: 13px; width: 58px; height: 58px;
                     border-radius: Metrics.radius-md; clip: true;
                     background: achievement.has-badge ? transparent : Theme.surface-raised;
                     if achievement.has-badge : Image {
@@ -347,39 +291,42 @@ export component AchievementsPage inherits Rectangle {
                         vertical-alignment: center;
                     }
                 }
-                Text {
-                    x: 91px; y: 8px; width: parent.width - 110px; height: 25px;
-                    text: achievement.title; overflow: elide;
-                    color: Theme.foreground; font-size: Typography.body-size;
+                MarqueeText {
+                    x: 89px; y: 8px; width: parent.width - 108px; height: 25px;
+                    text: achievement.title;
+                    edge-color: Theme.surface;
                     font-weight: Typography.emphasis-weight;
                 }
-                Text {
-                    x: 91px; y: 33px; width: parent.width - 110px; height: 22px;
+                MarqueeText {
+                    x: 89px; y: 33px; width: parent.width - 108px; height: 22px;
                     text: achievement.description != "" ? achievement.description : achievement.when;
-                    overflow: elide; color: Theme.secondary-foreground;
+                    edge-color: Theme.surface;
+                    text-color: Theme.secondary-foreground;
                     font-size: Typography.caption-size;
                 }
-                Text {
-                    x: 91px; y: 55px; width: parent.width - 110px; height: 22px;
+                MarqueeText {
+                    x: 89px; y: 55px; width: parent.width - 108px; height: 22px;
                     text: achievement.description != "" ? achievement.when : "";
-                    overflow: elide; color: Theme.secondary-foreground;
+                    edge-color: Theme.surface;
+                    text-color: Theme.secondary-foreground;
                     font-size: Typography.caption-size;
                 }
             }
             if root.entries.length == 0 : Text {
-                x: 12px; y: 48px; width: parent.width - 24px;
+                x: 0px; y: Metrics.spacing-lg; width: parent.width;
                 text: "No achievement details are available for this game.";
                 color: Theme.secondary-foreground; font-size: Typography.body-size;
             }
         }
-        // Match the Games and Library headers: no shadow on the first row,
-        // with the 11px penumbra emerging as the list scrolls underneath it.
-        if root.entries.length > 0 : Rectangle {
-            x: 0px; y: root.detail-top; width: root.width; height: 11px;
-            opacity: min(1.0, max(0.0, root.entry-camera / root.entry-stride));
-            background: @linear-gradient(180deg,
-                Theme.shadow.with-alpha(Theme.is-dark ? 0.23 : 0.11) 0%,
-                Theme.shadow.with-alpha(0.0) 100%);
+        if root.entries.length > 0 : ScrollEdgeShadow {
+            x: 0px; y: root.detail-top; width: root.width;
+            strength: root.entry-camera / root.entry-stride;
+        }
+        if root.entries.length > 0 : ScrollEdgeShadow {
+            x: 0px; y: root.list-bottom - self.height; width: root.width;
+            bottom: true;
+            strength: (root.entries.length * root.entry-stride - Metrics.list-row-gap
+                - root.entry-camera - root.detail-viewport-height) / root.entry-stride;
         }
     }
 }

@@ -17,6 +17,7 @@ Read this file **before** editing Horizon. It describes rules for the current re
 - **Steam account settings belong in Settings → Third-Party → Steam Account**, not in Achievements. Never place credentials, secret values, or request URLs containing secrets in UI state, logs, docs, screenshots, or commits. Local file permissions are not encryption.
 - **Activity Milestones shows recent real Steam achievement unlocks**, not invented Horizon playtime challenges. Unavailable or private Steam data must not be represented as zero. Achievement lookup is read-only.
 - Source-reported lifetime playtime and Horizon-observed session playtime are **different measurements**. Never sum them. Keep the known limitations of foreground handoff and recovered/checkpointed sessions visible.
+- Every full-screen page except Home uses the shared page frame (header, header values, breadcrumb, list rows, marquee text, hint bar): follow [docs/UI_STANDARDS.md](docs/UI_STANDARDS.md) rather than hand-building layout.
 - All new animation must respect Reduced Motion; keyboard, mouse and controller behavior must remain coherent. Route/history/focus decisions belong in Rust, not in Slint.
 - Preserve third-party attribution, SPDX/license texts, and `THIRD_PARTY_NOTICES.md`. User-supplied utility SVG geometry/colors should be preserved unless editing was requested; use the existing scale-aware renderer. **`README.md` must remain blank.**
 

@@ -1,0 +1,82 @@
+import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
+import { MarqueeText } from "marquee-text.slint";
+import { Wheel } from "wheel.slint";
+
+// The one card surface used by panels and read-only rows on every page.
+export component Surface inherits Rectangle {
+    background: Theme.surface;
+    border-radius: Metrics.radius-lg;
+    border-width: Theme.high-contrast ? 2px : 1px;
+    border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.65);
+}
+
+// The one focusable list row (Settings, Achievements games). Selection is
+// Rust-owned; this only renders it. Focus fades in AND out over
+// Motion.focus-duration; only the reveal animates so the idle pulse of
+// Motion.menu-focus-color keeps running. The focused row's title and subtitle
+// marquee; others clip with a soft edge. Page-specific trailing content
+// (progress, "Open ›", a switch) is passed as children, drawn on the right.
+export component ListRow inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <bool> focused: false;
+    in property <bool> enabled: true;
+    // Width kept free on the right for the trailing children.
+    in property <length> trailing-width: 48px;
+    callback activated();
+    // Mouse wheel over a row pans its list (camera only, never selection).
+    callback wheel(int);
+
+    height: Metrics.list-row-height;
+    private property <color> surface-color: root.enabled && (touch.pressed || touch.has-hover)
+        ? Theme.surface-raised : Theme.surface;
+    background: root.surface-color;
+    border-radius: Metrics.radius-lg;
+    private property <float> focus-reveal: root.focused && root.enabled ? 1.0 : 0.0;
+    animate focus-reveal { duration: Motion.focus-duration; easing: ease-in-out; }
+    border-width: root.focused && root.enabled ? (Theme.high-contrast ? 3px : 2px) : 1px;
+    // Slint's mix weights its FIRST colour by the factor.
+    border-color: Theme.divider.with-alpha(0.65).mix(Motion.menu-focus-color, 1.0 - root.focus-reveal);
+    animate border-width { duration: Motion.focus-duration; easing: ease-in-out; }
+    animate background { duration: Motion.hover-duration; easing: ease-in-out; }
+
+    accessible-role: button;
+    accessible-label: root.title;
+    accessible-description: root.subtitle;
+    accessible-enabled: root.enabled;
+
+    MarqueeText {
+        x: 24px; y: 14px;
+        width: max(40px, parent.width - 24px - root.trailing-width);
+        height: 30px;
+        text: root.title;
+        active: root.focused;
+        text-color: root.enabled ? Theme.foreground : Theme.secondary-foreground;
+        edge-color: root.surface-color;
+        font-size: Typography.heading-size;
+        font-weight: Typography.heading-weight;
+    }
+    MarqueeText {
+        x: 24px; y: 46px;
+        width: max(40px, parent.width - 24px - root.trailing-width);
+        height: 24px;
+        text: root.subtitle;
+        active: root.focused;
+        text-color: Theme.secondary-foreground;
+        edge-color: root.surface-color;
+        font-size: Typography.body-size;
+    }
+    @children
+    touch := TouchArea {
+        width: parent.width; height: parent.height;
+        enabled: root.enabled;
+        clicked => { root.activated(); }
+        scroll-event(event) => {
+            if event.delta-y != 0px {
+                root.wheel(Wheel.rows(event.delta-y));
+                return accept;
+            }
+            reject
+        }
+    }
+}

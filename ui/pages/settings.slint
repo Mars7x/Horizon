@@ -1,69 +1,23 @@
 import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { SelectionFocusSurface } from "../components/selection-focus-surface.slint";
+import { ListRow } from "../components/list-row.slint";
+import { PageHeader, Breadcrumb } from "../components/page-header.slint";
+import { MarqueeText } from "../components/marquee-text.slint";
 
-// Every Settings row uses the same spacing, focus frame and pointer feedback.
-// Selection and persistence remain Rust-owned so mouse and controller agree.
-component SettingsRow inherits Rectangle {
-    in property <string> heading;
-    in property <string> summary;
+// Settings rows are the shared ListRow plus a trailing action label or a
+// switch. Selection and persistence remain Rust-owned so mouse and controller agree.
+component SettingsRow inherits ListRow {
     in property <string> trailing: "";
-    in property <bool> focused: false;
     in property <bool> toggle: false;
     in property <bool> checked: false;
-    in property <bool> enabled: true;
-    callback activated();
-
-    // Slint requires roles to be compile-time constants. A switch row
-    // overrides this role to `switch` at the single call site below.
-    accessible-role: button;
-    accessible-label: root.heading;
-    accessible-description: root.summary;
+    trailing-width: root.toggle ? 130px : 230px;
     accessible-checkable: root.toggle;
     accessible-checked: root.checked;
-    accessible-enabled: root.enabled;
 
-    // Only focus reveal is animated; continuous brightness changes must not
-    // repeatedly restart `animate border-color` and freeze the idle pulse.
-    private property <float> focus-reveal: root.focused && root.enabled ? 1.0 : 0.0;
-    animate focus-reveal { duration: Motion.focus-duration; easing: ease-in-out; }
-    // Slint mix weights its FIRST brush by factor. Use 1-reveal so an
-    // unfocused row stays neutral, while focused rows receive the live accent.
-    // One outline for controller focus: no oversized overlay can cross rows.
-    background: (touch.pressed || touch.has-hover) && root.enabled
-        ? Theme.surface-raised : Theme.surface;
-    border-radius: Metrics.radius-lg;
-    border-width: root.focused && root.enabled ? (Theme.high-contrast ? 3px : 2px)
-        : (Theme.high-contrast ? 2px : 1px);
-    border-color: Theme.divider.with-alpha(0.68).mix(Motion.menu-focus-color, 1.0 - root.focus-reveal);
-    animate border-width { duration: Motion.focus-duration; easing: ease-in-out; }
-    animate background { duration: Motion.hover-duration; easing: ease-in-out; }
-    // The Settings category row is the visual reference for every other focus.
-
-    Text {
-        x: 24px; y: 15px;
-        width: parent.width - (root.toggle ? 154px : 252px);
-        height: 29px;
-        text: root.heading;
-        color: root.enabled ? Theme.foreground : Theme.secondary-foreground;
-        font-size: Typography.heading-size;
-        font-weight: Typography.heading-weight;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-    Text {
-        x: 24px; y: 49px;
-        width: parent.width - (root.toggle ? 154px : 48px);
-        height: 26px;
-        text: root.summary;
-        color: Theme.secondary-foreground;
-        font-size: Typography.body-size;
-        vertical-alignment: center;
-        overflow: elide;
-    }
     Text {
         visible: !root.toggle;
-        x: parent.width - 224px; y: 19px;
-        width: 196px; height: 29px;
+        x: parent.width - 224px; y: 14px;
+        width: 196px; height: 30px;
         text: root.trailing;
         color: root.enabled ? (root.focused ? Theme.accent : Theme.secondary-foreground)
             : Theme.secondary-foreground;
@@ -91,11 +45,6 @@ component SettingsRow inherits Rectangle {
             background: #ffffff; // Consistently white thumb in both states.
             animate x { duration: Motion.reduced-motion ? 0ms : 180ms; easing: ease-in-out; }
         }
-    }
-    touch := TouchArea {
-        width: parent.width; height: parent.height;
-        enabled: root.enabled;
-        clicked => { root.activated(); }
     }
 }
 
@@ -168,15 +117,15 @@ component AppearanceChoice inherits Rectangle {
     animate border-width { duration: Motion.focus-duration; easing: ease-in-out; }
     animate background { duration: Motion.hover-duration; easing: ease-in-out; }
     // Focus is the single stroke on this card, never a second ring.
-    Text {
+    MarqueeText {
         x: 8px; y: 0px; width: parent.width - 16px; height: parent.height;
         text: root.label;
-        color: root.selected ? Theme.accent : Theme.foreground;
+        active: root.focused;
+        edge-color: pointer.has-hover || pointer.pressed ? Theme.surface-raised : Theme.surface;
+        text-color: root.selected ? Theme.accent : Theme.foreground;
         font-size: Typography.body-size;
         font-weight: root.selected ? Typography.emphasis-weight : Typography.body-weight;
         horizontal-alignment: center;
-        vertical-alignment: center;
-        overflow: elide;
     }
     pointer := TouchArea {
         width: parent.width; height: parent.height;
@@ -298,26 +247,15 @@ export component SettingsPage inherits Rectangle {
     background: Theme.background;
     private property <length> content-width: root.width - Metrics.page-margin * 2;
 
-    Text {
-        x: Metrics.page-margin; y: 31px;
-        width: root.content-width; height: 47px;
-        text: root.view == 0 ? "Settings" : root.view == 1 ? "Appearance" : root.view == 2 ? "Third-Party" : "Steam Account";
-        color: Theme.foreground;
-        font-size: Typography.title-size;
-        font-weight: Typography.title-weight;
-        vertical-alignment: center;
-    }
-    Rectangle {
-        x: Metrics.page-margin; y: 87px;
-        width: root.content-width; height: 1px;
-        background: Theme.divider.with-alpha(0.65);
-    }
+    // The section title stays "Settings"; sub-views name themselves in
+    // their breadcrumb, as every other page's sub-views do.
+    PageHeader { width: parent.width; title: "Settings"; }
 
     settings-home := Rectangle {
         x: Metrics.page-margin + (root.view == 0 ? 0px : -12px);
-        y: 112px;
+        y: Metrics.page-header-height;
         width: root.content-width;
-        height: 202px;
+        height: Metrics.list-row-height * 2 + Metrics.list-row-gap;
         background: transparent;
         opacity: root.view == 0 ? 1.0 : 0.0;
         visible: self.opacity > 0.01;
@@ -327,21 +265,21 @@ export component SettingsPage inherits Rectangle {
         VerticalLayout {
             width: parent.width;
             height: parent.height;
-            spacing: 14px;
+            spacing: Metrics.list-row-gap;
             SettingsRow {
                 width: parent.width;
-                height: 94px;
-                heading: "Appearance";
-                summary: "Theme, accent colour and UI sounds";
+               
+                title: "Appearance";
+                subtitle: "Theme, accent colour and UI sounds";
                 trailing: "Open  ›";
                 focused: root.view == 0 && root.selection == 0;
                 activated => { if (root.view == 0 && !root.editing-key && !root.refresh-open) { root.activate(0); } }
             }
             SettingsRow {
                 width: parent.width;
-                height: 94px;
-                heading: "Third-Party";
-                summary: "Artwork providers and external integrations";
+               
+                title: "Third-Party";
+                subtitle: "Artwork providers and external integrations";
                 trailing: "Open  ›";
                 focused: root.view == 0 && root.selection == 1;
                 activated => { if (root.view == 0 && !root.editing-key && !root.refresh-open) { root.activate(1); } }
@@ -351,20 +289,18 @@ export component SettingsPage inherits Rectangle {
 
     appearance := Rectangle {
         x: Metrics.page-margin + (root.view == 1 ? 0px : 12px);
-        y: 109px;
-        width: root.content-width; height: root.height - 109px;
+        y: Metrics.page-header-height;
+        width: root.content-width; height: root.height - Metrics.page-header-height - Metrics.page-bottom-bar-height;
         background: transparent;
         opacity: root.view == 1 ? 1.0 : 0.0;
         visible: self.opacity > 0.01;
         animate x { duration: Motion.page-duration; easing: ease-in-out; }
         animate opacity { duration: Motion.page-duration; }
 
-        Text {
-            x: 0px; y: 0px; width: parent.width; height: 26px;
-            text: "Settings  /  Appearance";
-            color: Theme.secondary-foreground;
-            font-size: Typography.caption-size;
-            vertical-alignment: center;
+        Breadcrumb {
+            x: 0px; y: 0px; width: parent.width;
+            section: "Settings"; page: "Appearance";
+            back => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.go-back(); } }
         }
         Text {
             x: 0px; y: 35px; width: parent.width; height: 31px;
@@ -535,9 +471,9 @@ export component SettingsPage inherits Rectangle {
         }
         SettingsRow {
             x: 0px; y: 408px;
-            width: parent.width; height: 86px;
-            heading: "UI Sounds";
-            summary: "Play sounds when navigating, confirming, and going back";
+            width: parent.width;
+            title: "UI Sounds";
+            subtitle: "Play sounds when navigating, confirming, and going back";
             toggle: true;
             checked: root.ui-sounds-enabled;
             focused: root.view == 1 && root.selection == 13;
@@ -547,25 +483,22 @@ export component SettingsPage inherits Rectangle {
 
     third-party := Rectangle {
         x: Metrics.page-margin + (root.view == 2 ? 0px : 12px);
-        y: 109px;
-        width: root.content-width; height: root.height - 109px;
+        y: Metrics.page-header-height;
+        width: root.content-width; height: root.height - Metrics.page-header-height - Metrics.page-bottom-bar-height;
         background: transparent;
         opacity: root.view == 2 ? 1.0 : 0.0;
         visible: self.opacity > 0.01;
         animate x { duration: Motion.page-duration; easing: ease-in-out; }
         animate opacity { duration: Motion.page-duration; }
 
-        Text {
-            x: 0px; y: 0px;
-            width: parent.width; height: 26px;
-            text: "Settings  /  Third-Party";
-            color: Theme.secondary-foreground;
-            font-size: Typography.caption-size;
-            vertical-alignment: center;
+        Breadcrumb {
+            x: 0px; y: 0px; width: parent.width;
+            section: "Settings"; page: "Third-Party";
+            back => { if (root.view == 2 && !root.editing-key && !root.refresh-open) { root.go-back(); } }
         }
         Text {
-            x: 0px; y: 40px;
-            width: parent.width; height: 34px;
+            x: 0px; y: 32px;
+            width: parent.width; height: 32px;
             text: "SteamGridDB";
             color: Theme.foreground;
             font-size: Typography.heading-size;
@@ -573,19 +506,19 @@ export component SettingsPage inherits Rectangle {
             vertical-alignment: center;
         }
         SettingsRow {
-            x: 0px; y: 88px;
-            width: parent.width; height: 83px;
-            heading: "API key";
-            summary: root.key-present ? "Saved locally · key hidden" : "Not configured";
+            x: 0px; y: 70px;
+            width: parent.width;
+            title: "API key";
+            subtitle: root.key-present ? "Saved locally · key hidden" : "Not configured";
             trailing: root.key-present ? "Replace  ›" : "Add key  ›";
             focused: root.view == 2 && root.selection == 0;
             activated => { if (root.view == 2 && !root.editing-key && !root.refresh-open) { root.activate(0); } }
         }
         SettingsRow {
-            x: 0px; y: 182px;
-            width: parent.width; height: 83px;
-            heading: "Prefer SteamGridDB artwork";
-            summary: "Use SteamGridDB first; keep existing art as fallback";
+            x: 0px; y: 162px;
+            width: parent.width;
+            title: "Prefer SteamGridDB artwork";
+            subtitle: "Use SteamGridDB first; keep existing art as fallback";
             toggle: true;
             accessible-role: switch;
             checked: root.prefer-artwork;
@@ -593,20 +526,20 @@ export component SettingsPage inherits Rectangle {
             activated => { if (root.view == 2 && !root.editing-key && !root.refresh-open) { root.activate(1); } }
         }
         SettingsRow {
-            x: 0px; y: 276px;
-            width: parent.width; height: 83px;
-            heading: "Refresh artwork";
-            summary: "Check SteamGridDB for updated square covers";
+            x: 0px; y: 254px;
+            width: parent.width;
+            title: "Refresh artwork";
+            subtitle: "Check SteamGridDB for updated square covers";
             trailing: root.key-present ? "Refresh  ›" : "Unavailable";
             enabled: root.key-present;
             focused: root.view == 2 && root.selection == 2;
             activated => { if (root.view == 2 && !root.editing-key && !root.refresh-open) { root.activate(2); } }
         }
         SettingsRow {
-            x: 0px; y: 370px;
-            width: parent.width; height: 83px;
-            heading: "Remove API key";
-            summary: root.key-present ? "Disconnect SteamGridDB and keep cached files" : "No key is currently saved";
+            x: 0px; y: 346px;
+            width: parent.width;
+            title: "Remove API key";
+            subtitle: root.key-present ? "Disconnect SteamGridDB and keep cached files" : "No key is currently saved";
             trailing: root.key-present ? "Remove  ›" : "Unavailable";
             enabled: root.key-present;
             focused: root.view == 2 && root.selection == 3;
@@ -614,12 +547,8 @@ export component SettingsPage inherits Rectangle {
         }
         // Shared Steam account integration is a separate service, not a
         // SteamGridDB preference or another item in its artwork group.
-        Rectangle {
-            x: 0px; y: 465px; width: parent.width; height: 1px;
-            background: Theme.divider.with-alpha(0.70);
-        }
         Text {
-            x: 0px; y: 477px; width: parent.width; height: 33px;
+            x: 0px; y: 446px; width: parent.width; height: 32px;
             text: "Steam";
             color: Theme.foreground;
             font-size: Typography.heading-size;
@@ -627,10 +556,10 @@ export component SettingsPage inherits Rectangle {
             vertical-alignment: center;
         }
         SettingsRow {
-            x: 0px; y: 517px;
-            width: parent.width; height: 86px;
-            heading: "Steam Account";
-            summary: root.steam-connected ? "Configured for achievements and future Steam services" : "Configure SteamID64 and Web API key";
+            x: 0px; y: 484px;
+            width: parent.width;
+            title: "Steam Account";
+            subtitle: root.steam-connected ? "Configured for achievements and future Steam services" : "Configure SteamID64 and Web API key";
             trailing: "Open  ›";
             focused: root.view == 2 && root.selection == 4;
             activated => { if (root.view == 2 && !root.editing-key && !root.refresh-open) { root.activate(4); } }
@@ -639,23 +568,21 @@ export component SettingsPage inherits Rectangle {
 
     steam-account := Rectangle {
         x: Metrics.page-margin + (root.view == 3 ? 0px : 12px);
-        y: 109px;
-        width: root.content-width; height: root.height - 109px;
+        y: Metrics.page-header-height;
+        width: root.content-width; height: root.height - Metrics.page-header-height - Metrics.page-bottom-bar-height;
         background: transparent;
         opacity: root.view == 3 ? 1.0 : 0.0;
         visible: self.opacity > 0.01;
         animate x { duration: Motion.page-duration; easing: ease-in-out; }
         animate opacity { duration: Motion.page-duration; }
 
-        Text {
-            x: 0px; y: 0px; width: parent.width; height: 26px;
-            text: "Settings  /  Third-Party  /  Steam Account";
-            color: Theme.secondary-foreground;
-            font-size: Typography.caption-size;
-            vertical-alignment: center;
+        Breadcrumb {
+            x: 0px; y: 0px; width: parent.width;
+            section: "Settings"; page: "Third-Party  /  Steam Account";
+            back => { if (root.view == 3 && !root.editing-key && !root.refresh-open) { root.go-back(); } }
         }
         Text {
-            x: 0px; y: 38px; width: parent.width; height: 36px;
+            x: 0px; y: 32px; width: parent.width; height: 32px;
             text: "Steam Web API";
             color: Theme.foreground;
             font-size: Typography.heading-size;
@@ -663,7 +590,7 @@ export component SettingsPage inherits Rectangle {
             vertical-alignment: center;
         }
         Text {
-            x: 0px; y: 74px; width: parent.width; height: 32px;
+            x: 0px; y: 64px; width: parent.width; height: 28px;
             text: root.steam-connected ? "Configured for read-only achievements"
                 : "Set your SteamID64 and Web API key; this is not a Steam login.";
             color: Theme.secondary-foreground;
@@ -671,39 +598,39 @@ export component SettingsPage inherits Rectangle {
             vertical-alignment: center;
         }
         SettingsRow {
-            x: 0px; y: 120px; width: parent.width; height: 90px;
-            heading: "SteamID64";
-            summary: root.steam-identity;
+            x: 0px; y: 100px; width: parent.width;
+            title: "SteamID64";
+            subtitle: root.steam-identity;
             trailing: root.steam-identity == "Not configured" ? "Set ID  ›" : "Change  ›";
             focused: root.view == 3 && root.selection == 0;
             activated => { if (root.view == 3 && !root.editing-key) { root.activate(0); } }
         }
         SettingsRow {
-            x: 0px; y: 224px; width: parent.width; height: 90px;
-            heading: "Steam Web API key";
-            summary: root.steam-connected ? "Configured · key hidden" : "Required to retrieve achievements";
+            x: 0px; y: 192px; width: parent.width;
+            title: "Steam Web API key";
+            subtitle: root.steam-connected ? "Configured · key hidden" : "Required to retrieve achievements";
             trailing: root.steam-connected ? "Replace  ›" : "Add key  ›";
             focused: root.view == 3 && root.selection == 1;
             activated => { if (root.view == 3 && !root.editing-key) { root.activate(1); } }
         }
         SettingsRow {
-            x: 0px; y: 328px; width: parent.width; height: 90px;
-            heading: "Disconnect Steam";
-            summary: root.steam-saved ? "Delete Horizon's saved key and SteamID64" : "No locally saved account";
+            x: 0px; y: 284px; width: parent.width;
+            title: "Disconnect Steam";
+            subtitle: root.steam-saved ? "Delete Horizon's saved key and SteamID64" : "No locally saved account";
             trailing: root.steam-saved ? "Remove  ›" : "Unavailable";
             enabled: root.steam-saved;
             focused: root.view == 3 && root.selection == 2;
             activated => { if (root.view == 3 && !root.editing-key && root.steam-saved) { root.activate(2); } }
         }
         Text {
-            x: 0px; y: 443px; width: parent.width; height: 72px;
+            x: 0px; y: 384px; width: parent.width; height: 72px;
             text: "Stored locally with private file permissions; not encrypted. API keys are never shown after saving. Account connection does not grant Steam login access.";
             color: Theme.secondary-foreground;
             font-size: Typography.caption-size;
             wrap: word-wrap;
         }
         Text {
-            x: 0px; y: 530px; width: parent.width; height: 30px;
+            x: 0px; y: 460px; width: parent.width; height: 30px;
             text: root.feedback;
             visible: root.view == 3 && root.feedback != "";
             color: Theme.accent;
@@ -746,16 +673,17 @@ export component SettingsPage inherits Rectangle {
                 font-weight: Typography.heading-weight;
                 vertical-alignment: center;
             }
-            Text {
+            MarqueeText {
+                // Dialog text sits on the raised dialog surface.
+                edge-color: Theme.surface-raised;
                 x: 26px; y: 60px;
                 width: parent.width - 52px; height: 24px;
                 text: root.editor-kind == 1 ? "Your 17-digit numeric Steam identity."
                     : root.editor-kind == 2 ? "Enter a Web API key; stored locally, never shown again."
                     : root.key-present ? "Saved keys stay hidden. Enter a new key to replace it."
                     : "Enter your personal key to enable SteamGridDB artwork.";
-                color: Theme.secondary-foreground;
+                text-color: Theme.secondary-foreground;
                 font-size: Typography.body-size;
-                overflow: elide;
             }
             Rectangle {
                 x: 26px; y: 97px;
@@ -963,14 +891,15 @@ export component SettingsPage inherits Rectangle {
                     }
                 }
             }
-            Text {
+            MarqueeText {
+                // Dialog text sits on the raised dialog surface.
+                edge-color: Theme.surface-raised;
                 x: 26px; y: 162px;
                 width: parent.width - 52px; height: 21px;
                 visible: root.feedback != "";
                 text: root.feedback;
-                color: Theme.accent;
+                text-color: Theme.accent;
                 font-size: Typography.caption-size;
-                overflow: elide;
             }
             SettingsButton {
                 x: parent.width - 253px; y: 191px;
@@ -1112,17 +1041,16 @@ export component SettingsPage inherits Rectangle {
                     animate width { duration: Motion.reduced-motion ? 0ms : 130ms; easing: ease-out; }
                 }
             }
-            Text {
+            MarqueeText {
+                // Dialog text sits on the raised dialog surface.
+                edge-color: Theme.surface-raised;
                 x: 29px; y: 145px;
                 width: parent.width - 190px; height: 42px;
                 text: root.refresh-error != "" ? root.refresh-error
                     : (root.refresh-running ? "Checking for updated square covers"
                         : (root.refresh-total == 0 ? "No eligible games to refresh" : "Existing artwork is preserved"));
-                color: Theme.secondary-foreground;
+                text-color: Theme.secondary-foreground;
                 font-size: Typography.caption-size;
-                wrap: word-wrap;
-                overflow: elide;
-                vertical-alignment: center;
             }
             SettingsButton {
                 x: parent.width - 136px; y: 178px;

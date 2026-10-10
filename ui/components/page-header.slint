@@ -1,0 +1,133 @@
+import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
+import { MarqueeText } from "marquee-text.slint";
+
+// The one header used by every full-screen page: a title only, always at the
+// same position. Optional accessories (Source/Sort pickers) are children,
+// placed on the title row's right side at Metrics.page-accessory-y.
+export component PageHeader inherits Rectangle {
+    in property <string> title;
+    x: 0px;
+    y: 0px;
+    height: Metrics.page-header-height;
+    background: transparent;
+
+    Text {
+        x: Metrics.page-margin;
+        y: Metrics.page-title-y;
+        width: parent.width - Metrics.page-margin * 2;
+        height: Metrics.page-title-height;
+        text: root.title;
+        color: Theme.foreground;
+        font-size: Typography.title-size;
+        font-weight: Typography.title-weight;
+        vertical-alignment: center;
+    }
+    @children
+}
+
+// Sub-pages open with "‹  Section  /  Page"; clicking it goes back, the same
+// as the controller's B (pointer users have no other Back affordance).
+export component Breadcrumb inherits Rectangle {
+    in property <string> section;
+    in property <string> page;
+    callback back();
+    height: Metrics.breadcrumb-height;
+    background: transparent;
+    MarqueeText {
+        width: parent.width;
+        height: parent.height;
+        text: "‹  " + root.section + "  /  " + root.page;
+        text-color: back-touch.has-hover ? Theme.foreground : Theme.secondary-foreground;
+        font-size: Typography.caption-size;
+    }
+    back-touch := TouchArea {
+        width: parent.width; height: parent.height;
+        clicked => { root.back(); }
+    }
+}
+
+// Elevation at a fixed scroll boundary. `strength` (0..1) fades it with the
+// animated camera: 0 at the very start/end of the content, 1 once scrolled.
+export component ScrollEdgeShadow inherits Rectangle {
+    in property <bool> bottom: false;
+    in property <float> strength: 1.0;
+    height: Metrics.scroll-edge-shadow-height;
+    opacity: max(0.0, min(1.0, root.strength));
+    background: @linear-gradient(180deg,
+        Theme.shadow.with-alpha(root.bottom ? 0.0 : (Theme.is-dark ? 0.23 : 0.11)) 0%,
+        Theme.shadow.with-alpha(root.bottom ? (Theme.is-dark ? 0.23 : 0.11) : 0.0) 100%);
+}
+
+// A labelled value on the header's title row: "Source / All sources",
+// "Last 7 days / 6 h 12 min". Interactive values are pointer-clickable
+// (controller users get LB/RB, shown in the hint bar). Value changes slide
+// and crossfade; this is driven by an animated counter, not animation-tick(),
+// so an idle page never redraws continuously.
+export component HeaderValue inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <bool> interactive: false;
+    // Optional "‹ ›" cue for values that cycle.
+    in property <bool> cycles: false;
+    callback clicked();
+    height: Metrics.page-accessory-height;
+    border-radius: Metrics.radius-sm;
+    background: root.interactive && touch.has-hover ? Theme.surface.with-alpha(0.56) : transparent;
+    animate background { duration: Motion.hover-duration; easing: ease-in-out; }
+
+    private property <string> shown-value: root.value;
+    private property <string> old-value: "";
+    private property <int> swaps: 0;
+    private property <float> phase: 0;
+    animate phase { duration: Motion.value-swap-duration; easing: ease-out; }
+    private property <float> progress: 1.0 - min(1.0, root.swaps - root.phase);
+    changed value => {
+        root.old-value = root.shown-value;
+        root.shown-value = root.value;
+        root.swaps += 1;
+        root.phase = root.swaps;
+    }
+
+    Text {
+        x: Metrics.spacing-sm + 2px; y: 5px;
+        width: parent.width - 20px; height: 18px;
+        text: root.label;
+        color: Theme.secondary-foreground;
+        font-size: Typography.label-size;
+        vertical-alignment: center;
+    }
+    Rectangle {
+        x: Metrics.spacing-sm + 2px; y: 24px;
+        width: parent.width - 20px - (root.cycles ? 30px : 0px); height: 26px;
+        background: transparent;
+        clip: true;
+        if root.progress < 1.0 : MarqueeText {
+            y: -4px * root.progress;
+            width: parent.width; height: parent.height;
+            text: root.old-value;
+            font-size: Typography.body-size;
+            font-weight: Typography.emphasis-weight;
+            opacity: 1.0 - root.progress;
+        }
+        MarqueeText {
+            y: 4px * (1.0 - root.progress);
+            width: parent.width; height: parent.height;
+            text: root.shown-value;
+            font-size: Typography.body-size;
+            font-weight: Typography.emphasis-weight;
+            opacity: root.progress;
+        }
+    }
+    if root.cycles : Text {
+        x: parent.width - 34px; y: 24px; width: 26px; height: 26px;
+        text: "‹ ›";
+        color: Theme.secondary-foreground;
+        font-size: Typography.caption-size;
+        vertical-alignment: center;
+    }
+    touch := TouchArea {
+        width: parent.width; height: parent.height;
+        enabled: root.interactive;
+        clicked => { root.clicked(); }
+    }
+}

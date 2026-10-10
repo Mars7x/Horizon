@@ -3,6 +3,8 @@ import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { FallbackCover } from "../components/fallback-cover.slint";
 import { FocusFrame } from "../components/focus-frame.slint";
 import { LibraryCardData } from "../models/library.slint";
+import { PageHeader, HeaderValue, ScrollEdgeShadow } from "../components/page-header.slint";
+import { MarqueeText } from "../components/marquee-text.slint";
 
 // Library is a durable, full-shell destination, never a panel beneath Home chrome.
 // Clean, shallow previews reveal collection continuity without a scrollbar.
@@ -34,23 +36,7 @@ export component LibraryPage inherits Rectangle {
     // 0 = no reorder, 1 = Source, 2 = Sort. The controller sets this
     // before browse-sequence so Slint starts the correct transition.
     in property <int> browse-transition-kind: 0;
-    private property <string> visible-filter: "All sources";
-    private property <string> old-filter: "All sources";
-    private property <string> visible-sort: "Alphabetical";
-    private property <string> old-sort: "Alphabetical";
-    private property <string> visible-count: "";
-    private property <string> old-count: "";
-    private property <duration> filter-changed-at: 0ms;
-    private property <duration> sort-changed-at: 0ms;
-    private property <duration> count-changed-at: 0ms;
     private property <duration> browse-changed-at: 0ms;
-    private property <float> filter-progress: Motion.reduced-motion || !root.focus-visible
-        ? 1.0 : min(1.0, max(0.0, (animation-tick() - root.filter-changed-at) / 170ms));
-    private property <float> sort-progress: Motion.reduced-motion || !root.focus-visible
-        ? 1.0 : min(1.0, max(0.0, (animation-tick() - root.sort-changed-at) / 170ms));
-    private property <float> count-progress: Motion.reduced-motion || !root.focus-visible
-        || root.old-count == "" || root.old-count == root.visible-count
-        ? 1.0 : min(1.0, max(0.0, (animation-tick() - root.count-changed-at) / 190ms));
     // These animations do not overlap the outgoing and incoming artwork.
     // Source: old grid clears in 85ms, then covers reveal left-to-right
     // (145ms each, 7ms per column), about 230-293ms overall.
@@ -67,21 +53,6 @@ export component LibraryPage inherits Rectangle {
         ? 1.0 : min(1.0, max(0.0, (root.browse-age - 95ms) / 140ms));
     private property <bool> grid-reordering: root.reorder-enabled && root.browse-age
         < (root.browse-transition-kind == 1 ? 300ms : 235ms);
-    changed filter-text => {
-        root.old-filter = root.visible-filter;
-        root.visible-filter = root.filter-text;
-        root.filter-changed-at = animation-tick();
-    }
-    changed sort-text => {
-        root.old-sort = root.visible-sort;
-        root.visible-sort = root.sort-text;
-        root.sort-changed-at = animation-tick();
-    }
-    changed count-text => {
-        root.old-count = root.visible-count;
-        root.visible-count = root.count-text;
-        root.count-changed-at = animation-tick();
-    }
     changed browse-sequence => { root.browse-changed-at = animation-tick(); }
 
     // Snapshot the old/new metadata only when Rust publishes a NEW game ID.
@@ -93,7 +64,7 @@ export component LibraryPage inherits Rectangle {
     private property <duration> metadata-start: 0ms;
     // Title and provider transition independently. Identical text never flashes.
     private property <float> metadata-linear-progress: Motion.reduced-motion || !root.focus-visible
-        ? 1.0 : min(1.0, max(0.0, (animation-tick() - root.metadata-start) / 190ms));
+        ? 1.0 : min(1.0, max(0.0, (animation-tick() - root.metadata-start) / Motion.value-swap-duration));
     private property <float> eased-metadata-progress: 1.0 - (1.0 - root.metadata-linear-progress)
         * (1.0 - root.metadata-linear-progress) * (1.0 - root.metadata-linear-progress);
     private property <float> title-progress: root.departing-title == ""
@@ -126,8 +97,8 @@ export component LibraryPage inherits Rectangle {
     private property <length> row-stride: root.card-size + 28px;
     private property <length> art-inset: root.card-size * 0.085;
     private property <length> grid-pad: 22px;
-    private property <length> top-content-inset: 99px;
-    private property <length> bottom-content-reserve: 73px;
+    private property <length> top-content-inset: Metrics.page-header-height;
+    private property <length> bottom-content-reserve: Metrics.page-bottom-bar-height;
     // Keep exact parity with Rust LibraryController::visible_rows().
     private property <int> displayed-rows: max(1, Math.floor(
         (root.height - root.top-content-inset - root.bottom-content-reserve
@@ -148,117 +119,26 @@ export component LibraryPage inherits Rectangle {
     // the recovered vertical room. Elevation is drawn at the boundary BELOW,
     // not as a separately painted header slab.
 
-    Text {
-        x: Metrics.page-margin; y: 11px;
-        text: "Library";
-        color: Theme.foreground;
-        font-size: Typography.title-size;
-        font-weight: Typography.title-weight;
-    }
-    Rectangle {
-        x: Metrics.page-margin; y: 52px;
-        height: 30px; width: 230px;
-        background: transparent; clip: true;
-        Text {
-            width: parent.width; height: parent.height;
-            y: -5px * root.count-progress;
-            text: root.old-count;
-            color: Theme.secondary-foreground;
-            font-size: Typography.caption-size;
-            vertical-alignment: center;
-            opacity: 1.0 - root.count-progress;
-        }
-        Text {
-            width: parent.width; height: parent.height;
-            y: 5px * (1.0 - root.count-progress);
-            text: root.visible-count;
-            color: Theme.secondary-foreground;
-            font-size: Typography.caption-size;
-            vertical-alignment: center;
-            opacity: root.count-progress;
-        }
-    }
-
-    // Separate, non-focusable pointer commands, laid out on an explicit grid.
-    // Stacked captions and left-aligned values prevent Source/Sort collisions,
-    // including when longer provider names are localized or displayed.
-    header-actions := Rectangle {
-        x: root.width - Metrics.page-margin - self.width;
-        y: 17px;
-        width: 360px; height: 57px;
-        background: transparent;
-
-        source-action := Rectangle {
-            x: 0px; y: 0px; width: 148px; height: parent.height;
-            border-radius: Metrics.radius-sm;
-            background: source-pointer.has-hover
-                ? Theme.surface.with-alpha(0.56) : transparent;
-            Text {
-                x: 10px; y: 5px; width: parent.width - 20px; height: 18px;
-                text: "Source";
-                color: Theme.secondary-foreground;
-                font-size: 11px;
-                vertical-alignment: center;
-            }
-            Rectangle {
-                x: 10px; y: 24px; width: parent.width - 20px; height: 29px;
-                background: transparent; clip: true;
-                Text {
-                    x: 0px; y: -4px * root.filter-progress;
-                    width: parent.width; height: parent.height;
-                    text: root.old-filter;
-                    color: Theme.foreground; font-size: 15px;
-                    vertical-alignment: center; overflow: elide;
-                    opacity: root.old-filter == root.visible-filter ? 0.0 : 1.0 - root.filter-progress;
-                }
-                Text {
-                    x: 0px; y: 4px * (1.0 - root.filter-progress);
-                    width: parent.width; height: parent.height;
-                    text: root.visible-filter;
-                    color: Theme.foreground; font-size: 15px;
-                    vertical-alignment: center; overflow: elide;
-                    opacity: root.filter-progress;
-                }
-            }
-            source-pointer := TouchArea {
-                width: parent.width; height: parent.height;
+    PageHeader {
+        width: parent.width;
+        title: "Library";
+        // Non-focusable values; LB/RB cycle Source and Sort for controllers.
+        HorizontalLayout {
+            // Right-aligned so each value's text edge meets the page margin.
+            width: 130px + 160px + 180px + Metrics.spacing-sm * 2;
+            x: parent.width - Metrics.page-margin - self.width + Metrics.spacing-sm + 2px;
+            y: Metrics.page-accessory-y;
+            height: Metrics.page-accessory-height;
+            spacing: Metrics.spacing-sm;
+            HeaderValue { width: 130px; label: "Collection"; value: root.count-text; }
+            HeaderValue {
+                width: 160px; label: "Source"; value: root.filter-text;
+                interactive: true;
                 clicked => { root.cycle-filter(); }
             }
-        }
-        sort-action := Rectangle {
-            x: 168px; y: 0px; width: 192px; height: parent.height;
-            border-radius: Metrics.radius-sm;
-            background: sort-pointer.has-hover
-                ? Theme.surface.with-alpha(0.56) : transparent;
-            Text {
-                x: 10px; y: 5px; width: parent.width - 20px; height: 18px;
-                text: "Sort";
-                color: Theme.secondary-foreground;
-                font-size: 11px;
-                vertical-alignment: center;
-            }
-            Rectangle {
-                x: 10px; y: 24px; width: parent.width - 20px; height: 29px;
-                background: transparent; clip: true;
-                Text {
-                    x: 0px; y: -4px * root.sort-progress;
-                    width: parent.width; height: parent.height;
-                    text: root.old-sort;
-                    color: Theme.foreground; font-size: 15px;
-                    vertical-alignment: center; overflow: elide;
-                    opacity: root.old-sort == root.visible-sort ? 0.0 : 1.0 - root.sort-progress;
-                }
-                Text {
-                    x: 0px; y: 4px * (1.0 - root.sort-progress);
-                    width: parent.width; height: parent.height;
-                    text: root.visible-sort;
-                    color: Theme.foreground; font-size: 15px;
-                    vertical-alignment: center; overflow: elide;
-                    opacity: root.sort-progress;
-                }
-            }
-            sort-pointer := TouchArea {
-                width: parent.width; height: parent.height;
+            HeaderValue {
+                width: 180px; label: "Sort"; value: root.sort-text;
+                interactive: true;
                 clicked => { root.cycle-sort(); }
             }
         }
@@ -484,65 +364,52 @@ export component LibraryPage inherits Rectangle {
 
     }
 
-    // Full-shell, adwaita-like header elevation without a tinted header band.
-    // gallery.y is animated during normal row scrolling. Use its CURRENT
-    // offset (not the destination row) to fade the shadow in as a previous
-    // row passes beneath the fixed header, and back out at the first row.
-    // No shadow at the initial scroll position; the existing footer boundary
-    // remains unchanged.
-    if root.total-count > 0 : Rectangle {
+    // Scroll-edge elevation follows the ANIMATED camera (gallery.y): the top
+    // shadow appears once a row has passed under the header, the bottom one
+    // while more rows remain below. None when everything is in view.
+    if root.total-count > 0 : ScrollEdgeShadow {
         x: 0px; y: grid-viewport.y;
-        width: parent.width; height: 11px;
-        opacity: min(1.0, max(0.0,
-            (root.peek-limit - gallery.y) / root.row-stride));
-        background: @linear-gradient(180deg,
-            Theme.shadow.with-alpha(Theme.is-dark ? 0.23 : 0.11) 0%,
-            Theme.shadow.with-alpha(0.0) 100%);
+        width: parent.width;
+        strength: (root.peek-limit - gallery.y) / root.row-stride;
     }
-    if root.total-count > 0 : Rectangle {
-        x: 0px; y: grid-viewport.y + grid-viewport.height - 11px;
-        width: parent.width; height: 11px;
-        background: @linear-gradient(180deg,
-            Theme.shadow.with-alpha(0.0) 0%,
-            Theme.shadow.with-alpha(Theme.is-dark ? 0.23 : 0.11) 100%);
+    if root.total-count > 0 : ScrollEdgeShadow {
+        x: 0px; y: grid-viewport.y + grid-viewport.height - self.height;
+        width: parent.width;
+        bottom: true;
+        strength: (gallery.y + gallery.height - grid-viewport.height + root.peek-limit) / root.row-stride;
     }
 
-    // Metadata remains fixed below the gallery on the same background as the
-    // header and page. The viewport clips peeking covers above this region;
-    // no additional surface, fade, shadow, or divider is needed.
-    // Title and source have independent motion: unchanged strings stay still.
-    // The selected identity/revision is owned by Rust; no timers in Slint.
+    // Bottom bar, left side: the selected game. The hint bar (app.slint)
+    // owns the right side. Title and source swap independently; unchanged
+    // strings stay still. The selected identity/revision is owned by Rust.
     title-window := Rectangle {
-        x: Metrics.page-margin; y: root.height - 65px;
-        width: parent.width - Metrics.page-margin * 2;
-        height: 30px; clip: true; background: transparent;
-        Text {
-            x: 0px; y: -6px * root.title-progress;
+        x: Metrics.page-margin;
+        y: root.height - Metrics.page-bottom-bar-height + 6px;
+        width: (parent.width - Metrics.page-margin * 2) / 2;
+        height: 28px; clip: true; background: transparent;
+        if root.title-progress < 1.0 : MarqueeText {
+            y: -6px * root.title-progress;
             width: parent.width; height: parent.height;
             text: root.total-count > 0 ? root.departing-title : "";
-            color: Theme.foreground;
-            font-size: Typography.body-size;
             font-weight: Typography.emphasis-weight;
-            overflow: elide; vertical-alignment: center;
             opacity: 1.0 - root.title-progress;
         }
-        Text {
-            x: 0px; y: 6px * (1.0 - root.title-progress);
+        MarqueeText {
+            y: 6px * (1.0 - root.title-progress);
             width: parent.width; height: parent.height;
             text: root.total-count > 0 ? root.presented-title : "";
-            color: Theme.foreground;
-            font-size: Typography.body-size;
             font-weight: Typography.emphasis-weight;
-            overflow: elide; vertical-alignment: center;
+            active: root.focus-visible;
             opacity: root.title-progress;
         }
     }
     source-window := Rectangle {
-        x: Metrics.page-margin; y: root.height - 34px;
-        width: parent.width - Metrics.page-margin * 2;
-        height: 24px; clip: true; background: transparent;
+        x: Metrics.page-margin;
+        y: title-window.y + title-window.height;
+        width: title-window.width;
+        height: 22px; clip: true; background: transparent;
         Text {
-            x: 0px; y: -4px * root.source-progress;
+            y: -4px * root.source-progress;
             width: parent.width; height: parent.height;
             text: root.total-count > 0 ? root.departing-source : "";
             color: Theme.secondary-foreground;
@@ -551,7 +418,7 @@ export component LibraryPage inherits Rectangle {
             opacity: 1.0 - root.source-progress;
         }
         Text {
-            x: 0px; y: 4px * (1.0 - root.source-progress);
+            y: 4px * (1.0 - root.source-progress);
             width: parent.width; height: parent.height;
             text: root.total-count > 0 ? root.presented-source : "";
             color: Theme.secondary-foreground;

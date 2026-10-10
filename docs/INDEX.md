@@ -11,6 +11,7 @@
 | Which layer owns behavior? | [Architecture](ARCHITECTURE.md) | `src/{domain,services,presentation,persistence,sources,platform,input}/` |
 | Which pages/routes exist? | [Navigation](NAVIGATION.md) | `src/navigation/`, `src/presentation/navigation.rs`, `ui/app.slint` |
 | Home visuals and focus? | [Home UI](HOME_UI.md), [Typography](TYPOGRAPHY.md) | `ui/pages/home.slint`, `ui/components/` |
+| How must every other page look? | [UI standards](UI_STANDARDS.md) | `ui/components/page-header.slint`, `list-row.slint`, `marquee-text.slint`, `hint-bar.slint` |
 | Library focus, sources, sorting? | [Library](LIBRARY.md) | `src/presentation/library.rs`, `ui/pages/library.slint` |
 | Observed playtime and session history? | [Activity](ACTIVITY.md) | `src/services/activity.rs`, `src/presentation/activity.rs` |
 | Steam achievements and recent unlocks? | [Achievements](ACHIEVEMENTS.md) | `src/services/achievements.rs`, `src/presentation/achievements.rs` |
