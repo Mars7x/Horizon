@@ -384,7 +384,8 @@ export component LibraryPage inherits Rectangle {
     // strings stay still. The selected identity/revision is owned by Rust.
     title-window := Rectangle {
         x: Metrics.page-margin;
-        y: root.height - Metrics.page-bottom-bar-height + 6px;
+        // Title on the shared hint line; source directly below it.
+        y: root.height - Metrics.hint-row-center-from-bottom - self.height / 2;
         width: (parent.width - Metrics.page-margin * 2) / 2;
         height: 28px; clip: true; background: transparent;
         if root.title-progress < 1.0 : MarqueeText {

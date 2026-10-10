@@ -1,5 +1,6 @@
 import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { ControllerIcon } from "system-icons.slint";
+import { HintBar } from "hint-bar.slint";
 
 component ClockReadout inherits Rectangle {
     in property <string> clock-time;
@@ -85,33 +86,13 @@ export component Footer inherits Rectangle {
         background: Theme.divider;
     }
 
-    Rectangle {
-        x: parent.width - Metrics.page-margin - 68px;
-        y: (parent.height - 22px) / 2;
-        width: 22px;
-        height: 22px;
-        border-radius: 11px;
-        background: Theme.foreground;
-
-        Text {
-            text: "A";
-            color: Theme.background;
-            font-size: 12px;
-            font-weight: 700;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
-    }
-
-    Text {
-        x: parent.width - Metrics.page-margin - 39px;
-        y: 0px;
-        width: 39px;
-        height: parent.height;
-        text: "OK";
-        color: Theme.secondary-foreground;
-        font-size: Typography.caption-size;
-        font-weight: Typography.emphasis-weight;
-        vertical-alignment: center;
+    // Same component and line as every other page's hints, so "A OK" sits
+    // exactly where those pages put their last hint.
+    HintBar {
+        x: parent.width - Metrics.page-margin - 95px;
+        y: parent.height - Metrics.hint-row-center-from-bottom - self.height / 2;
+        width: 95px;
+        height: Metrics.hint-row-height;
+        hints: [{ button: "A", label: "OK" }];
     }
 }

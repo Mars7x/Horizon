@@ -606,9 +606,9 @@ export component AppWindow inherits Window {
             // page controllers). Update both together.
             HintBar {
                 x: Metrics.page-margin;
-                y: parent.height - Metrics.page-bottom-bar-height;
+                y: parent.height - Metrics.hint-row-center-from-bottom - self.height / 2;
                 width: parent.width - Metrics.page-margin * 2;
-                height: Metrics.page-bottom-bar-height;
+                height: Metrics.hint-row-height;
                 visible: root.current-route != AppRouteView.home;
                 z: 2;
                 // Dialogs carry their own focusable buttons; the bar fades
