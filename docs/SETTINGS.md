@@ -1,6 +1,6 @@
 # Settings — Phase 9.5.44.57
 
-> **Current-state guide:** Steam account configuration belongs under **Settings → Third-Party → Steam Account**, visually separated into its own **Steam** group below the **SteamGridDB** artwork group. These are independent services. Both use Settings navigation; the Achievements page does not collect credentials. See [ACHIEVEMENTS.md](ACHIEVEMENTS.md) and [PROJECT_STATE.md](PROJECT_STATE.md). Later phase-specific notes below supersede earlier Settings behavior.
+> **Current-state guide:** **Settings → Third-Party** lists one row per service, and each opens its own page: **SteamGridDB** (API key, prefer artwork, refresh, remove key) and **Steam Account** (SteamID64, Web API key, disconnect). These are independent services laid out the same way. Back from either returns to its row in Third-Party. Both use Settings navigation; the Achievements page does not collect credentials. See [ACHIEVEMENTS.md](ACHIEVEMENTS.md) and [PROJECT_STATE.md](PROJECT_STATE.md). Later phase-specific notes below supersede earlier Settings behavior.
 
 
 Horizon supports SteamGridDB square artwork for Steam and Heroic.
@@ -19,7 +19,7 @@ layout, persistence, and contrast rules.
 
 ## SteamGridDB key and preferences
 
-Enter a personal key at **Settings → Third-Party → API key**. Generate keys at
+Enter a personal key at **Settings → Third-Party → SteamGridDB → API key**. Generate keys at
 https://www.steamgriddb.com/profile/preferences/api. Horizon stores keys in
 `$XDG_CONFIG_HOME/io.github.Mars7x.Horizon/third-party.json` (the Flatpak
 config directory is sandbox-local), with mode 0600 under a mode-0700 directory.
@@ -205,7 +205,7 @@ password. User-supplied keys must be managed according to Steam's API terms.
 
 ## Phase 10.4.2 — Separate third-party sections
 
-Third-Party settings visibly groups the four SteamGridDB artwork actions together, then separates the **Steam** account entry with a heading and divider. Focus order, persistence, editor handling, and disabled-row skipping remain unchanged. Future providers should use their own named sections rather than appearing as another SteamGridDB setting.
+*(Superseded: SteamGridDB now has its own sub-page like Steam Account; see the current-state guide above.)* Third-Party settings visibly groups the four SteamGridDB artwork actions together, then separates the **Steam** account entry with a heading and divider. Focus order, persistence, editor handling, and disabled-row skipping remain unchanged. Future providers should use their own named sections rather than appearing as another SteamGridDB setting.
 
 ## Phase 10.4.3.3 — Parent-row focus restoration (pending build verification)
 

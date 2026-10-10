@@ -156,7 +156,6 @@ export component AppWindow inherits Window {
     in property <[AchievementEntryData]> achievement-entries;
     in property <string> achievements-status: "Connect Steam to display achievements.";
     in property <bool> achievements-loading: false;
-    in property <bool> achievements-saved-data: false;
     in property <int> achievements-selected-index: 0;
     in property <int> achievements-visit-revision: 0;
     in property <int> achievements-catalog-revision: 0;
@@ -493,6 +492,7 @@ export component AppWindow inherits Window {
                 achievements-page := AchievementsPage {
                     width: parent.width;
                     height: parent.height;
+                    active: root.current-route == AppRouteView.achievements;
                     game-count: root.achievements-game-count;
                     source-label: root.achievements-source-label;
                     has-source-choice: root.achievements-has-source-choice;
@@ -509,7 +509,6 @@ export component AppWindow inherits Window {
                     viewing-entries: root.achievements-viewing-entries;
                     status: root.achievements-status;
                     loading: root.achievements-loading;
-                    showing-saved-data: root.achievements-saved-data;
                     choose-game(index) => {
                         if (root.current-route == AppRouteView.achievements) { root.achievements-select(index); }
                     }

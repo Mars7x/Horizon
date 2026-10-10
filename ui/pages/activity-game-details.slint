@@ -340,7 +340,7 @@ export component ActivityGameDetailsPage inherits Rectangle {
         width: root.history-width;
         strength: root.first-row > 0 ? 1.0 : 0.0;
     }
-    if root.session-count > 0 : ScrollEdgeShadow {
+    if root.active && root.session-count > 0 : ScrollEdgeShadow {
         x: root.history-x; y: root.list-top + root.list-height - self.height;
         width: root.history-width;
         bottom: true;

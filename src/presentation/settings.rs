@@ -28,7 +28,10 @@ enum SettingsView {
     #[default]
     Root,
     Appearance,
+    // Third-Party lists one "Open" row per service; each service has its
+    // own sub-page so SteamGridDB and Steam work the same way.
     ThirdParty,
+    SteamGridDb,
     SteamAccount,
 }
 
@@ -251,10 +254,10 @@ impl SettingsController {
                         page.last_accent_selection.unwrap_or(3),
                         event.repeated,
                     )
-                } else if page.view == SettingsView::ThirdParty
+                } else if page.view == SettingsView::SteamGridDb
                     && !self.service.borrow().has_steamgriddb_key()
                 {
-                    third_party_step_without_key(page.selected, delta, event.repeated)
+                    steamgriddb_step_without_key(page.selected, delta, event.repeated)
                 } else {
                     step_with_edge_wrap(page.selected, 0, count - 1, delta, event.repeated)
                 };
@@ -264,7 +267,7 @@ impl SettingsController {
             }
             UiAction::Left | UiAction::Right => {
                 let page = self.page.borrow();
-                if page.view == SettingsView::ThirdParty && page.selected == 1 {
+                if page.view == SettingsView::SteamGridDb && page.selected == 1 {
                     let preferred = action == UiAction::Right;
                     drop(page);
                     self.set_preference(ui, preferred);
@@ -407,7 +410,22 @@ impl SettingsController {
                 self.publish(ui);
                 return;
             }
-            SettingsView::ThirdParty | SettingsView::SteamAccount => {}
+            SettingsView::ThirdParty => {
+                let destination = match selected {
+                    0 => SettingsView::SteamGridDb,
+                    1 => SettingsView::SteamAccount,
+                    _ => return,
+                };
+                let mut page = self.page.borrow_mut();
+                page.view = destination;
+                page.selected = 0;
+                page.feedback.clear();
+                drop(page);
+                self.cue(UiSoundCue::Ok);
+                self.publish(ui);
+                return;
+            }
+            SettingsView::SteamGridDb | SettingsView::SteamAccount => {}
         }
         if view == SettingsView::SteamAccount {
             if !(0..=2).contains(&selected) {
@@ -438,7 +456,7 @@ impl SettingsController {
             self.publish(ui);
             return;
         }
-        if !(0..=4).contains(&selected) {
+        if !(0..=3).contains(&selected) {
             return;
         }
         if (selected == 2 || selected == 3) && !self.service.borrow().has_steamgriddb_key() {
@@ -468,28 +486,19 @@ impl SettingsController {
                     self.cue(UiSoundCue::Ok);
                 }
             }
-            3 => {
-                if self.service.borrow().has_steamgriddb_key() {
-                    let result = self.service.borrow_mut().remove_steamgriddb_key();
-                    if result.is_ok() {
-                        self.notify_artwork_changed();
-                        self.cue(UiSoundCue::Ok);
-                        // Move focus to a usable control after removing the key.
-                        self.page.borrow_mut().selected = 0;
-                    }
-                    self.page.borrow_mut().feedback = if result.is_ok() {
-                        "Saved API key removed.".into()
-                    } else {
-                        "Could not remove the API key.".into()
-                    };
+            3 if self.service.borrow().has_steamgriddb_key() => {
+                let result = self.service.borrow_mut().remove_steamgriddb_key();
+                if result.is_ok() {
+                    self.notify_artwork_changed();
+                    self.cue(UiSoundCue::Ok);
+                    // Move focus to a usable control after removing the key.
+                    self.page.borrow_mut().selected = 0;
                 }
-            }
-            4 => {
-                let mut page = self.page.borrow_mut();
-                page.view = SettingsView::SteamAccount;
-                page.selected = 0;
-                page.feedback.clear();
-                self.cue(UiSoundCue::Ok);
+                self.page.borrow_mut().feedback = if result.is_ok() {
+                    "Saved API key removed.".into()
+                } else {
+                    "Could not remove the API key.".into()
+                };
             }
             _ => {}
         }
@@ -721,6 +730,7 @@ impl SettingsController {
             SettingsView::Appearance => 1,
             SettingsView::ThirdParty => 2,
             SettingsView::SteamAccount => 3,
+            SettingsView::SteamGridDb => 4,
         });
         let prefs = self.appearance.preferences();
         ui.set_settings_theme_index(prefs.theme_index());
@@ -756,7 +766,8 @@ fn settings_parent(view: SettingsView) -> Option<(SettingsView, i32)> {
         SettingsView::Root => None,
         SettingsView::Appearance => Some((SettingsView::Root, 0)),
         SettingsView::ThirdParty => Some((SettingsView::Root, 1)),
-        SettingsView::SteamAccount => Some((SettingsView::ThirdParty, 4)),
+        SettingsView::SteamGridDb => Some((SettingsView::ThirdParty, 0)),
+        SettingsView::SteamAccount => Some((SettingsView::ThirdParty, 1)),
     }
 }
 
@@ -765,7 +776,8 @@ fn selection_count(view: SettingsView, _has_key: bool, steam_saved: bool) -> i32
     match view {
         SettingsView::Root => 2,
         SettingsView::Appearance => 14,
-        SettingsView::ThirdParty => 5,
+        SettingsView::ThirdParty => 2,
+        SettingsView::SteamGridDb => 4,
         SettingsView::SteamAccount => {
             if steam_saved {
                 3
@@ -788,8 +800,9 @@ fn next_id_editor_target(target: i32, direction: UiAction, can_save: bool) -> i3
     }
 }
 
-fn third_party_step_without_key(selected: i32, delta: i32, repeated: bool) -> i32 {
-    let selectable = [0, 1, 4];
+/// Without a key, Refresh and Remove are unavailable and skipped by focus.
+fn steamgriddb_step_without_key(selected: i32, delta: i32, repeated: bool) -> i32 {
+    let selectable = [0, 1];
     let index = selectable
         .iter()
         .position(|&item| item == selected)
@@ -930,13 +943,15 @@ mod editor_navigation_tests {
         );
         assert_eq!(
             super::selection_count(SettingsView::ThirdParty, false, false),
-            5
+            2
         );
-        assert_eq!(super::third_party_step_without_key(1, 1, false), 4);
         assert_eq!(
-            super::selection_count(SettingsView::ThirdParty, true, false),
-            5
+            super::selection_count(SettingsView::SteamGridDb, true, false),
+            4
         );
+        // Without a key, focus moves only between API key and the preference.
+        assert_eq!(super::steamgriddb_step_without_key(1, 1, false), 0);
+        assert_eq!(super::steamgriddb_step_without_key(0, 1, false), 1);
         assert_eq!(
             super::selection_count(SettingsView::SteamAccount, true, true),
             3
@@ -1028,8 +1043,12 @@ mod root_activation_regressions {
             Some((SettingsView::Root, 1))
         );
         assert_eq!(
+            settings_parent(SettingsView::SteamGridDb),
+            Some((SettingsView::ThirdParty, 0))
+        );
+        assert_eq!(
             settings_parent(SettingsView::SteamAccount),
-            Some((SettingsView::ThirdParty, 4))
+            Some((SettingsView::ThirdParty, 1))
         );
         let fresh = PageState::default();
         assert_eq!(fresh.view, SettingsView::Root);
