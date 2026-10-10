@@ -1,0 +1,616 @@
+import { Wheel } from "../components/wheel.slint";
+import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
+import { AlbumTileData } from "../models/album.slint";
+import { PageHeader, HeaderValue, ScrollEdgeShadow } from "../components/page-header.slint";
+import { MarqueeText } from "../components/marquee-text.slint";
+import { FocusFrame } from "../components/focus-frame.slint";
+import { TransitionDriver } from "../components/transition.slint";
+import { ActionButton } from "../components/action-button.slint";
+
+// A white tick (fonts may lack ✓).
+component TickGlyph inherits Path {
+    viewbox-width: 12; viewbox-height: 10;
+    commands: "M 1 5 L 4.5 8.5 L 11 1.5";
+    fill: transparent;
+    stroke: white;
+    stroke-width: 2px;
+    stroke-line-cap: round;
+}
+
+// Small filled play triangle (fonts may lack ▶).
+component PlayGlyph inherits Path {
+    viewbox-width: 10; viewbox-height: 12;
+    commands: "M 0 0 L 10 6 L 0 12 Z";
+    fill: white;
+    stroke-width: 0px;
+}
+
+// A capture in the grid. Same focus language as covers: Home's corner
+// brackets and a slight lift.
+component AlbumTile inherits Rectangle {
+    in property <AlbumTileData> tile;
+    in property <bool> selected;
+    in property <length> tile-width;
+    in property <length> tile-height;
+    // The grid's multi-select is on: tick boxes show, others dim.
+    in property <bool> selecting: false;
+    callback clicked();
+    callback wheel(int);
+    width: root.tile-width;
+    height: root.tile-height;
+    background: transparent;
+
+    in property <float> selected-scale: 1.06;
+    private property <float> lift: root.selected ? root.selected-scale : 1.0;
+    animate lift { duration: Motion.focus-duration; easing: ease-out; }
+
+    shell := Rectangle {
+        width: root.tile-width * root.lift;
+        height: root.tile-height * root.lift;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        border-radius: Metrics.radius-md;
+        background: Theme.surface;
+        border-width: Theme.high-contrast ? 2px : 1px;
+        border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.42);
+        drop-shadow-offset-y: root.selected ? 5px : 3px;
+        drop-shadow-blur: root.selected ? 16px : 10px;
+        drop-shadow-color: Theme.shadow.with-alpha(root.selected ? 0.9 : 0.6);
+        clip: true;
+        if root.tile.has-thumbnail : Image {
+            width: parent.width; height: parent.height;
+            source: root.tile.thumbnail;
+            image-fit: cover;
+            // Captures that can't be deleted step back while selecting.
+            opacity: root.selecting && !root.tile.deletable ? 0.35 : 1.0;
+            animate opacity { duration: Motion.hover-duration; easing: ease-in-out; }
+        }
+        if root.selecting && root.tile.deletable : Rectangle {
+            x: 10px; y: 10px; width: 26px; height: 26px;
+            border-radius: 13px;
+            background: root.tile.checked ? Theme.accent : #00000066;
+            border-width: 2px;
+            border-color: root.tile.checked ? Theme.accent : white;
+            animate background, border-color { duration: Motion.hover-duration; easing: ease-in-out; }
+            if root.tile.checked : TickGlyph { x: 6px; y: 7px; width: 14px; height: 12px; }
+        }
+        if root.tile.failed : Text {
+            width: parent.width; height: parent.height;
+            text: root.tile.is-video ? "Can't play this video" : "Can't open this image";
+            color: Theme.secondary-foreground;
+            font-size: Typography.caption-size;
+            horizontal-alignment: center; vertical-alignment: center;
+        }
+        // Videos: their length in a pill (a play mark until it is known).
+        if root.tile.is-video : Rectangle {
+            x: parent.width - self.width - 8px;
+            y: parent.height - self.height - 8px;
+            width: root.tile.duration != "" ? duration-text.preferred-width + 20px : 30px;
+            height: 24px;
+            border-radius: 12px;
+            background: #000000a8;
+            duration-text := Text {
+                width: parent.width; height: parent.height;
+                visible: root.tile.duration != "";
+                text: root.tile.duration;
+                color: white;
+                font-size: Typography.label-size;
+                font-weight: Typography.emphasis-weight;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            if root.tile.duration == "" : PlayGlyph {
+                x: 11px; y: 7px; width: 8px; height: 10px;
+            }
+        }
+    }
+    FocusFrame {
+        x: shell.x - Metrics.focus-offset;
+        y: shell.y - Metrics.focus-offset;
+        width: shell.width + Metrics.focus-offset * 2;
+        height: shell.height + Metrics.focus-offset * 2;
+        active: root.selected;
+        opacity: root.selected ? 1.0 : 0.0;
+        animate opacity { duration: Motion.focus-duration; easing: ease-in-out; }
+    }
+    TouchArea {
+        width: parent.width; height: parent.height;
+        clicked => { root.clicked(); }
+        scroll-event(event) => {
+            if event.delta-y != 0px {
+                root.wheel(Wheel.rows(event.delta-y));
+                return accept;
+            }
+            reject
+        }
+    }
+}
+
+// Album: every screenshot and clip, newest first, in a grid; A grows the
+// selected one to fill the window, where Left/Right slide between captures. Rust owns the
+// order, selection, camera row and which images are decoded; Slint lays out
+// the grid and reports its shape (`grid-columns`, `visible-rows`).
+export component AlbumPage inherits Rectangle {
+    in property <[AlbumTileData]> tiles;
+    in property <int> total-count: 0;
+    // Captures before filtering; 0 shows the empty Album message.
+    in property <int> collection-count: 0;
+    in property <string> status: "";
+    in property <string> count-text: "0 captures";
+    in property <string> game-text: "All games";
+    in property <string> kind-text: "All";
+    in property <int> selected-index: 0;
+    in property <int> scroll-row: 0;
+    in property <int> visit-revision: 0;
+    in property <string> selected-text: "";
+    // False while this page is leaving: bottom-bar chrome switches with the
+    // route like the hint bar.
+    in property <bool> active: true;
+
+    in property <bool> viewing: false;
+    in property <string> viewer-text: "";
+    in property <image> viewer-image;
+    in property <bool> viewer-has-image: false;
+    in property <image> viewer-previous-image;
+    in property <bool> viewer-previous-has-image: false;
+    // The open capture's grid thumbnail, for landing back in the grid.
+    in property <image> viewer-landing-image;
+    in property <bool> viewer-landing-has-image: false;
+    // Bumped by Rust for each step; `slide-direction` is +1 (next) or -1.
+    in property <int> slide-key: 0;
+    in property <int> slide-direction: 1;
+    in property <bool> viewer-is-video: false;
+    in property <bool> viewer-playing: false;
+    in property <string> viewer-problem: "";
+    // Video clock. Rust anchors the position (on start, pause, seek and a
+    // regular resync); between anchors the clock runs on frame time, so the
+    // bar and time move continuously and exactly together.
+    in property <int> video-position-ms: 0;
+    in property <int> video-duration-ms: 0;
+    in property <int> video-anchor: 0;
+    // Playing with frames on screen: only then does the clock advance.
+    in property <bool> video-clock-running: false;
+    private property <duration> anchor-tick: 0ms;
+    // Until the handler below has run (a frame late), use the anchored
+    // position as it is rather than time since the previous anchor.
+    private property <int> anchor-seen: 0;
+    changed video-anchor => {
+        root.anchor-tick = animation-tick();
+        root.anchor-seen = root.video-anchor;
+    }
+    private property <float> clock-ms: min(root.video-duration-ms,
+        root.video-position-ms + (root.viewing && root.video-clock-running && root.anchor-seen == root.video-anchor
+            ? (animation-tick() - root.anchor-tick) / 1ms : 0));
+    private property <float> video-progress: root.video-duration-ms > 0
+        ? max(0.0, min(1.0, root.clock-ms / root.video-duration-ms)) : 0.0;
+    pure function clock-text(ms: float) -> string {
+        let total = Math.floor(ms / 1000);
+        let seconds = Math.mod(total, 60);
+        let minutes = Math.mod(Math.floor(total / 60), 60);
+        let hours = Math.floor(total / 3600);
+        let padded-seconds = (seconds < 10 ? "0" : "") + seconds;
+        return hours > 0
+            ? hours + ":" + (minutes < 10 ? "0" : "") + minutes + ":" + padded-seconds
+            : minutes + ":" + padded-seconds;
+    }
+
+    in property <bool> selecting: false;
+    in property <bool> can-delete: false;
+    in property <bool> dialog-open: false;
+    in property <string> dialog-title: "";
+    in property <string> dialog-text: "";
+    // 0 Cancel, 1 Delete.
+    in property <int> dialog-focus: 0;
+    callback dialog-choose(int);
+
+    callback choose(int);
+    callback cycle-game();
+    callback cycle-kind();
+    callback scroll-rows(int);
+    callback step(int);
+    callback toggle-play();
+    callback seek(float);
+    callback close-viewer();
+    // The grid's shape changed (window resize): Rust re-mounts its rows.
+    callback layout-changed();
+    changed grid-columns => { root.layout-changed(); }
+    changed visible-rows => { root.layout-changed(); }
+    background: Theme.background;
+
+    private property <length> margin: Metrics.page-margin;
+    private property <length> content-bottom: root.height - Metrics.page-bottom-bar-height;
+    // The selected tile's lift. The viewer opens from and closes onto the
+    // lifted size, so the frame and tile meet exactly.
+    private property <float> tile-lift: 1.06;
+    // Room around the grid for the lifted tile and its brackets.
+    private property <length> grid-pad: 20px;
+    private property <length> gap: 22px;
+    out property <int> grid-columns: root.width < 900px ? 3
+        : root.width < 1500px ? 4 : root.width < 2300px ? 5 : 6;
+    private property <length> viewport-width: root.width - (root.margin - root.grid-pad) * 2;
+    private property <length> viewport-height: max(0px, root.content-bottom - Metrics.page-header-height);
+    private property <length> tile-width: (root.viewport-width - root.grid-pad * 2
+        - (root.grid-columns - 1) * root.gap) / root.grid-columns;
+    private property <length> tile-height: root.tile-width * 9 / 16;
+    private property <length> row-stride: root.tile-height + root.gap;
+    out property <int> visible-rows: max(1, Math.floor(
+        (root.viewport-height - root.grid-pad * 2 + root.gap) / root.row-stride));
+    private property <int> total-rows: Math.floor((root.total-count + root.grid-columns - 1) / root.grid-columns);
+
+    // A fresh visit jumps to the top instead of animating there (see
+    // AchievementsPage: the duration is read at draw time).
+    private property <int> settled-visit: 0;
+    changed visit-revision => { camera-settle.stop(); camera-settle.start(); }
+    camera-settle := Timer {
+        interval: 50ms;
+        running: false;
+        triggered => { self.stop(); root.settled-visit = root.visit-revision; }
+    }
+    private property <length> camera: root.scroll-row * root.row-stride;
+    animate camera {
+        duration: root.settled-visit == root.visit-revision ? Motion.carousel-duration : 0ms;
+        easing: ease-out;
+    }
+
+    // The viewer grows out of the selected tile and shrinks back into it.
+    private property <float> reveal: root.viewing ? 1.0 : 0.0;
+    animate reveal { duration: Motion.page-duration; easing: ease-out; }
+
+    PageHeader {
+        width: parent.width;
+        title: "Album";
+        HorizontalLayout {
+            width: 130px + 190px + 130px + Metrics.spacing-sm * 2;
+            x: parent.width - Metrics.page-margin - self.width + Metrics.spacing-sm + 2px;
+            y: Metrics.page-accessory-y;
+            height: Metrics.page-accessory-height;
+            spacing: Metrics.spacing-sm;
+            HeaderValue { width: 130px; label: "Captures"; value: root.count-text; }
+            HeaderValue {
+                width: 190px; label: "Game"; value: root.game-text;
+                interactive: !root.viewing && root.collection-count > 0;
+                button: root.collection-count > 0 ? "LB" : "";
+                clicked => { root.cycle-game(); }
+            }
+            HeaderValue {
+                width: 130px; label: "Type"; value: root.kind-text;
+                interactive: !root.viewing && root.collection-count > 0;
+                button: root.collection-count > 0 ? "RB" : "";
+                clicked => { root.cycle-kind(); }
+            }
+        }
+    }
+
+    if root.total-count == 0 : Text {
+        x: root.margin; y: (root.height - self.height) / 2;
+        width: root.width - root.margin * 2;
+        horizontal-alignment: center;
+        wrap: word-wrap;
+        text: root.collection-count == 0 ? root.status : "No captures match this filter.";
+        color: Theme.secondary-foreground;
+        font-size: Typography.body-size;
+    }
+
+    grid-viewport := Rectangle {
+        x: root.margin - root.grid-pad;
+        y: Metrics.page-header-height;
+        width: root.viewport-width;
+        height: root.viewport-height;
+        background: transparent;
+        clip: true;
+        TouchArea {
+            width: parent.width; height: parent.height;
+            enabled: !root.viewing;
+            scroll-event(event) => {
+                if event.delta-y != 0px {
+                    root.scroll-rows(Wheel.rows(event.delta-y));
+                    return accept;
+                }
+                reject
+            }
+        }
+        for tile in root.tiles : AlbumTile {
+            x: root.grid-pad + Math.mod(tile.absolute-index, root.grid-columns)
+                * (root.tile-width + root.gap);
+            y: root.grid-pad + Math.floor(tile.absolute-index / root.grid-columns)
+                * root.row-stride - root.camera;
+            tile: tile;
+            tile-width: root.tile-width;
+            tile-height: root.tile-height;
+            selected-scale: root.tile-lift;
+            selecting: root.selecting;
+            selected: root.active && !root.viewing && root.selected-index == tile.absolute-index;
+            clicked => { root.choose(tile.absolute-index); }
+            wheel(rows) => { root.scroll-rows(rows); }
+        }
+    }
+    if root.total-count > 0 : ScrollEdgeShadow {
+        x: 0px; y: grid-viewport.y; width: root.width;
+        strength: root.camera / root.row-stride;
+    }
+    if root.active && root.total-count > 0 : ScrollEdgeShadow {
+        x: 0px; y: root.content-bottom - self.height; width: root.width;
+        bottom: true;
+        strength: root.total-rows - root.visible-rows - root.camera / root.row-stride;
+    }
+
+    // Bottom bar, left: the selected capture. The hint bar (app.slint) owns
+    // the right side.
+    if root.active && root.total-count > 0 && root.reveal < 1.0 : MarqueeText {
+        x: Metrics.page-margin;
+        y: root.height - Metrics.hint-row-center-from-bottom - self.height / 2;
+        width: (root.width - Metrics.page-margin * 2) / 2;
+        height: 28px;
+        opacity: 1.0 - root.reveal;
+        text: root.selected-text;
+        active: !root.viewing;
+        font-weight: Typography.emphasis-weight;
+    }
+
+    // ----- Fullscreen viewer -------------------------------------------
+    // The capture fills the window on black. Where it starts and ends: the
+    // selected tile's place in the grid (its target camera position, so a
+    // capture browsed to while open lands where the grid will show it).
+    private property <int> selected-column: Math.mod(root.selected-index, root.grid-columns);
+    private property <int> selected-row: Math.floor(root.selected-index / root.grid-columns);
+    private property <length> tile-x: root.margin + root.selected-column * (root.tile-width + root.gap)
+        - root.tile-width * (root.tile-lift - 1) / 2;
+    private property <length> tile-y: Metrics.page-header-height + root.grid-pad
+        + (root.selected-row - root.scroll-row) * root.row-stride
+        - root.tile-height * (root.tile-lift - 1) / 2;
+    // Fitted (contain) size of the capture in the window. At full reveal the
+    // frame is exactly this, so the frame's "cover" fit equals "contain".
+    private property <float> aspect: root.viewer-has-image && root.viewer-image.height > 0
+        ? root.viewer-image.width / root.viewer-image.height : 16 / 9;
+    private property <length> fit-width: root.width / root.height > root.aspect
+        ? root.height * root.aspect : root.width;
+    private property <length> fit-height: root.fit-width / root.aspect;
+
+    // Overlay (title, date, hints, timeline): shown on opening and on any
+    // input, fading after three seconds; kept while a video is paused.
+    in property <int> overlay-revision: 0;
+    private property <bool> overlay-awake: false;
+    changed overlay-revision => { root.wake-overlay(); }
+    function wake-overlay() {
+        root.overlay-awake = true;
+        overlay-timer.stop();
+        overlay-timer.start();
+    }
+    overlay-timer := Timer {
+        interval: 3s;
+        running: false;
+        triggered => { self.stop(); root.overlay-awake = false; }
+    }
+    out property <bool> overlay-shown: root.viewing && (root.overlay-awake
+        || (root.viewer-is-video && !root.viewer-playing) || root.viewer-problem != "");
+    private property <float> overlay-opacity: root.overlay-shown ? 1.0 : 0.0;
+    animate overlay-opacity { duration: Motion.value-swap-duration; easing: ease-in-out; }
+
+    viewer := Rectangle {
+        x: 0px; y: 0px;
+        width: root.width; height: root.height;
+        visible: root.reveal > 0.0;
+        background: #000000.with-alpha(root.reveal);
+
+        slide := TransitionDriver { key: root.slide-key; }
+        private property <length> travel: (root.width + Metrics.spacing-xxl) * root.slide-direction;
+
+        // Leaving: shown only while a slide runs.
+        Image {
+            width: parent.width; height: parent.height;
+            visible: slide.phase < 3 && root.viewer-previous-has-image;
+            x: slide.phase >= 2 ? -parent.travel : 0px;
+            animate x { duration: slide.phase == 2 ? Motion.page-duration : 0ms; easing: ease-out; }
+            source: root.viewer-previous-image;
+            image-fit: contain;
+        }
+        frame := Rectangle {
+            private property <length> offset: slide.phase == 1 ? parent.travel : 0px;
+            animate offset { duration: slide.phase == 2 ? Motion.page-duration : 0ms; easing: ease-out; }
+            private property <length> lifted-width: root.tile-width * root.tile-lift;
+            private property <length> lifted-height: root.tile-height * root.tile-lift;
+            x: root.tile-x + ((root.width - root.fit-width) / 2 - root.tile-x) * root.reveal + self.offset;
+            y: root.tile-y + ((root.height - root.fit-height) / 2 - root.tile-y) * root.reveal;
+            width: self.lifted-width + (root.fit-width - self.lifted-width) * root.reveal;
+            height: self.lifted-height + (root.fit-height - self.lifted-height) * root.reveal;
+            border-radius: Metrics.radius-md * (1.0 - root.reveal);
+            clip: true;
+            background: transparent;
+            // The tile's own thumbnail underneath: closing crossfades onto
+            // it, so the frame lands on exactly what the tile shows (a video
+            // may have stopped far from its poster frame).
+            if root.viewer-landing-has-image : Image {
+                width: parent.width; height: parent.height;
+                source: root.viewer-landing-image;
+                image-fit: cover;
+            }
+            if root.viewer-has-image : Image {
+                width: parent.width; height: parent.height;
+                source: root.viewer-image;
+                image-fit: cover;
+                opacity: root.viewing || !root.viewer-landing-has-image ? 1.0 : root.reveal;
+            }
+        }
+
+        if root.viewer-problem != "" : Text {
+            width: parent.width; height: parent.height;
+            text: root.viewer-problem;
+            color: #ffffffcc;
+            font-size: Typography.body-size;
+            horizontal-alignment: center; vertical-alignment: center;
+        }
+
+        // Pointer: moving wakes the overlay; click the capture to play/pause
+        // a video, the edges to browse.
+        TouchArea {
+            width: parent.width; height: parent.height;
+            enabled: root.viewing;
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.move) { root.wake-overlay(); }
+            }
+            clicked => {
+                root.wake-overlay();
+                if (root.viewer-is-video) { root.toggle-play(); }
+            }
+        }
+        for side in [-1, 1] : edge := TouchArea {
+            x: side < 0 ? 0px : parent.width - self.width;
+            y: 120px;
+            width: min(140px, parent.width / 5);
+            height: max(0px, parent.height - 280px);
+            enabled: root.viewing;
+            clicked => { root.wake-overlay(); root.step(side); }
+            Rectangle {
+                x: side < 0 ? Metrics.spacing-lg : parent.width - self.width - Metrics.spacing-lg;
+                y: (parent.height - self.height) / 2;
+                width: 48px; height: 48px; border-radius: 24px;
+                background: #00000080;
+                opacity: edge.has-hover ? 1.0 : 0.0;
+                animate opacity { duration: Motion.hover-duration; easing: ease-in-out; }
+                Text {
+                    width: parent.width; height: parent.height;
+                    text: side < 0 ? "‹" : "›";
+                    color: white;
+                    font-size: Typography.heading-size;
+                    horizontal-alignment: center; vertical-alignment: center;
+                }
+            }
+        }
+
+        if root.viewer-is-video && root.viewer-problem == "" : Rectangle {
+            // Paused: a play button over the frame.
+            width: 80px; height: 80px; border-radius: 40px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: #00000099;
+            opacity: root.viewer-playing ? 0.0 : root.reveal;
+            animate opacity { duration: Motion.hover-duration; easing: ease-in-out; }
+            PlayGlyph { x: 31px; y: 27px; width: 24px; height: 26px; }
+        }
+
+        // Top overlay: when, and where in the Album.
+        Rectangle {
+            x: 0px; y: 0px;
+            width: parent.width; height: 132px;
+            opacity: root.overlay-opacity * root.reveal;
+            visible: self.opacity > 0.0;
+            background: @linear-gradient(180deg, #000000a6 0%, #00000000 100%);
+            Text {
+                x: parent.width / 2;
+                y: Metrics.page-title-y;
+                width: parent.width / 2 - Metrics.page-margin;
+                height: Metrics.page-title-height;
+                text: root.viewer-text;
+                color: #ffffffcc;
+                font-size: Typography.caption-size;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+            }
+        }
+
+        // Bottom overlay: video timeline and time. The hint bar (app.slint)
+        // draws over it, in its on-dark style.
+        Rectangle {
+            x: 0px; y: parent.height - self.height;
+            width: parent.width; height: 160px;
+            opacity: root.overlay-opacity * root.reveal;
+            visible: self.opacity > 0.0;
+            background: @linear-gradient(180deg, #00000000 0%, #000000b3 100%);
+            if root.viewer-is-video && root.viewer-problem == "" : Rectangle {
+                x: Metrics.page-margin;
+                y: parent.height - Metrics.page-bottom-bar-height;
+                width: parent.width - Metrics.page-margin * 2;
+                height: 4px;
+                border-radius: 2px;
+                background: #ffffff40;
+                Rectangle {
+                    x: 0px; height: parent.height; border-radius: 2px;
+                    width: parent.width * root.video-progress;
+                    background: Theme.accent;
+                }
+                // Playhead.
+                Rectangle {
+                    width: 12px; height: 12px; border-radius: 6px;
+                    x: parent.width * root.video-progress - self.width / 2;
+                    y: (parent.height - self.height) / 2;
+                    background: white;
+                    drop-shadow-blur: 4px;
+                    drop-shadow-color: #00000080;
+                }
+                TouchArea {
+                    y: -10px; height: parent.height + 20px; width: parent.width;
+                    enabled: root.viewing;
+                    clicked => { root.wake-overlay(); root.seek(self.mouse-x / self.width); }
+                }
+            }
+            if root.viewer-is-video && root.video-duration-ms > 0 : Text {
+                x: Metrics.page-margin;
+                y: parent.height - Metrics.hint-row-center-from-bottom - self.height / 2;
+                height: 28px;
+                text: root.clock-text(root.clock-ms) + " / " + root.clock-text(root.video-duration-ms);
+                color: white;
+                font-size: Typography.body-size;
+                font-weight: Typography.emphasis-weight;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    // Delete confirmation, over the grid or the fullscreen viewer. Modal:
+    // the backdrop takes every click. Cancel is focused first.
+    Rectangle {
+        x: 0px; y: 0px;
+        width: root.width; height: root.height;
+        background: #00000099;
+        opacity: root.dialog-open ? 1.0 : 0.0;
+        visible: root.dialog-open || self.opacity > 0.01;
+        animate opacity { duration: Motion.reduced-motion ? 0ms : 170ms; easing: ease-in-out; }
+        TouchArea { width: parent.width; height: parent.height; }
+
+        Rectangle {
+            width: min(456px, parent.width - 64px);
+            height: 196px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2 + (root.dialog-open ? 0px : 12px);
+            animate y { duration: Motion.reduced-motion ? 0ms : 180ms; easing: ease-out; }
+            background: Theme.surface-raised;
+            border-radius: Metrics.radius-lg;
+            border-width: Theme.high-contrast ? 2px : 1px;
+            border-color: Theme.divider;
+            Text {
+                x: 29px; y: 27px;
+                width: parent.width - 58px; height: 34px;
+                text: root.dialog-title;
+                color: Theme.foreground;
+                font-size: Typography.heading-size;
+                font-weight: Typography.heading-weight;
+                vertical-alignment: center;
+            }
+            Text {
+                x: 29px; y: 66px;
+                width: parent.width - 58px; height: 44px;
+                text: root.dialog-text;
+                color: Theme.secondary-foreground;
+                font-size: Typography.body-size;
+                wrap: word-wrap;
+            }
+            ActionButton {
+                x: parent.width - 29px - 2 * 107px - 12px; y: 132px;
+                width: 107px; height: 40px;
+                label: "Cancel";
+                focused: root.dialog-open && root.dialog-focus == 0;
+                enabled: root.dialog-open;
+                activated => { root.dialog-choose(0); }
+            }
+            ActionButton {
+                x: parent.width - 29px - 107px; y: 132px;
+                width: 107px; height: 40px;
+                label: "Delete";
+                primary: true;
+                focused: root.dialog-open && root.dialog-focus == 1;
+                enabled: root.dialog-open;
+                activated => { root.dialog-choose(1); }
+            }
+        }
+    }
+}

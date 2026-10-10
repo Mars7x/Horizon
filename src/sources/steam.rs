@@ -12,12 +12,15 @@ use thiserror::Error;
 use tracing::{debug, warn};
 use zip::ZipArchive;
 
-use crate::domain::{DomainValidationError, ExternalGameId, GameTitle, PlaytimeSeconds, SourceId};
+use crate::domain::{
+    DomainValidationError, ExternalGameId, GameTitle, PlaytimeSeconds, SourceId, album::MediaKind,
+};
 
 use super::{
-    GameSource, SourceArtworkCandidate, SourceCapability, SourceDescriptor, SourceDiscovery,
-    SourceError, SourceGame, SourceInitializationError, SourceLaunchTarget, SourceRuntimeState,
-    SourceSnapshot, SourceSnapshotError, SourceUnavailableReason,
+    CaptureSource, GameSource, SourceArtworkCandidate, SourceCapability, SourceCapture,
+    SourceDescriptor, SourceDiscovery, SourceError, SourceGame, SourceInitializationError,
+    SourceLaunchTarget, SourceRuntimeState, SourceSnapshot, SourceSnapshotError,
+    SourceUnavailableReason,
 };
 
 const STEAM_SOURCE_ID: &str = "steam";
@@ -851,6 +854,12 @@ const STEAM_ID64_ACCOUNT_BASE: u64 = 76_561_197_960_265_728;
 /// account Steam marks `MostRecent` in `loginusers.vdf`; otherwise accepts a
 /// lone account. Ambiguity reports nothing rather than guessing.
 fn active_localconfig_path(root: &Path) -> Option<PathBuf> {
+    let path = active_account_dir(root)?.join("config/localconfig.vdf");
+    path.is_file().then_some(path)
+}
+
+/// `userdata/<account>/` for the account `active_localconfig_path` explains.
+fn active_account_dir(root: &Path) -> Option<PathBuf> {
     let userdata = root.join("userdata");
     let accounts = fs::read_dir(&userdata)
         .ok()?
@@ -873,8 +882,7 @@ fn active_localconfig_path(root: &Path) -> Option<PathBuf> {
         None if accounts.len() == 1 => accounts.into_iter().next()?,
         None => return None,
     };
-    let path = userdata.join(account).join("config/localconfig.vdf");
-    path.is_file().then_some(path)
+    Some(userdata.join(account))
 }
 
 fn most_recent_account_id(content: &str) -> Option<String> {
@@ -1263,6 +1271,118 @@ fn read_manifest_name(path: &Path) -> Result<Option<GameTitle>, SteamDiscoveryEr
         return Ok(None);
     };
     Ok(Some(GameTitle::new(name)?))
+}
+
+/// Steam's own screenshots, read in place: `userdata/<account>/760/remote/
+/// <appid>/screenshots/`. Only the active account's (see `active_account_dir`),
+/// so another person's screenshots on a shared PC never appear.
+pub struct SteamCaptures {
+    source_id: SourceId,
+    roots: Vec<PathBuf>,
+}
+
+impl SteamCaptures {
+    pub fn new() -> Result<Self, SteamSourceInitError> {
+        Ok(Self {
+            source_id: SourceId::new(STEAM_SOURCE_ID)?,
+            roots: default_steam_roots(),
+        })
+    }
+
+    #[cfg(test)]
+    fn with_roots(roots: Vec<PathBuf>) -> Self {
+        Self {
+            source_id: SourceId::new(STEAM_SOURCE_ID).expect("steam source id"),
+            roots,
+        }
+    }
+}
+
+impl CaptureSource for SteamCaptures {
+    fn source_id(&self) -> &SourceId {
+        &self.source_id
+    }
+
+    fn captures(&self) -> Vec<SourceCapture> {
+        let mut seen_accounts = BTreeSet::new();
+        let mut captures = Vec::new();
+        for root in &self.roots {
+            let Some(account) = active_account_dir(root) else {
+                continue;
+            };
+            // Several candidate roots are usually links to one installation.
+            let identity = fs::canonicalize(&account).unwrap_or_else(|_| account.clone());
+            if !seen_accounts.insert(identity) {
+                continue;
+            }
+            let Ok(games) = fs::read_dir(account.join("760/remote")) else {
+                continue;
+            };
+            for game in games.filter_map(Result::ok) {
+                let Some(app_id) = game
+                    .file_name()
+                    .to_str()
+                    .filter(|name| name.parse::<u32>().is_ok_and(|id| id > 0))
+                    .map(str::to_owned)
+                else {
+                    continue;
+                };
+                let external_id = ExternalGameId::new(app_id).ok();
+                let folder = game.path().join("screenshots");
+                let Ok(files) = fs::read_dir(&folder) else {
+                    continue;
+                };
+                for file in files.filter_map(Result::ok) {
+                    let path = file.path();
+                    let Some(kind) = MediaKind::from_path(&path) else {
+                        continue;
+                    };
+                    let Ok(metadata) = file.metadata() else {
+                        continue;
+                    };
+                    if !metadata.is_file() {
+                        continue;
+                    }
+                    let name = file.file_name();
+                    let captured_at = name
+                        .to_str()
+                        .and_then(steam_screenshot_time)
+                        .or_else(|| metadata.modified().ok().and_then(unix_millis))
+                        .unwrap_or(0);
+                    let preview = folder.join("thumbnails").join(&name);
+                    captures.push(SourceCapture {
+                        path,
+                        kind,
+                        external_id: external_id.clone(),
+                        captured_at,
+                        preview: preview.is_file().then_some(preview),
+                    });
+                }
+            }
+        }
+        captures
+    }
+}
+
+/// Steam names screenshots `YYYYMMDDHHMMSS_N.jpg` in local time.
+fn steam_screenshot_time(name: &str) -> Option<i64> {
+    use chrono::{Local, NaiveDateTime, TimeZone};
+    let stamp = name.get(..14)?;
+    let naive = NaiveDateTime::parse_from_str(stamp, "%Y%m%d%H%M%S").ok()?;
+    Some(
+        Local
+            .from_local_datetime(&naive)
+            .earliest()?
+            .timestamp_millis(),
+    )
+}
+
+fn unix_millis(time: SystemTime) -> Option<i64> {
+    let millis = time
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .ok()?
+        .as_millis();
+    i64::try_from(millis).ok()
 }
 
 #[cfg(test)]
@@ -1722,5 +1842,68 @@ mod tests {
         let states = parse_gameprocess_running_states(log);
         assert!(!states.contains_key("1462040"));
         assert_eq!(states.get("14620400"), Some(&false));
+    }
+
+    #[test]
+    fn captures_list_the_single_accounts_screenshots_with_their_thumbnails() {
+        let root = temp_dir("captures");
+        let shots = root.join("userdata/123/760/remote/1245620/screenshots");
+        fs::create_dir_all(shots.join("thumbnails")).expect("screenshots");
+        fs::write(shots.join("20261010143012_1.jpg"), b"jpg").expect("shot");
+        fs::write(shots.join("thumbnails/20261010143012_1.jpg"), b"jpg").expect("thumb");
+        fs::write(shots.join("other.png"), b"png").expect("undated shot");
+        fs::write(shots.join("screenshots.vdf"), b"vdf").expect("not media");
+        // Non-numeric folders are not Steam games.
+        fs::create_dir_all(root.join("userdata/123/760/remote/junk/screenshots")).expect("junk");
+        // The same installation reached through two roots is listed once.
+        let captures = SteamCaptures::with_roots(vec![root.clone(), root.clone()]).captures();
+
+        assert_eq!(captures.len(), 2);
+        let dated = captures
+            .iter()
+            .find(|c| c.path.ends_with("20261010143012_1.jpg"))
+            .expect("dated capture");
+        assert_eq!(dated.kind, MediaKind::Photo);
+        assert_eq!(
+            dated.external_id.as_ref().map(ExternalGameId::as_str),
+            Some("1245620")
+        );
+        assert_eq!(
+            dated.captured_at,
+            steam_screenshot_time("20261010143012_1.jpg").expect("time")
+        );
+        assert!(
+            dated
+                .preview
+                .as_ref()
+                .is_some_and(|p| p.ends_with("thumbnails/20261010143012_1.jpg"))
+        );
+        let undated = captures
+            .iter()
+            .find(|c| c.path.ends_with("other.png"))
+            .expect("undated");
+        assert!(
+            undated.captured_at > 0,
+            "falls back to the file's modified time"
+        );
+        assert!(undated.preview.is_none());
+
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn captures_ignore_ambiguous_accounts() {
+        let root = temp_dir("captures-ambiguous");
+        for account in ["111", "222"] {
+            let shots = root.join(format!("userdata/{account}/760/remote/10/screenshots"));
+            fs::create_dir_all(&shots).expect("screenshots");
+            fs::write(shots.join("20261010143012_1.jpg"), b"jpg").expect("shot");
+        }
+        assert!(
+            SteamCaptures::with_roots(vec![root.clone()])
+                .captures()
+                .is_empty()
+        );
+        fs::remove_dir_all(root).expect("cleanup");
     }
 }

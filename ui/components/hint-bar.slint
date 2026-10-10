@@ -1,21 +1,26 @@
-import { Theme, Metrics, Typography } from "../theme/theme.slint";
+import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { HintData } from "../models/hints.slint";
 
 // Button glyph in the same style as Home's footer "A": filled foreground
 // shape, letter in the background colour. Face buttons are circles,
-// shoulder buttons are pills.
-component ButtonGlyph inherits Rectangle {
+// shoulder buttons are pills. `compact` is the small size used beside a
+// header value's label (LB/RB pickers).
+export component ButtonGlyph inherits Rectangle {
     in property <string> button;
+    in property <bool> on-dark: false;
+    in property <bool> compact: false;
     private property <bool> shoulder: root.button.character-count > 1;
-    width: root.shoulder ? 34px : 22px;
-    height: 22px;
-    border-radius: 11px;
-    background: Theme.foreground;
+    width: root.compact ? (root.shoulder ? 24px : 16px) : (root.shoulder ? 34px : 22px);
+    height: root.compact ? 16px : 22px;
+    border-radius: self.height / 2;
+    background: root.on-dark ? white : Theme.foreground;
     Text {
+        width: parent.width;
+        height: parent.height;
         text: root.button;
-        color: Theme.background;
+        color: root.on-dark ? black : Theme.background;
         font-family: Typography.family;
-        font-size: root.shoulder ? 11px : 12px;
+        font-size: root.compact ? 9px : (root.shoulder ? 11px : 12px);
         font-weight: Typography.emphasis-weight;
         horizontal-alignment: center;
         vertical-alignment: center;
@@ -23,33 +28,69 @@ component ButtonGlyph inherits Rectangle {
 }
 
 // Right-aligned controller hints shown in every full-screen page's bottom bar.
-// Hints are display-only labels for what Rust's input handlers do; the
-// mapping from page state to hints lives in one place (app.slint).
+// The mapping from page state to hints lives in one place (app.slint).
+// Hints are also buttons for pointer users: clicking one sends that button
+// (`activated("A")`, …) through the same Rust input path as a controller
+// press. A hint pair activates the glyph clicked; its label activates the
+// first.
 export component HintBar inherits Rectangle {
     in property <[HintData]> hints;
+    // Over media (Album's fullscreen viewer): white glyphs and labels.
+    in property <bool> on-dark: false;
+    // False while the bar is faded out, so invisible hints never take clicks.
+    in property <bool> interactive: true;
+    callback activated(string);
     background: transparent;
+    // Each hint has click padding; the row runs that much past the bar's
+    // right edge so the last label still ends exactly at the page margin.
     HorizontalLayout {
+        x: 0px;
+        width: parent.width + Metrics.spacing-sm;
         alignment: end;
-        spacing: Metrics.spacing-lg;
-        for hint in root.hints : HorizontalLayout {
-            spacing: Metrics.spacing-sm;
-            alignment: start;
-            VerticalLayout {
-                alignment: center;
-                ButtonGlyph { button: hint.button; }
+        spacing: Metrics.spacing-sm;
+        for hint in root.hints : hint-item := Rectangle {
+            border-radius: Metrics.radius-sm;
+            background: !hint-touch.has-hover ? transparent
+                : root.on-dark ? #ffffff26 : Theme.surface.with-alpha(0.9);
+            animate background { duration: Motion.hover-duration; easing: ease-in-out; }
+            hint-touch := TouchArea {
+                width: parent.width; height: parent.height;
+                enabled: root.interactive;
+                clicked => { root.activated(hint.button); }
             }
-            if hint.button2 != "" : VerticalLayout {
-                alignment: center;
-                ButtonGlyph { button: hint.button2; }
-            }
-            Text {
-                text: hint.label;
-                color: Theme.secondary-foreground;
-                // Explicit: Home's footer does not inherit the app font.
-                font-family: Typography.family;
-                font-size: Typography.caption-size;
-                font-weight: Typography.emphasis-weight;
-                vertical-alignment: center;
+            HorizontalLayout {
+                padding-left: Metrics.spacing-sm;
+                padding-right: Metrics.spacing-sm;
+                spacing: Metrics.spacing-sm;
+                alignment: start;
+                VerticalLayout {
+                    alignment: center;
+                    ButtonGlyph {
+                        button: hint.button;
+                        on-dark: root.on-dark;
+                    }
+                }
+                if hint.button2 != "" : VerticalLayout {
+                    alignment: center;
+                    ButtonGlyph {
+                        button: hint.button2;
+                        on-dark: root.on-dark;
+                        TouchArea {
+                            width: parent.width; height: parent.height;
+                            enabled: root.interactive;
+                            clicked => { root.activated(hint.button2); }
+                        }
+                    }
+                }
+                Text {
+                    text: hint.label;
+                    color: root.on-dark ? #ffffffd9 : Theme.secondary-foreground;
+                    // Explicit: Home's footer does not inherit the app font.
+                    font-family: Typography.family;
+                    font-size: Typography.caption-size;
+                    font-weight: Typography.emphasis-weight;
+                    vertical-alignment: center;
+                }
             }
         }
     }

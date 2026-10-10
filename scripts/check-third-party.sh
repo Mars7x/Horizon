@@ -39,6 +39,7 @@ grep -Fq "serde 1.x / serde_json 1.x" "$notice" || { echo "Serde provenance miss
 # The retired Bottles adapter no longer uses yaml_serde. Do not require a
 # phantom dependency notice for a crate absent from Cargo.toml/Cargo.lock.
 grep -Fq "zbus 5.x" "$notice" || { echo "zbus provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
+grep -Fq "gstreamer-rs 0.25.x" "$notice" || { echo "gstreamer-rs provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
 
 for license in "${required_licenses[@]}"; do
   test -s "$root/LICENSES/$license" || { echo "missing license text: $license" >&2; exit 1; }

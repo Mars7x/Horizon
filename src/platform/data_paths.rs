@@ -6,9 +6,9 @@
 //! shared with every other program, so Horizon uses an `<app-id>` subfolder.
 //!
 //! ```text
-//! data/    library.sqlite3
+//! data/    library.sqlite3  album/
 //! config/  appearance.json  steamgriddb.json  steam-account.json   (0700 dir)
-//! cache/   artwork/local/  artwork/steamgriddb/  achievements/     (disposable)
+//! cache/   artwork/local/  artwork/steamgriddb/  achievements/  album/  (disposable)
 //! ```
 //!
 //! Every cache folder holds a `.version` file. When a service changes its
@@ -31,6 +31,7 @@ const STEAMGRIDDB_FILE: &str = "steamgriddb.json";
 const APPEARANCE_FILE: &str = "appearance.json";
 const STEAM_ACCOUNT_FILE: &str = "steam-account.json";
 const CACHE_VERSION_FILE: &str = ".version";
+const ALBUM_DIR: &str = "album";
 
 #[derive(Debug, Error)]
 pub enum DataPathError {
@@ -117,6 +118,17 @@ pub fn steamgriddb_cache_dir(version: &str) -> Option<PathBuf> {
 /// Per-account achievement snapshots and badge thumbnails.
 pub fn achievements_cache_dir(version: &str) -> Option<PathBuf> {
     cache_dir("achievements", version)
+}
+
+/// Horizon's own screenshots and clips. Data, not cache: captures cannot be
+/// rebuilt. The folder is created when the first capture is written.
+pub fn album_dir() -> Result<PathBuf, DataPathError> {
+    Ok(app_dir(BaseDir::Data)?.join(ALBUM_DIR))
+}
+
+/// Album thumbnails and video durations.
+pub fn album_cache_dir(version: &str) -> Option<PathBuf> {
+    cache_dir("album", version)
 }
 
 fn config_file_path(filename: &str) -> Result<PathBuf, DataPathError> {

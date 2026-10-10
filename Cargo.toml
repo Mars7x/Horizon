@@ -12,6 +12,10 @@ license = "GPL-3.0-or-later"
 ashpd = { version = "0.13", default-features = false, features = ["open_uri", "settings", "tokio"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 futures-util = "0.3"
+# Album video: playback and poster frames through the runtime's GStreamer.
+gstreamer = { version = "0.25", features = ["v1_24"] }
+gstreamer-app = "0.25"
+gstreamer-video = "0.25"
 image = { version = "0.25", default-features = false, features = ["ico", "jpeg", "png"] }
 ico = "0.5"
 rusqlite = { version = "0.37", features = ["bundled"] }

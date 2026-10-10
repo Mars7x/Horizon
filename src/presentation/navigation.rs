@@ -14,8 +14,13 @@ use crate::{
 };
 
 use super::{
-    CallbackSlot, achievements::AchievementsController, activity::ActivityDetailsActions,
-    home::HomeController, library::LibraryController, settings::SettingsController,
+    CallbackSlot,
+    achievements::AchievementsController,
+    activity::ActivityDetailsActions,
+    album::{AlbumController, AlbumFeedback},
+    home::HomeController,
+    library::LibraryController,
+    settings::SettingsController,
 };
 
 /// Bridges pure Rust navigation/focus state to Slint presentation state.
@@ -34,6 +39,7 @@ pub struct NavigationController {
     activity_on_enter: CallbackSlot<dyn Fn(&AppWindow)>,
     activity_details: CallbackSlot<dyn ActivityDetailsActions>,
     achievements: RefCell<Option<Rc<AchievementsController>>>,
+    album: RefCell<Option<Rc<AlbumController>>>,
 }
 
 impl NavigationController {
@@ -54,6 +60,7 @@ impl NavigationController {
             activity_on_enter: RefCell::new(None),
             activity_details: RefCell::new(None),
             achievements: RefCell::new(None),
+            album: RefCell::new(None),
         });
         controller.publish_route(ui);
         controller.publish_focus(ui);
@@ -124,6 +131,109 @@ impl NavigationController {
         });
     }
 
+    /// Pointer callbacks act only while Album is the current route, so a
+    /// page that is zooming away cannot be operated.
+    pub fn set_album(self: &Rc<Self>, controller: Rc<AlbumController>, ui: &AppWindow) {
+        *self.album.borrow_mut() = Some(Rc::clone(&controller));
+        let on_album = |navigation: &Rc<Self>| {
+            navigation.current_route() == AppRoute::Utility(UtilityPage::Album)
+        };
+        let (weak, album, navigation) = (ui.as_weak(), Rc::clone(&controller), Rc::clone(self));
+        ui.on_album_choose(move |index| {
+            if let Some(ui) = weak.upgrade()
+                && on_album(&navigation)
+                && album.choose(&ui, index)
+            {
+                navigation.cue(UiSoundCue::Ok);
+            }
+        });
+        let (weak, album, navigation) = (ui.as_weak(), Rc::clone(&controller), Rc::clone(self));
+        ui.on_album_cycle_game(move || {
+            if let Some(ui) = weak.upgrade()
+                && on_album(&navigation)
+            {
+                navigation.cue(UiSoundCue::Ok);
+                album.cycle_game(&ui);
+            }
+        });
+        let (weak, album, navigation) = (ui.as_weak(), Rc::clone(&controller), Rc::clone(self));
+        ui.on_album_cycle_kind(move || {
+            if let Some(ui) = weak.upgrade()
+                && on_album(&navigation)
+            {
+                navigation.cue(UiSoundCue::Ok);
+                album.cycle_kind(&ui);
+            }
+        });
+        let (weak, album, navigation) = (ui.as_weak(), Rc::clone(&controller), Rc::clone(self));
+        ui.on_album_scroll_rows(move |rows| {
+            if let Some(ui) = weak.upgrade()
+                && on_album(&navigation)
+            {
+                album.scroll_rows(&ui, rows);
+            }
+        });
+        let (weak, album, navigation) = (ui.as_weak(), Rc::clone(&controller), Rc::clone(self));
+        ui.on_album_step(move |direction| {
+            if let Some(ui) = weak.upgrade()
+                && on_album(&navigation)
+            {
+                album.step(&ui, direction);
+            }
+        });
+        let (weak, album, navigation) = (ui.as_weak(), Rc::clone(&controller), Rc::clone(self));
+        ui.on_album_toggle_play(move || {
+            if let Some(ui) = weak.upgrade()
+                && on_album(&navigation)
+            {
+                album.toggle_play(&ui);
+            }
+        });
+        let (weak, album, navigation) = (ui.as_weak(), Rc::clone(&controller), Rc::clone(self));
+        ui.on_album_seek(move |fraction| {
+            if let Some(ui) = weak.upgrade()
+                && on_album(&navigation)
+            {
+                album.seek_fraction(&ui, fraction);
+            }
+        });
+        let (weak, album, navigation) = (ui.as_weak(), Rc::clone(&controller), Rc::clone(self));
+        ui.on_album_close_viewer(move || {
+            if let Some(ui) = weak.upgrade()
+                && on_album(&navigation)
+                && album.close_viewer(&ui)
+            {
+                navigation.cue(UiSoundCue::Back);
+            }
+        });
+        let (weak, album, navigation) = (ui.as_weak(), Rc::clone(&controller), Rc::clone(self));
+        ui.on_album_dialog_choose(move |choice| {
+            if let Some(ui) = weak.upgrade()
+                && on_album(&navigation)
+            {
+                navigation.album_feedback(album.choose_in_dialog(&ui, choice));
+            }
+        });
+        let (weak, album) = (ui.as_weak(), controller);
+        ui.on_album_layout_changed(move || {
+            if let Some(ui) = weak.upgrade() {
+                album.on_layout_changed(&ui);
+            }
+        });
+    }
+
+    /// Route-local lifecycle for pages that hold resources (Album video).
+    fn leave_route(&self, ui: &AppWindow, from: AppRoute) {
+        if from == AppRoute::Utility(UtilityPage::Settings) {
+            self.settings.on_leave(ui);
+        }
+        if from == AppRoute::Utility(UtilityPage::Album)
+            && let Some(album) = self.album.borrow().as_ref()
+        {
+            album.on_leave(ui);
+        }
+    }
+
     pub fn set_activity_details(&self, actions: Rc<dyn ActivityDetailsActions>) {
         *self.activity_details.borrow_mut() = Some(actions);
     }
@@ -153,6 +263,14 @@ impl NavigationController {
         ui.set_activity_selected_index(0);
     }
 
+    fn album_feedback(&self, feedback: AlbumFeedback) {
+        match feedback {
+            AlbumFeedback::Ok => self.cue(UiSoundCue::Ok),
+            AlbumFeedback::Back => self.cue(UiSoundCue::Back),
+            AlbumFeedback::None => {}
+        }
+    }
+
     fn cue(&self, cue: UiSoundCue) {
         if let Some(callback) = self.action_sound.borrow().as_ref() {
             callback(cue);
@@ -174,8 +292,11 @@ impl NavigationController {
         self.remember_focus_for_route(from);
         if self.navigator.borrow_mut().navigate_to(route) {
             debug!(?from, to = ?route, "route changed");
-            if from == AppRoute::Utility(UtilityPage::Settings) {
-                self.settings.on_leave(ui);
+            self.leave_route(ui, from);
+            if route == AppRoute::Utility(UtilityPage::Album)
+                && let Some(album) = self.album.borrow().as_ref()
+            {
+                album.start_new_visit(ui);
             }
             if route == AppRoute::Utility(UtilityPage::Settings) {
                 self.settings.on_enter(ui);
@@ -208,6 +329,17 @@ impl NavigationController {
                 .borrow()
                 .as_ref()
                 .is_some_and(|c| c.exit_entries(ui))
+        {
+            self.cue(UiSoundCue::Back);
+            return;
+        }
+        if self.current_route() == AppRoute::Utility(UtilityPage::Album)
+            && event.action == UiAction::Back
+            && self
+                .album
+                .borrow()
+                .as_ref()
+                .is_some_and(|album| album.back(ui))
         {
             self.cue(UiSoundCue::Back);
             return;
@@ -447,8 +579,11 @@ impl NavigationController {
         if self.navigator.borrow_mut().go_back() {
             let to = self.current_route();
             debug!(?from, ?to, "Back restored previous route and focus");
-            if from == AppRoute::Utility(UtilityPage::Settings) {
-                self.settings.on_leave(ui);
+            self.leave_route(ui, from);
+            if to == AppRoute::Utility(UtilityPage::Album)
+                && let Some(album) = self.album.borrow().as_ref()
+            {
+                album.start_new_visit(ui);
             }
             if to == AppRoute::Utility(UtilityPage::Settings) {
                 self.settings.on_enter(ui);
@@ -492,9 +627,7 @@ impl NavigationController {
                 to = ?AppRoute::Home,
                 "Home reset top-level navigation, content focus, and first-game selection"
             );
-            if from == AppRoute::Utility(UtilityPage::Settings) {
-                self.settings.on_leave(ui);
-            }
+            self.leave_route(ui, from);
             self.publish_route_change(ui, from, AppRoute::Home);
         }
     }
@@ -557,7 +690,11 @@ impl NavigationController {
                 let utility = self.focus.borrow().utility();
                 self.activate_utility(ui, utility);
             }
-            UiAction::Up | UiAction::Accept | UiAction::LeftBumper | UiAction::RightBumper => {
+            UiAction::Up
+            | UiAction::Accept
+            | UiAction::LeftBumper
+            | UiAction::RightBumper
+            | UiAction::Secondary => {
                 debug!(
                     action = ?event.action,
                     repeated = event.repeated,
@@ -665,6 +802,14 @@ impl NavigationController {
                         }
                     }
                 }
+            }
+            AppRoute::Utility(UtilityPage::Album) => {
+                let feedback = self
+                    .album
+                    .borrow()
+                    .as_ref()
+                    .map_or(AlbumFeedback::None, |album| album.handle_action(ui, event));
+                self.album_feedback(feedback);
             }
             AppRoute::Utility(UtilityPage::Activity) => {
                 if ui.get_activity_details_visible() {

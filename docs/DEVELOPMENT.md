@@ -5,7 +5,7 @@ This document gives reproducible commands for the source snapshot described in [
 ## Toolchain and location
 
 - `Cargo.toml` specifies Rust edition **2024** and `rust-version = "1.92"`; the project uses Slint **~1.18** with Winit/Skia, SDL3 (`pkg-config`), SQLite and XDG portals.
-- The primary Flatpak manifest is `flatpak/io.github.Mars7x.Horizon.yml`: Freedesktop Platform/SDK **26.08** plus the **26.08 Rust stable SDK extension**. The Flatpak build includes SDL3; direct host builds need its development package and headers.
+- The primary Flatpak manifest is `flatpak/io.github.Mars7x.Horizon.yml`: Freedesktop Platform/SDK **26.08** plus the **26.08 Rust stable SDK extension**. The Flatpak build includes SDL3, and the runtime provides GStreamer (Album video); direct host builds need SDL3 and GStreamer 1.24+ development packages (`gstreamer-1.0`, `gstreamer-app-1.0`, `gstreamer-video-1.0`) and headers.
 - The application ID is `io.github.Mars7x.Horizon`. Keep app IDs, data paths and desktop-entry values coordinated; do not rename them incidentally.
 - Use the actual repository root containing `Cargo.toml`. The intended workflow is GNOME Builder with the Flatpak manifest; no Qt, GTK or Electron shell is involved.
 
@@ -22,7 +22,7 @@ bash scripts/check-third-party.sh
 
 Or invoke all of the above with `bash scripts/check.sh`. The first three require a working host toolchain/dependencies; the final attribution check can be run independently. The codebase is rustfmt-formatted (settings in `rustfmt.toml`) and `cargo fmt --check` is enforced: run `cargo fmt` before committing Rust changes. The one-time reformat commit is listed in `.git-blame-ignore-revs`; enable it locally with `git config blame.ignoreRevsFile .git-blame-ignore-revs`.
 
-Without a host Rust toolchain, the same checks run inside the Flatpak SDK (`org.freedesktop.Sdk//26.08` with the `rust-stable` extension: put `/usr/lib/sdk/rust-stable/bin` on `PATH`). SDL3 is not in the SDK; build the manifest's pinned SDL3 tarball with CMake into a local prefix and point `PKG_CONFIG_PATH`/`LD_LIBRARY_PATH` at it.
+Without a host Rust toolchain, the same checks run inside the Flatpak SDK (`org.freedesktop.Sdk//26.08` with the `rust-stable` extension: put `/usr/lib/sdk/rust-stable/bin` on `PATH`). GStreamer is in the SDK; SDL3 is not: build the manifest's pinned SDL3 tarball with CMake into a local prefix and point `PKG_CONFIG_PATH`/`LD_LIBRARY_PATH` at it.
 
 Build the Flatpak with `bash scripts/build-flatpak.sh` when the host has `flatpak-builder` and its dependencies. The helper currently installs locally (`--user`) and uses the manifest. GNOME Builder's own Flatpak build/run also works when the matching SDK is present.
 

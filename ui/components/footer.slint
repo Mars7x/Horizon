@@ -41,6 +41,8 @@ export component Footer inherits Rectangle {
     in property <int> connected-controller-count: 0;
     in property <string> clock-time: "";
     in property <string> clock-suffix: "";
+    // A hint was clicked: the button it shows ("A").
+    callback hint-activated(string);
 
     background: transparent;
 
@@ -94,5 +96,6 @@ export component Footer inherits Rectangle {
         width: 95px;
         height: Metrics.hint-row-height;
         hints: [{ button: "A", label: "OK" }];
+        activated(button) => { root.hint-activated(button); }
     }
 }

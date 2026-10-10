@@ -7,4 +7,4 @@ cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
 
-"$SCRIPT_DIR/check-third-party.sh"
+bash "$SCRIPT_DIR/check-third-party.sh"

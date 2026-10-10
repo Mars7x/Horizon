@@ -4,6 +4,7 @@ import { ListRow } from "../components/list-row.slint";
 import { PageHeader, Breadcrumb } from "../components/page-header.slint";
 import { MarqueeText } from "../components/marquee-text.slint";
 import { TransitionDriver, TransitionLayer } from "../components/transition.slint";
+import { ActionButton as SettingsButton } from "../components/action-button.slint";
 
 // Settings rows are the shared ListRow plus a trailing action label or a
 // switch. Selection and persistence remain Rust-owned so mouse and controller agree.
@@ -50,54 +51,6 @@ component SettingsRow inherits ListRow {
 }
 
 // Shared button component for dialog and back navigation.
-component SettingsButton inherits Rectangle {
-    in property <string> label;
-    in property <bool> primary: false;
-    in property <bool> focused: false;
-    in property <bool> enabled: true;
-    callback activated();
-
-    accessible-role: button;
-    accessible-label: root.label;
-    accessible-enabled: root.enabled;
-    border-radius: Metrics.radius-md;
-    border-width: 1px;
-    border-color: root.focused ? transparent : (root.primary ? Theme.accent : Theme.divider);
-    background: root.primary ? (touch.pressed ? Theme.accent-pressed
-        : touch.has-hover ? Theme.accent-hover : Theme.accent)
-        : ((touch.pressed || touch.has-hover) ? Theme.surface-raised : Theme.surface);
-    opacity: root.enabled ? 1.0 : 0.48;
-    animate background { duration: Motion.hover-duration; easing: ease-in-out; }
-    animate border-color { duration: Motion.focus-duration; easing: ease-in-out; }
-    animate opacity { duration: Motion.hover-duration; }
-    // A clean outline-only focus ring (including on filled action buttons).
-    // No selection fill or shadow; the primary Save button retains its normal
-    // accent-coloured *button* background, independent of focus.
-    SelectionFocusSurface {
-        x: -5px; y: -5px;
-        width: parent.width + 10px; height: parent.height + 10px;
-        corner-radius: Metrics.radius-md + 5px;
-        focused: root.focused && root.enabled;
-        reveal-duration: Motion.focus-duration;
-        filled: false;
-        soft-shadow: false;
-    }
-    Text {
-        width: parent.width; height: parent.height;
-        text: root.label;
-        color: root.primary ? Theme.accent-foreground : Theme.foreground;
-        font-size: Typography.body-size;
-        font-weight: Typography.emphasis-weight;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-    touch := TouchArea {
-        width: parent.width; height: parent.height;
-        enabled: root.enabled;
-        clicked => { root.activated(); }
-    }
-}
-
 // A saved Theme preference is expressed by accent-coloured text, not an
 // additional checked border or checkmark. The ONLY border highlight is focus.
 component AppearanceChoice inherits Rectangle {

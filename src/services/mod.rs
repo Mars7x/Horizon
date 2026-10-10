@@ -1,5 +1,6 @@
 pub mod achievements;
 pub mod activity;
+pub mod album;
 pub mod artwork;
 pub mod import;
 pub mod launch;

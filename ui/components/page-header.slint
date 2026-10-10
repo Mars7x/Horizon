@@ -1,5 +1,6 @@
 import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { MarqueeText } from "marquee-text.slint";
+import { ButtonGlyph } from "hint-bar.slint";
 
 // The one header used by every full-screen page: a title only, always at the
 // same position. Optional accessories (Source/Sort pickers) are children,
@@ -60,15 +61,22 @@ export component ScrollEdgeShadow inherits Rectangle {
 
 // A labelled value on the header's title row: "Source / All sources",
 // "Last 7 days / 6 h 12 min". Interactive values are pointer-clickable
-// (controller users get LB/RB, shown in the hint bar). Value changes slide
+// (controller users get LB/RB, shown as small glyphs before the label, not in
+// the hint bar: the button sits next to what it changes). Value changes slide
 // and crossfade; this is driven by an animated counter, not animation-tick(),
 // so an idle page never redraws continuously.
 export component HeaderValue inherits Rectangle {
     in property <string> label;
     in property <string> value;
     in property <bool> interactive: false;
+    // The bumper(s) that change this value ("LB", or "LB" + "RB" for a
+    // value stepped both ways). Empty for read-outs.
+    in property <string> button: "";
+    in property <string> button2: "";
     callback clicked();
     height: Metrics.page-accessory-height;
+    private property <length> glyphs-width: root.button == "" ? 0px
+        : root.button2 == "" ? 24px + 6px : 24px * 2 + 4px + 6px;
     border-radius: Metrics.radius-sm;
     background: root.interactive && touch.has-hover ? Theme.surface.with-alpha(0.56) : transparent;
     animate background { duration: Motion.hover-duration; easing: ease-in-out; }
@@ -86,9 +94,19 @@ export component HeaderValue inherits Rectangle {
         root.phase = root.swaps;
     }
 
+    if root.button != "" : ButtonGlyph {
+        x: Metrics.spacing-sm + 2px; y: 6px;
+        compact: true;
+        button: root.button;
+    }
+    if root.button2 != "" : ButtonGlyph {
+        x: Metrics.spacing-sm + 2px + 28px; y: 6px;
+        compact: true;
+        button: root.button2;
+    }
     Text {
-        x: Metrics.spacing-sm + 2px; y: 5px;
-        width: parent.width - 20px; height: 18px;
+        x: Metrics.spacing-sm + 2px + root.glyphs-width; y: 5px;
+        width: parent.width - 20px - root.glyphs-width; height: 18px;
         text: root.label;
         color: Theme.secondary-foreground;
         font-size: Typography.label-size;

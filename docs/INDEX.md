@@ -15,6 +15,7 @@
 | Library focus, sources, sorting? | [Library](LIBRARY.md) | `src/presentation/library.rs`, `ui/pages/library.slint` |
 | Observed playtime and session history? | [Activity](ACTIVITY.md) | `src/services/activity.rs`, `src/presentation/activity.rs` |
 | Steam achievements and recent unlocks? | [Achievements](ACHIEVEMENTS.md) | `src/services/achievements.rs`, `src/presentation/achievements.rs` |
+| Screenshots, clips, video playback? | [Album](ALBUM.md) | `src/services/album/`, `src/presentation/album.rs`, `src/platform/video.rs`, `ui/pages/album.slint` |
 | External credentials or appearance? | [Settings](SETTINGS.md), [Appearance](APPEARANCE.md) | `src/services/steam_account.rs`, `src/presentation/settings.rs` |
 | Imports and provider capabilities? | [Sources](SOURCES.md), [Steam](STEAM.md), [Heroic](HEROIC.md) | `src/sources/`, `src/services/import.rs` |
 | Database or migrations? | [Database](DATABASE.md), [Domain](DOMAIN.md) | `src/persistence/`, `src/domain/` |

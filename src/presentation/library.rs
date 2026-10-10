@@ -4,6 +4,9 @@ use tracing::warn;
 use slint::{Model, ModelRc, VecModel};
 
 use super::home::HomeController;
+use crate::navigation::grid::{
+    horizontal_step, scroll_to_selection, total_rows, vertical_step, wheel_scroll_top,
+};
 use crate::{
     AppWindow, LibraryCardData,
     domain::LibraryGame,
@@ -143,72 +146,6 @@ fn grid_columns(viewport_width: f32) -> usize {
 fn visible_rows(viewport_height: f32, layout: GridLayout) -> usize {
     let content = viewport_height - CONTENT_TOP - CONTENT_BOTTOM - 2.0 * GRID_PAD;
     ((content + CARD_GAP) / layout.stride).floor().max(1.0) as usize
-}
-
-fn total_rows(count: usize, columns: usize) -> usize {
-    count.div_ceil(columns.max(1))
-}
-
-// Camera-only pointer scrolling. Focus identity and metadata are deliberately
-// independent from this viewport movement.
-fn wheel_scroll_top(top: usize, count: usize, columns: usize, visible: usize, delta: i32) -> usize {
-    let max_top = total_rows(count, columns).saturating_sub(visible);
-    (top as i64 + i64::from(delta)).clamp(0, max_top as i64) as usize
-}
-
-fn scroll_to_selection(
-    selection: usize,
-    columns: usize,
-    visible: usize,
-    previous_top: usize,
-    count: usize,
-) -> usize {
-    let row = selection / columns.max(1);
-    let max_top = total_rows(count, columns).saturating_sub(visible);
-    let next = if row < previous_top {
-        row
-    } else if row >= previous_top + visible {
-        row + 1 - visible
-    } else {
-        previous_top
-    };
-    next.min(max_top)
-}
-
-/// Horizontal navigation follows reading order through row boundaries on
-/// both fresh presses and held repeat. Neither end wraps to the opposite end.
-fn horizontal_step(selected: usize, count: usize, delta: i32) -> usize {
-    if count == 0 {
-        return 0;
-    }
-    if delta > 0 {
-        (selected + 1).min(count - 1)
-    } else if delta < 0 {
-        selected.saturating_sub(1)
-    } else {
-        selected
-    }
-}
-
-/// Vertical navigation keeps the same column where possible and clamps at
-/// collection boundaries; there is no surprising jump to the opposite end.
-fn vertical_step(selected: usize, count: usize, columns: usize, down: bool) -> usize {
-    if count == 0 {
-        return 0;
-    }
-    if down {
-        if selected + columns < count {
-            selected + columns
-        } else if selected < (total_rows(count, columns) - 1) * columns {
-            count - 1
-        } else {
-            selected
-        }
-    } else if selected >= columns {
-        selected - columns
-    } else {
-        selected
-    }
 }
 
 struct State {

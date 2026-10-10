@@ -131,6 +131,20 @@ The existing Apache-2.0 and MIT license texts cover these dual-licensed dependen
 
 The existing MIT license text is included as `LICENSES/MIT.txt`.
 
+### Album video dependencies
+
+- **gstreamer-rs 0.25.x** (`gstreamer`, `gstreamer-app`, `gstreamer-video`)
+  - Upstream: https://gitlab.freedesktop.org/gstreamer/gstreamer-rs
+  - License: MIT OR Apache-2.0
+  - Use in Horizon: Rust bindings used to play Album videos and read their
+    poster frames and durations.
+  - Modification: none; consumed as Cargo dependencies.
+
+GStreamer itself and its codec plugins are not bundled by Horizon; they are
+provided by the Flatpak runtime (`org.freedesktop.Platform`) and its codec
+extensions under their own licenses. The existing MIT and Apache-2.0 license
+texts cover the bindings.
+
 **Gamescope is not bundled by Horizon.** Phase 9.5 may use an independently
 installed host Gamescope executable through the optional helper. Horizon neither
 redistributes Gamescope nor copies its source in this phase.

@@ -13,7 +13,9 @@ use std::{
 
 use thiserror::Error;
 
-use crate::domain::{DomainValidationError, ExternalGameId, GameTitle, PlaytimeSeconds, SourceId};
+use crate::domain::{
+    DomainValidationError, ExternalGameId, GameTitle, PlaytimeSeconds, SourceId, album::MediaKind,
+};
 
 pub mod heroic;
 pub mod steam;
@@ -419,6 +421,35 @@ pub trait GameSource: Send + Sync {
     ) -> Result<Vec<SourceArtworkCandidate>, SourceError> {
         Ok(vec![])
     }
+}
+
+/// A screenshot or clip a source made and keeps in its own files.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceCapture {
+    pub path: PathBuf,
+    pub kind: MediaKind,
+    /// The source's own game id, when the capture names one.
+    pub external_id: Option<ExternalGameId>,
+    /// Unix milliseconds.
+    pub captured_at: i64,
+    /// A smaller copy the source already keeps beside the original.
+    pub preview: Option<PathBuf>,
+}
+
+/// Lists captures a source keeps (Steam's screenshots). Separate from
+/// `GameSource`: the Album scans on its own worker thread, and capture
+/// discovery never affects the library. Read-only; files stay the source's.
+pub trait CaptureSource: Send + Sync {
+    fn source_id(&self) -> &SourceId;
+    /// Directory listing only: no decoding. A missing or unreadable folder is
+    /// an empty result, not an error, so one source never hides the others.
+    fn captures(&self) -> Vec<SourceCapture>;
+}
+
+/// The capture sources Horizon reads, built like `production_source_registry`.
+pub fn production_capture_sources()
+-> Result<Vec<std::sync::Arc<dyn CaptureSource>>, SourceInitializationError> {
+    Ok(vec![std::sync::Arc::new(steam::SteamCaptures::new()?)])
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
