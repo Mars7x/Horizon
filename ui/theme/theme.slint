@@ -184,7 +184,8 @@ export global Motion {
     // Changing values (picker labels, counts, the selected game's name) slide
     // and crossfade over this one duration on every page.
     out property <duration> value-swap-duration: reduced-motion ? 0ms : 180ms;
-    // Held-direction list cameras: linear and slightly under the 115ms input
-    // repeat, so consecutive steps join into one continuous movement.
-    out property <duration> list-camera-duration: reduced-motion ? 0ms : 110ms;
+    // Every list and grid camera (components/scroll.slint): linear and
+    // slightly under the 115ms input repeat, so held steps join into one
+    // continuous movement.
+    out property <duration> scroll-duration: reduced-motion ? 0ms : 110ms;
 }

@@ -4,6 +4,7 @@ import { GameCardData } from "../models/game-card.slint";
 import { ActivityHistoryRowData } from "../models/activity.slint";
 import { FallbackCover } from "../components/fallback-cover.slint";
 import { Breadcrumb, ScrollEdgeShadow } from "../components/page-header.slint";
+import { Scroll, CameraSettle } from "../components/scroll.slint";
 import { MarqueeText } from "../components/marquee-text.slint";
 import { TransitionDriver, TransitionLayer } from "../components/transition.slint";
 import { Surface } from "../components/list-row.slint";
@@ -26,8 +27,10 @@ export component ActivityGameDetailsPage inherits TransitionLayer {
     in property <string> average-session;
     in property <[ActivityHistoryRowData]> rows;
     in property <int> session-count: 0;
-    // First history row currently in view (the window is Rust-owned).
+    // First history row currently in view (the window is Rust-owned), and
+    // the absolute index of the first mounted row (overscan included).
     in property <int> first-row: 0;
+    in property <int> model-start: 0;
     callback back();
     callback scroll-history(int);
 
@@ -60,6 +63,16 @@ export component ActivityGameDetailsPage inherits TransitionLayer {
     private property <length> list-height: max(0px, root.height - root.list-top - Metrics.page-bottom-bar-height);
     out property <int> visible-rows: max(1, Math.floor(
         root.list-height / root.row-height));
+    // The shared scroll standard (components/scroll.slint). Opening a game
+    // jumps to its top instead of scrolling from the last game's place.
+    camera-settle := CameraSettle { key: root.active ? 1 : 0; }
+    private property <length> content-height: root.session-count * root.row-height - Metrics.list-row-gap;
+    private property <length> camera: Scroll.camera(root.first-row * root.row-height,
+        root.content-height, root.list-height);
+    animate camera {
+        duration: camera-settle.settled ? Motion.scroll-duration : 0ms;
+        easing: linear;
+    }
 
     Breadcrumb {
         x: root.inset; y: Metrics.page-header-height;
@@ -289,7 +302,7 @@ export component ActivityGameDetailsPage inherits TransitionLayer {
         }
         // Read-only and unfocusable: the shared surface, no focus ring.
         for record[index] in root.rows : Surface {
-            y: index * root.row-height;
+            y: (root.model-start + index) * root.row-height - root.camera;
             width: parent.width;
             height: root.row-height - Metrics.list-row-gap;
             MarqueeText {
@@ -335,12 +348,12 @@ export component ActivityGameDetailsPage inherits TransitionLayer {
     if root.session-count > 0 : ScrollEdgeShadow {
         x: root.history-x; y: root.list-top;
         width: root.history-width;
-        strength: root.first-row > 0 ? 1.0 : 0.0;
+        strength: Scroll.edge(root.camera);
     }
     if root.active && root.session-count > 0 : ScrollEdgeShadow {
         x: root.history-x; y: root.list-top + root.list-height - self.height;
         width: root.history-width;
         bottom: true;
-        strength: root.first-row + root.visible-rows < root.session-count ? 1.0 : 0.0;
+        strength: Scroll.edge(root.content-height - root.camera - root.list-height);
     }
 }

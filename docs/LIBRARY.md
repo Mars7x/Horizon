@@ -127,8 +127,9 @@ The next Library iteration can refine search, layout density and information des
   uses a 190ms ease-out fade with a small vertical settle. Reduced Motion shows
   the new text immediately. Hidden/retained Library pages do not drive the
   metadata animation tick. This handles rapid focus steps without timers.
-- Gallery camera motion uses `Motion.carousel-duration` / ease-out, matching
-  Home's camera movement. The unchanged `FocusFrame` continues to track the
+- Gallery camera motion follows the shared scrolling standard
+  ([UI standards](UI_STANDARDS.md#scrolling)): whole-row target, never past
+  the last row, `Motion.scroll-duration` linear. The unchanged `FocusFrame` continues to track the
   selected cover with `Motion.focus-duration`, including its single uniform
   accent pulse. The selected shell keeps a modest animated scale (1.045).
 - The full-visible-row calculation and Rust virtualization window are preserved.

@@ -6,6 +6,7 @@ import { MarqueeText } from "../components/marquee-text.slint";
 import { FocusFrame } from "../components/focus-frame.slint";
 import { TransitionDriver } from "../components/transition.slint";
 import { ActionButton } from "../components/action-button.slint";
+import { Scroll, CameraSettle } from "../components/scroll.slint";
 
 // A white tick (fonts may lack ✓).
 component TickGlyph inherits Path {
@@ -237,19 +238,18 @@ export component AlbumPage inherits Rectangle {
         (root.viewport-height - root.grid-pad * 2 + root.gap) / root.row-stride));
     private property <int> total-rows: Math.floor((root.total-count + root.grid-columns - 1) / root.grid-columns);
 
-    // A fresh visit jumps to the top instead of animating there (see
-    // AchievementsPage: the duration is read at draw time).
-    private property <int> settled-visit: 0;
-    changed visit-revision => { camera-settle.stop(); camera-settle.start(); }
-    camera-settle := Timer {
-        interval: 50ms;
-        running: false;
-        triggered => { self.stop(); root.settled-visit = root.visit-revision; }
-    }
-    private property <length> camera: root.scroll-row * root.row-stride;
+    // The shared scroll standard (components/scroll.slint). A fresh visit
+    // jumps to the top instead of scrolling there.
+    camera-settle := CameraSettle { key: root.visit-revision; }
+    private property <length> content-height: root.total-rows * root.row-stride - root.gap
+        + root.grid-pad * 2;
+    // Where the camera is going (the viewer lands on the tile there).
+    private property <length> target-camera: Scroll.camera(root.scroll-row * root.row-stride,
+        root.content-height, root.viewport-height);
+    private property <length> camera: root.target-camera;
     animate camera {
-        duration: root.settled-visit == root.visit-revision ? Motion.carousel-duration : 0ms;
-        easing: ease-out;
+        duration: camera-settle.settled ? Motion.scroll-duration : 0ms;
+        easing: linear;
     }
 
     // The viewer grows out of the selected tile and shrinks back into it.
@@ -326,12 +326,12 @@ export component AlbumPage inherits Rectangle {
     }
     if root.total-count > 0 : ScrollEdgeShadow {
         x: 0px; y: grid-viewport.y; width: root.width;
-        strength: root.camera / root.row-stride;
+        strength: Scroll.edge(root.camera);
     }
     if root.active && root.total-count > 0 : ScrollEdgeShadow {
         x: 0px; y: root.content-bottom - self.height; width: root.width;
         bottom: true;
-        strength: root.total-rows - root.visible-rows - root.camera / root.row-stride;
+        strength: Scroll.edge(root.content-height - root.camera - root.viewport-height);
     }
 
     // Bottom bar, left: the selected capture. The hint bar (app.slint) owns
@@ -356,7 +356,7 @@ export component AlbumPage inherits Rectangle {
     private property <length> tile-x: root.margin + root.selected-column * (root.tile-width + root.gap)
         - root.tile-width * (root.tile-lift - 1) / 2;
     private property <length> tile-y: Metrics.page-header-height + root.grid-pad
-        + (root.selected-row - root.scroll-row) * root.row-stride
+        + root.selected-row * root.row-stride - root.target-camera
         - root.tile-height * (root.tile-lift - 1) / 2;
     // Fitted (contain) size of the capture in the window. At full reveal the
     // frame is exactly this, so the frame's "cover" fit equals "contain".

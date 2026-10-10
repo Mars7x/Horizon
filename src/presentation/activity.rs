@@ -21,6 +21,9 @@ const TOP_GAME_LIMIT: usize = 12;
 ///
 /// Session lifecycle and SQL remain in services/persistence. This layer only
 /// formats stable domain/application values for Slint.
+/// History rows mounted past each edge of the visible window.
+const HISTORY_OVERSCAN_ROWS: usize = 2;
+
 pub struct ActivityController;
 
 impl ActivityController {
@@ -217,12 +220,16 @@ impl<R: ActivityRepository> ActivityDetailsController<R> {
         let visible = ui.get_activity_detail_visible_rows().max(1) as usize;
         let max_first = rows.len().saturating_sub(visible);
         let first = requested_first.min(max_first);
+        // Mount a couple of rows beyond each edge so the camera can glide
+        // between windows (the shared scroll standard) without empty rows.
+        let start = first.saturating_sub(HISTORY_OVERSCAN_ROWS);
         let slice = rows
             .iter()
-            .skip(first)
-            .take(visible)
+            .skip(start)
+            .take(visible + (first - start) + HISTORY_OVERSCAN_ROWS)
             .cloned()
             .collect::<Vec<_>>();
+        ui.set_activity_detail_model_start(start.min(i32::MAX as usize) as i32);
         ui.set_activity_detail_first_row(first.min(i32::MAX as usize) as i32);
         ui.set_activity_detail_rows(ModelRc::from(Rc::new(VecModel::from(slice))));
     }

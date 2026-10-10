@@ -15,7 +15,7 @@ utilities, footer) and is not changed by these rules. See
 | Bottom bar | `Metrics.page-bottom-bar-height`, equal to Home's footer height so the hint line is centred in the bar. Left: page context (Library's selected game). Keep it to the selection itself; no status text such as "Saved results" or "Updating…". Right: controller hints. Hints and context sit on one line, `Metrics.hint-row-center-from-bottom` (Home's footer midline), and end at the page margin, so Home's footer "A OK" (the same `HintBar`) lines up with every page. | `HintBar` in `ui/app.slint` and `ui/components/footer.slint` |
 | Sub-pages | Open with a clickable `‹  Section  /  Page` breadcrumb at the content top. Clicking it is Back. | `Breadcrumb` |
 | Route changes | The shared Zoom transition (below). Bottom-bar chrome (hints, bottom-bar context, the bottom scroll shadow) switches with the route instantly, so a leaving page never ghosts into Home's footer. | `focus-visible` / `active` on each page |
-| Scroll edges | Top shadow only once content has scrolled under the header; bottom shadow only while more content is below. Driven by the animated camera where there is one. | `ScrollEdgeShadow` |
+| Scroll edges | Top shadow only once content has scrolled under the header; bottom shadow only while more content is below. Strength is `Scroll.edge` of the hidden pixels, from the animated camera. | `ScrollEdgeShadow`, `Scroll.edge` |
 
 ## Controller hints
 
@@ -108,7 +108,7 @@ bar draws in its `on-dark` style there.
 
 Use `Motion` tokens, not literal durations: `focus-duration` (focus reveal),
 `hover-duration`, `page-duration` (Zoom), `value-swap-duration` (changing
-values), `list-camera-duration` (held-direction list scrolling, linear), and
+values), `scroll-duration` (every list and grid camera, linear), and
 `carousel-duration`. Page-specific choreography (Library's re-sort animation,
 the text caret) may keep local timings with a comment. Everything respects
 Reduced Motion.
@@ -123,6 +123,31 @@ evaluated (at draw time), not when its inputs change. To make one change
 instant (a fresh visit resetting a list to the top), keep the duration at 0
 until that change has been drawn, then restore it (Achievements uses a short
 timer after `visit-revision` changes).
+
+## Scrolling
+
+Every vertical list and grid (Library, Album, Achievements' two lists,
+Activity's session history) scrolls the same way, through
+`ui/components/scroll.slint`:
+
+- **Target:** the first whole row in view. Moving focus past an edge moves
+  the camera the least distance that brings the focused row fully into view.
+  The wheel steps it a row at a time.
+- **Never past the end:** `Scroll.camera` clamps the camera to
+  `[0, content − viewport]`. At the end, the last row rests on the
+  viewport's bottom edge; there is never empty space under it. A short list
+  doesn't scroll at all.
+- **Motion:** `Motion.scroll-duration` (110 ms), linear, just under the
+  115 ms held-input repeat, so held steps glide at a steady speed.
+- **Fresh visits jump:** a `CameraSettle` keyed on the visit (or on opening
+  a sub-view) makes the reset instant instead of scrolling back.
+- **Peeking rows** are part of the content: clicking one selects it and
+  scrolls it into view.
+- **Long content** mounts only rows near the camera, plus a couple of
+  overscan rows each side, so a glide never reveals unmounted space.
+
+Horizontal carousels (Home, Activity covers) are not lists and keep their
+own camera.
 
 ## Mouse wheel
 
