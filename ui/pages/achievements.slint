@@ -5,6 +5,7 @@ import { PageHeader, HeaderValue, Breadcrumb, ScrollEdgeShadow } from "../compon
 import { ListRow, Surface, BadgeIcon } from "../components/list-row.slint";
 import { MarqueeText } from "../components/marquee-text.slint";
 import { TransitionDriver, TransitionLayer } from "../components/transition.slint";
+import { Scroll, CameraSettle } from "../components/scroll.slint";
 
 // One full-width games list, then one full-width, read-only achievement list.
 // Both views remain mounted; opening a game zooms between them.
@@ -60,26 +61,9 @@ export component AchievementsPage inherits Rectangle {
     // Remember the viewport, not merely the selected index. Otherwise moving
     // UP after scrolling down can leave the focused game offscreen entirely.
     private property <int> first-game: 0;
-    // A fresh visit jumps straight to the top. `settled-visit` lags
-    // `visit-revision` until the reset has been drawn, so every camera change
-    // the reset causes (here or in the selection handler, in whichever order
-    // Slint runs them) has zero duration. Slint reads an animation's duration
-    // when the animated value is next evaluated (at draw time), so settling
-    // waits a frame rather than happening in this handler.
-    private property <int> settled-visit: 0;
-    changed visit-revision => {
-        root.first-game = 0;
-        camera-settle.stop();
-        camera-settle.start();
-    }
-    camera-settle := Timer {
-        interval: 50ms;
-        running: false;
-        triggered => {
-            self.stop();
-            root.settled-visit = root.visit-revision;
-        }
-    }
+    // A fresh visit, or opening a game, jumps instead of scrolling there.
+    camera-settle := CameraSettle { key: root.visit-revision * 2 + (root.viewing-entries ? 1 : 0); }
+    changed visit-revision => { root.first-game = 0; }
     // Keep a wheel-panned camera in bounds when the catalog shrinks.
     changed games => {
         root.first-game = min(root.first-game,
@@ -103,11 +87,16 @@ export component AchievementsPage inherits Rectangle {
             root.first-game = root.selected-index - root.visible-games + 1;
         }
     }
-    private property <length> game-camera: root.first-game * root.row-stride;
-    private property <length> entry-camera: root.first-entry * root.entry-stride;
-    // Linear, just under the 115ms held-input repeat: steps join smoothly.
+    // Rows sit 2px in (room for the focus ring), so content is the rows
+    // plus that inset on both ends.
+    private property <length> game-content: root.games.length * root.row-stride - Metrics.list-row-gap + 4px;
+    private property <length> entry-content: root.entries.length * root.entry-stride - Metrics.list-row-gap + 4px;
+    private property <length> game-camera: Scroll.camera(root.first-game * root.row-stride,
+        root.game-content, root.game-viewport-height);
+    private property <length> entry-camera: Scroll.camera(root.first-entry * root.entry-stride,
+        root.entry-content, root.detail-viewport-height);
     animate game-camera, entry-camera {
-        duration: root.settled-visit == root.visit-revision ? Motion.list-camera-duration : 0ms;
+        duration: camera-settle.settled ? Motion.scroll-duration : 0ms;
         easing: linear;
     }
 
@@ -223,13 +212,12 @@ export component AchievementsPage inherits Rectangle {
         }
         if root.games.length > 0 : ScrollEdgeShadow {
             x: 0px; y: root.game-top; width: root.width;
-            strength: root.game-camera / root.row-stride;
+            strength: Scroll.edge(root.game-camera);
         }
         if root.active && root.games.length > 0 : ScrollEdgeShadow {
             x: 0px; y: root.list-bottom - self.height; width: root.width;
             bottom: true;
-            strength: (root.games.length * root.row-stride - Metrics.list-row-gap
-                - root.game-camera - root.game-viewport-height) / root.row-stride;
+            strength: Scroll.edge(root.game-content - root.game-camera - root.game-viewport-height);
         }
     }
 
@@ -330,13 +318,12 @@ export component AchievementsPage inherits Rectangle {
         }
         if root.entries.length > 0 : ScrollEdgeShadow {
             x: 0px; y: root.detail-top; width: root.width;
-            strength: root.entry-camera / root.entry-stride;
+            strength: Scroll.edge(root.entry-camera);
         }
         if root.active && root.entries.length > 0 : ScrollEdgeShadow {
             x: 0px; y: root.list-bottom - self.height; width: root.width;
             bottom: true;
-            strength: (root.entries.length * root.entry-stride - Metrics.list-row-gap
-                - root.entry-camera - root.detail-viewport-height) / root.entry-stride;
+            strength: Scroll.edge(root.entry-content - root.entry-camera - root.detail-viewport-height);
         }
     }
 }

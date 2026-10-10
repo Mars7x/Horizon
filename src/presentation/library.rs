@@ -282,6 +282,7 @@ impl LibraryController {
             grid_columns(ui.get_logical_viewport_width_px()) as i32
         );
         ui.set_library_previous_scroll_row(s.scroll_top as i32);
+        ui.set_library_previous_total_count(s.order.len() as i32);
         ui.set_library_previous_selected_index(s.selection as i32);
         ui.set_library_has_previous_grid(has_previous);
     }

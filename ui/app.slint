@@ -162,6 +162,7 @@ export component AppWindow inherits Window {
     in property <[LibraryCardData]> library-previous-cards;
     in property <int> library-previous-grid-columns: 1;
     in property <int> library-previous-scroll-row: 0;
+    in property <int> library-previous-total-count: 0;
     in property <int> library-previous-selected-index: -1;
     in property <bool> library-has-previous-grid: false;
     in property <int> library-selected-index: 0;
@@ -288,6 +289,7 @@ export component AppWindow inherits Window {
     in property <[ActivityHistoryRowData]> activity-detail-rows;
     in property <int> activity-detail-session-count: 0;
     in property <int> activity-detail-first-row: 0;
+    in property <int> activity-detail-model-start: 0;
     out property <int> activity-detail-visible-rows: activity-details-page.visible-rows;
     callback activity-detail-layout-changed();
     callback activity-detail-scroll(int);
@@ -468,6 +470,7 @@ export component AppWindow inherits Window {
                     previous-cards: root.library-previous-cards;
                     previous-grid-columns: root.library-previous-grid-columns;
                     previous-scroll-row: root.library-previous-scroll-row;
+                    previous-total-count: root.library-previous-total-count;
                     previous-selected-index: root.library-previous-selected-index;
                     has-previous-grid: root.library-has-previous-grid;
                     selected-index: root.library-selected-index;
@@ -615,6 +618,7 @@ export component AppWindow inherits Window {
                     height: parent.height;
                     active: root.activity-details-visible;
                     first-row: root.activity-detail-first-row;
+                    model-start: root.activity-detail-model-start;
                     game: root.activity-detail-game;
                     source-name: root.activity-detail-source;
                     last-played: root.activity-detail-last-played;

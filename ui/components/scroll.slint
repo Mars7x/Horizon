@@ -1,0 +1,46 @@
+import { Motion } from "../theme/theme.slint";
+
+// One scrolling standard for every vertical list and grid (Library, Album,
+// Achievements, Activity history). See docs/UI_STANDARDS.md, "Scrolling".
+//
+// - The page (or Rust) picks the target: the first whole row in view.
+// - `Scroll.camera` turns it into pixels, never past the content's end: at
+//   the end, the last row rests on the viewport's bottom edge rather than
+//   leaving empty space under it.
+// - Every camera animates with `Motion.scroll-duration`, linear, so held
+//   input glides at a constant speed, and stays still for one frame after a
+//   fresh visit (`CameraSettle`) so a reset jumps instead of scrolling.
+// - Scroll-edge shadows read the animated camera through `Scroll.edge`.
+export global Scroll {
+    // Pixel camera for a target offset, within [0, content - viewport].
+    public pure function camera(target: length, content: length, viewport: length) -> length {
+        max(0px, min(target, content - viewport))
+    }
+    // Shadow strength for `hidden` pixels of content beyond an edge.
+    public pure function edge(hidden: length) -> float {
+        max(0.0, min(1.0, hidden / 24px))
+    }
+}
+
+// Changing `key` (a visit, opening a view) makes the next camera change
+// instant. `settled` turns false the moment `key` changes (it is derived, so
+// no handler runs a frame late) and true again once that change has drawn.
+// Use as: `duration: settle.settled ? Motion.scroll-duration : 0ms`.
+export component CameraSettle {
+    in property <int> key: 0;
+    private property <int> settled-key: 0;
+    out property <bool> settled: root.settled-key == root.key;
+    init => { root.settled-key = root.key; }
+    changed key => {
+        timer.stop();
+        timer.start();
+    }
+    timer := Timer {
+        interval: 50ms;
+        running: false;
+        triggered => {
+            self.stop();
+            root.settled-key = root.key;
+        }
+    }
+}
