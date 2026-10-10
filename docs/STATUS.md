@@ -127,32 +127,6 @@ not. No replacement driver, custom HID commands, udev changes, or broader
 Flatpak device permissions are introduced. If SDL, BlueZ and UPower all lack a
 battery report, Horizon continues hiding the icon instead of inventing one.
 
-### Responsive status and animated appearance (Phase 9.5.44.73)
-
-The network and power observers now run independently on background system-D-Bus
-connections. NetworkManager retains its five-second cadence and connection
-stability filter. UPower and BlueZ host/controller battery checks begin immediately
-and repeat about every two seconds, without waiting for network queries. SDL3
-controller power is also refreshed every two seconds, not on the 8 ms input path.
-The main-thread timer merges partial updates so that a network-only observation
-cannot overwrite a fresh battery or vice versa. Only changes are published.
-
-A battery indicator and footer controller icon remain instantiated so that both
-appearance **and disappearance** can animate. The battery slides and fades in
-from the right and retracts on loss, while the controller SVG enters from the
-left with a subtle 7px slide. Their separators follow the visibility state.
-Animation durations are 220 ms in / 155 ms out; the shell retains its correct
-battery precedence and hides unknown percentages. Reduced Motion disables
-travel and duration. These animations never change focus or input ownership.
-
-**8BitDo Ultimate 2 2.4GHz:** An actual percentage depends on the controller,
-receiver and SDL HIDAPI driver's reporting mode. SDL DInput mode can supply
-it on compatible firmware; a receiver exposing only Xbox/XInput emulation may
-not. No replacement driver, custom HID commands, udev changes, or broader
-Flatpak device permissions are introduced. If SDL, BlueZ and UPower all lack a
-battery report, Horizon continues hiding the icon instead of inventing one.
-
-
 ## Phase 9.5.44.74 — Immediate network changes and crisp GNOME symbols
 
 The network observer subscribes to system-bus signals sent by NetworkManager

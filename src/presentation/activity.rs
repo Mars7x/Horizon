@@ -81,7 +81,7 @@ impl ActivityShowcaseController {
                 continue;
             };
             let Some(game) = self.home.card_at(index) else { continue; };
-            new_ids.push(summary.game_id().clone());
+            new_ids.push(summary.game_id());
             new_covers.push(ActivityCoverData {
                 game,
                 observed_time: format_duration(summary.observed_playtime()).into(),
@@ -94,10 +94,9 @@ impl ActivityShowcaseController {
             // The same games in the same order need no model replacement,
             // hence no flash/reset on the existing three-second sync.
             for (index, updated) in new_covers.into_iter().enumerate() {
-                if let Some(existing) = self.covers.row_data(index) {
-                    if existing.observed_time != updated.observed_time {
-                        self.covers.set_row_data(index, updated);
-                    }
+                if let Some(existing) = self.covers.row_data(index)
+                    && existing.observed_time != updated.observed_time {
+                    self.covers.set_row_data(index, updated);
                 }
             }
             return;
@@ -290,7 +289,7 @@ impl<R: ActivityRepository + 'static> ActivityDetailsActions for ActivityDetails
         if !ui.get_activity_details_visible() { return; }
         if let Some(game_id) = self.active_game.get()
             && self.showcase.catalog_index_for(game_id) == Some(index) {
-                ui.set_activity_detail_game(card);
+            ui.set_activity_detail_game(card);
         }
     }
 }
@@ -372,8 +371,8 @@ mod tests {
         let a = GameId::new(1).expect("game id");
         let b = GameId::new(2).expect("game id");
         let c = GameId::new(3).expect("game id");
-        assert_eq!(retained_selected_index(&[a.clone(), b.clone(), c.clone()], 1,
-            &[c.clone(), a.clone(), b.clone()]), 2);
+        assert_eq!(retained_selected_index(&[a, b, c], 1,
+            &[c, a, b]), 2);
         assert_eq!(retained_selected_index(&[a, b], 1, &[c]), 0);
         assert_eq!(retained_selected_index(&[], 0, &[]), 0);
     }

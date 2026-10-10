@@ -80,11 +80,11 @@ mod tests {
             Some(BatteryReading { percent: 19, charging: true }));
         // A peripheral reporting a very different percentage is not safely
         // identifiable as the same SDL gamepad: never borrow its power state.
-        assert_eq!(preferred_battery(None, Some(sdl_unknown),
-            Some(BatteryReading { percent: 70, charging: true })).unwrap().charging, false);
+        assert!(!preferred_battery(None, Some(sdl_unknown),
+            Some(BatteryReading { percent: 70, charging: true })).unwrap().charging);
         // A definitive SDL discharging state is not overridden by a bus value.
         let sdl_known = ControllerBattery { charging_known: true, ..sdl_unknown };
-        assert_eq!(preferred_battery(None, Some(sdl_known), Some(upower)).unwrap().charging, false);
+        assert!(!preferred_battery(None, Some(sdl_known), Some(upower)).unwrap().charging);
         // A known SDL charging state remains authoritative.
         let sdl_charging = ControllerBattery {
             percent: 19, charging: true, charging_known: true,

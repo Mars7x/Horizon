@@ -89,7 +89,7 @@ impl NetworkReading {
         // NetworkManager's Internet-connectivity result is distinct from the
         // physical link: "none" must not turn an active Ethernet link into an
         // unplugged-cable icon. Mark restricted Internet access separately.
-        Self { kind, wifi_strength, limited: matches!(connectivity, 1 | 2 | 3) }
+        Self { kind, wifi_strength, limited: matches!(connectivity, 1..=3) }
     }
 }
 
@@ -303,10 +303,9 @@ fn wifi_strength(bus: &Connection, active: &Proxy<'_>) -> Option<u8> {
         let Ok(device) = Proxy::new(bus, NM, path.as_str(), WIRELESS_IFACE) else { continue };
         let Ok(ap_path) = device.get_property::<OwnedObjectPath>("ActiveAccessPoint") else { continue };
         if ap_path.as_str() == "/" { continue; }
-        if let Ok(ap) = Proxy::new(bus, NM, ap_path.as_str(), ACCESS_POINT_IFACE) {
-            if let Ok(strength) = ap.get_property::<u8>("Strength") {
-                return Some(strength.min(100));
-            }
+        if let Ok(ap) = Proxy::new(bus, NM, ap_path.as_str(), ACCESS_POINT_IFACE)
+            && let Ok(strength) = ap.get_property::<u8>("Strength") {
+            return Some(strength.min(100));
         }
     }
     None

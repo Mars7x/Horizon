@@ -386,9 +386,8 @@ fn recent_miss(root: &Path) -> bool {
 }
 
 fn write_miss(root: &Path) {
-    if let Some(parent) = root.parent() {
-        if fs::create_dir_all(parent).is_ok() { let _ = fs::write(root.with_extension("miss-v6"), b""); }
-    }
+    if let Some(parent) = root.parent()
+        && fs::create_dir_all(parent).is_ok() { let _ = fs::write(root.with_extension("miss-v6"), b""); }
 }
 
 fn write_cache(root: &Path, artwork: &SquareArtwork, provenance: &ArtworkProvenance) -> io::Result<()> {

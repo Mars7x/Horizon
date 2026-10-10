@@ -884,7 +884,9 @@ mod tests {
                 .position(|session| session.id() == session_id)
                 .expect("open session");
             let session = self.sessions[index].clone();
-            let confirmed_through = self.checkpoints.get(&session_id).copied();
+            // Mirrors SQLite: no checkpoint past the start means unknown.
+            let confirmed_through = self.checkpoints.get(&session_id).copied()
+                .filter(|&at| at > session.started_at());
             self.sessions[index] = PlaySession::new(
                 session.id(),
                 session.game_id(),
@@ -917,7 +919,8 @@ mod tests {
                     continue;
                 }
                 interrupted += 1;
-                let confirmed_through = self.checkpoints.get(&session.id()).copied();
+                let confirmed_through = self.checkpoints.get(&session.id()).copied()
+                    .filter(|&at| at > session.started_at());
                 *session = PlaySession::new(
                     session.id(),
                     session.game_id(),

@@ -1,5 +1,8 @@
 # Settings — Phase 9.5.44.57
 
+> **Current-state guide:** Steam account configuration belongs under **Settings → Third-Party → Steam Account**, visually separated into its own **Steam** group below the **SteamGridDB** artwork group. These are independent services. Both use Settings navigation; the Achievements page does not collect credentials. See [ACHIEVEMENTS.md](ACHIEVEMENTS.md) and [PROJECT_STATE.md](PROJECT_STATE.md). Later phase-specific notes below supersede earlier Settings behavior.
+
+
 Horizon supports SteamGridDB square artwork for Steam and Heroic.
 Settings places **Appearance** before **Third-Party**. In Phase 9.5.44.57, the
 category rows use a bounded vertical layout and no longer overlap. In
@@ -177,3 +180,38 @@ receives the existing 3.2-second breathing focus colour and 140 ms reveal. Selec
 continues to use the existing neutral ring when unfocused, and the focus ring
 uses the accent colour when focused. The settings subtitle now describes
 Navigation, OK and Back cues, all controlled by the existing UI Sounds switch.
+
+## Phase 10.4.1 — Steam account in Third-Party settings
+
+**Settings → Third-Party → Steam Account** provides a dedicated, controller-
+accessible screen to enter a numeric SteamID64, set or replace the personal
+Steam Web API key, and remove locally saved credentials. The editor reuses the
+SteamGridDB masked entry and the existing Back, Enter, paste and cancel logic.
+The SteamID64 is visible; the API-key draft is masked by default, and the saved
+secret never appears in Slint. The SteamGridDB artwork integration remains
+separate and uses its original settings file.
+
+A new Steam Account row remains reachable even when SteamGridDB is unconfigured.
+Disabled SteamGridDB refresh/remove rows and the unavailable Steam disconnect
+row are excluded from controller focus traversal. Leaving the nested account
+settings screen returns to Third-Party settings rather than to the root page.
+The Steam account service is shared with Achievements and reserved for a future
+Friends integration; Friends' UI and behavior are unchanged.
+
+Credentials are stored with mode 0600 in an application-private XDG config
+file, not in SQLite, the source tree, or the achievement UI. This is **not
+an encrypted or Steam OpenID login**. The application never asks for a Steam
+password. User-supplied keys must be managed according to Steam's API terms.
+
+## Phase 10.4.2 — Separate third-party sections
+
+Third-Party settings visibly groups the four SteamGridDB artwork actions together, then separates the **Steam** account entry with a heading and divider. Focus order, persistence, editor handling, and disabled-row skipping remain unchanged. Future providers should use their own named sections rather than appearing as another SteamGridDB setting.
+
+## Phase 10.4.3.3 — Parent-row focus restoration (pending build verification)
+
+Back within Settings is route-local navigation, not a new Settings visit.
+Returning from **Appearance** focuses the Appearance row on the root page;
+returning from **Third-Party** focuses the Third-Party row; returning from
+**Steam Account** focuses its entry under Third-Party. A genuinely fresh
+Settings visit (after leaving the Settings route) still resets to Appearance.
+The existing editor cancel and refresh-modal Back behavior is unchanged.

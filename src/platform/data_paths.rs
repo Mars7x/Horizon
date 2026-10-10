@@ -12,6 +12,7 @@ const APP_DATA_DIR: &str = "io.github.Mars7x.Horizon";
 const DATABASE_FILE: &str = "library.sqlite3";
 const SETTINGS_FILE: &str = "third-party.json";
 const APPEARANCE_FILE: &str = "appearance.json";
+const STEAM_ACCOUNT_FILE: &str = "steam-account.json";
 
 #[derive(Debug, Error)]
 pub enum DataPathError {
@@ -50,6 +51,10 @@ pub fn library_database_path() -> Result<PathBuf, DataPathError> {
 /// app-specific XDG configuration directory (Flatpak gets its own XDG_CONFIG_HOME).
 pub fn third_party_settings_path() -> Result<PathBuf, DataPathError> {
     config_file_path(SETTINGS_FILE)
+}
+
+pub fn steam_account_settings_path() -> Result<PathBuf, DataPathError> {
+    config_file_path(STEAM_ACCOUNT_FILE)
 }
 
 pub fn appearance_settings_path() -> Result<PathBuf, DataPathError> {

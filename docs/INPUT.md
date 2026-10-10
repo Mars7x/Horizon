@@ -199,3 +199,11 @@ Do not merge these into one input/session state machine. Activity tracking must 
 Managed Gamescope sessions do not introduce a second controller-routing path. Horizon still consumes SDL navigation only while its own window is active. When Gamescope/the game owns foreground activation, Horizon suppresses semantic controller actions exactly as it does for an external launch. Bringing Horizon intentionally back to the foreground restores Horizon UI input even if the managed session is still running.
 
 Session lifecycle and input ownership remain independent: the host helper reports managed-session state to the launch/activity services, while `InputManager` continues to depend only on Horizon window activation.
+
+## Phase 10.4.3.1 — Keyboard/controller repeat consistency
+
+The Slint input scope forwards logical directional presses **and releases** to `InputManager`. The manager caps OS auto-repeat events to the same timing constants used by SDL's D-pad: an immediate first step, no repeat until **300ms**, then at most one additional step every **115ms**. This avoids the desktop environment's much faster keyboard repeat accelerating Horizon's menus. Keyboard input remains device-independent `UiAction` by the time it reaches controllers. A release or loss of window activation clears the held-direction state, and orphan repeats are ignored. `Accept`, `Back`, `Menu` and `Home` remain fresh-press only. A slower OS repeat setting may still produce a slower rate; the cap does not synthesize repeated events.
+
+## Phase 10.4.3.3 — Mouse wheel is camera input, not navigation
+
+On scrollable lists, pointer-wheel deltas pan the camera without emitting controller/keyboard Up or Down events or changing selection. The Achievements game catalog and Library grid now explicitly decouple viewport position from focus. Read-only Achievements and Activity session details wheel-scroll their existing history windows without focusing any rows. Directional keys and gamepad inputs continue using the established navigation actions and repeat caps. See [ADR 0162](adr/0162-achievement-input-and-lazy-badge-parity.md).

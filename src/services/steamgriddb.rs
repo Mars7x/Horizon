@@ -135,7 +135,7 @@ fn sorted_eligible_artwork(grids: Vec<ApiGrid>) -> Vec<SteamGridDbSquareGrid> {
             score: grid.score,
         })
     }).collect::<Vec<_>>();
-    eligible.sort_by(|a, b| b.score.cmp(&a.score));
+    eligible.sort_by_key(|grid| std::cmp::Reverse(grid.score));
     eligible
 }
 
@@ -369,10 +369,9 @@ impl SteamGridDbMatchService {
         if !lookup.external_ids.is_empty() {
             let mut matches = Vec::new();
             for external in &lookup.external_ids {
-                if let Some(found) = self.client.game_by_external_id(external)? {
-                    if !matches.iter().any(|prev: &SteamGridDbGame| prev.id == found.id) {
-                        matches.push(found);
-                    }
+                if let Some(found) = self.client.game_by_external_id(external)?
+                    && !matches.iter().any(|prev: &SteamGridDbGame| prev.id == found.id) {
+                    matches.push(found);
                 }
             }
             match matches.len() {

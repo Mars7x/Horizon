@@ -1,5 +1,8 @@
 # Phase 10 — Library UX
 
+> **Current-state guide:** Library is now a **full-shell** route; it is not hosted beneath Home’s utility header. Selected-game scaling and focus spacing should match Home while leaving Home unchanged. The phase-by-phase notes below are the change history, not independent current specs; see [NAVIGATION.md](NAVIGATION.md).
+
+
 ## Phase 10.0: Source-backed browsing foundation
 
 The Library route is directly accessible from the permanent **Library tile at the end of Home**, or with Menu/Start/F10 as a shortcut. The former modal route-switcher has been removed. Back returns through normal navigation history. The original Home game-card focus is unchanged.
@@ -342,3 +345,11 @@ all sides. This applies to the live grid and its outgoing source/sort snapshot,
 so the expanded and contracted focus states have consistent bracket spacing
 through selection and reorder transitions. Do not modify Home's `GameTile` or
 `FocusFrame`; no independent focus animation or new asset is introduced.
+
+## Phase 10.4.3.2 — Scroll-responsive header elevation
+
+The Library's **top** scroll-edge penumbra is no longer permanently visible. It has zero opacity at the unscrolled first row, then fades in with the actual animated gallery position during the first row of downward scrolling and fades out on return to the top. The header and page still share `Theme.background`; no permanent divider, tinted slab or artificial scroll clipping is added. The existing **bottom** boundary, responsive grid, focus brackets, selected artwork scaling, source/sort controls and Home remain unchanged. The shadow is presentation only; it never intercepts pointer/controller input. See [ADR 0161](adr/0161-scroll-driven-header-elevation-and-exclusive-game-focus.md).
+
+## Phase 10.4.3.3 — Pointer-wheel camera separation (pending build verification)
+
+Mouse-wheel input scrolls the Library grid viewport **without moving the keyboard/controller game selection, changing selected-title metadata, or altering the shell focus region**. Controller/keyboard directional navigation still moves selection and brings the chosen tile into view. The virtualized grid reloads the appropriate overscan window as the camera moves; Source/Sort changes restore selection-centered camera behavior. No Home geometry was modified. See [ADR 0162](adr/0162-achievement-input-and-lazy-badge-parity.md).

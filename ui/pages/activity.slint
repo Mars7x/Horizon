@@ -2,6 +2,7 @@ import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { FallbackCover } from "../components/fallback-cover.slint";
 import { FocusFrame } from "../components/focus-frame.slint";
 import { ActivityCoverData, ActivityDayData } from "../models/activity.slint";
+import { AchievementEntryData } from "../models/achievements.slint";
 
 // Matches Home's selected title pacing: 2s hold, distance-sensitive linear
 // travel, 2.4s end hold, then an invisible reset. Short titles never move.
@@ -143,7 +144,7 @@ component ActivityCoverTitle inherits Rectangle {
 }
 
 // Phase 10.3.0: one controller focus region, shared cover/focus design from
-// Home, and two quiet informational panels. No fabricated milestones.
+// Home, and two quiet informational panels. Recent unlocks are Steam-derived.
 export component ActivityPage inherits Rectangle {
     in property <[ActivityCoverData]> covers;
     in property <[ActivityDayData]> days;
@@ -153,6 +154,8 @@ export component ActivityPage inherits Rectangle {
     in property <bool> focus-visible: false;
     in property <string> week-total: "0 min";
     in property <string> month-total: "0 min";
+    in property <[AchievementEntryData]> recent-achievements;
+    in property <string> achievement-status: "Connect Steam achievements in the Achievements utility";
     callback choose-game(int);
     background: Theme.background;
 
@@ -381,7 +384,7 @@ export component ActivityPage inherits Rectangle {
         }
     }
 
-    // One restrained chart and one intentionally inert future-feature slot.
+    // One restrained chart and a source-neutral preview of verified recent unlocks.
     Rectangle {
         x: Metrics.page-margin; y: root.panels-top;
         width: root.panel-width; height: root.panels-height;
@@ -438,18 +441,64 @@ export component ActivityPage inherits Rectangle {
         border-radius: Metrics.radius-lg;
         border-width: Theme.high-contrast ? 2px : 1px;
         border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.48);
+        clip: true;
         Text {
             x: 19px; y: 13px; text: "Milestones";
             color: Theme.foreground; font-size: Typography.heading-size;
             font-weight: Typography.heading-weight;
         }
-        Text {
-            x: 19px; y: (parent.height - 38px) / 2;
-            width: parent.width - 38px; height: 55px;
-            text: "Coming later";
+        if root.recent-achievements.length == 0 : Text {
+            x: 19px; y: 62px;
+            width: parent.width - 38px; height: 76px;
+            text: root.achievement-status;
             color: Theme.secondary-foreground;
             font-size: Typography.body-size;
-            horizontal-alignment: center; vertical-alignment: center;
+            wrap: word-wrap;
+        }
+        for achievement[i] in root.recent-achievements : Rectangle {
+            x: 18px; y: 54px + i * 72px;
+            width: parent.width - 36px; height: 66px;
+            visible: i < (root.panels-height < 200px ? 1 : root.panels-height < 279px ? 2 : 3);
+            background: transparent;
+            Rectangle {
+                x: 0px; y: 5px; width: 54px; height: 54px;
+                border-radius: Metrics.radius-md;
+                background: Theme.background;
+                if achievement.has-badge : Image {
+                    x: 3px; y: 3px;
+                    width: parent.width - 6px; height: parent.height - 6px;
+                    source: achievement.badge;
+                    image-fit: contain;
+                }
+                if !achievement.has-badge : Text {
+                    x: 0px; y: 0px;
+                    width: parent.width; height: parent.height;
+                    text: "★";
+                    color: Theme.accent;
+                    font-size: 27px;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+            }
+            Text {
+                x: 67px; y: 5px; width: parent.width - 70px; height: 24px;
+                text: achievement.title;
+                overflow: elide; color: Theme.foreground;
+                font-size: Typography.body-size;
+                font-weight: Typography.emphasis-weight;
+            }
+            Text {
+                x: 67px; y: 29px; width: parent.width - 70px; height: 19px;
+                text: achievement.game + " · " + achievement.provider;
+                overflow: elide; color: Theme.secondary-foreground;
+                font-size: Typography.caption-size;
+            }
+            Text {
+                x: 67px; y: 48px; width: parent.width - 70px; height: 16px;
+                text: achievement.when;
+                overflow: elide; color: Theme.secondary-foreground;
+                font-size: Typography.caption-size;
+            }
         }
     }
 }

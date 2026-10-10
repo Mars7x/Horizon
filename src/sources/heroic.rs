@@ -132,15 +132,13 @@ impl HeroicSource {
         for store in &self.runtime_stores {
             if let Some(observation) = heroic_log_observation(store, app_name)
                 .map_err(SourceError::new)?
-            {
-                if latest.as_ref().is_none_or(|previous| {
+                && latest.as_ref().is_none_or(|previous| {
                     observation.modified_ms > previous.modified_ms
                         || (observation.modified_ms == previous.modified_ms
                             && !observation.active && previous.active)
                 }) {
                     latest = Some(observation);
                 }
-            }
         }
         let running = latest.is_some_and(|observation| {
             observation.active && armed_ms.is_none_or(|armed| {
@@ -417,10 +415,9 @@ fn parse_timestamp_values(value: &Value) -> Vec<(String, PlaytimeSeconds)> {
     fn collect(value: &Value, prefix: &str, result: &mut BTreeMap<String, PlaytimeSeconds>) {
         let Some(object) = value.as_object() else { return };
         // electron-store dot keys can nest a dotted app ID at arbitrary depth.
-        if !prefix.is_empty() {
-            if let Some(duration) = object.get("totalPlayed").and_then(valid_minutes) {
-                result.entry(prefix.to_owned()).or_insert(duration);
-            }
+        if !prefix.is_empty()
+            && let Some(duration) = object.get("totalPlayed").and_then(valid_minutes) {
+            result.entry(prefix.to_owned()).or_insert(duration);
         }
         for (key, child) in object {
             if key == "totalPlayed" || key == "firstPlayed" || key == "lastPlayed" {
@@ -428,10 +425,9 @@ fn parse_timestamp_values(value: &Value) -> Vec<(String, PlaytimeSeconds)> {
             }
             if let Some(name) = key.strip_suffix(".totalPlayed") {
                 let full_name = if prefix.is_empty() { name.to_owned() } else { format!("{prefix}.{name}") };
-                if !full_name.is_empty() {
-                    if let Some(duration) = valid_minutes(child) {
-                        result.entry(full_name).or_insert(duration);
-                    }
+                if !full_name.is_empty()
+                    && let Some(duration) = valid_minutes(child) {
+                    result.entry(full_name).or_insert(duration);
                 }
             } else if child.is_object() {
                 let full_name = if prefix.is_empty() { key.to_owned() } else { format!("{prefix}.{key}") };

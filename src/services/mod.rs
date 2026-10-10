@@ -1,3 +1,5 @@
+pub mod steam_account;
+pub mod achievements;
 pub mod artwork;
 pub mod activity;
 pub mod import;

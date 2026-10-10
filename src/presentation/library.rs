@@ -124,6 +124,13 @@ fn total_rows(count: usize, columns: usize) -> usize {
     count.div_ceil(columns.max(1))
 }
 
+// Camera-only pointer scrolling. Focus identity and metadata are deliberately
+// independent from this viewport movement.
+fn wheel_scroll_top(top: usize, count: usize, columns: usize, visible: usize, delta: i32) -> usize {
+    let max_top = total_rows(count, columns).saturating_sub(visible);
+    (top as i64 + i64::from(delta)).clamp(0, max_top as i64) as usize
+}
+
 fn scroll_to_selection(selection: usize, columns: usize, visible: usize, previous_top: usize, count: usize) -> usize {
     let row = selection / columns.max(1);
     let max_top = total_rows(count, columns).saturating_sub(visible);
@@ -160,6 +167,7 @@ struct State {
     order: Vec<usize>,
     selection: usize,
     scroll_top: usize,
+    wheel_scrolled: bool,
     mounted_start: usize,
     mounted_len: usize,
     window_dirty: bool,
@@ -172,7 +180,7 @@ impl Default for State {
     fn default() -> Self {
         Self {
             source_index: 0, sort: LibrarySort::Alphabetical, order: Vec::new(),
-            selection: 0, scroll_top: 0, mounted_start: 0, mounted_len: 0,
+            selection: 0, scroll_top: 0, wheel_scrolled: false, mounted_start: 0, mounted_len: 0,
             window_dirty: true, metadata_game_id: None, metadata_sequence: 0,
             browse_sequence: 0,
             browse_transition_kind: 0,
@@ -259,6 +267,7 @@ impl LibraryController {
         s.selection = preferred_id.and_then(|id| order.iter().position(|i| self.catalog[*i].game().id().get() == id))
             .unwrap_or(prior.min(order.len().saturating_sub(1)));
         s.order = order;
+        s.wheel_scrolled = false;
         s.window_dirty = true;
         if s.order.is_empty() { s.scroll_top = 0; }
         drop(s);
@@ -273,7 +282,14 @@ impl LibraryController {
         );
         let mut s = self.state.borrow_mut();
         let count = s.order.len();
-        s.scroll_top = scroll_to_selection(s.selection, columns, visible, s.scroll_top, count);
+        // Pointer wheel is camera-only; preserve it until the next keyboard/
+        // controller focus movement. Never auto-scroll to the selected game
+        // just because the data model or viewport was republished.
+        if s.wheel_scrolled {
+            s.scroll_top = s.scroll_top.min(total_rows(count, columns).saturating_sub(visible));
+        } else {
+            s.scroll_top = scroll_to_selection(s.selection, columns, visible, s.scroll_top, count);
+        }
         let start_row = s.scroll_top.saturating_sub(OVERSCAN_ROWS);
         let end_row = (s.scroll_top + visible + OVERSCAN_ROWS).min(total_rows(count, columns));
         let start = start_row * columns;
@@ -339,11 +355,10 @@ impl LibraryController {
 
     pub fn on_card_updated(&self, original: usize, card: crate::GameCardData) {
         let s = self.state.borrow();
-        if let Some(position) = s.order.iter().skip(s.mounted_start).take(s.mounted_len).position(|i| *i == original) {
-            if let Some(mut row) = self.rows.row_data(position) {
-                row.game = card;
-                self.rows.set_row_data(position, row);
-            }
+        if let Some(position) = s.order.iter().skip(s.mounted_start).take(s.mounted_len).position(|i| *i == original)
+            && let Some(mut row) = self.rows.row_data(position) {
+            row.game = card;
+            self.rows.set_row_data(position, row);
         }
     }
 
@@ -354,6 +369,9 @@ impl LibraryController {
         if index >= s.order.len() { return; }
         let same = s.selection == index;
         s.selection = index;
+        // Explicit pointer selection reanchors the camera to controller focus.
+        // Merely turning the mouse wheel never changes that focus identity.
+        s.wheel_scrolled = false;
         let original = if same { s.order.get(index).copied() } else { None };
         drop(s);
         self.publish(ui);
@@ -363,8 +381,12 @@ impl LibraryController {
 
     fn move_selection(&self, ui: &AppWindow, target: usize) {
         let mut s = self.state.borrow_mut();
-        if s.order.is_empty() || target >= s.order.len() || target == s.selection { return; }
+        if s.order.is_empty() || target >= s.order.len() { return; }
+        if target == s.selection && !s.wheel_scrolled { return; }
         s.selection = target;
+        // First keyboard/controller movement after a wheel pan restores the
+        // selected cover to view, even if navigation hit a list boundary.
+        s.wheel_scrolled = false;
         drop(s);
         self.publish(ui);
     }
@@ -387,16 +409,15 @@ impl LibraryController {
 
     pub fn scroll_by_row(&self, ui: &AppWindow, direction: i32) {
         if direction == 0 { return; }
-        // Wheel changes the selected row as well, keeping the one Home focus
-        // visible and the full-title metadata synchronized with the grid.
-        let columns = grid_columns(ui.get_logical_viewport_width_px());
-        let s = self.state.borrow();
-        if s.order.is_empty() { return; }
-        let old = s.selection;
-        let target = vertical_step(s.selection, s.order.len(), columns, direction > 0);
+        let layout = GridLayout::for_width(ui.get_logical_viewport_width_px());
+        let visible = visible_rows(ui.get_logical_viewport_height_px(), layout);
+        let mut s = self.state.borrow_mut();
+        let next = wheel_scroll_top(s.scroll_top, s.order.len(), layout.columns, visible, direction);
+        if next == s.scroll_top { return; }
+        s.scroll_top = next;
+        s.wheel_scrolled = true;
         drop(s);
-        if target == old { self.publish(ui); }
-        else { self.move_selection(ui, target); }
+        self.publish(ui);
     }
 
     pub fn cycle_filter(&self, ui: &AppWindow) {
@@ -447,7 +468,8 @@ impl LibraryController {
 #[cfg(test)]
 mod tests {
     use super::{grid_columns, visible_rows, GridLayout, sorted_catalog_indices, source_title, LibrarySort,
-        horizontal_step, vertical_step, scroll_to_selection, total_rows, OVERSCAN_ROWS};
+        horizontal_step, vertical_step, scroll_to_selection, wheel_scroll_top, total_rows, OVERSCAN_ROWS,
+        CARD_GAP, GRID_PAD};
     use crate::domain::{Game, GameId, GameTitle, LibraryGame, SourceGameRef, SourceId, ExternalGameId};
 
     fn game(id: i64, title: &str, source: &str) -> LibraryGame {
@@ -455,6 +477,15 @@ mod tests {
             Game::new(GameId::new(id).unwrap(), GameTitle::new(title).unwrap()),
             vec![SourceGameRef::new(SourceId::new(source).unwrap(), ExternalGameId::new(id.to_string()).unwrap())],
         )
+    }
+
+    #[test]
+    fn mouse_wheel_scroll_is_clamped_independently_of_selection() {
+        assert_eq!(wheel_scroll_top(0, 24, 4, 3, 1), 1);
+        assert_eq!(wheel_scroll_top(3, 24, 4, 3, -1), 2);
+        assert_eq!(wheel_scroll_top(3, 24, 4, 3, 2), 3); // bottom
+        assert_eq!(wheel_scroll_top(0, 2, 4, 3, 1), 0); // all visible
+        assert_eq!(wheel_scroll_top(0, 24, 4, 3, -1), 0);
     }
 
     #[test]

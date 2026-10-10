@@ -11,6 +11,7 @@ use tracing::{debug, warn};
 
 use crate::{
     AppWindow, GameCardData,
+    presentation::CallbackSlot,
     domain::{GameId, LibraryGame},
     input::{UiAction, UiActionEvent},
     navigation::step_with_edge_wrap,
@@ -158,7 +159,7 @@ pub struct HomeController {
     // Invalidates an old press-release callback on failure, navigation or a
     // subsequent launch; the visual press is independent of session lifetime.
     press_generation: Rc<Cell<u64>>,
-    card_changed: RefCell<Option<Rc<dyn Fn(usize, GameCardData)>>>,
+    card_changed: CallbackSlot<dyn Fn(usize, GameCardData)>,
 }
 
 impl HomeController {
@@ -712,7 +713,9 @@ fn monogram(title: &str) -> String {
         .collect::<String>()
 }
 
-fn fallback_palette(game_id: i64, title: &str) -> ((u8, u8, u8), (u8, u8, u8), (u8, u8, u8)) {
+type Rgb8 = (u8, u8, u8);
+
+fn fallback_palette(game_id: i64, title: &str) -> (Rgb8, Rgb8, Rgb8) {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64 ^ game_id as u64;
     for byte in title.bytes() {
         hash ^= u64::from(byte);
