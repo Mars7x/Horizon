@@ -650,11 +650,14 @@ export component AppWindow inherits Window {
                 height: Metrics.hint-row-height;
                 visible: root.current-route != AppRouteView.home;
                 z: 3;
-                // Appears once the page has risen into place. Dialogs carry
-                // their own focusable buttons, so the bar fades out with the
-                // page behind the dialog's dimmed backdrop.
-                opacity: root.route-phase < 3 || (root.current-route == AppRouteView.settings
-                    && (root.settings-refresh-open || root.settings-editing-key)) ? 0.0 : 1.0;
+                // Appears once the page has risen into place. Its opacity is
+                // also 0 while hidden on Home, so becoming visible always
+                // fades in from 0 (never down from a stale 1 and back up).
+                // Dialogs carry their own focusable buttons, so the bar fades
+                // out with the page behind the dialog's dimmed backdrop.
+                opacity: root.current-route == AppRouteView.home || root.route-phase < 3
+                    || (root.current-route == AppRouteView.settings
+                        && (root.settings-refresh-open || root.settings-editing-key)) ? 0.0 : 1.0;
                 animate opacity { duration: Motion.page-duration; easing: ease-in-out; }
                 hints: root.page-hints;
             }
