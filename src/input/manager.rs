@@ -6,7 +6,7 @@ use super::{
     actions::{UiAction, UiActionEvent},
     keyboard,
     sdl::{
-        ControllerStatus, SdlGamepadInput, DIGITAL_INITIAL_REPEAT_DELAY, DIGITAL_REPEAT_INTERVAL,
+        ControllerStatus, DIGITAL_INITIAL_REPEAT_DELAY, DIGITAL_REPEAT_INTERVAL, SdlGamepadInput,
     },
 };
 
@@ -36,17 +36,15 @@ impl InputManager {
         action_sink: Rc<dyn Fn(UiActionEvent)>,
         status_sink: Rc<dyn Fn(ControllerStatus)>,
     ) -> Rc<Self> {
-        let gamepad_input = match SdlGamepadInput::start(
-            Rc::clone(&action_sink),
-            Rc::clone(&status_sink),
-        ) {
-            Ok(input) => Some(input),
-            Err(error) => {
-                warn!(%error, "SDL3 gamepad input unavailable; keyboard input remains active");
-                status_sink(ControllerStatus::default());
-                None
-            }
-        };
+        let gamepad_input =
+            match SdlGamepadInput::start(Rc::clone(&action_sink), Rc::clone(&status_sink)) {
+                Ok(input) => Some(input),
+                Err(error) => {
+                    warn!(%error, "SDL3 gamepad input unavailable; keyboard input remains active");
+                    status_sink(ControllerStatus::default());
+                    None
+                }
+            };
 
         Rc::new(Self {
             action_sink,
@@ -88,10 +86,15 @@ impl InputManager {
         if action.repeatable() {
             if !repeated {
                 self.keyboard_repeat.set(Some(KeyboardRepeat {
-                    action, pressed_at: now, last_emitted_at: now,
+                    action,
+                    pressed_at: now,
+                    last_emitted_at: now,
                 }));
             } else {
-                let Some(mut state) = self.keyboard_repeat.get().filter(|state| state.action == action)
+                let Some(mut state) = self
+                    .keyboard_repeat
+                    .get()
+                    .filter(|state| state.action == action)
                 else {
                     // Ignore orphaned OS repeat events after a lost key-up.
                     return true;
@@ -116,7 +119,10 @@ impl InputManager {
             return false;
         };
         if action.repeatable()
-            && self.keyboard_repeat.get().is_some_and(|state| state.action == action)
+            && self
+                .keyboard_repeat
+                .get()
+                .is_some_and(|state| state.action == action)
         {
             self.keyboard_repeat.set(None);
         }

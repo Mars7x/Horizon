@@ -5,8 +5,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use thiserror::Error;
 use std::os::unix::fs::PermissionsExt;
+use thiserror::Error;
 
 const APP_DATA_DIR: &str = "io.github.Mars7x.Horizon";
 const DATABASE_FILE: &str = "library.sqlite3";
@@ -30,7 +30,11 @@ pub enum DataPathError {
         source: std::io::Error,
     },
     #[error("failed to create or secure Horizon config directory {path}: {source}")]
-    CreateConfigDirectory { path: PathBuf, #[source] source: std::io::Error },
+    CreateConfigDirectory {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 pub fn library_database_path() -> Result<PathBuf, DataPathError> {
@@ -67,19 +71,27 @@ fn config_file_path(filename: &str) -> Result<PathBuf, DataPathError> {
     let root = resolve_config_root(config_home.as_deref(), home.as_deref())?;
     let dir = root.join(APP_DATA_DIR);
     fs::create_dir_all(&dir).map_err(|source| DataPathError::CreateConfigDirectory {
-        path: dir.clone(), source,
+        path: dir.clone(),
+        source,
     })?;
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).map_err(|source| {
-        DataPathError::CreateConfigDirectory { path: dir.clone(), source }
+        DataPathError::CreateConfigDirectory {
+            path: dir.clone(),
+            source,
+        }
     })?;
     Ok(dir.join(filename))
 }
 
-fn resolve_config_root(config_home: Option<&Path>, home: Option<&Path>) -> Result<PathBuf, DataPathError> {
+fn resolve_config_root(
+    config_home: Option<&Path>,
+    home: Option<&Path>,
+) -> Result<PathBuf, DataPathError> {
     if let Some(path) = config_home {
         if !path.is_absolute() {
             return Err(DataPathError::RelativeEnvironmentPath {
-                variable: "XDG_CONFIG_HOME", path: path.to_owned(),
+                variable: "XDG_CONFIG_HOME",
+                path: path.to_owned(),
             });
         }
         return Ok(path.to_owned());
@@ -87,7 +99,8 @@ fn resolve_config_root(config_home: Option<&Path>, home: Option<&Path>) -> Resul
     let home = home.ok_or(DataPathError::MissingDataRoot)?;
     if !home.is_absolute() {
         return Err(DataPathError::RelativeEnvironmentPath {
-            variable: "HOME", path: home.to_owned(),
+            variable: "HOME",
+            path: home.to_owned(),
         });
     }
     Ok(home.join(".config"))

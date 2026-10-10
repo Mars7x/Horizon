@@ -10,9 +10,9 @@ use std::{
 };
 
 use zbus::{
+    MatchRule,
     blocking::{Connection, MessageIterator, Proxy},
     message::Type as MessageType,
-    MatchRule,
     zvariant::{OwnedObjectPath, OwnedValue},
 };
 
@@ -48,7 +48,12 @@ pub enum NetworkKind {
 
 impl NetworkKind {
     pub fn ui_code(self) -> i32 {
-        match self { Self::Offline => 0, Self::Ethernet => 1, Self::Wifi => 2, Self::Other => 3 }
+        match self {
+            Self::Offline => 0,
+            Self::Ethernet => 1,
+            Self::Wifi => 2,
+            Self::Other => 3,
+        }
     }
 }
 
@@ -82,14 +87,22 @@ struct NetworkReading {
 
 impl NetworkReading {
     fn offline() -> Self {
-        Self { kind: NetworkKind::Offline, wifi_strength: 0, limited: false }
+        Self {
+            kind: NetworkKind::Offline,
+            wifi_strength: 0,
+            limited: false,
+        }
     }
 
     fn physical(kind: NetworkKind, wifi_strength: u8, connectivity: u32) -> Self {
         // NetworkManager's Internet-connectivity result is distinct from the
         // physical link: "none" must not turn an active Ethernet link into an
         // unplugged-cable icon. Mark restricted Internet access separately.
-        Self { kind, wifi_strength, limited: matches!(connectivity, 1..=3) }
+        Self {
+            kind,
+            wifi_strength,
+            limited: matches!(connectivity, 1..=3),
+        }
     }
 }
 
@@ -154,7 +167,8 @@ impl StatusMonitor {
         let (network_wake, network_events) = mpsc::sync_channel::<()>(1);
         if let Err(error) = thread::Builder::new()
             .name("horizon-network-events".into())
-            .spawn(move || watch_network_changes(network_wake)) {
+            .spawn(move || watch_network_changes(network_wake))
+        {
             tracing::warn!(%error, "network event listener unavailable; polling fallback active");
         }
         let network_sender = sender.clone();
@@ -164,22 +178,32 @@ impl StatusMonitor {
                 let mut bus: Option<Connection> = None;
                 let mut filter = NetworkFilter::default();
                 loop {
-                    if bus.is_none() { bus = Connection::system().ok(); }
+                    if bus.is_none() {
+                        bus = Connection::system().ok();
+                    }
                     let observation = bus.as_ref().and_then(read_network);
                     // A confirmed offline state is checked a second time after
                     // 150 ms, not five seconds later. This filters transient
                     // handoffs without introducing a visibly slow disconnect.
                     let confirm = matches!(observation, Some(r) if r.kind == NetworkKind::Offline)
-                        && filter.disconnected_polls == 0 && filter.last.is_some();
+                        && filter.disconnected_polls == 0
+                        && filter.last.is_some();
                     let result = filter.update(observation);
-                    if network_sender.send(StatusUpdate::Network(result)).is_err() { break; }
-                    let timeout = if confirm { NETWORK_DISCONNECT_CONFIRM } else { NETWORK_INTERVAL };
+                    if network_sender.send(StatusUpdate::Network(result)).is_err() {
+                        break;
+                    }
+                    let timeout = if confirm {
+                        NETWORK_DISCONNECT_CONFIRM
+                    } else {
+                        NETWORK_INTERVAL
+                    };
                     match network_events.recv_timeout(timeout) {
                         Ok(()) | Err(RecvTimeoutError::Timeout) => {}
                         Err(RecvTimeoutError::Disconnected) => thread::sleep(timeout),
                     }
                 }
-            }) {
+            })
+        {
             tracing::warn!(%error, "network status observer unavailable");
         }
         if let Err(error) = thread::Builder::new()
@@ -187,18 +211,29 @@ impl StatusMonitor {
             .spawn(move || {
                 let mut bus: Option<Connection> = None;
                 loop {
-                    if bus.is_none() { bus = Connection::system().ok(); }
+                    if bus.is_none() {
+                        bus = Connection::system().ok();
+                    }
                     // Read host battery and peripheral sources separately from
                     // NetworkManager; invalid reports remain None, not 100%.
                     let host = bus.as_ref().and_then(read_host_battery);
                     let controller = bus.as_ref().and_then(read_controller_battery);
-                    if sender.send(StatusUpdate::Power { host, controller }).is_err() { break; }
+                    if sender
+                        .send(StatusUpdate::Power { host, controller })
+                        .is_err()
+                    {
+                        break;
+                    }
                     thread::sleep(BATTERY_INTERVAL);
                 }
-            }) {
+            })
+        {
             tracing::warn!(%error, "battery status observer unavailable");
         }
-        Self { receiver, last: RefCell::new(SystemStatus::default()) }
+        Self {
+            receiver,
+            last: RefCell::new(SystemStatus::default()),
+        }
     }
 
     pub fn latest(&self) -> Option<SystemStatus> {
@@ -219,7 +254,11 @@ impl StatusMonitor {
                 }
             }
         }
-        if received && *last != before { Some(*last) } else { None }
+        if received && *last != before {
+            Some(*last)
+        } else {
+            None
+        }
     }
 }
 
@@ -238,7 +277,9 @@ fn watch_network_changes(wake: SyncSender<()>) {
                 .build();
             let mut messages = MessageIterator::for_match_rule(rule, &bus, Some(32))?;
             for message in &mut messages {
-                if message.is_err() { break; }
+                if message.is_err() {
+                    break;
+                }
                 match wake.try_send(()) {
                     Ok(()) | Err(TrySendError::Full(())) => {}
                     Err(TrySendError::Disconnected(())) => return Ok(()),
@@ -269,12 +310,20 @@ fn read_network(bus: &Connection) -> Option<NetworkReading> {
         };
         let state = match active.get_property::<u32>("State") {
             Ok(state) => state,
-            Err(_) => { incomplete = true; continue; }
+            Err(_) => {
+                incomplete = true;
+                continue;
+            }
         };
-        if state != 2 { continue; }
+        if state != 2 {
+            continue;
+        }
         let connection_type = match active.get_property::<String>("Type") {
             Ok(value) => value,
-            Err(_) => { incomplete = true; continue; }
+            Err(_) => {
+                incomplete = true;
+                continue;
+            }
         };
         let kind = match connection_type.as_str() {
             "802-3-ethernet" => NetworkKind::Ethernet,
@@ -283,8 +332,12 @@ fn read_network(bus: &Connection) -> Option<NetworkReading> {
         };
         let strength = if kind == NetworkKind::Wifi {
             wifi_strength(bus, &active).unwrap_or(0)
-        } else { 0 };
-        let is_primary = primary.as_ref().is_some_and(|p| p.as_str() == path.as_str());
+        } else {
+            0
+        };
+        let is_primary = primary
+            .as_ref()
+            .is_some_and(|p| p.as_str() == path.as_str());
         choices.push((is_primary, kind, strength));
     }
     // Prefer an active primary physical link, then wired if the primary is a VPN.
@@ -294,17 +347,28 @@ fn read_network(bus: &Connection) -> Option<NetworkReading> {
     }
     // A valid empty/unsupported physical-link list is an offline observation;
     // a partial D-Bus failure is UNKNOWN and should not trigger a false offline.
-    if incomplete { None } else { Some(NetworkReading::offline()) }
+    if incomplete {
+        None
+    } else {
+        Some(NetworkReading::offline())
+    }
 }
 
 fn wifi_strength(bus: &Connection, active: &Proxy<'_>) -> Option<u8> {
     let paths: Vec<OwnedObjectPath> = active.get_property("Devices").ok()?;
     for path in paths {
-        let Ok(device) = Proxy::new(bus, NM, path.as_str(), WIRELESS_IFACE) else { continue };
-        let Ok(ap_path) = device.get_property::<OwnedObjectPath>("ActiveAccessPoint") else { continue };
-        if ap_path.as_str() == "/" { continue; }
+        let Ok(device) = Proxy::new(bus, NM, path.as_str(), WIRELESS_IFACE) else {
+            continue;
+        };
+        let Ok(ap_path) = device.get_property::<OwnedObjectPath>("ActiveAccessPoint") else {
+            continue;
+        };
+        if ap_path.as_str() == "/" {
+            continue;
+        }
         if let Ok(ap) = Proxy::new(bus, NM, ap_path.as_str(), ACCESS_POINT_IFACE)
-            && let Ok(strength) = ap.get_property::<u8>("Strength") {
+            && let Ok(strength) = ap.get_property::<u8>("Strength")
+        {
             return Some(strength.min(100));
         }
     }
@@ -317,7 +381,9 @@ fn read_host_battery(bus: &Connection) -> Option<BatteryReading> {
     // wireless peripheral batteries from host charge status.
     let present = device.get_property::<bool>("IsPresent").ok()?;
     let kind = device.get_property::<u32>("Type").ok()?;
-    if !present || kind != 2 { return None; } // UPower Battery (not UPS or mouse).
+    if !present || kind != 2 {
+        return None;
+    } // UPower Battery (not UPS or mouse).
     let percent = device.get_property::<f64>("Percentage").ok()?;
     let state = device.get_property::<u32>("State").unwrap_or(0);
     parse_battery(percent, state)
@@ -337,12 +403,18 @@ fn read_upower_gamepad_battery(bus: &Connection) -> Option<BatteryReading> {
     let paths: Vec<OwnedObjectPath> = root.call("EnumerateDevices", &()).ok()?;
     let mut candidates = Vec::new();
     for path in paths {
-        let Ok(device) = Proxy::new(bus, UPOWER, path.as_str(), UPOWER_DEVICE) else { continue };
+        let Ok(device) = Proxy::new(bus, UPOWER, path.as_str(), UPOWER_DEVICE) else {
+            continue;
+        };
         if device.get_property::<u32>("Type").ok() != Some(UPOWER_GAME_CONTROLLER_TYPE) {
             continue;
         }
-        if device.get_property::<bool>("IsPresent").ok() != Some(true) { continue; }
-        let Ok(percent) = device.get_property::<f64>("Percentage") else { continue };
+        if device.get_property::<bool>("IsPresent").ok() != Some(true) {
+            continue;
+        }
+        let Ok(percent) = device.get_property::<f64>("Percentage") else {
+            continue;
+        };
         let state = device.get_property::<u32>("State").unwrap_or(0);
         if let Some(battery) = parse_battery(percent, state) {
             candidates.push(battery);
@@ -361,43 +433,75 @@ fn read_bluez_gamepad_battery(bus: &Connection) -> Option<BatteryReading> {
         if !interfaces.contains_key(BLUEZ_BATTERY) || !interfaces.contains_key(BLUEZ_DEVICE) {
             continue;
         }
-        let Ok(device) = Proxy::new(bus, BLUEZ, path.as_str(), BLUEZ_DEVICE) else { continue };
-        if device.get_property::<bool>("Connected").ok() != Some(true) { continue; }
+        let Ok(device) = Proxy::new(bus, BLUEZ, path.as_str(), BLUEZ_DEVICE) else {
+            continue;
+        };
+        if device.get_property::<bool>("Connected").ok() != Some(true) {
+            continue;
+        }
         let icon = device.get_property::<String>("Icon").unwrap_or_default();
-        let name = device.get_property::<String>("Name")
+        let name = device
+            .get_property::<String>("Name")
             .or_else(|_| device.get_property::<String>("Alias"))
             .unwrap_or_default();
-        if !is_gamepad_device(&icon, &name) { continue; }
-        let Ok(battery) = Proxy::new(bus, BLUEZ, path.as_str(), BLUEZ_BATTERY) else { continue };
-        let Ok(percent) = battery.get_property::<u8>("Percentage") else { continue };
-        if percent > 100 { continue; }
+        if !is_gamepad_device(&icon, &name) {
+            continue;
+        }
+        let Ok(battery) = Proxy::new(bus, BLUEZ, path.as_str(), BLUEZ_BATTERY) else {
+            continue;
+        };
+        let Ok(percent) = battery.get_property::<u8>("Percentage") else {
+            continue;
+        };
+        if percent > 100 {
+            continue;
+        }
         // BlueZ Battery1 has no charging-state property. Do not guess.
-        candidates.push(BatteryReading { percent, charging: false });
+        candidates.push(BatteryReading {
+            percent,
+            charging: false,
+        });
     }
     single_candidate(candidates)
 }
 
 fn single_candidate(values: Vec<BatteryReading>) -> Option<BatteryReading> {
-    if values.len() == 1 { values.into_iter().next() } else { None }
+    if values.len() == 1 {
+        values.into_iter().next()
+    } else {
+        None
+    }
 }
 
 fn is_gamepad_device(icon: &str, name: &str) -> bool {
-    if icon == "input-gaming" { return true; }
+    if icon == "input-gaming" {
+        return true;
+    }
     let name = name.to_ascii_lowercase();
-    (name.contains("8bitdo") && (name.contains("ultimate") || name.contains("pro") ||
-        name.contains("controller") || name.contains("sn30"))) ||
-        name.contains("gamepad") ||
-        name.contains("game controller") || name.contains("xbox wireless controller") ||
-        name.contains("dualsense") || name.contains("dualshock") ||
-        name.contains("pro controller")
+    (name.contains("8bitdo")
+        && (name.contains("ultimate")
+            || name.contains("pro")
+            || name.contains("controller")
+            || name.contains("sn30")))
+        || name.contains("gamepad")
+        || name.contains("game controller")
+        || name.contains("xbox wireless controller")
+        || name.contains("dualsense")
+        || name.contains("dualshock")
+        || name.contains("pro controller")
 }
 
 fn parse_battery(percent: f64, state: u32) -> Option<BatteryReading> {
-    if !percent.is_finite() || !(0.0..=100.0).contains(&percent) { return None; }
+    if !percent.is_finite() || !(0.0..=100.0).contains(&percent) {
+        return None;
+    }
     // UPower DeviceState=1 is actively Charging. State=5 is PendingCharge:
     // plugged in but charge paused (e.g. battery conservation threshold),
     // so it must not be shown as an active lightning-bolt charge state.
-    Some(BatteryReading { percent: percent.round() as u8, charging: state == 1 })
+    Some(BatteryReading {
+        percent: percent.round() as u8,
+        charging: state == 1,
+    })
 }
 
 #[cfg(test)]
@@ -411,11 +515,41 @@ mod tests {
     }
     #[test]
     fn charging_and_percentage() {
-        assert_eq!(parse_battery(47.7, 1), Some(BatteryReading { percent: 48, charging: true }));
-        assert_eq!(parse_battery(0.0, 2), Some(BatteryReading { percent: 0, charging: false }));
-        assert_eq!(parse_battery(100.0, 4), Some(BatteryReading { percent: 100, charging: false }));
-        assert_eq!(parse_battery(80.0, 5), Some(BatteryReading { percent: 80, charging: false }));
-        assert_eq!(parse_battery(80.0, 6), Some(BatteryReading { percent: 80, charging: false }));
+        assert_eq!(
+            parse_battery(47.7, 1),
+            Some(BatteryReading {
+                percent: 48,
+                charging: true
+            })
+        );
+        assert_eq!(
+            parse_battery(0.0, 2),
+            Some(BatteryReading {
+                percent: 0,
+                charging: false
+            })
+        );
+        assert_eq!(
+            parse_battery(100.0, 4),
+            Some(BatteryReading {
+                percent: 100,
+                charging: false
+            })
+        );
+        assert_eq!(
+            parse_battery(80.0, 5),
+            Some(BatteryReading {
+                percent: 80,
+                charging: false
+            })
+        );
+        assert_eq!(
+            parse_battery(80.0, 6),
+            Some(BatteryReading {
+                percent: 80,
+                charging: false
+            })
+        );
     }
     #[test]
     fn connected_ethernet_survives_one_failed_or_disconnected_poll() {
@@ -427,7 +561,10 @@ mod tests {
         assert_eq!(filter.update(Some(ethernet)), ethernet);
         // Genuine disconnection is published after two consecutive reads.
         assert_eq!(filter.update(Some(NetworkReading::offline())), ethernet);
-        assert_eq!(filter.update(Some(NetworkReading::offline())).kind, NetworkKind::Offline);
+        assert_eq!(
+            filter.update(Some(NetworkReading::offline())).kind,
+            NetworkKind::Offline
+        );
     }
 
     #[test]
@@ -447,9 +584,11 @@ mod tests {
         let result = NetworkReading::physical(NetworkKind::Ethernet, 0, 1);
         assert_eq!(result.kind, NetworkKind::Ethernet);
         assert!(result.limited);
-        assert_eq!(NetworkReading::physical(NetworkKind::Ethernet, 0, 0).kind, NetworkKind::Ethernet);
+        assert_eq!(
+            NetworkReading::physical(NetworkKind::Ethernet, 0, 0).kind,
+            NetworkKind::Ethernet
+        );
     }
-
 }
 
 #[cfg(test)]
@@ -466,7 +605,10 @@ mod peripheral_tests {
 
     #[test]
     fn ambiguous_peripherals_have_no_selected_battery() {
-        let battery = BatteryReading { percent: 65, charging: false };
+        let battery = BatteryReading {
+            percent: 65,
+            charging: false,
+        };
         assert_eq!(single_candidate(vec![]), None);
         assert_eq!(single_candidate(vec![battery]), Some(battery));
         assert_eq!(single_candidate(vec![battery, battery]), None);
@@ -479,13 +621,29 @@ mod update_merging_tests {
     #[test]
     fn independently_received_updates_retain_both_status_categories() {
         let ethernet = NetworkReading::physical(NetworkKind::Ethernet, 0, 4);
-        let battery = BatteryReading { percent: 38, charging: true };
+        let battery = BatteryReading {
+            percent: 38,
+            charging: true,
+        };
         let mut value = SystemStatus::default();
-        let events = [StatusUpdate::Power { host: None, controller: Some(battery) }, StatusUpdate::Network(ethernet)];
+        let events = [
+            StatusUpdate::Power {
+                host: None,
+                controller: Some(battery),
+            },
+            StatusUpdate::Network(ethernet),
+        ];
         for update in events {
             match update {
-                StatusUpdate::Network(n) => { value.network=n.kind; value.limited=n.limited; value.wifi_strength=n.wifi_strength; }
-                StatusUpdate::Power {host, controller} => {value.host_battery=host;value.controller_battery_fallback=controller;}
+                StatusUpdate::Network(n) => {
+                    value.network = n.kind;
+                    value.limited = n.limited;
+                    value.wifi_strength = n.wifi_strength;
+                }
+                StatusUpdate::Power { host, controller } => {
+                    value.host_battery = host;
+                    value.controller_battery_fallback = controller;
+                }
             }
         }
         assert_eq!(value.network, NetworkKind::Ethernet);

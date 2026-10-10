@@ -2,7 +2,10 @@
 //! This module owns audio playback. Presentation and input adapters remain silent.
 use std::time::{Duration, Instant};
 
-use sdl3::{Sdl, AudioSubsystem, audio::{AudioFormat, AudioSpec, AudioStreamOwner}};
+use sdl3::{
+    AudioSubsystem, Sdl,
+    audio::{AudioFormat, AudioSpec, AudioStreamOwner},
+};
 use tracing::warn;
 
 const NAVIGATION_WAV: &[u8] = include_bytes!("../ui/assets/horizon-navigation.wav");
@@ -10,11 +13,19 @@ const OK_WAV: &[u8] = include_bytes!("../ui/assets/horizon-ok.wav");
 const BACK_WAV: &[u8] = include_bytes!("../ui/assets/horizon-back.wav");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UiSoundCue { Navigation, Ok, Back }
+pub enum UiSoundCue {
+    Navigation,
+    Ok,
+    Back,
+}
 
 impl UiSoundCue {
     const fn index(self) -> usize {
-        match self { Self::Navigation => 0, Self::Ok => 1, Self::Back => 2 }
+        match self {
+            Self::Navigation => 0,
+            Self::Ok => 1,
+            Self::Back => 2,
+        }
     }
 }
 
@@ -40,15 +51,25 @@ impl Playback {
             channels: Some(1),
             format: Some(AudioFormat::s16_sys()),
         };
-        let device = subsystem.open_playback_device(&spec).map_err(|error| error.to_string())?;
-        let stream = device.open_device_stream(Some(&spec)).map_err(|error| error.to_string())?;
+        let device = subsystem
+            .open_playback_device(&spec)
+            .map_err(|error| error.to_string())?;
+        let stream = device
+            .open_device_stream(Some(&spec))
+            .map_err(|error| error.to_string())?;
         // SDL opens the device initially paused. Resume only after a short
         // silent primer is available, so the first *audible* sample is not
         // also the first packet the backend ever sees.
-        stream.put_data_i16(&STARTUP_SILENCE).map_err(|error| error.to_string())?;
+        stream
+            .put_data_i16(&STARTUP_SILENCE)
+            .map_err(|error| error.to_string())?;
         stream.flush().map_err(|error| error.to_string())?;
         stream.resume().map_err(|error| error.to_string())?;
-        Ok(Self { stream, _subsystem: subsystem, _sdl: sdl })
+        Ok(Self {
+            stream,
+            _subsystem: subsystem,
+            _sdl: sdl,
+        })
     }
 }
 
@@ -63,13 +84,19 @@ impl UiSounds {
     pub fn new(enabled: bool) -> Self {
         // A malformed bundled asset is a packaging error, not a user's runtime error.
         let samples = [NAVIGATION_WAV, OK_WAV, BACK_WAV].map(|wav| {
-            decode_pcm16_mono_48k(wav)
-                .expect("bundled Horizon UI WAV must be PCM16 mono 48 kHz")
+            decode_pcm16_mono_48k(wav).expect("bundled Horizon UI WAV must be PCM16 mono 48 kHz")
         });
-        Self { enabled, samples, playback: None, last_failed_open: None }
+        Self {
+            enabled,
+            samples,
+            playback: None,
+            last_failed_open: None,
+        }
     }
 
-    pub fn play_navigation(&mut self) { self.play(UiSoundCue::Navigation); }
+    pub fn play_navigation(&mut self) {
+        self.play(UiSoundCue::Navigation);
+    }
 
     pub fn set_enabled(&mut self, enabled: bool) {
         if !enabled && self.enabled {
@@ -84,8 +111,15 @@ impl UiSounds {
     /// Open the reusable device once, before the user navigates. Call from
     /// Slint's event loop after initial UI setup; never from an audio callback.
     pub fn prepare(&mut self) {
-        if !self.enabled || self.playback.is_some() { return; }
-        if self.last_failed_open.is_some_and(|at| at.elapsed() < RETRY_DELAY) { return; }
+        if !self.enabled || self.playback.is_some() {
+            return;
+        }
+        if self
+            .last_failed_open
+            .is_some_and(|at| at.elapsed() < RETRY_DELAY)
+        {
+            return;
+        }
         match Playback::open() {
             Ok(playback) => {
                 self.playback = Some(playback);
@@ -100,11 +134,15 @@ impl UiSounds {
 
     /// Call only after a semantic UI action succeeds; no sound on ignored input.
     pub fn play(&mut self, cue: UiSoundCue) {
-        if !self.enabled { return; }
+        if !self.enabled {
+            return;
+        }
         self.prepare();
         if let Some(playback) = &self.playback {
             // No sound pile-up if the user navigates quickly or uses held-repeat.
-            let result = playback.stream.clear()
+            let result = playback
+                .stream
+                .clear()
                 .and_then(|()| playback.stream.put_data_i16(&self.samples[cue.index()]))
                 // Short effects need an explicit flush so SDL's conversion
                 // buffer releases their complete tail promptly.
@@ -119,7 +157,9 @@ impl UiSounds {
 }
 
 fn decode_pcm16_mono_48k(wav: &[u8]) -> Option<Vec<i16>> {
-    if wav.get(0..4)? != b"RIFF" || wav.get(8..12)? != b"WAVE" { return None; }
+    if wav.get(0..4)? != b"RIFF" || wav.get(8..12)? != b"WAVE" {
+        return None;
+    }
     let mut format_ok = false;
     let mut data: Option<&[u8]> = None;
     let mut at = 12usize;
@@ -135,12 +175,23 @@ fn decode_pcm16_mono_48k(wav: &[u8]) -> Option<Vec<i16>> {
             let bits = u16::from_le_bytes(contents[14..16].try_into().ok()?);
             format_ok = kind == 1 && channels == 1 && rate == 48_000 && bits == 16;
         }
-        if name == b"data" { data = Some(contents); }
+        if name == b"data" {
+            data = Some(contents);
+        }
         at = at.checked_add(length)?.checked_add(length % 2)?;
     }
     let bytes = data?;
-    if !format_ok || bytes.is_empty() || bytes.len() % 2 != 0 { return None; }
-    Some(bytes.as_chunks::<2>().0.iter().map(|pair| i16::from_le_bytes(*pair)).collect())
+    if !format_ok || bytes.is_empty() || bytes.len() % 2 != 0 {
+        return None;
+    }
+    Some(
+        bytes
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| i16::from_le_bytes(*pair))
+            .collect(),
+    )
 }
 
 #[cfg(test)]

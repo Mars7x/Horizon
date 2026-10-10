@@ -13,6 +13,10 @@ pub fn initialize() -> Result<(), slint::PlatformError> {
         .renderer_name("skia".into())
         .select()?;
 
-    info!(backend = "winit", renderer = "skia", "Slint platform initialized");
+    info!(
+        backend = "winit",
+        renderer = "skia",
+        "Slint platform initialized"
+    );
     Ok(())
 }

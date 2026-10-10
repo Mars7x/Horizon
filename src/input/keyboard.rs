@@ -90,10 +90,7 @@ mod tests {
 
     #[test]
     fn held_accept_is_not_repeated() {
-        assert_eq!(
-            action_for_key(encoded(Key::Return).as_str(), true),
-            None
-        );
+        assert_eq!(action_for_key(encoded(Key::Return).as_str(), true), None);
     }
 
     #[test]

@@ -97,10 +97,7 @@ async fn run_clock_format_monitor(
     on_change(initial);
 
     let mut changes = match settings
-        .receive_setting_changed_with_args::<String>(
-            GNOME_INTERFACE_NAMESPACE,
-            CLOCK_FORMAT_KEY,
-        )
+        .receive_setting_changed_with_args::<String>(GNOME_INTERFACE_NAMESPACE, CLOCK_FORMAT_KEY)
         .await
     {
         Ok(changes) => changes,

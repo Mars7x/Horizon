@@ -103,10 +103,8 @@ impl ManagedSessionExecutor for DbusManagedSessionExecutor {
             return Ok(ManagedStartOutcome::Unavailable);
         }
 
-        let result: Result<(u32, u64, String), zbus::Error> = proxy.call(
-            "StartSession",
-            &(source_id.as_str(), external_id.as_str()),
-        );
+        let result: Result<(u32, u64, String), zbus::Error> =
+            proxy.call("StartSession", &(source_id.as_str(), external_id.as_str()));
         let Ok((code, raw_session_id, detail)) = result else {
             return Ok(ManagedStartOutcome::Unavailable);
         };
@@ -203,8 +201,7 @@ impl DbusRuntimeObservationExecutor {
         let Ok(proxy) = self.proxy() else {
             return false;
         };
-        let info: Result<(u32, bool, String), zbus::Error> =
-            proxy.call("RuntimeObserverInfo", &());
+        let info: Result<(u32, bool, String), zbus::Error> = proxy.call("RuntimeObserverInfo", &());
         matches!(info, Ok((SESSION_HELPER_PROTOCOL_VERSION, true, _)))
     }
 }
@@ -218,8 +215,7 @@ impl RuntimeObservationExecutor for DbusRuntimeObservationExecutor {
         let Ok(proxy) = self.proxy() else {
             return Ok(RuntimeObservationStartOutcome::Unavailable);
         };
-        let info: Result<(u32, bool, String), zbus::Error> =
-            proxy.call("RuntimeObserverInfo", &());
+        let info: Result<(u32, bool, String), zbus::Error> = proxy.call("RuntimeObserverInfo", &());
         let Ok((protocol, available, _detail)) = info else {
             return Ok(RuntimeObservationStartOutcome::Unavailable);
         };
@@ -238,7 +234,9 @@ impl RuntimeObservationExecutor for DbusRuntimeObservationExecutor {
         match code {
             STARTED => RuntimeObservationId::new(raw_id)
                 .map(RuntimeObservationStartOutcome::Started)
-                .ok_or_else(|| RuntimeObservationError::message("host helper returned observation id 0")),
+                .ok_or_else(|| {
+                    RuntimeObservationError::message("host helper returned observation id 0")
+                }),
             START_UNSUPPORTED => Ok(RuntimeObservationStartOutcome::Unsupported),
             START_UNAVAILABLE => Ok(RuntimeObservationStartOutcome::Unavailable),
             START_FAILED => Err(RuntimeObservationError::message(detail)),

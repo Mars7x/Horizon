@@ -1,23 +1,46 @@
 //! Controller-first Settings > Third-Party page; Slint displays state only.
-use std::{cell::RefCell, rc::Rc, sync::{Arc, atomic::{AtomicU64, Ordering}}};
 use slint::ComponentHandle;
+use std::{
+    cell::RefCell,
+    rc::Rc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
-use crate::{AppWindow,
+use crate::{
+    AppWindow,
+    appearance::{ACCENT_PRESETS, ThemePreference},
     audio::UiSoundCue,
-    appearance::{ThemePreference, ACCENT_PRESETS},
     input::{UiAction, UiActionEvent},
     navigation::step_with_edge_wrap,
     platform::wayland_clipboard::WaylandClipboard,
     presentation::{CallbackSlot, appearance::AppearanceController},
-    services::{settings::{SettingsService, ArtworkPreferences}, steam_account::SteamAccountService}};
+    services::{
+        settings::{ArtworkPreferences, SettingsService},
+        steam_account::SteamAccountService,
+    },
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum SettingsView { #[default] Root, Appearance, ThirdParty, SteamAccount }
+enum SettingsView {
+    #[default]
+    Root,
+    Appearance,
+    ThirdParty,
+    SteamAccount,
+}
 
 // SteamGridDB is a separate service; the shared prefix is not redundant.
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum EditorKind { #[default] SteamGridDb, SteamId, SteamWebKey }
+enum EditorKind {
+    #[default]
+    SteamGridDb,
+    SteamId,
+    SteamWebKey,
+}
 
 #[derive(Default)]
 struct PageState {
@@ -46,7 +69,12 @@ pub struct SettingsController {
 }
 
 impl SettingsController {
-    pub fn new(ui: &AppWindow, service: SettingsService, appearance: AppearanceController, steam_account: Rc<RefCell<SteamAccountService>>) -> Rc<Self> {
+    pub fn new(
+        ui: &AppWindow,
+        service: SettingsService,
+        appearance: AppearanceController,
+        steam_account: Rc<RefCell<SteamAccountService>>,
+    ) -> Rc<Self> {
         let controller = Rc::new(Self {
             page: RefCell::new(PageState::default()),
             service: RefCell::new(service),
@@ -70,7 +98,9 @@ impl SettingsController {
     }
 
     fn notify_steam_account_changed(&self) {
-        if let Some(callback) = self.steam_account_changed.borrow().as_ref() { callback(); }
+        if let Some(callback) = self.steam_account_changed.borrow().as_ref() {
+            callback();
+        }
     }
 
     /// Settings persist first; notify Home only on committed changes.
@@ -93,20 +123,28 @@ impl SettingsController {
     }
 
     fn cue(&self, cue: UiSoundCue) {
-        if let Some(callback) = self.action_sound.borrow().as_ref() { callback(cue); }
+        if let Some(callback) = self.action_sound.borrow().as_ref() {
+            callback(cue);
+        }
     }
 
     fn set_ui_sounds_enabled(&self, ui: &AppWindow, enabled: bool) {
-        if self.appearance.preferences().ui_sounds_enabled == enabled { return; }
+        if self.appearance.preferences().ui_sounds_enabled == enabled {
+            return;
+        }
         let result = self.appearance.set_ui_sounds_enabled(ui, enabled);
         if result.is_ok() {
-            if let Some(callback) = self.sound_changed.borrow().as_ref() { callback(enabled); }
+            if let Some(callback) = self.sound_changed.borrow().as_ref() {
+                callback(enabled);
+            }
             // Off mutes immediately; On can confirm with an OK cue.
             self.cue(UiSoundCue::Ok);
         }
         self.page.borrow_mut().feedback = if result.is_ok() {
             String::new()
-        } else { "Could not save UI sound preference.".into() };
+        } else {
+            "Could not save UI sound preference.".into()
+        };
         self.publish(ui);
     }
 
@@ -127,7 +165,9 @@ impl SettingsController {
         // Failure is non-fatal: try again on the actual Ctrl+V gesture.
         self.ensure_wayland_clipboard(ui);
     }
-    pub fn on_leave(&self, ui: &AppWindow) { self.reset(ui); }
+    pub fn on_leave(&self, ui: &AppWindow) {
+        self.reset(ui);
+    }
 
     fn reset(&self, ui: &AppWindow) {
         self.paste_generation.fetch_add(1, Ordering::Relaxed);
@@ -147,7 +187,11 @@ impl SettingsController {
         if ui.get_settings_refresh_open() {
             if action == UiAction::Back || (action == UiAction::Accept && !event.repeated) {
                 ui.set_settings_refresh_open(false);
-                self.cue(if action == UiAction::Back { UiSoundCue::Back } else { UiSoundCue::Ok });
+                self.cue(if action == UiAction::Back {
+                    UiSoundCue::Back
+                } else {
+                    UiSoundCue::Ok
+                });
             } else if action == UiAction::Home {
                 ui.set_settings_refresh_open(false);
                 return false;
@@ -173,7 +217,9 @@ impl SettingsController {
                     let mut page = self.page.borrow_mut();
                     page.editor_target = if page.editor_kind == EditorKind::SteamId {
                         next_id_editor_target(page.editor_target, action, can_save)
-                    } else { next_editor_target(page.editor_target, action, can_save) };
+                    } else {
+                        next_editor_target(page.editor_target, action, can_save)
+                    };
                     let target = page.editor_target;
                     drop(page);
                     ui.set_settings_editor_target(target);
@@ -199,10 +245,19 @@ impl SettingsController {
                 );
                 let delta = if action == UiAction::Up { -1 } else { 1 };
                 page.selected = if page.view == SettingsView::Appearance {
-                    appearance_step_vertical(page.selected, action, page.last_accent_selection.unwrap_or(3), event.repeated)
-                } else if page.view == SettingsView::ThirdParty && !self.service.borrow().has_steamgriddb_key() {
+                    appearance_step_vertical(
+                        page.selected,
+                        action,
+                        page.last_accent_selection.unwrap_or(3),
+                        event.repeated,
+                    )
+                } else if page.view == SettingsView::ThirdParty
+                    && !self.service.borrow().has_steamgriddb_key()
+                {
                     third_party_step_without_key(page.selected, delta, event.repeated)
-                } else { step_with_edge_wrap(page.selected, 0, count - 1, delta, event.repeated) };
+                } else {
+                    step_with_edge_wrap(page.selected, 0, count - 1, delta, event.repeated)
+                };
                 if page.view == SettingsView::Appearance && (3..=12).contains(&page.selected) {
                     page.last_accent_selection = Some(page.selected);
                 }
@@ -219,7 +274,8 @@ impl SettingsController {
                 } else if page.view == SettingsView::Appearance {
                     drop(page);
                     let mut page = self.page.borrow_mut();
-                    page.selected = appearance_step_horizontal(page.selected, action, event.repeated);
+                    page.selected =
+                        appearance_step_horizontal(page.selected, action, event.repeated);
                     if (3..=12).contains(&page.selected) {
                         page.last_accent_selection = Some(page.selected);
                     }
@@ -240,32 +296,44 @@ impl SettingsController {
         let weak = ui.as_weak();
         let controller = Rc::clone(self);
         ui.on_settings_activate(move |index| {
-            if let Some(ui) = weak.upgrade() { controller.activate(&ui, index); }
+            if let Some(ui) = weak.upgrade() {
+                controller.activate(&ui, index);
+            }
         });
         let weak = ui.as_weak();
         let controller = Rc::clone(self);
         ui.on_settings_back(move || {
-            if let Some(ui) = weak.upgrade() { controller.back_inside(&ui); }
+            if let Some(ui) = weak.upgrade() {
+                controller.back_inside(&ui);
+            }
         });
         let weak = ui.as_weak();
         let controller = Rc::clone(self);
         ui.on_settings_dismiss_refresh(move || {
-            if let Some(ui) = weak.upgrade() { controller.back_inside(&ui); }
+            if let Some(ui) = weak.upgrade() {
+                controller.back_inside(&ui);
+            }
         });
         let weak = ui.as_weak();
         let controller = Rc::clone(self);
         ui.on_settings_save_key(move |key| {
-            if let Some(ui) = weak.upgrade() { controller.save_key(&ui, key.as_str()); }
+            if let Some(ui) = weak.upgrade() {
+                controller.save_key(&ui, key.as_str());
+            }
         });
         let weak = ui.as_weak();
         let controller = Rc::clone(self);
         ui.on_settings_cancel_key(move || {
-            if let Some(ui) = weak.upgrade() { controller.cancel_key(&ui); }
+            if let Some(ui) = weak.upgrade() {
+                controller.cancel_key(&ui);
+            }
         });
         let weak = ui.as_weak();
         let controller = Rc::clone(self);
         ui.on_settings_request_wayland_paste(move || {
-            if let Some(ui) = weak.upgrade() { controller.paste_from_wayland(&ui); }
+            if let Some(ui) = weak.upgrade() {
+                controller.paste_from_wayland(&ui);
+            }
         });
         let weak = ui.as_weak();
         let controller = Rc::clone(self);
@@ -279,11 +347,15 @@ impl SettingsController {
     }
 
     fn activate(&self, ui: &AppWindow, selected: i32) {
-        if self.page.borrow().editing_key { return; }
+        if self.page.borrow().editing_key {
+            return;
+        }
         let view = self.page.borrow().view;
         match view {
             SettingsView::Root => {
-                if !(0..=1).contains(&selected) { return; }
+                if !(0..=1).contains(&selected) {
+                    return;
+                }
                 let mut page = self.page.borrow_mut();
                 page.view = root_destination(selected).expect("root selection checked above");
                 page.selected = 0;
@@ -294,7 +366,9 @@ impl SettingsController {
                 return;
             }
             SettingsView::Appearance => {
-                if !(0..=13).contains(&selected) { return; }
+                if !(0..=13).contains(&selected) {
+                    return;
+                }
                 {
                     let mut page = self.page.borrow_mut();
                     page.selected = selected;
@@ -308,25 +382,37 @@ impl SettingsController {
                     return;
                 }
                 let result = match selected {
-                    0 => self.appearance.set_theme_preference(ui, ThemePreference::System),
-                    1 => self.appearance.set_theme_preference(ui, ThemePreference::Light),
-                    2 => self.appearance.set_theme_preference(ui, ThemePreference::Dark),
+                    0 => self
+                        .appearance
+                        .set_theme_preference(ui, ThemePreference::System),
+                    1 => self
+                        .appearance
+                        .set_theme_preference(ui, ThemePreference::Light),
+                    2 => self
+                        .appearance
+                        .set_theme_preference(ui, ThemePreference::Dark),
                     3 => self.appearance.use_system_accent(ui),
-                    _ => self.appearance.set_custom_accent(ui, ACCENT_PRESETS[(selected - 4) as usize].1),
+                    _ => self
+                        .appearance
+                        .set_custom_accent(ui, ACCENT_PRESETS[(selected - 4) as usize].1),
                 };
                 self.page.borrow_mut().feedback = if result.is_ok() {
                     String::new()
                 } else {
                     "Could not save appearance settings.".into()
                 };
-                if result.is_ok() { self.cue(UiSoundCue::Ok); }
+                if result.is_ok() {
+                    self.cue(UiSoundCue::Ok);
+                }
                 self.publish(ui);
                 return;
             }
             SettingsView::ThirdParty | SettingsView::SteamAccount => {}
         }
         if view == SettingsView::SteamAccount {
-            if !(0..=2).contains(&selected) { return; }
+            if !(0..=2).contains(&selected) {
+                return;
+            }
             self.page.borrow_mut().selected = selected;
             match selected {
                 0 => self.open_editor(ui, EditorKind::SteamId),
@@ -338,8 +424,13 @@ impl SettingsController {
                         let ok = result.is_ok();
                         self.page.borrow_mut().feedback = if ok {
                             "Saved Steam account removed locally.".into()
-                        } else { "Unable to remove Steam account settings.".into() };
-                        if ok { self.notify_steam_account_changed(); self.cue(UiSoundCue::Ok); }
+                        } else {
+                            "Unable to remove Steam account settings.".into()
+                        };
+                        if ok {
+                            self.notify_steam_account_changed();
+                            self.cue(UiSoundCue::Ok);
+                        }
                     }
                 }
                 _ => {}
@@ -347,9 +438,12 @@ impl SettingsController {
             self.publish(ui);
             return;
         }
-        if !(0..=4).contains(&selected) { return; }
-        if (selected == 2 || selected == 3)
-            && !self.service.borrow().has_steamgriddb_key() { return; }
+        if !(0..=4).contains(&selected) {
+            return;
+        }
+        if (selected == 2 || selected == 3) && !self.service.borrow().has_steamgriddb_key() {
+            return;
+        }
         self.page.borrow_mut().selected = selected;
         match selected {
             0 => {
@@ -361,7 +455,8 @@ impl SettingsController {
             }
             2 => {
                 if self.service.borrow().has_steamgriddb_key()
-                    && let Some(callback) = self.artwork_refresh.borrow().as_ref() {
+                    && let Some(callback) = self.artwork_refresh.borrow().as_ref()
+                {
                     // Open the progress dialog before starting the worker.
                     ui.set_settings_refresh_completed(0);
                     ui.set_settings_refresh_total(0);
@@ -409,8 +504,14 @@ impl SettingsController {
         page.feedback.clear();
         drop(page);
         let draft = if kind == EditorKind::SteamId {
-            self.steam_account.borrow().identity().unwrap_or("").to_owned()
-        } else { String::new() };
+            self.steam_account
+                .borrow()
+                .identity()
+                .unwrap_or("")
+                .to_owned()
+        } else {
+            String::new()
+        };
         ui.set_settings_key_draft(draft.into());
         self.cue(UiSoundCue::Ok);
     }
@@ -418,14 +519,17 @@ impl SettingsController {
     fn ensure_wayland_clipboard(&self, ui: &AppWindow) -> Option<Arc<WaylandClipboard>> {
         let mut clipboard = self.wayland_clipboard.borrow_mut();
         if clipboard.is_none()
-            && let Ok(reader) = WaylandClipboard::from_window(ui.window()) {
+            && let Ok(reader) = WaylandClipboard::from_window(ui.window())
+        {
             *clipboard = Some(Arc::new(reader));
         }
         clipboard.as_ref().cloned()
     }
 
     fn paste_from_wayland(&self, ui: &AppWindow) {
-        if !self.page.borrow().editing_key { return; }
+        if !self.page.borrow().editing_key {
+            return;
+        }
         // Keep the entire clipboard operation off the Slint event loop.
         let Some(clipboard) = self.ensure_wayland_clipboard(ui) else {
             self.page.borrow_mut().feedback =
@@ -440,10 +544,11 @@ impl SettingsController {
         std::thread::spawn(move || {
             let text = clipboard.read_key();
             let _ = weak_ui.upgrade_in_event_loop(move |ui| {
-                if !ui.get_settings_editing_key() ||
-                    ui.get_settings_editor_target() != 0 ||
-                    epoch.load(Ordering::Relaxed) != generation ||
-                    ui.get_settings_key_draft().as_str() != initial_draft {
+                if !ui.get_settings_editing_key()
+                    || ui.get_settings_editor_target() != 0
+                    || epoch.load(Ordering::Relaxed) != generation
+                    || ui.get_settings_key_draft().as_str() != initial_draft
+                {
                     // Text was edited or this modal was closed while the
                     // compositor supplied the selection; never overwrite it.
                     return;
@@ -469,28 +574,27 @@ impl SettingsController {
                         ui.set_settings_synthetic_key_insertion(true);
                         let window = ui.window();
                         for control in [Key::Control, Key::ControlR] {
-                            let _ = window.dispatch_event_with_result(
-                                WindowEvent::KeyReleased { text: control.into() }
-                            );
+                            let _ = window.dispatch_event_with_result(WindowEvent::KeyReleased {
+                                text: control.into(),
+                            });
                         }
                         for ch in text.chars() {
                             let key: slint::SharedString = ch.to_string().into();
-                            let _ = window.dispatch_event_with_result(
-                                WindowEvent::KeyPressed { text: key.clone() }
-                            );
-                            let _ = window.dispatch_event_with_result(
-                                WindowEvent::KeyReleased { text: key }
-                            );
+                            let _ = window.dispatch_event_with_result(WindowEvent::KeyPressed {
+                                text: key.clone(),
+                            });
+                            let _ = window
+                                .dispatch_event_with_result(WindowEvent::KeyReleased { text: key });
                         }
                         if held & 1 != 0 {
-                            let _ = window.dispatch_event_with_result(
-                                WindowEvent::KeyPressed { text: Key::Control.into() }
-                            );
+                            let _ = window.dispatch_event_with_result(WindowEvent::KeyPressed {
+                                text: Key::Control.into(),
+                            });
                         }
                         if held & 2 != 0 {
-                            let _ = window.dispatch_event_with_result(
-                                WindowEvent::KeyPressed { text: Key::ControlR.into() }
-                            );
+                            let _ = window.dispatch_event_with_result(WindowEvent::KeyPressed {
+                                text: Key::ControlR.into(),
+                            });
                         }
                         ui.set_settings_synthetic_key_insertion(false);
                     }
@@ -505,7 +609,10 @@ impl SettingsController {
         if self.service.borrow().prefer_steamgriddb_artwork() == preferred {
             return;
         }
-        let result = self.service.borrow_mut().set_prefer_steamgriddb_artwork(preferred);
+        let result = self
+            .service
+            .borrow_mut()
+            .set_prefer_steamgriddb_artwork(preferred);
         if result.is_ok() {
             self.notify_artwork_changed();
             self.cue(UiSoundCue::Ok);
@@ -519,37 +626,59 @@ impl SettingsController {
     }
 
     fn save_key(&self, ui: &AppWindow, key: &str) {
-        if !self.page.borrow().editing_key { return; }
+        if !self.page.borrow().editing_key {
+            return;
+        }
         let kind = self.page.borrow().editor_kind;
         let result = match kind {
             EditorKind::SteamGridDb => self.service.borrow_mut().set_steamgriddb_key(key),
-            EditorKind::SteamId => self.steam_account.borrow_mut().set_steam_id64(key).map_err(str::to_owned),
-            EditorKind::SteamWebKey => self.steam_account.borrow_mut().set_web_api_key(key).map_err(str::to_owned),
+            EditorKind::SteamId => self
+                .steam_account
+                .borrow_mut()
+                .set_steam_id64(key)
+                .map_err(str::to_owned),
+            EditorKind::SteamWebKey => self
+                .steam_account
+                .borrow_mut()
+                .set_web_api_key(key)
+                .map_err(str::to_owned),
         };
         match result {
             Ok(()) => {
-                if kind == EditorKind::SteamGridDb { self.notify_artwork_changed(); }
-                else { self.notify_steam_account_changed(); }
+                if kind == EditorKind::SteamGridDb {
+                    self.notify_artwork_changed();
+                } else {
+                    self.notify_steam_account_changed();
+                }
                 self.paste_generation.fetch_add(1, Ordering::Relaxed);
                 self.page.borrow_mut().editing_key = false;
                 self.page.borrow_mut().feedback = match kind {
                     EditorKind::SteamGridDb => "SteamGridDB API key saved locally.",
-                    EditorKind::SteamId => if self.steam_account.borrow().connected() {
-                        "SteamID64 updated."
-                    } else { "SteamID64 entered. Add the Web API key to connect." },
+                    EditorKind::SteamId => {
+                        if self.steam_account.borrow().connected() {
+                            "SteamID64 updated."
+                        } else {
+                            "SteamID64 entered. Add the Web API key to connect."
+                        }
+                    }
                     EditorKind::SteamWebKey => "Steam Web API key saved locally.",
-                }.into();
+                }
+                .into();
                 ui.set_settings_editing_key(false);
                 ui.set_settings_key_draft("".into());
                 self.cue(UiSoundCue::Ok);
             }
-            Err(message) => { self.page.borrow_mut().feedback = message; }
+            Err(message) => {
+                self.page.borrow_mut().feedback = message;
+            }
         }
         self.publish(ui);
     }
 
     fn cancel_key(&self, ui: &AppWindow) {
-        if !self.page.borrow().editing_key { return; }
+        if !self.page.borrow().editing_key {
+            return;
+        }
         self.cue(UiSoundCue::Back);
         self.paste_generation.fetch_add(1, Ordering::Relaxed);
         let mut page = self.page.borrow_mut();
@@ -588,7 +717,10 @@ impl SettingsController {
         let page = self.page.borrow();
         let settings = self.service.borrow();
         ui.set_settings_view(match page.view {
-            SettingsView::Root => 0, SettingsView::Appearance => 1, SettingsView::ThirdParty => 2, SettingsView::SteamAccount => 3
+            SettingsView::Root => 0,
+            SettingsView::Appearance => 1,
+            SettingsView::ThirdParty => 2,
+            SettingsView::SteamAccount => 3,
         });
         let prefs = self.appearance.preferences();
         ui.set_settings_theme_index(prefs.theme_index());
@@ -596,7 +728,9 @@ impl SettingsController {
         ui.set_settings_ui_sounds_enabled(prefs.ui_sounds_enabled);
         ui.set_settings_appearance_feedback(if page.view == SettingsView::Appearance {
             page.feedback.clone().into()
-        } else { "".into() });
+        } else {
+            "".into()
+        });
         ui.set_settings_selection(page.selected);
         ui.set_settings_key_present(settings.has_steamgriddb_key());
         let account = self.steam_account.borrow();
@@ -604,7 +738,9 @@ impl SettingsController {
         ui.set_settings_steam_connected(account.connected());
         ui.set_settings_steam_saved(account.saved());
         ui.set_settings_editor_kind(match page.editor_kind {
-            EditorKind::SteamGridDb => 0, EditorKind::SteamId => 1, EditorKind::SteamWebKey => 2,
+            EditorKind::SteamGridDb => 0,
+            EditorKind::SteamId => 1,
+            EditorKind::SteamWebKey => 2,
         });
         ui.set_settings_prefer_artwork(settings.prefer_steamgriddb_artwork());
         ui.set_settings_editing_key(page.editing_key);
@@ -630,10 +766,15 @@ fn selection_count(view: SettingsView, _has_key: bool, steam_saved: bool) -> i32
         SettingsView::Root => 2,
         SettingsView::Appearance => 14,
         SettingsView::ThirdParty => 5,
-        SettingsView::SteamAccount => if steam_saved { 3 } else { 2 },
+        SettingsView::SteamAccount => {
+            if steam_saved {
+                3
+            } else {
+                2
+            }
+        }
     }
 }
-
 
 fn next_id_editor_target(target: i32, direction: UiAction, can_save: bool) -> i32 {
     use UiAction::{Down, Left, Right, Up};
@@ -649,7 +790,10 @@ fn next_id_editor_target(target: i32, direction: UiAction, can_save: bool) -> i3
 
 fn third_party_step_without_key(selected: i32, delta: i32, repeated: bool) -> i32 {
     let selectable = [0, 1, 4];
-    let index = selectable.iter().position(|&item| item == selected).unwrap_or(0) as i32;
+    let index = selectable
+        .iter()
+        .position(|&item| item == selected)
+        .unwrap_or(0) as i32;
     let next = step_with_edge_wrap(index, 0, selectable.len() as i32 - 1, delta, repeated);
     selectable[next as usize]
 }
@@ -682,19 +826,58 @@ fn appearance_step_horizontal(index: i32, direction: UiAction, repeated: bool) -
 // controls, preserving the last accent on a return trip. The accent layout is
 // fixed: System + Red/Orange align to Theme System, Yellow through Blue to
 // Theme Light, and Purple/Pink/White to Theme Dark.
-fn appearance_step_vertical(index: i32, direction: UiAction, last_accent: i32, repeated: bool) -> i32 {
-    let last_accent = if (3..=12).contains(&last_accent) { last_accent } else { 3 };
+fn appearance_step_vertical(
+    index: i32,
+    direction: UiAction,
+    last_accent: i32,
+    repeated: bool,
+) -> i32 {
+    let last_accent = if (3..=12).contains(&last_accent) {
+        last_accent
+    } else {
+        3
+    };
     match (index, direction) {
-        (0, UiAction::Down) => if (3..=5).contains(&last_accent) { last_accent } else { 3 },
-        (1, UiAction::Down) => if (6..=9).contains(&last_accent) { last_accent } else { 8 },
-        (2, UiAction::Down) => if (10..=12).contains(&last_accent) { last_accent } else { 12 },
-        (0..=2, UiAction::Up) => if repeated { index } else { 13 },
+        (0, UiAction::Down) => {
+            if (3..=5).contains(&last_accent) {
+                last_accent
+            } else {
+                3
+            }
+        }
+        (1, UiAction::Down) => {
+            if (6..=9).contains(&last_accent) {
+                last_accent
+            } else {
+                8
+            }
+        }
+        (2, UiAction::Down) => {
+            if (10..=12).contains(&last_accent) {
+                last_accent
+            } else {
+                12
+            }
+        }
+        (0..=2, UiAction::Up) => {
+            if repeated {
+                index
+            } else {
+                13
+            }
+        }
         (3..=5, UiAction::Up) => 0,
         (6..=9, UiAction::Up) => 1,
         (10..=12, UiAction::Up) => 2,
         (3..=12, UiAction::Down) => 13,
         (13, UiAction::Up) => last_accent,
-        (13, UiAction::Down) => if repeated { 13 } else { 0 },
+        (13, UiAction::Down) => {
+            if repeated {
+                13
+            } else {
+                0
+            }
+        }
         _ => index,
     }
 }
@@ -703,12 +886,18 @@ fn appearance_step_vertical(index: i32, direction: UiAction, last_accent: i32, r
 /// Disabled Save is excluded so every selected action is immediately usable.
 fn next_editor_target(target: i32, direction: UiAction, can_save: bool) -> i32 {
     use UiAction::{Down, Left, Right, Up};
-    
+
     match (target, direction) {
         (0, Right) => 1,
         (0, Down) => 2,
         (1, Left) => 0,
-        (1, Down) => if can_save { 3 } else { 2 },
+        (1, Down) => {
+            if can_save {
+                3
+            } else {
+                2
+            }
+        }
         (2, Up) => 0,
         (2, Right) if can_save => 3,
         (3, Left) => 2,
@@ -719,7 +908,9 @@ fn next_editor_target(target: i32, direction: UiAction, can_save: bool) -> i32 {
 
 #[cfg(test)]
 mod editor_navigation_tests {
-    use super::{next_editor_target, SettingsView, appearance_step_horizontal, appearance_step_vertical};
+    use super::{
+        SettingsView, appearance_step_horizontal, appearance_step_vertical, next_editor_target,
+    };
     use crate::input::UiAction;
 
     #[test]
@@ -733,12 +924,27 @@ mod editor_navigation_tests {
     #[test]
     fn refresh_row_is_included_only_with_saved_key() {
         assert_eq!(super::selection_count(SettingsView::Root, false, false), 2);
-        assert_eq!(super::selection_count(SettingsView::Appearance, false, false), 14);
-        assert_eq!(super::selection_count(SettingsView::ThirdParty, false, false), 5);
+        assert_eq!(
+            super::selection_count(SettingsView::Appearance, false, false),
+            14
+        );
+        assert_eq!(
+            super::selection_count(SettingsView::ThirdParty, false, false),
+            5
+        );
         assert_eq!(super::third_party_step_without_key(1, 1, false), 4);
-        assert_eq!(super::selection_count(SettingsView::ThirdParty, true, false), 5);
-        assert_eq!(super::selection_count(SettingsView::SteamAccount, true, true), 3);
-        assert_eq!(super::selection_count(SettingsView::SteamAccount, true, false), 2);
+        assert_eq!(
+            super::selection_count(SettingsView::ThirdParty, true, false),
+            5
+        );
+        assert_eq!(
+            super::selection_count(SettingsView::SteamAccount, true, true),
+            3
+        );
+        assert_eq!(
+            super::selection_count(SettingsView::SteamAccount, true, false),
+            2
+        );
     }
 
     #[test]
@@ -764,7 +970,13 @@ mod editor_navigation_tests {
         // Up/Down uses spatial columns and reverses when returning to a swatch.
         for accent in 3..=12 {
             let theme = appearance_step_vertical(accent, Up, accent, false);
-            let expected_theme = if accent <= 5 { 0 } else if accent <= 9 { 1 } else { 2 };
+            let expected_theme = if accent <= 5 {
+                0
+            } else if accent <= 9 {
+                1
+            } else {
+                2
+            };
             assert_eq!(theme, expected_theme);
             assert_eq!(appearance_step_vertical(theme, Down, accent, false), accent);
             assert_eq!(appearance_step_vertical(accent, Down, accent, false), 13);
@@ -802,14 +1014,23 @@ mod editor_navigation_tests {
 
 #[cfg(test)]
 mod root_activation_regressions {
-    use super::{root_destination, settings_parent, PageState, SettingsView};
+    use super::{PageState, SettingsView, root_destination, settings_parent};
 
     #[test]
     fn back_inside_settings_restores_the_parent_row() {
         assert_eq!(settings_parent(SettingsView::Root), None);
-        assert_eq!(settings_parent(SettingsView::Appearance), Some((SettingsView::Root, 0)));
-        assert_eq!(settings_parent(SettingsView::ThirdParty), Some((SettingsView::Root, 1)));
-        assert_eq!(settings_parent(SettingsView::SteamAccount), Some((SettingsView::ThirdParty, 4)));
+        assert_eq!(
+            settings_parent(SettingsView::Appearance),
+            Some((SettingsView::Root, 0))
+        );
+        assert_eq!(
+            settings_parent(SettingsView::ThirdParty),
+            Some((SettingsView::Root, 1))
+        );
+        assert_eq!(
+            settings_parent(SettingsView::SteamAccount),
+            Some((SettingsView::ThirdParty, 4))
+        );
         let fresh = PageState::default();
         assert_eq!(fresh.view, SettingsView::Root);
         assert_eq!(fresh.selected, 0);

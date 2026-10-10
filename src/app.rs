@@ -13,15 +13,22 @@ use crate::{
     persistence::{SqliteLibraryRepository, settings::SettingsStore},
     platform::{
         data_paths,
-        system_status::{StatusMonitor, SystemStatus},
         launcher::PortalLaunchExecutor,
         session_helper::DbusManagedSessionExecutor,
         slint_backend,
+        system_status::{StatusMonitor, SystemStatus},
     },
     presentation::{
         achievements::AchievementsController,
-        activity::{ActivityController, ActivityShowcaseController, ActivityDetailsController, ActivityDetailsActions}, appearance::AppearanceController, clock::ClockController,
-        home::HomeController, navigation::NavigationController, settings::SettingsController,
+        activity::{
+            ActivityController, ActivityDetailsActions, ActivityDetailsController,
+            ActivityShowcaseController,
+        },
+        appearance::AppearanceController,
+        clock::ClockController,
+        home::HomeController,
+        navigation::NavigationController,
+        settings::SettingsController,
         status::StatusController,
     },
     services::{
@@ -31,9 +38,9 @@ use crate::{
         launch::GameLaunchService,
         library::LibraryService,
         runtime::{RuntimeObservationExecutor, SourceRuntimeObservationExecutor},
-        source_playtime::SourcePlaytimeSync,
         session::{ManagedSessionExecutor, ManagedSessionTerminalState},
         settings::SettingsService,
+        source_playtime::SourcePlaytimeSync,
         steam_account::SteamAccountService,
     },
     sources::production_source_registry,
@@ -46,8 +53,7 @@ const HOME_RECENT_LIMIT: usize = 15;
 pub fn run() -> Result<(), AppError> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("horizon=info")),
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("horizon=info")),
         )
         .init();
 
@@ -124,8 +130,10 @@ pub fn run() -> Result<(), AppError> {
     slint::set_xdg_app_id(APP_ID)?;
 
     let ui = AppWindow::new()?;
-    let appearance = AppearanceController::new(&ui,
-        AppearanceStore::new(data_paths::appearance_settings_path()?))?;
+    let appearance = AppearanceController::new(
+        &ui,
+        AppearanceStore::new(data_paths::appearance_settings_path()?),
+    )?;
     let _appearance_monitor = match appearance.start_portal_monitor(&ui) {
         Ok(monitor) => Some(monitor),
         Err(error) => {
@@ -161,8 +169,10 @@ pub fn run() -> Result<(), AppError> {
     let sync_worker = Rc::clone(&source_playtime_sync);
     let sync_games = library_games.clone();
     let sync_ui = ui.as_weak();
-    source_playtime_timer.start(TimerMode::Repeated, SOURCE_PLAYTIME_REFRESH_INTERVAL, move || {
-        match sync_worker.refresh(&sync_registry, &sync_games, &sync_activity) {
+    source_playtime_timer.start(
+        TimerMode::Repeated,
+        SOURCE_PLAYTIME_REFRESH_INTERVAL,
+        move || match sync_worker.refresh(&sync_registry, &sync_games, &sync_activity) {
             Ok(true) => {
                 if let Some(ui) = sync_ui.upgrade() {
                     match sync_activity.overview(
@@ -176,13 +186,11 @@ pub fn run() -> Result<(), AppError> {
             }
             Ok(false) => {}
             Err(error) => warn!(%error, "source playtime refresh failed"),
-        }
-    });
-    let artwork_service = ArtworkService::new(Rc::clone(&registry));
-    let mut launch_service = GameLaunchService::new(
-        Rc::clone(&registry),
-        Rc::new(PortalLaunchExecutor),
+        },
     );
+    let artwork_service = ArtworkService::new(Rc::clone(&registry));
+    let mut launch_service =
+        GameLaunchService::new(Rc::clone(&registry), Rc::new(PortalLaunchExecutor));
     match DbusManagedSessionExecutor::new() {
         Ok(executor) => {
             let available = executor.probe();
@@ -204,9 +212,8 @@ pub fn run() -> Result<(), AppError> {
     // optional host helper. Provider adapters expose only provider-owned state
     // that is already readable through Horizon's narrow filesystem grants.
     // Steam uses its local gameprocess_log.txt rather than /proc.
-    let runtime_observer: Rc<dyn RuntimeObservationExecutor> = Rc::new(
-        SourceRuntimeObservationExecutor::new(Rc::clone(&registry)),
-    );
+    let runtime_observer: Rc<dyn RuntimeObservationExecutor> =
+        Rc::new(SourceRuntimeObservationExecutor::new(Rc::clone(&registry)));
     launch_service = launch_service.with_runtime_observer(runtime_observer);
     info!("in-process source-runtime observation initialized");
     let launch_service = Rc::new(launch_service);
@@ -224,11 +231,13 @@ pub fn run() -> Result<(), AppError> {
         launch_activity,
     );
     // Mount a single stable Activity cover model before the UI is shown.
-    let activity_showcase = ActivityShowcaseController::new(
-        &ui, library_catalog.clone(), Rc::clone(&home),
-    );
+    let activity_showcase =
+        ActivityShowcaseController::new(&ui, library_catalog.clone(), Rc::clone(&home));
     activity_showcase.refresh(&ui, &activity_overview);
-    info!(recent_games = recent_ids.len(), "Home recent carousel initialized");
+    info!(
+        recent_games = recent_ids.len(),
+        "Home recent carousel initialized"
+    );
     // Changes are discovered from durable sessions, never by guessing on launch.
     // A small read-only DB query is cheap and keeps Home current after returns
     // from Steam/Heroic and when a source-owned session completes.
@@ -238,7 +247,9 @@ pub fn run() -> Result<(), AppError> {
     let recents_ui = ui.as_weak();
     let recents_showcase = Rc::clone(&activity_showcase);
     recent_refresh_timer.start(TimerMode::Repeated, Duration::from_secs(3), move || {
-        let Some(ui) = recents_ui.upgrade() else { return; };
+        let Some(ui) = recents_ui.upgrade() else {
+            return;
+        };
         match recents_activity.recent_game_ids(HOME_RECENT_LIMIT) {
             Ok(ids) => recents_home.refresh_recent_games(&ui, &ids),
             Err(error) => warn!(%error, "Home recent history refresh failed"),
@@ -256,11 +267,13 @@ pub fn run() -> Result<(), AppError> {
             }
         }
     });
-    let activity_details: Rc<dyn ActivityDetailsActions> = ActivityDetailsController::new(
-        Rc::clone(&activity_service), Rc::clone(&activity_showcase),
-    );
+    let activity_details: Rc<dyn ActivityDetailsActions> =
+        ActivityDetailsController::new(Rc::clone(&activity_service), Rc::clone(&activity_showcase));
     let library_controller = crate::presentation::library::LibraryController::new(
-        &ui, library_catalog, Rc::clone(&home), Rc::clone(&activity_service),
+        &ui,
+        library_catalog,
+        Rc::clone(&home),
+        Rc::clone(&activity_service),
     );
     let library_updates = Rc::downgrade(&library_controller);
     let activity_artwork_updates = Rc::downgrade(&activity_showcase);
@@ -284,7 +297,12 @@ pub fn run() -> Result<(), AppError> {
         SteamAccountService::load(data_paths::steam_account_settings_path()?)
             .map_err(|message| AppError::SteamAccount(message.to_owned()))?,
     ));
-    let settings = SettingsController::new(&ui, settings_service, appearance.clone(), Rc::clone(&steam_account));
+    let settings = SettingsController::new(
+        &ui,
+        settings_service,
+        appearance.clone(),
+        Rc::clone(&steam_account),
+    );
     let navigation_sound = Rc::new(RefCell::new(UiSounds::new(
         appearance.preferences().ui_sounds_enabled,
     )));
@@ -301,7 +319,9 @@ pub fn run() -> Result<(), AppError> {
     let initial_preferences = settings.artwork_preferences();
     ui.set_settings_artwork_status(if initial_preferences.api_key.is_some() {
         "Checking SteamGridDB artwork…".into()
-    } else { "Save an API key to enable SteamGridDB artwork.".into() });
+    } else {
+        "Save an API key to enable SteamGridDB artwork.".into()
+    });
     home.refresh_steamgriddb(initial_preferences);
     let artwork_home = Rc::clone(&home);
     let artwork_ui = ui.as_weak();
@@ -309,7 +329,9 @@ pub fn run() -> Result<(), AppError> {
         if let Some(ui) = artwork_ui.upgrade() {
             ui.set_settings_artwork_status(if preferences.api_key.is_some() {
                 "Checking SteamGridDB artwork…".into()
-            } else { "SteamGridDB disabled (no API key).".into() });
+            } else {
+                "SteamGridDB disabled (no API key).".into()
+            });
         }
         artwork_home.refresh_steamgriddb(preferences);
     }));
@@ -325,19 +347,29 @@ pub fn run() -> Result<(), AppError> {
             artwork_home.collect_steamgriddb_results(&ui);
         }
     });
-    let achievements = AchievementsController::new(&ui, &achievements_catalog, Rc::clone(&steam_account));
+    let achievements =
+        AchievementsController::new(&ui, &achievements_catalog, Rc::clone(&steam_account));
     let achievement_updates = Rc::clone(&achievements);
     let achievement_ui = ui.as_weak();
     settings.set_steam_account_changed(Rc::new(move || {
-        if let Some(ui) = achievement_ui.upgrade() { achievement_updates.account_changed(&ui); }
+        if let Some(ui) = achievement_ui.upgrade() {
+            achievement_updates.account_changed(&ui);
+        }
     }));
     let achievements_poll = Timer::default();
     let achievements_ui = ui.as_weak();
     let achievements_worker = Rc::clone(&achievements);
     achievements_poll.start(TimerMode::Repeated, Duration::from_millis(120), move || {
-        if let Some(ui) = achievements_ui.upgrade() { achievements_worker.poll(&ui); }
+        if let Some(ui) = achievements_ui.upgrade() {
+            achievements_worker.poll(&ui);
+        }
     });
-    let navigation = NavigationController::new(&ui, Rc::clone(&home), Rc::clone(&library_controller), settings);
+    let navigation = NavigationController::new(
+        &ui,
+        Rc::clone(&home),
+        Rc::clone(&library_controller),
+        settings,
+    );
     navigation.set_achievements(achievements, &ui);
     navigation.set_activity_details(Rc::clone(&activity_details));
     // Prepare Activity synchronously on navigation, before PageTransitionLayer
@@ -371,7 +403,9 @@ pub fn run() -> Result<(), AppError> {
     let action_navigation = Rc::clone(&navigation);
     let action_sound = Rc::clone(&navigation_sound);
     let action_sink: Rc<dyn Fn(UiActionEvent)> = Rc::new(move |event| {
-        let Some(ui) = ui_weak.upgrade() else { return; };
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
         // Snapshot semantic focus, not raw key presses: blocked directions and
         // unchanged focus should never make a navigation cue. OK/Back are
         // emitted by the semantic menu handlers; game launching stays silent.
@@ -379,37 +413,50 @@ pub fn run() -> Result<(), AppError> {
         // Comparing both halves still detects changes in every focus field.
         let before = (
             (
-                ui.get_current_route(), ui.get_selected_index(),
-                ui.get_top_utilities_focused(), ui.get_focused_utility_index(),
-                ui.get_settings_view(), ui.get_settings_selection(),
+                ui.get_current_route(),
+                ui.get_selected_index(),
+                ui.get_top_utilities_focused(),
+                ui.get_focused_utility_index(),
+                ui.get_settings_view(),
+                ui.get_settings_selection(),
                 ui.get_settings_editor_target(),
             ),
             (
                 ui.get_library_selected_index(),
-                ui.get_library_filter_text(), ui.get_library_sort_text(),
+                ui.get_library_filter_text(),
+                ui.get_library_sort_text(),
                 ui.get_activity_selected_index(),
-                ui.get_achievements_selected_index(), ui.get_achievements_first_entry(),
+                ui.get_achievements_selected_index(),
+                ui.get_achievements_first_entry(),
                 ui.get_achievements_viewing_entries(),
             ),
         );
         action_navigation.handle_action(&ui, event);
         let after = (
             (
-                ui.get_current_route(), ui.get_selected_index(),
-                ui.get_top_utilities_focused(), ui.get_focused_utility_index(),
-                ui.get_settings_view(), ui.get_settings_selection(),
+                ui.get_current_route(),
+                ui.get_selected_index(),
+                ui.get_top_utilities_focused(),
+                ui.get_focused_utility_index(),
+                ui.get_settings_view(),
+                ui.get_settings_selection(),
                 ui.get_settings_editor_target(),
             ),
             (
                 ui.get_library_selected_index(),
-                ui.get_library_filter_text(), ui.get_library_sort_text(),
+                ui.get_library_filter_text(),
+                ui.get_library_sort_text(),
                 ui.get_activity_selected_index(),
-                ui.get_achievements_selected_index(), ui.get_achievements_first_entry(),
+                ui.get_achievements_selected_index(),
+                ui.get_achievements_first_entry(),
                 ui.get_achievements_viewing_entries(),
             ),
         );
-        if matches!(event.action, UiAction::Up | UiAction::Down | UiAction::Left | UiAction::Right)
-            && before != after {
+        if matches!(
+            event.action,
+            UiAction::Up | UiAction::Down | UiAction::Left | UiAction::Right
+        ) && before != after
+        {
             action_sound.borrow_mut().play(UiSoundCue::Navigation);
         }
     });
@@ -493,10 +540,8 @@ pub fn run() -> Result<(), AppError> {
     let foreground_return_timer = Timer::default();
     let foreground_activity = Rc::clone(&activity_service);
     let foreground_ui = ui.as_weak();
-    foreground_return_timer.start(
-        TimerMode::Repeated,
-        Duration::from_millis(250),
-        move || match foreground_activity.poll_foreground_return() {
+    foreground_return_timer.start(TimerMode::Repeated, Duration::from_millis(250), move || {
+        match foreground_activity.poll_foreground_return() {
             Ok(ActivitySessionTransition::Completed(_)) => {
                 let Some(ui) = foreground_ui.upgrade() else {
                     return;
@@ -513,8 +558,8 @@ pub fn run() -> Result<(), AppError> {
             Err(error) => {
                 warn!(%error, "foreground activity return could not be confirmed");
             }
-        },
-    );
+        }
+    });
 
     // Source-owned runtime observation is independent of Horizon window focus.
     // Steam derives exact AppID-scoped running-list transitions from its local
@@ -615,16 +660,11 @@ pub fn run() -> Result<(), AppError> {
                 completion.terminal(),
                 ManagedSessionTerminalState::Exited { .. }
             );
-            managed_home.handle_managed_session_completion(
-                &ui,
-                completion.session_id(),
-                failed,
-            );
+            managed_home.handle_managed_session_completion(&ui, completion.session_id(), failed);
 
-            match managed_activity.handle_managed_session_terminal(
-                completion.session_id(),
-                completion.terminal(),
-            ) {
+            match managed_activity
+                .handle_managed_session_terminal(completion.session_id(), completion.terminal())
+            {
                 Ok(transition) => {
                     refresh_activity |= transition.changed();
                 }

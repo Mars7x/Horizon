@@ -1,8 +1,13 @@
 //! Durable, atomic appearance preferences. No reliance on the UI event loop.
-use std::{fs::{self, OpenOptions}, io::{self, Write}, path::PathBuf,
-    os::unix::fs::OpenOptionsExt, sync::atomic::{AtomicU64, Ordering}};
-use thiserror::Error;
 use super::AppearancePreferences;
+use std::{
+    fs::{self, OpenOptions},
+    io::{self, Write},
+    os::unix::fs::OpenOptionsExt,
+    path::PathBuf,
+    sync::atomic::{AtomicU64, Ordering},
+};
+use thiserror::Error;
 
 static WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -17,9 +22,13 @@ pub enum AppearanceStoreError {
 }
 
 #[derive(Debug, Clone)]
-pub struct AppearanceStore { path: PathBuf }
+pub struct AppearanceStore {
+    path: PathBuf,
+}
 impl AppearanceStore {
-    pub fn new(path: PathBuf) -> Self { Self { path } }
+    pub fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
     pub fn load(&self) -> Result<AppearancePreferences, AppearanceStoreError> {
         match fs::read(&self.path) {
             Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
@@ -31,17 +40,31 @@ impl AppearanceStore {
         let bytes = serde_json::to_vec_pretty(value)?;
         let dir = self.path.parent().expect("appearance path has parent");
         fs::create_dir_all(dir).map_err(AppearanceStoreError::Write)?;
-        let file_name = self.path.file_name().expect("appearance path has name").to_string_lossy();
-        let tmp = self.path.with_file_name(format!(".{file_name}.{}.{}.tmp",
-            std::process::id(), WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed)));
+        let file_name = self
+            .path
+            .file_name()
+            .expect("appearance path has name")
+            .to_string_lossy();
+        let tmp = self.path.with_file_name(format!(
+            ".{file_name}.{}.{}.tmp",
+            std::process::id(),
+            WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
         let result = (|| {
-            let mut file = OpenOptions::new().create_new(true).write(true).mode(0o600)
-                .open(&tmp).map_err(AppearanceStoreError::Write)?;
-            file.write_all(&bytes).map_err(AppearanceStoreError::Write)?;
+            let mut file = OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .mode(0o600)
+                .open(&tmp)
+                .map_err(AppearanceStoreError::Write)?;
+            file.write_all(&bytes)
+                .map_err(AppearanceStoreError::Write)?;
             file.sync_all().map_err(AppearanceStoreError::Write)?;
             fs::rename(&tmp, &self.path).map_err(AppearanceStoreError::Write)
         })();
-        if result.is_err() { let _ = fs::remove_file(&tmp); }
+        if result.is_err() {
+            let _ = fs::remove_file(&tmp);
+        }
         result
     }
 }
@@ -59,17 +82,25 @@ mod tests {
 
     #[test]
     fn saves_and_loads_independent_theme_and_accent_preferences() {
-        let path = std::env::temp_dir().join(format!("horizon-appearance-{}-{}.json",
-            std::process::id(), WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed)));
+        let path = std::env::temp_dir().join(format!(
+            "horizon-appearance-{}-{}.json",
+            std::process::id(),
+            WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
         let store = AppearanceStore::new(path.clone());
         assert_eq!(store.load().unwrap(), AppearancePreferences::default());
-        let prefs = AppearancePreferences { theme: ThemePreference::Dark,
+        let prefs = AppearancePreferences {
+            theme: ThemePreference::Dark,
             accent: AccentPreference::Custom(Rgb::new(242, 201, 76)),
-            ui_sounds_enabled: false };
+            ui_sounds_enabled: false,
+        };
         store.save(&prefs).unwrap();
         assert_eq!(store.load().unwrap(), prefs);
         use std::os::unix::fs::PermissionsExt;
-        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
         let _ = fs::remove_file(path);
     }
 }

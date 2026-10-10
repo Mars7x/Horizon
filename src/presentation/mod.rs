@@ -1,7 +1,7 @@
 pub mod achievements;
 pub mod activity;
-pub mod clock;
 pub mod appearance;
+pub mod clock;
 pub mod home;
 pub mod library;
 pub mod navigation;

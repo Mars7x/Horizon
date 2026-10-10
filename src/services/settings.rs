@@ -1,5 +1,8 @@
 //! Third-party settings use case. Validation and transaction semantics live here.
-use crate::{domain::settings::ThirdPartySettings, persistence::settings::{SettingsStore, SettingsStoreError}};
+use crate::{
+    domain::settings::ThirdPartySettings,
+    persistence::settings::{SettingsStore, SettingsStoreError},
+};
 
 /// Copy only into the short-lived background worker. Never expose keys to Slint.
 #[derive(Clone)]
@@ -23,8 +26,10 @@ impl SettingsService {
     /// Call its blocking methods only on a background worker.
     pub fn steamgriddb_client(
         &self,
-    ) -> Result<Option<super::steamgriddb::SteamGridDbClient>, super::steamgriddb::SteamGridDbError> {
-        self.values.steamgriddb_key()
+    ) -> Result<Option<super::steamgriddb::SteamGridDbClient>, super::steamgriddb::SteamGridDbError>
+    {
+        self.values
+            .steamgriddb_key()
             .map(super::steamgriddb::SteamGridDbClient::new)
             .transpose()
     }
@@ -36,8 +41,12 @@ impl SettingsService {
         }
     }
 
-    pub fn has_steamgriddb_key(&self) -> bool { self.values.has_steamgriddb_key() }
-    pub fn prefer_steamgriddb_artwork(&self) -> bool { self.values.prefer_steamgriddb_artwork() }
+    pub fn has_steamgriddb_key(&self) -> bool {
+        self.values.has_steamgriddb_key()
+    }
+    pub fn prefer_steamgriddb_artwork(&self) -> bool {
+        self.values.prefer_steamgriddb_artwork()
+    }
 
     pub fn set_steamgriddb_key(&mut self, key: &str) -> Result<(), String> {
         let key = key.trim();
@@ -46,7 +55,8 @@ impl SettingsService {
         }
         let mut next = self.values.clone();
         next.set_steamgriddb_key(key.to_string());
-        self.commit(next).map_err(|_| "Could not save API key. Check Horizon's config directory.".into())
+        self.commit(next)
+            .map_err(|_| "Could not save API key. Check Horizon's config directory.".into())
     }
 
     pub fn remove_steamgriddb_key(&mut self) -> Result<(), SettingsStoreError> {
@@ -55,7 +65,10 @@ impl SettingsService {
         self.commit(next)
     }
 
-    pub fn set_prefer_steamgriddb_artwork(&mut self, preferred: bool) -> Result<(), SettingsStoreError> {
+    pub fn set_prefer_steamgriddb_artwork(
+        &mut self,
+        preferred: bool,
+    ) -> Result<(), SettingsStoreError> {
         let mut next = self.values.clone();
         next.set_prefer_steamgriddb_artwork(preferred);
         self.commit(next)
@@ -77,7 +90,8 @@ mod tests {
     #[test]
     fn invalid_key_is_never_saved() {
         let n = TEMP_TEST_ID.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!("horizon-key-validation-{}-{n}", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("horizon-key-validation-{}-{n}", std::process::id()));
         let mut service = SettingsService::load(SettingsStore::new(path.clone())).unwrap();
         assert!(service.set_steamgriddb_key("   ").is_err());
         assert!(service.set_steamgriddb_key("has spaces").is_err());

@@ -6,9 +6,10 @@ use tracing::{debug, warn};
 use crate::{
     AppWindow, Motion, Theme,
     appearance::{
-        AccentPreference, AppearancePreferences, AppearanceState, Palette, Rgb, SystemAppearance, ThemePreference,
-        store::{AppearanceStore, AppearanceStoreError},
+        AccentPreference, AppearancePreferences, AppearanceState, Palette, Rgb, SystemAppearance,
+        ThemePreference,
         portal::{PortalMonitor, PortalMonitorError},
+        store::{AppearanceStore, AppearanceStoreError},
     },
 };
 
@@ -22,18 +23,28 @@ impl AppearanceController {
     pub fn new(ui: &AppWindow, store: AppearanceStore) -> Result<Self, AppearanceStoreError> {
         let preferences = store.load()?;
         let controller = Self {
-            state: Arc::new(Mutex::new(AppearanceState { preferences, ..AppearanceState::default() })),
+            state: Arc::new(Mutex::new(AppearanceState {
+                preferences,
+                ..AppearanceState::default()
+            })),
             store: Arc::new(store),
         };
         controller.apply(ui);
         Ok(controller)
     }
 
-    pub fn preferences(&self) -> AppearancePreferences { lock_state(&self.state).preferences }
+    pub fn preferences(&self) -> AppearancePreferences {
+        lock_state(&self.state).preferences
+    }
 
-    pub fn set_preferences(&self, ui: &AppWindow, preferences: AppearancePreferences)
-        -> Result<(), AppearanceStoreError> {
-        if self.preferences() == preferences { return Ok(()); }
+    pub fn set_preferences(
+        &self,
+        ui: &AppWindow,
+        preferences: AppearancePreferences,
+    ) -> Result<(), AppearanceStoreError> {
+        if self.preferences() == preferences {
+            return Ok(());
+        }
         self.store.save(&preferences)?; // Never render a preference that failed to save.
         lock_state(&self.state).preferences = preferences;
         self.apply(ui);
@@ -63,15 +74,21 @@ impl AppearanceController {
         })
     }
 
-    pub fn set_theme_preference(&self, ui: &AppWindow, preference: ThemePreference)
-        -> Result<(), AppearanceStoreError> {
+    pub fn set_theme_preference(
+        &self,
+        ui: &AppWindow,
+        preference: ThemePreference,
+    ) -> Result<(), AppearanceStoreError> {
         let mut next = self.preferences();
         next.theme = preference;
         self.set_preferences(ui, next)
     }
 
-    pub fn set_ui_sounds_enabled(&self, ui: &AppWindow, enabled: bool)
-        -> Result<(), AppearanceStoreError> {
+    pub fn set_ui_sounds_enabled(
+        &self,
+        ui: &AppWindow,
+        enabled: bool,
+    ) -> Result<(), AppearanceStoreError> {
         let mut next = self.preferences();
         next.ui_sounds_enabled = enabled;
         self.set_preferences(ui, next)
@@ -83,7 +100,11 @@ impl AppearanceController {
         self.set_preferences(ui, next)
     }
 
-    pub fn set_custom_accent(&self, ui: &AppWindow, color: Rgb) -> Result<(), AppearanceStoreError> {
+    pub fn set_custom_accent(
+        &self,
+        ui: &AppWindow,
+        color: Rgb,
+    ) -> Result<(), AppearanceStoreError> {
         let mut next = self.preferences();
         next.accent = AccentPreference::Custom(color);
         self.set_preferences(ui, next)
@@ -122,9 +143,11 @@ fn apply_resolved(ui: &AppWindow, appearance: crate::appearance::ResolvedAppeara
         crate::appearance::EffectiveTheme::Dark
     ));
     theme.set_high_contrast(appearance.high_contrast);
-    theme.set_appearance_white_swatch(to_slint_color(
-        Palette::preview_accent(appearance.theme, Rgb::WHITE, appearance.high_contrast),
-    ));
+    theme.set_appearance_white_swatch(to_slint_color(Palette::preview_accent(
+        appearance.theme,
+        Rgb::WHITE,
+        appearance.high_contrast,
+    )));
     theme.set_background(to_slint_color(palette.background));
     theme.set_surface(to_slint_color(palette.surface));
     theme.set_surface_raised(to_slint_color(palette.surface_raised));
@@ -140,8 +163,7 @@ fn apply_resolved(ui: &AppWindow, appearance: crate::appearance::ResolvedAppeara
     // Mix toward white instead of using Slint's generic `brighter()` so saturated
     // accents such as red still show the sweep. Keep the mix restrained: enough
     // luminance separation to remain visible while keeping the highlight subtle.
-    let focus_highlight =
-        to_slint_color(palette.focus.mix(crate::appearance::Rgb::WHITE, 0.34));
+    let focus_highlight = to_slint_color(palette.focus.mix(crate::appearance::Rgb::WHITE, 0.34));
     theme.set_focus(focus);
     theme.set_focus_highlight(focus_highlight);
 
