@@ -7,7 +7,7 @@ import { MarqueeText } from "../components/marquee-text.slint";
 import { TransitionDriver, TransitionLayer } from "../components/transition.slint";
 
 // One full-width games list, then one full-width, read-only achievement list.
-// Both views remain mounted; a game's achievements rise over the list (Rise).
+// Both views remain mounted; opening a game zooms between them.
 // Lists run between the shared page header and the bottom bar.
 export component AchievementsPage inherits Rectangle {
     in property <[AchievementGameData]> games;
@@ -60,7 +60,26 @@ export component AchievementsPage inherits Rectangle {
     // Remember the viewport, not merely the selected index. Otherwise moving
     // UP after scrolling down can leave the focused game offscreen entirely.
     private property <int> first-game: 0;
-    changed visit-revision => { root.first-game = 0; }
+    // A fresh visit jumps straight to the top. `settled-visit` lags
+    // `visit-revision` until the reset has been drawn, so every camera change
+    // the reset causes (here or in the selection handler, in whichever order
+    // Slint runs them) has zero duration. Slint reads an animation's duration
+    // when the animated value is next evaluated (at draw time), so settling
+    // waits a frame rather than happening in this handler.
+    private property <int> settled-visit: 0;
+    changed visit-revision => {
+        root.first-game = 0;
+        camera-settle.stop();
+        camera-settle.start();
+    }
+    camera-settle := Timer {
+        interval: 50ms;
+        running: false;
+        triggered => {
+            self.stop();
+            root.settled-visit = root.visit-revision;
+        }
+    }
     // Keep a wheel-panned camera in bounds when the catalog shrinks.
     changed games => {
         root.first-game = min(root.first-game,
@@ -88,7 +107,7 @@ export component AchievementsPage inherits Rectangle {
     private property <length> entry-camera: root.first-entry * root.entry-stride;
     // Linear, just under the 115ms held-input repeat: steps join smoothly.
     animate game-camera, entry-camera {
-        duration: Motion.list-camera-duration;
+        duration: root.settled-visit == root.visit-revision ? Motion.list-camera-duration : 0ms;
         easing: linear;
     }
 
@@ -118,8 +137,8 @@ export component AchievementsPage inherits Rectangle {
         }
     }
 
-    // Shared Rise: a game's achievements rise over the games list; Back
-    // drops them. The header above stays still (layers are clear above it).
+    // Shared Zoom: opening a game's achievements zooms in; Back zooms out.
+    // The header above stays still (layers are clear above it).
     view-transition := TransitionDriver { key: root.viewing-entries ? 1 : 0; }
 
     games-view := TransitionLayer {

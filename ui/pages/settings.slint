@@ -252,9 +252,8 @@ export component SettingsPage inherits Rectangle {
     // their breadcrumb, as every other page's sub-views do.
     PageHeader { width: parent.width; title: "Settings"; }
 
-    // Sub-views use the shared Rise: deeper views rise over their parent,
-    // Back drops them. Depth: Settings 0, Appearance/Third-Party 1,
-    // Steam Account/SteamGridDB 2.
+    // Sub-views use the shared Zoom: going deeper zooms in, Back zooms out.
+    // Depth: Settings 0, Appearance/Third-Party 1, Steam Account/SteamGridDB 2.
     view-transition := TransitionDriver { key: root.view; }
     private property <bool> view-back: root.view-depth(root.view) < root.view-depth(view-transition.from-key);
     pure function view-depth(view: int) -> int {
@@ -266,7 +265,6 @@ export component SettingsPage inherits Rectangle {
         rest-y: Metrics.page-header-height;
         width: root.content-width;
         height: root.height - Metrics.page-header-height;
-        travel: root.height;
         opaque: true;
         active: root.view == 0;
         outgoing: view-transition.from-key == 0;
@@ -304,7 +302,6 @@ export component SettingsPage inherits Rectangle {
         rest-y: Metrics.page-header-height;
         width: root.content-width;
         height: root.height - Metrics.page-header-height;
-        travel: root.height;
         opaque: true;
         active: root.view == 1;
         outgoing: view-transition.from-key == 1;
@@ -502,7 +499,6 @@ export component SettingsPage inherits Rectangle {
         rest-y: Metrics.page-header-height;
         width: root.content-width;
         height: root.height - Metrics.page-header-height;
-        travel: root.height;
         opaque: true;
         active: root.view == 2;
         outgoing: view-transition.from-key == 2;
@@ -539,7 +535,6 @@ export component SettingsPage inherits Rectangle {
         rest-y: Metrics.page-header-height;
         width: root.content-width;
         height: root.height - Metrics.page-header-height;
-        travel: root.height;
         opaque: true;
         active: root.view == 4;
         outgoing: view-transition.from-key == 4;
@@ -621,7 +616,6 @@ export component SettingsPage inherits Rectangle {
         rest-y: Metrics.page-header-height;
         width: root.content-width;
         height: root.height - Metrics.page-header-height;
-        travel: root.height;
         opaque: true;
         active: root.view == 3;
         outgoing: view-transition.from-key == 3;

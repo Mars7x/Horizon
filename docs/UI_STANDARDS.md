@@ -14,7 +14,7 @@ utilities, footer) and is not changed by these rules. See
 | Content | Starts at `Metrics.page-header-height` and ends at the bottom bar. | — |
 | Bottom bar | `Metrics.page-bottom-bar-height`, equal to Home's footer height so the hint line is centred in the bar. Left: page context (Library's selected game). Keep it to the selection itself; no status text such as "Saved results" or "Updating…". Right: controller hints. Hints and context sit on one line, `Metrics.hint-row-center-from-bottom` (Home's footer midline), and end at the page margin, so Home's footer "A OK" (the same `HintBar`) lines up with every page. | `HintBar` in `ui/app.slint` and `ui/components/footer.slint` |
 | Sub-pages | Open with a clickable `‹  Section  /  Page` breadcrumb at the content top. Clicking it is Back. | `Breadcrumb` |
-| Route changes | The shared "Rise" transition (below). Bottom-bar chrome (hints, bottom-bar context, the bottom scroll shadow) switches with the route instantly, so a leaving page never ghosts into Home's footer. | `focus-visible` / `active` on each page |
+| Route changes | The shared Zoom transition (below). Bottom-bar chrome (hints, bottom-bar context, the bottom scroll shadow) switches with the route instantly, so a leaving page never ghosts into Home's footer. | `focus-visible` / `active` on each page |
 | Scroll edges | Top shadow only once content has scrolled under the header; bottom shadow only while more content is below. Driven by the animated camera where there is one. | `ScrollEdgeShadow` |
 
 ## Controller hints
@@ -48,15 +48,16 @@ B (Back), LB/RB (bumpers). A shared action can show two glyphs (`button2`). Whil
   (`Theme.background`, `Theme.surface`, or `Theme.surface-raised`).
 - Missing achievement artwork is the neutral "◇", never a star or fake badge.
 
-## Transitions: Rise
+## Transitions: Zoom
 
 Every page and sub-page change uses one transition, built from
 `TransitionDriver` and `TransitionLayer` in `ui/components/transition.slint`:
 
 - **Forward** (opening a page, a Settings section, a game's achievements,
-  Activity details): the new layer rises from the bottom over the current one,
-  which dims to 60% underneath.
-- **Back**: the top layer drops away, revealing the one below as it brightens.
+  Activity details): the new layer grows in from 94% as it fades in, while the
+  current one grows past to 106% and fades out.
+- **Back** mirrors it: the layer you return to settles in from 106%, while the
+  one you leave shrinks to 94% and fades.
 - Leaving Home is forward; returning to Home is Back. Inside a section, depth
   decides the direction (Settings 0, Appearance/Third-Party 1, their pages 2).
 - Section headers stay still: sub-page layers are clear above
@@ -65,14 +66,18 @@ Every page and sub-page change uses one transition, built from
   (`prewarm`) and start timing only after that frame. A slow first frame
   (artwork upload on a fresh start) delays the transition instead of
   swallowing it.
-- Home's chrome dims and leaves with Home; hints appear once a page settles.
+- Home's top bar and footer zoom and fade with Home, around the window centre;
+  hints appear once a page settles.
 - `TransitionDriver.phase` is derived from its `key`, so a transition is already in its first phase the instant the key changes. Bind `key`; never start transitions from `changed` handlers, which run a frame late and flash the settled state.
-- Reduced Motion makes it instant.
+- Duration is `Motion.page-duration`; Reduced Motion makes it instant.
+- Offscreen review renders use Slint's software renderer, which ignores
+  `transform-scale`: they show the fade but not the zoom. Check scaling in the
+  real app.
 
 ## Motion
 
 Use `Motion` tokens, not literal durations: `focus-duration` (focus reveal),
-`hover-duration`, `page-duration` (Rise), `value-swap-duration` (changing
+`hover-duration`, `page-duration` (Zoom), `value-swap-duration` (changing
 values), `list-camera-duration` (held-direction list scrolling, linear), and
 `carousel-duration`. Page-specific choreography (Library's re-sort animation,
 the text caret) may keep local timings with a comment. Everything respects
@@ -82,6 +87,12 @@ An element hidden with `visible: false` must also hold its hidden value for any
 animated property (for example `opacity: 0`). Otherwise it animates from a stale
 value the moment it becomes visible (the hint bar once flashed in, faded out,
 then faded in again).
+
+A property's `animate` duration is read when the animated value is next
+evaluated (at draw time), not when its inputs change. To make one change
+instant (a fresh visit resetting a list to the top), keep the duration at 0
+until that change has been drawn, then restore it (Achievements uses a short
+timer after `visit-revision` changes).
 
 ## Mouse wheel
 
