@@ -640,8 +640,9 @@ impl ActivityRepository for SqliteLibraryRepository {
              SUM(CASE WHEN ps.state = 'completed' THEN 1 ELSE 0 END), MAX(ps.ended_at) \
              FROM play_sessions AS ps \
              INNER JOIN games AS g ON g.id = ps.game_id \
-             WHERE ps.state = 'completed' \
-                OR (ps.state = 'interrupted' AND ps.ended_at IS NOT NULL) \
+             WHERE (ps.state = 'completed' \
+                OR (ps.state = 'interrupted' AND ps.ended_at IS NOT NULL)) \
+               AND EXISTS (SELECT 1 FROM game_sources AS gs WHERE gs.game_id = ps.game_id) \
              GROUP BY ps.game_id, g.title \
              ORDER BY SUM(ps.ended_at - ps.started_at) DESC, MAX(ps.ended_at) DESC, g.title ASC \
              LIMIT ?1",
@@ -747,6 +748,17 @@ mod tests {
             ExternalGameId::new(external_id).expect("external id"),
             GameTitle::new(title).expect("title"),
         )
+    }
+
+    fn seed_game(
+        repository: &mut SqliteLibraryRepository,
+        title: &str,
+        source: &str,
+        external_id: &str,
+    ) -> GameId {
+        repository
+            .upsert_discovered_game(&discovered(source, external_id, title))
+            .expect("seed game")
     }
 
     #[test]
@@ -1219,6 +1231,33 @@ mod tests {
         let overview = repository.activity_overview(8, 4).expect("overview");
         assert_eq!(overview.recent_sessions()[0].title().as_str(), "Historical");
         assert_eq!(overview.observed_playtime().get(), 100);
+        assert!(overview.top_games().is_empty(), "uninstalled games are not Activity cover choices");
+    }
+
+    #[test]
+    fn activity_top_games_skip_uninstalled_history_before_applying_limit() {
+        let mut repository = SqliteLibraryRepository::open_in_memory().expect("repository");
+        let retired = seed_game(&mut repository, "Retired", "steam", "100");
+        let installed = seed_game(&mut repository, "Installed", "heroic", "200");
+        for (game_id, source, start, end) in [
+            (retired, "steam", 100, 1_000),
+            (installed, "heroic", 1_100, 1_110),
+        ] {
+            let source = SourceId::new(source).expect("source");
+            let session = repository.begin_play_session(
+                game_id, &source, start, SessionTrackingMethod::SourceRuntime,
+            ).expect("begin session");
+            repository.complete_play_session(session, end).expect("end session");
+        }
+        repository.synchronize_source_snapshot(
+            &SourceId::new("steam").expect("source"), &[], &[],
+        ).expect("uninstall retired game");
+
+        let overview = repository.activity_overview(6, 1).expect("overview");
+        assert_eq!(overview.top_games().len(), 1);
+        assert_eq!(overview.top_games()[0].game_id(), installed);
+        assert_eq!(overview.observed_playtime().get(), 910,
+            "the global observed total retains the retired game's history");
     }
 
 }

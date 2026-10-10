@@ -5,8 +5,8 @@ import { GameCardData } from "models/game-card.slint";
 export { GameCardData }
 import { LibraryCardData } from "models/library.slint";
 export { LibraryCardData }
-import { ActivitySessionData, ActivityGameData, ActivityCoverData, ActivityDayData, ActivityHistoryRowData } from "models/activity.slint";
-export { ActivitySessionData, ActivityGameData, ActivityCoverData, ActivityDayData, ActivityHistoryRowData }
+import { ActivityCoverData, ActivityDayData, ActivityHistoryRowData } from "models/activity.slint";
+export { ActivityCoverData, ActivityDayData, ActivityHistoryRowData }
 
 import { AppRouteView } from "models/navigation.slint";
 export { AppRouteView }
@@ -115,13 +115,6 @@ export component AppWindow inherits Window {
 
     // Activity is persisted/application-owned data. The Activity page only
     // formats and renders these models; it never queries SQLite directly.
-    in property <string> activity-total-playtime: "0 min";
-    in property <string> activity-reported-playtime: "—";
-    in property <[ActivityGameData]> activity-reported-games;
-    in property <string> activity-session-count: "0";
-    in property <string> activity-game-count: "0";
-    in property <[ActivitySessionData]> activity-recent-sessions;
-    in property <[ActivityGameData]> activity-top-games;
     in property <[ActivityCoverData]> activity-covers;
     in property <[ActivityDayData]> activity-days;
     in property <string> activity-week-total: "0 min";

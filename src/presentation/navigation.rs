@@ -65,6 +65,26 @@ impl NavigationController {
         *self.activity_details.borrow_mut() = Some(actions);
     }
 
+    /// Entering Activity through either a direct route or the Back stack is a
+    /// new visit. Nested detail Back is not: that path preserves the cover.
+    fn prepare_activity_visit(&self, ui: &AppWindow) {
+        // Leaving Activity through Home/Menu can retain its nested details UI.
+        // A new visit must show the overview, not that previous game's history.
+        if ui.get_activity_details_visible() {
+            if let Some(details) = self.activity_details.borrow().as_ref() {
+                details.close(ui);
+            }
+        }
+        ui.set_activity_pressed_index(-1);
+        ui.set_activity_selected_index(0);
+        if let Some(refresh) = self.activity_on_enter.borrow().as_ref() {
+            refresh(ui);
+        }
+        // A reordered most-played list may restore the former first GameId
+        // during refresh. Force the NEW first cover for every new visit.
+        ui.set_activity_selected_index(0);
+    }
+
     fn cue(&self, cue: UiSoundCue) {
         if let Some(callback) = self.action_sound.borrow().as_ref() { callback(cue); }
     }
@@ -88,15 +108,7 @@ impl NavigationController {
             if route == AppRoute::Utility(UtilityPage::Settings) { self.settings.on_enter(ui); }
             if route == AppRoute::Library { self.library.on_enter(ui); }
             if route == AppRoute::Utility(UtilityPage::Activity) {
-                ui.set_activity_pressed_index(-1);
-                // An Activity visit always starts at the first game. Do this
-                // before refreshing the showcase so the retained-GameId logic
-                // cannot restore a selection from the previous visit. Back
-                // from nested game details does not enter this route again.
-                ui.set_activity_selected_index(0);
-                if let Some(refresh) = self.activity_on_enter.borrow().as_ref() {
-                    refresh(ui);
-                }
+                self.prepare_activity_visit(ui);
             }
             self.publish_route_change(ui, from, route);
             self.restore_focus_for_route(ui, route);
@@ -321,6 +333,9 @@ impl NavigationController {
             debug!(?from, ?to, "Back restored previous route and focus");
             if from == AppRoute::Utility(UtilityPage::Settings) { self.settings.on_leave(ui); }
             if to == AppRoute::Utility(UtilityPage::Settings) { self.settings.on_enter(ui); }
+            if to == AppRoute::Utility(UtilityPage::Activity) {
+                self.prepare_activity_visit(ui);
+            }
             // Queue feedback before potentially expensive route redraws.
             self.cue(UiSoundCue::Back);
             self.publish_route_change(ui, from, to);

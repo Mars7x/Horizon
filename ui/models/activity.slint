@@ -13,21 +13,6 @@ export struct ActivityDayData {
     fraction: float,
 }
 
-// Retained for other presentation callers; the new Activity page no longer
-// uses session cards as a primary navigation surface.
-export struct ActivitySessionData {
-    title: string,
-    duration: string,
-    when: string,
-    method: string,
-}
-
-export struct ActivityGameData {
-    title: string,
-    playtime: string,
-    sessions: string,
-}
-
 // One visible slice of the complete game session history. Rows are not
 // provider lifetime estimates; they originate only from persisted sessions.
 export struct ActivityHistoryRowData {

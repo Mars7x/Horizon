@@ -395,3 +395,20 @@ expanded focus bracket top edge to prevent upper-caption collisions. The
 carousel's clip area includes both caption lines. The chart and inert Milestones panels follow the caption stack with
 28px breathing room instead of being laid out at a conflicting fixed Y value.
 No artwork, animation timing, session data, or controller behavior changes.
+
+
+## Phase 10.3.3 — Activity audit and hardening
+
+A fresh Activity visit always starts with the first game, whether the route is
+opened directly or restored through Back from another route. A new visit
+also closes any nested details screen retained by an earlier Home/Menu route
+change. Back from nested game details within the same Activity visit is
+different: it retains the selected cover.
+
+The most-played cover query excludes games that no longer have an installed
+source **before** applying the cover limit. Historical session records and
+observed playtime totals are retained and are not deleted or rewritten. The
+SQLite test helpers and regression coverage are kept runnable under `cargo test`.
+
+No changes to Activity's UI, visual animation, session tracking, milestone
+placeholder, Home, or Library behavior are introduced by this hardening pass.
