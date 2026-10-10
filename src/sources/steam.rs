@@ -777,9 +777,9 @@ fn steam_client_icon_candidate(path: &Path) -> Option<SourceArtworkCandidate> {
 }
 
 fn square_png_side(bytes: &[u8]) -> Option<u32> {
-    let image = image::load_from_memory_with_format(bytes, image::ImageFormat::Png).ok()?;
-    let width = image.width();
-    let height = image.height();
+    // The header is enough; the chosen frame is decoded later, once.
+    let (width, height) =
+        crate::services::image::dimensions(bytes, Some(image::ImageFormat::Png)).ok()?;
     (width > 0 && width == height && width <= MAX_STEAM_ICON_DIMENSION).then_some(width)
 }
 

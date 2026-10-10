@@ -291,3 +291,12 @@ Provider adapters expose `SourceArtworkCandidate` values through
 selection, and square normalization. Presentation converts the resulting RGBA
 buffer into a Slint `Image`. No provider filesystem path, AppID, or image-format
 rule enters Slint. Steam is the first concrete `Artwork` provider. See ADR 0049.
+
+## Shared runtime standards
+
+These apply everywhere; see [ADR 0168](adr/0168-optimization-and-runtime-standards.md).
+
+- **Worker results:** a background job sends through `services::worker::worker_channel`. Each send calls the channel's `Notify`, which `presentation::wake::drain_notify` (or `ui_notify`) turns into one coalesced run of a UI-thread drain. No timer checks a channel. Background threads start with `services::worker::spawn`: named, and a thread that can't start is logged, never a panic.
+- **Images:** every decode goes through `services::image`. The format is read from the content, never the file name; reads are capped at 16K per side and 256 MB of decoder memory; size checks read only the header. Home's covers load from the cache on all cores at start-up (`ArtworkService::square_artworks`).
+- **Background:** while another app has the foreground, `Motion.loops-paused` stops every idle animation loop and SDL polls at 250 ms, so a hidden Horizon draws nothing and barely wakes.
+- **Activity refresh:** every session change publishes through `ActivityController::refresh`.

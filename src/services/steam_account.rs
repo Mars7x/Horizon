@@ -223,10 +223,12 @@ impl SteamWebApiClient {
         if bytes.len() > 256 * 1024 {
             return None;
         }
-        let image = image::load_from_memory(&bytes).ok()?;
-        if image.width() > 1024 || image.height() > 1024 {
+        // Check the size from the header before decoding anything.
+        let (width, height) = crate::services::image::dimensions(&bytes, None).ok()?;
+        if width > 1024 || height > 1024 {
             return None;
         }
+        let image = crate::services::image::decode(&bytes, None).ok()?;
         let badge = image
             .resize_exact(56, 56, image::imageops::FilterType::CatmullRom)
             .to_rgba8();

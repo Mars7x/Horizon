@@ -6,7 +6,7 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
-        mpsc::{self, Receiver, Sender},
+        mpsc::Receiver,
     },
     time::Duration,
 };
@@ -22,7 +22,7 @@ use crate::{
     domain::{GameId, LibraryGame},
     input::{UiAction, UiActionEvent},
     navigation::step_with_edge_wrap,
-    presentation::CallbackSlot,
+    presentation::{CallbackSlot, wake::drain_notify},
     services::{
         activity::LaunchActivitySink,
         artwork::{ArtworkService, SquareArtwork},
@@ -32,6 +32,7 @@ use crate::{
         settings::ArtworkPreferences,
         steamgriddb::SteamGridDbLookup,
         steamgriddb_artwork::{self, ArtworkLookupJob, ArtworkWorkerEvent},
+        worker::{WorkerSender, worker_channel},
     },
 };
 
@@ -155,7 +156,7 @@ pub struct HomeController {
     source_cards: Vec<GameCardData>,
     artwork_lookup_jobs: Vec<ArtworkLookupJob>,
     artwork_cache_root: Option<PathBuf>,
-    artwork_sender: Sender<ArtworkWorkerEvent>,
+    artwork_sender: WorkerSender<ArtworkWorkerEvent>,
     artwork_receiver: RefCell<Receiver<ArtworkWorkerEvent>>,
     artwork_generation: Arc<AtomicU64>,
     library_games: Vec<LibraryGame>,
@@ -183,7 +184,8 @@ impl HomeController {
     ) -> Rc<Self> {
         let card_data = library_games
             .iter()
-            .map(|game| game_card(game, artwork_service))
+            .zip(artwork_service.square_artworks(&library_games))
+            .map(|(game, artwork)| game_card(game, artwork))
             .collect::<Vec<_>>();
         let titles = card_data.iter().map(|game| game.title.clone()).collect();
         let artwork_lookup_jobs = library_games
@@ -195,7 +197,14 @@ impl HomeController {
                 lookup: SteamGridDbLookup::for_game(game, registry),
             })
             .collect();
-        let (artwork_sender, artwork_receiver) = mpsc::channel();
+        // Artwork results wake the UI thread; nothing polls for them.
+        let weak_ui = ui.as_weak();
+        let (artwork_notify, artwork_drain) = drain_notify(move |home: &Self| {
+            if let Some(ui) = weak_ui.upgrade() {
+                home.collect_steamgriddb_results(&ui);
+            }
+        });
+        let (artwork_sender, artwork_receiver) = worker_channel(artwork_notify);
         let card_data_for_fallback = card_data.clone();
         let cards = Rc::new(VecModel::from(card_data));
         let home_order = ordered_home_indices(&library_games, recent_game_ids);
@@ -228,6 +237,7 @@ impl HomeController {
             card_changed: RefCell::new(None),
         });
 
+        artwork_drain.bind(&controller);
         controller.select_index(ui, 0);
 
         let ui_weak = ui.as_weak();
@@ -287,10 +297,10 @@ impl HomeController {
         );
     }
 
-    /// Drained by the existing Slint timer on the presentation thread, where
-    /// VecModel updates belong. The original source card is always available.
-    pub fn collect_steamgriddb_results(&self, ui: &AppWindow) {
-        for _ in 0..32 {
+    /// Drained on the UI thread, where VecModel updates belong, whenever the
+    /// worker sends. The original source card is always available.
+    fn collect_steamgriddb_results(&self, ui: &AppWindow) {
+        loop {
             let Ok(event) = self.artwork_receiver.borrow().try_recv() else {
                 break;
             };
@@ -759,10 +769,9 @@ fn needs_external_artwork(prefer_external: bool, has_source_artwork: bool) -> bo
     prefer_external || !has_source_artwork
 }
 
-fn game_card(game: &LibraryGame, artwork_service: &ArtworkService) -> GameCardData {
+fn game_card(game: &LibraryGame, square_artwork: Option<SquareArtwork>) -> GameCardData {
     let title = game.game().title().as_str();
     let (primary, secondary, highlight) = fallback_palette(game.game().id().get(), title);
-    let square_artwork = artwork_service.square_artwork(game);
     let pixelated_artwork = square_artwork
         .as_ref()
         .is_some_and(SquareArtwork::pixelated);

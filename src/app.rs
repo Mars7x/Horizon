@@ -32,6 +32,7 @@ use crate::{
         navigation::NavigationController,
         settings::SettingsController,
         status::StatusController,
+        wake::drain_notify,
     },
     services::{
         achievements::ACHIEVEMENTS_CACHE_VERSION,
@@ -179,13 +180,7 @@ pub fn run() -> Result<(), AppError> {
         move || match sync_worker.refresh(&sync_registry, &sync_games, &sync_activity) {
             Ok(true) => {
                 if let Some(ui) = sync_ui.upgrade() {
-                    match sync_activity.overview(
-                        ActivityController::recent_session_limit(),
-                        ActivityController::top_game_limit(),
-                    ) {
-                        Ok(overview) => ActivityController::publish(&ui, &overview),
-                        Err(error) => warn!(%error, "source playtime overview could not refresh"),
-                    }
+                    ActivityController::refresh(&ui, &sync_activity);
                 }
             }
             Ok(false) => {}
@@ -263,17 +258,10 @@ pub fn run() -> Result<(), AppError> {
             Ok(ids) => recents_home.refresh_recent_games(&ui, &ids),
             Err(error) => warn!(%error, "Home recent history refresh failed"),
         }
-        if ui.get_current_route() == crate::AppRouteView::Activity {
-            match recents_activity.overview(
-                ActivityController::recent_session_limit(),
-                ActivityController::top_game_limit(),
-            ) {
-                Ok(overview) => {
-                    ActivityController::publish(&ui, &overview);
-                    recents_showcase.refresh(&ui, &overview);
-                }
-                Err(error) => warn!(%error, "Activity overview refresh failed"),
-            }
+        if ui.get_current_route() == crate::AppRouteView::Activity
+            && let Some(overview) = ActivityController::refresh(&ui, &recents_activity)
+        {
+            recents_showcase.refresh(&ui, &overview);
         }
     });
     let activity_details: Rc<dyn ActivityDetailsActions> =
@@ -348,14 +336,6 @@ pub fn run() -> Result<(), AppError> {
     settings.set_artwork_refresh(Rc::new(move |preferences| {
         refresh_home.force_refresh_steamgriddb(preferences);
     }));
-    let artwork_timer = Timer::default();
-    let artwork_home = Rc::clone(&home);
-    let artwork_ui = ui.as_weak();
-    artwork_timer.start(TimerMode::Repeated, Duration::from_millis(120), move || {
-        if let Some(ui) = artwork_ui.upgrade() {
-            artwork_home.collect_steamgriddb_results(&ui);
-        }
-    });
     let achievements = AchievementsController::new(
         &ui,
         &achievements_catalog,
@@ -369,14 +349,6 @@ pub fn run() -> Result<(), AppError> {
             achievement_updates.account_changed(&ui);
         }
     }));
-    let achievements_poll = Timer::default();
-    let achievements_ui = ui.as_weak();
-    let achievements_worker = Rc::clone(&achievements);
-    achievements_poll.start(TimerMode::Repeated, Duration::from_millis(120), move || {
-        if let Some(ui) = achievements_ui.upgrade() {
-            achievements_worker.poll(&ui);
-        }
-    });
     let navigation = NavigationController::new(
         &ui,
         Rc::clone(&home),
@@ -413,15 +385,8 @@ pub fn run() -> Result<(), AppError> {
     let on_enter_activity = Rc::clone(&activity_service);
     let on_enter_showcase = Rc::clone(&activity_showcase);
     navigation.set_activity_on_enter(Rc::new(move |ui| {
-        match on_enter_activity.overview(
-            ActivityController::recent_session_limit(),
-            ActivityController::top_game_limit(),
-        ) {
-            Ok(overview) => {
-                ActivityController::publish(ui, &overview);
-                on_enter_showcase.refresh(ui, &overview);
-            }
-            Err(error) => warn!(%error, "Activity entry refresh failed; retaining cached covers"),
+        if let Some(overview) = ActivityController::refresh(ui, &on_enter_activity) {
+            on_enter_showcase.refresh(ui, &overview);
         }
     }));
     // The very same semantic handlers cover gamepad/keyboard and pointer
@@ -535,12 +500,11 @@ pub fn run() -> Result<(), AppError> {
 
     let input = InputManager::new(action_sink, status_sink);
 
-    let system_monitor = StatusMonitor::start();
-    let system_status_timer = Timer::default();
+    // Network and battery readings wake the UI thread when they arrive.
     let system_ui = ui.as_weak();
     let system_controller = Rc::clone(&controller_status);
     let system_host = Rc::clone(&host_status);
-    system_status_timer.start(TimerMode::Repeated, Duration::from_millis(50), move || {
+    let (system_notify, system_drain) = drain_notify(move |system_monitor: &StatusMonitor| {
         if let Some(fresh) = system_monitor.latest() {
             // Controller hotplug/power updates publish from this same cache.
             // Keep it synchronized or they briefly overwrite a live Ethernet
@@ -551,6 +515,8 @@ pub fn run() -> Result<(), AppError> {
             }
         }
     });
+    let system_monitor = Rc::new(StatusMonitor::start(system_notify));
+    system_drain.bind(&system_monitor);
 
     // SDL gamepad events are process-global, unlike keyboard events delivered
     // by the focused Slint window. Bind semantic controller ownership to the
@@ -563,6 +529,9 @@ pub fn run() -> Result<(), AppError> {
     let activation_ui = ui.as_weak();
     ui.on_application_active_changed(move |active| {
         activation_input.set_ui_input_enabled(active);
+        if let Some(ui) = activation_ui.upgrade() {
+            ui.global::<crate::Motion>().set_loops_paused(!active);
+        }
 
         // Activity observes the same OS activation boundary that owns
         // controller input. Handle the activity transition before Home clears
@@ -582,13 +551,7 @@ pub fn run() -> Result<(), AppError> {
             activation_album.handle_application_active_changed(&ui, active);
 
             if matches!(activity_transition, ActivitySessionTransition::Completed(_)) {
-                match activation_activity.overview(
-                    ActivityController::recent_session_limit(),
-                    ActivityController::top_game_limit(),
-                ) {
-                    Ok(overview) => ActivityController::publish(&ui, &overview),
-                    Err(error) => warn!(%error, "Activity overview could not be refreshed"),
-                }
+                ActivityController::refresh(&ui, &activation_activity);
             }
         }
     });
@@ -605,13 +568,7 @@ pub fn run() -> Result<(), AppError> {
                 let Some(ui) = foreground_ui.upgrade() else {
                     return;
                 };
-                match foreground_activity.overview(
-                    ActivityController::recent_session_limit(),
-                    ActivityController::top_game_limit(),
-                ) {
-                    Ok(overview) => ActivityController::publish(&ui, &overview),
-                    Err(error) => warn!(%error, "Activity overview could not be refreshed"),
-                }
+                ActivityController::refresh(&ui, &foreground_activity);
             }
             Ok(_) => {}
             Err(error) => {
@@ -650,13 +607,7 @@ pub fn run() -> Result<(), AppError> {
         if refresh_activity
             && let Some(ui) = runtime_ui.upgrade()
         {
-            match runtime_activity.overview(
-                ActivityController::recent_session_limit(),
-                ActivityController::top_game_limit(),
-            ) {
-                Ok(overview) => ActivityController::publish(&ui, &overview),
-                Err(error) => warn!(%error, "Activity overview could not be refreshed"),
-            }
+            ActivityController::refresh(&ui, &runtime_activity);
         }
     });
 
@@ -674,13 +625,7 @@ pub fn run() -> Result<(), AppError> {
         let Some(ui) = live_activity_ui.upgrade() else {
             return;
         };
-        match live_activity.overview(
-            ActivityController::recent_session_limit(),
-            ActivityController::top_game_limit(),
-        ) {
-            Ok(overview) => ActivityController::publish(&ui, &overview),
-            Err(error) => warn!(%error, "live Activity overview could not be refreshed"),
-        }
+        ActivityController::refresh(&ui, &live_activity);
     });
 
     // Persist a conservative observation checkpoint for every live session.
@@ -738,13 +683,7 @@ pub fn run() -> Result<(), AppError> {
         }
 
         if refresh_activity {
-            match managed_activity.overview(
-                ActivityController::recent_session_limit(),
-                ActivityController::top_game_limit(),
-            ) {
-                Ok(overview) => ActivityController::publish(&ui, &overview),
-                Err(error) => warn!(%error, "Activity overview could not be refreshed"),
-            }
+            ActivityController::refresh(&ui, &managed_activity);
         }
     });
 
@@ -760,9 +699,8 @@ pub fn run() -> Result<(), AppError> {
     let _activity_service = activity_service;
     let _source_registry = registry;
     let _clock = clock;
-    let _achievements_poll = achievements_poll;
+    let _system_monitor = system_monitor;
     let _album = album;
-    let _artwork_timer = artwork_timer;
     let _navigation = navigation;
     let _library_controller = library_controller;
     let _recent_refresh_timer = recent_refresh_timer;

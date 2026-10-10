@@ -159,9 +159,10 @@ Artwork priority:
 - If the API key is absent: no SteamGridDB requests or cached results are
   applied. Removing the key restores local source art immediately.
 
-The network worker does not own or manipulate Slint handles. A presentation
-thread timer polls bounded `mpsc` results; generation IDs reject stale replies
-after a setting change. Network failures do not interrupt Home navigation.
+The network worker does not own or manipulate Slint handles. It sends results
+through a `services::worker` channel, whose every send wakes the UI thread to
+drain them (no polling timer); generation IDs reject stale replies after a
+setting change. Network failures do not interrupt Home navigation.
 
 SteamGridDB assets remain owned/licensed by their respective uploaders or rights
 holders. Attribution provenance lives with the cached asset and is not a grant

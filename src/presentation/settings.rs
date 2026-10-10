@@ -550,7 +550,7 @@ impl SettingsController {
         let generation = self.paste_generation.fetch_add(1, Ordering::Relaxed) + 1;
         let epoch = Arc::clone(&self.paste_generation);
         let weak_ui = ui.as_weak();
-        std::thread::spawn(move || {
+        crate::services::worker::spawn("settings-paste", move || {
             let text = clipboard.read_key();
             let _ = weak_ui.upgrade_in_event_loop(move |ui| {
                 if !ui.get_settings_editing_key()

@@ -93,6 +93,14 @@ ahead.
 - The first Album visit loads GStreamer's decoders and audio output in the
   background (`VideoBackend::warm_up`), so the first video starts as fast as
   later ones.
+- **Sound and the start-up pause.** Playback through the PulseAudio socket
+  is clocked by the audio stream, which barely moves for its first few
+  hundred milliseconds: the picture held still at the start of every video.
+  Horizon now sends sound straight to PipeWire when it can connect (the
+  Flatpak grants `xdg-run/pipewire-0` for this)
+  (PipeWire's sink clocks smoothly from the first frame), and otherwise runs
+  playback on the system clock with the PulseAudio sink following it.
+  Measured: frames arrive on time from the first one on both paths.
 
 Frames are copied once from GStreamer's buffer into Slint's (one memcpy
 when rows are packed, never into a zero-filled buffer first). While a frame
@@ -110,9 +118,9 @@ media extension, so a half-written file never appears. Pass the game's
 
 - **Nothing on the UI thread blocks.** The scan runs on its own thread per
   visit. Decoding runs on two `MediaLoader` workers. Video runs on
-  GStreamer's threads. Results return through one channel and a single
-  `album-media-ready` wake-up, so an idle Album uses no CPU (no polling timer;
-  only a 4 Hz clock while a video plays).
+  GStreamer's threads. Results return through one `services::worker`
+  channel that wakes the UI thread once per burst, so an idle Album uses no
+  CPU (no polling timer).
 - **Demand-driven decoding.** The controller tells the loader what the screen
   needs *now*, replacing everything still queued. The open photo and its
   neighbours come first, then thumbnails for visible rows, then for the

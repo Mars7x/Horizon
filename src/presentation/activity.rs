@@ -17,16 +17,36 @@ use crate::{
 const RECENT_SESSION_LIMIT: usize = 6;
 const TOP_GAME_LIMIT: usize = 12;
 
+/// History rows mounted past each edge of the visible window.
+const HISTORY_OVERSCAN_ROWS: usize = 2;
+
 /// Pure presentation adapter for persisted Activity data.
 ///
 /// Session lifecycle and SQL remain in services/persistence. This layer only
 /// formats stable domain/application values for Slint.
-/// History rows mounted past each edge of the visible window.
-const HISTORY_OVERSCAN_ROWS: usize = 2;
-
 pub struct ActivityController;
 
 impl ActivityController {
+    /// Reads the current overview and publishes it: the one way every
+    /// session change (launch, return, source runtime, managed exit, live
+    /// tick, source playtime) refreshes Activity. A failed read is logged and
+    /// leaves the page as it was.
+    pub fn refresh<R: ActivityRepository>(
+        ui: &AppWindow,
+        activity: &ActivityService<R>,
+    ) -> Option<ActivityOverview> {
+        match activity.overview(RECENT_SESSION_LIMIT, TOP_GAME_LIMIT) {
+            Ok(overview) => {
+                Self::publish(ui, &overview);
+                Some(overview)
+            }
+            Err(error) => {
+                warn!(%error, "Activity overview could not be refreshed");
+                None
+            }
+        }
+    }
+
     pub const fn recent_session_limit() -> usize {
         RECENT_SESSION_LIMIT
     }

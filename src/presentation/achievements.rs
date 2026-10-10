@@ -5,21 +5,22 @@ use std::{
     collections::BTreeSet,
     path::PathBuf,
     rc::Rc,
-    sync::mpsc::Sender,
-    sync::mpsc::{self, Receiver},
+    sync::mpsc::Receiver,
 };
 
 use chrono::{Local, TimeZone};
-use slint::{Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
+use slint::{ComponentHandle, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 
 use crate::{
     AchievementEntryData, AchievementGameData, AppWindow,
     domain::LibraryGame,
+    presentation::wake::drain_notify,
     services::achievements::{
         AchievementImportEvent, SteamAchievement, SteamGame, SteamGameAchievements,
         hydrate_game_badges, import_steam_achievements, purge_achievement_cache, steam_games,
     },
     services::steam_account::SteamAccountService,
+    services::worker::{Notify, WorkerSender, spawn, worker_channel},
 };
 
 pub struct AchievementsController {
@@ -28,7 +29,9 @@ pub struct AchievementsController {
     cache_identity: RefCell<Option<String>>,
     steam_games: Vec<SteamGame>,
     receiver: RefCell<Receiver<AchievementImportEvent>>,
-    sender: RefCell<Sender<AchievementImportEvent>>,
+    sender: RefCell<WorkerSender<AchievementImportEvent>>,
+    // Wakes the UI thread to drain `receiver`; reused for each new channel.
+    notify: Notify,
     loaded: RefCell<Vec<SteamGameAchievements>>,
     selected: Cell<usize>,
     source_index: Cell<usize>,
@@ -49,7 +52,13 @@ impl AchievementsController {
         // disables the cache.
         cache_root: Option<PathBuf>,
     ) -> Rc<Self> {
-        let (sender, receiver) = mpsc::channel();
+        let weak_ui = ui.as_weak();
+        let (notify, drain) = drain_notify(move |controller: &Self| {
+            if let Some(ui) = weak_ui.upgrade() {
+                controller.drain(&ui);
+            }
+        });
+        let (sender, receiver) = worker_channel(notify.clone());
         let identity = account
             .borrow()
             .credentials()
@@ -61,6 +70,7 @@ impl AchievementsController {
             steam_games: steam_games(library),
             sender: RefCell::new(sender),
             receiver: RefCell::new(receiver),
+            notify,
             loaded: RefCell::new(Vec::new()),
             selected: Cell::new(0),
             source_index: Cell::new(0),
@@ -71,6 +81,7 @@ impl AchievementsController {
             unavailable: Cell::new(0),
             requested_badges: RefCell::new(BTreeSet::new()),
         });
+        drain.bind(&controller);
         controller.publish(ui);
         controller
     }
@@ -118,9 +129,13 @@ impl AchievementsController {
         let jobs = self.steam_games.clone();
         let sender = self.sender.borrow().clone();
         let cache_root = self.cache_root.clone();
-        std::thread::spawn(move || {
+        if !spawn("achievements-import", move || {
             import_steam_achievements(credentials, jobs, cache_root, sender)
-        });
+        }) {
+            // Nothing is reading; the next visit tries again.
+            self.started.set(false);
+            ui.set_achievements_loading(false);
+        }
     }
 
     /// Discard results from the previous account. Its background worker may
@@ -137,7 +152,7 @@ impl AchievementsController {
         if let Some(old) = previous {
             purge_achievement_cache(self.cache_root.as_deref(), &old);
         }
-        let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = worker_channel(self.notify.clone());
         *self.sender.borrow_mut() = sender;
         *self.receiver.borrow_mut() = receiver;
         self.loaded.borrow_mut().clear();
@@ -163,9 +178,9 @@ impl AchievementsController {
         }
     }
 
-    /// Drains only completed network events on Slint's thread; requests never
-    /// block animation, mouse, or controller input.
-    pub fn poll(&self, ui: &AppWindow) {
+    /// Drains completed network events on Slint's thread whenever a worker
+    /// sends; requests never block animation, mouse, or controller input.
+    fn drain(&self, ui: &AppWindow) {
         let mut changed = false;
         let mut catalog_changed = false;
         while let Ok(event) = self.receiver.borrow().try_recv() {
@@ -452,9 +467,11 @@ impl AchievementsController {
                 if let Some(credentials) = self.account.borrow().credentials() {
                     let sender = self.sender.borrow().clone();
                     let cache_root = self.cache_root.clone();
-                    std::thread::spawn(move || {
+                    if !spawn("achievements-badges", move || {
                         hydrate_game_badges(credentials, game, cache_root, sender)
-                    });
+                    }) {
+                        self.requested_badges.borrow_mut().remove(&app_id);
+                    }
                 } else {
                     self.requested_badges.borrow_mut().remove(&app_id);
                 }

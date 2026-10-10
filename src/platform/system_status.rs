@@ -4,10 +4,12 @@
 use std::{
     cell::RefCell,
     collections::HashMap,
-    sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError},
+    sync::mpsc::{self, RecvTimeoutError, SyncSender, TrySendError},
     thread,
     time::Duration,
 };
+
+use crate::services::worker::{Notify, worker_channel};
 
 use zbus::{
     MatchRule,
@@ -154,13 +156,15 @@ enum StatusUpdate {
 }
 
 pub struct StatusMonitor {
-    receiver: Receiver<StatusUpdate>,
+    receiver: mpsc::Receiver<StatusUpdate>,
     last: RefCell<SystemStatus>,
 }
 
 impl StatusMonitor {
-    pub fn start() -> Self {
-        let (sender, receiver) = mpsc::channel();
+    /// `notify` wakes the UI thread to call [`StatusMonitor::latest`]
+    /// whenever a reading arrives.
+    pub fn start(notify: Notify) -> Self {
+        let (sender, receiver) = worker_channel(notify);
         // NetworkManager broadcasts property/signal changes for active links,
         // devices, and Wi-Fi access points. Coalesce bursts into one wake-up;
         // no D-Bus call or event stream ever runs on the Slint/input thread.

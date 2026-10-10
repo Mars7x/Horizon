@@ -783,7 +783,7 @@ export component SettingsPage inherits Rectangle {
                     height: Typography.body-size * 1.10;
                     background: Theme.foreground;
                     opacity: root.editing-key && root.editor-target == 0 && api-input.has-focus
-                        ? (Motion.reduced-motion ? 1.0
+                        ? (Motion.reduced-motion || Motion.loops-paused ? 1.0
                             : 0.12 + 0.88 * (0.5 + 0.5 * cos(animation-tick() / Motion.caret-blink-cycle * 360deg)))
                         : 0.0;
                 }
@@ -958,7 +958,7 @@ export component SettingsPage inherits Rectangle {
             stroke-line-cap: round;
             visible: root.refresh-running;
             transform-origin: { x: 22px, y: 22px };
-            transform-rotation: root.refresh-running && !Motion.reduced-motion
+            transform-rotation: root.refresh-running && !Motion.reduced-motion && !Motion.loops-paused
                 ? mod(animation-tick(), Motion.spinner-cycle) / Motion.spinner-cycle * 360deg
                 : 0deg;
         }

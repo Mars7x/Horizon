@@ -154,6 +154,9 @@ export global Typography {
 // the one spring.
 export global Motion {
     in-out property <bool> reduced-motion: false;
+    // Set by Rust while another app (a game) has the foreground: the idle
+    // loops below stop, so a hidden Horizon never draws frames.
+    in-out property <bool> loops-paused: false;
 
     out property <duration> focus-duration: reduced-motion ? 0ms : 140ms;
     // Peripheral HUD status, not menu focus. No motion with Reduced Motion.
@@ -167,7 +170,7 @@ export global Motion {
     out property <duration> focus-idle-cycle: 3200ms;
     out property <float> focus-idle-highlight-strength: 0.80;
     out property <color> menu-focus-color:
-        reduced-motion || Theme.high-contrast ? Theme.focus
+        reduced-motion || loops-paused || Theme.high-contrast ? Theme.focus
         : Theme.focus.mix(Theme.focus-highlight,
             1.0 - focus-idle-highlight-strength
                 * (0.5 - 0.5 * cos(animation-tick() / focus-idle-cycle * 360deg)));

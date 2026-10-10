@@ -16,7 +16,14 @@ use tracing::{debug, info, warn};
 
 use super::actions::{UiAction, UiActionEvent};
 
+// SDL is pumped from a UI-thread timer whose rate follows what input can
+// do right now: every 8ms while a controller can navigate Horizon, slower
+// while none is connected (only hotplug matters), and slowest while a game
+// has the foreground (topology and battery only), so Horizon stays out of
+// the game's way.
 const POLL_INTERVAL: Duration = Duration::from_millis(8);
+const IDLE_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const BACKGROUND_POLL_INTERVAL: Duration = Duration::from_millis(250);
 // Battery can become available shortly after hotplug; keep this inexpensive
 // status query responsive without putting it in the 8ms input hot path.
 const CONTROLLER_BATTERY_INTERVAL: Duration = Duration::from_secs(2);
@@ -62,8 +69,8 @@ pub enum GamepadInputError {
 /// SDL requires event pumping on the main thread. Using a Slint timer keeps
 /// that requirement explicit and avoids a cross-thread workaround.
 pub struct SdlGamepadInput {
-    _timer: Timer,
-    _state: Rc<RefCell<SdlState>>,
+    timer: Rc<Timer>,
+    state: Rc<RefCell<SdlState>>,
 }
 
 impl SdlGamepadInput {
@@ -93,14 +100,20 @@ impl SdlGamepadInput {
         state.open_initial_gamepads();
         status_sink(state.status());
 
+        let interval = state.poll_interval();
         let state = Rc::new(RefCell::new(state));
-        let timer = Timer::default();
+        let timer = Rc::new(Timer::default());
         let timer_state = Rc::clone(&state);
         let timer_action_sink = Rc::clone(&action_sink);
         let timer_status_sink = Rc::clone(&status_sink);
+        let own_timer = Rc::downgrade(&timer);
 
-        timer.start(TimerMode::Repeated, POLL_INTERVAL, move || {
+        timer.start(TimerMode::Repeated, interval, move || {
             poll_gamepad_events(&timer_state, &timer_action_sink, &timer_status_sink);
+            // A controller arriving or leaving changes the rate.
+            if let Some(timer) = own_timer.upgrade() {
+                pace(&timer, &timer_state.borrow());
+            }
         });
 
         info!(
@@ -108,14 +121,19 @@ impl SdlGamepadInput {
             "SDL3 gamepad input started"
         );
 
-        Ok(Self {
-            _timer: timer,
-            _state: state,
-        })
+        Ok(Self { timer, state })
     }
 
     pub fn set_enabled(&self, enabled: bool) {
-        self._state.borrow_mut().set_enabled(enabled);
+        self.state.borrow_mut().set_enabled(enabled);
+        pace(&self.timer, &self.state.borrow());
+    }
+}
+
+fn pace(timer: &Timer, state: &SdlState) {
+    let interval = state.poll_interval();
+    if timer.interval() != interval {
+        timer.set_interval(interval);
     }
 }
 
@@ -347,6 +365,16 @@ impl SdlState {
             info!(removed, "gamepad disconnected");
         }
         removed > 0
+    }
+
+    fn poll_interval(&self) -> Duration {
+        if !self.enabled {
+            BACKGROUND_POLL_INTERVAL
+        } else if self.open_gamepads.is_empty() {
+            IDLE_POLL_INTERVAL
+        } else {
+            POLL_INTERVAL
+        }
     }
 
     fn set_enabled(&mut self, enabled: bool) {
