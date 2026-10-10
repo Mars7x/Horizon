@@ -1,7 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    env,
-    fs,
+    env, fs,
     io::{self, Read},
     path::{Path, PathBuf},
     sync::Mutex,
@@ -142,9 +141,9 @@ impl SteamSource {
             .runtime_logs
             .lock()
             .map_err(|_| SteamDiscoveryError::RuntimeLogCachePoisoned)?;
-        let refresh = cache.get(path).is_none_or(|entry| {
-            entry.length != length || entry.modified != modified
-        });
+        let refresh = cache
+            .get(path)
+            .is_none_or(|entry| entry.length != length || entry.modified != modified);
 
         if refresh {
             let content = fs::read_to_string(path).map_err(|source| SteamDiscoveryError::Read {
@@ -285,16 +284,18 @@ impl SteamSource {
 
         let mut games = games
             .into_iter()
-            .map(|(app_id, title)| {
-                Ok(SourceGame::new(ExternalGameId::new(app_id)?, title))
-            })
+            .map(|(app_id, title)| Ok(SourceGame::new(ExternalGameId::new(app_id)?, title)))
             .collect::<Result<Vec<_>, SteamDiscoveryError>>()?;
         games.sort_by(|left, right| {
             left.title()
                 .as_str()
                 .to_lowercase()
                 .cmp(&right.title().as_str().to_lowercase())
-                .then_with(|| left.external_id().as_str().cmp(right.external_id().as_str()))
+                .then_with(|| {
+                    left.external_id()
+                        .as_str()
+                        .cmp(right.external_id().as_str())
+                })
         });
         Ok(SteamRootDiscovery {
             games,
@@ -315,7 +316,9 @@ impl GameSource for SteamSource {
             .filter(|root| looks_like_steam_root(root))
             .collect::<Vec<_>>();
         if roots.is_empty() {
-            return Ok(SourceDiscovery::Unavailable(SourceUnavailableReason::NotInstalled));
+            return Ok(SourceDiscovery::Unavailable(
+                SourceUnavailableReason::NotInstalled,
+            ));
         }
 
         let mut merged = BTreeMap::<String, SourceGame>::new();
@@ -357,14 +360,15 @@ impl GameSource for SteamSource {
                 .as_str()
                 .to_lowercase()
                 .cmp(&right.title().as_str().to_lowercase())
-                .then_with(|| left.external_id().as_str().cmp(right.external_id().as_str()))
+                .then_with(|| {
+                    left.external_id()
+                        .as_str()
+                        .cmp(right.external_id().as_str())
+                })
         });
 
         let snapshot = if all_roots_succeeded {
-            SourceSnapshot::authoritative_with_membership(
-                games,
-                present_game_ids.into_iter(),
-            )
+            SourceSnapshot::authoritative_with_membership(games, present_game_ids)
         } else {
             SourceSnapshot::new(games)
         }
@@ -403,7 +407,10 @@ impl GameSource for SteamSource {
             };
             // Lifetime playtime is per Steam account. Two distinct clients
             // may have different active accounts; never merge those totals.
-            if selected_account.as_deref().is_some_and(|selected| selected != account) {
+            if selected_account
+                .as_deref()
+                .is_some_and(|selected| selected != account)
+            {
                 warn!(path = %path.display(), account, "Steam root uses a different account; skipping its lifetime playtime");
                 continue;
             }
@@ -501,8 +508,14 @@ impl GameSource for SteamSource {
         Ok(Some(SourceRuntimeState::Stopped))
     }
 
-    fn external_artwork_id(&self, external_id: &ExternalGameId) -> Option<super::ExternalArtworkId> {
-        external_id.as_str().parse::<u32>().ok()
+    fn external_artwork_id(
+        &self,
+        external_id: &ExternalGameId,
+    ) -> Option<super::ExternalArtworkId> {
+        external_id
+            .as_str()
+            .parse::<u32>()
+            .ok()
             .filter(|id| *id > 0)
             .map(super::ExternalArtworkId::SteamAppId)
     }
@@ -524,21 +537,21 @@ impl GameSource for SteamSource {
         for root in self.roots.iter().filter(|root| looks_like_steam_root(root)) {
             if let Some(hash) = &hashes.linux_client_icon {
                 let archive_path = root.join("steam/games").join(format!("{hash}.zip"));
-                if archive_path.is_file() && seen.insert(archive_path.clone()) {
-                    if let Some(candidate) =
-                        steam_linux_icon_archive_candidate(&archive_path)
-                    {
-                        candidates.push(candidate);
-                    }
+                if archive_path.is_file()
+                    && seen.insert(archive_path.clone())
+                    && let Some(candidate) = steam_linux_icon_archive_candidate(&archive_path)
+                {
+                    candidates.push(candidate);
                 }
             }
 
             if let Some(hash) = &hashes.client_icon {
                 let ico_path = root.join("steam/games").join(format!("{hash}.ico"));
-                if ico_path.is_file() && seen.insert(ico_path.clone()) {
-                    if let Some(candidate) = steam_client_icon_candidate(&ico_path) {
-                        candidates.push(candidate);
-                    }
+                if ico_path.is_file()
+                    && seen.insert(ico_path.clone())
+                    && let Some(candidate) = steam_client_icon_candidate(&ico_path)
+                {
+                    candidates.push(candidate);
                 }
             }
 
@@ -570,9 +583,7 @@ impl SteamArtworkHashes {
     }
 
     fn is_empty(&self) -> bool {
-        self.app_icon.is_none()
-            && self.client_icon.is_none()
-            && self.linux_client_icon.is_none()
+        self.app_icon.is_none() && self.client_icon.is_none() && self.linux_client_icon.is_none()
     }
 }
 
@@ -584,11 +595,7 @@ fn artwork_hash(common: &Obj<'_>, key: &str) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-fn steam_artwork_paths(
-    root: &Path,
-    app_id: &str,
-    hashes: &SteamArtworkHashes,
-) -> Vec<PathBuf> {
+fn steam_artwork_paths(root: &Path, app_id: &str, hashes: &SteamArtworkHashes) -> Vec<PathBuf> {
     let mut paths = Vec::new();
 
     let library_cache = root.join("appcache/librarycache");
@@ -717,10 +724,7 @@ fn steam_client_icon_candidate(path: &Path) -> Option<SourceArtworkCandidate> {
     for entry in icon_dir.entries() {
         let width = entry.width();
         let height = entry.height();
-        if width == 0
-            || width != height
-            || width > MAX_STEAM_ICON_DIMENSION
-        {
+        if width == 0 || width != height || width > MAX_STEAM_ICON_DIMENSION {
             continue;
         }
 
@@ -805,9 +809,7 @@ fn gameprocess_added_app_id(line: &str) -> Option<&str> {
     if !app_id.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
     }
-    rest[end..]
-        .contains(" adding PID ")
-        .then_some(app_id)
+    rest[end..].contains(" adding PID ").then_some(app_id)
 }
 
 fn gameprocess_removed_app_id(line: &str) -> Option<&str> {
@@ -884,8 +886,12 @@ fn most_recent_account_id(content: &str) -> Option<String> {
         .unwrap_or(root);
     let mut most_recent = None;
     for (steam_id, value) in users.iter() {
-        let Some(entry) = value.as_obj() else { continue };
-        let Some(key) = vdf_key_ci(entry, "MostRecent") else { continue };
+        let Some(entry) = value.as_obj() else {
+            continue;
+        };
+        let Some(key) = vdf_key_ci(entry, "MostRecent") else {
+            continue;
+        };
         if entry.get(key.as_str()).and_then(|value| value.as_str()) != Some("1") {
             continue;
         }
@@ -933,11 +939,17 @@ fn parse_localconfig_playtime(content: &str) -> Result<Vec<(String, PlaytimeSeco
                 loop {
                     match chars.next() {
                         Some('\\') => {
-                            let escaped = chars.next().ok_or("unterminated escape in Steam localconfig")?;
+                            let escaped = chars
+                                .next()
+                                .ok_or("unterminated escape in Steam localconfig")?;
                             text.push(escaped);
                         }
                         Some('"') => break,
-                        None => return Err("unterminated quoted string in Steam localconfig".to_owned()),
+                        None => {
+                            return Err(
+                                "unterminated quoted string in Steam localconfig".to_owned()
+                            );
+                        }
                         Some(other) => text.push(other),
                     }
                 }
@@ -951,7 +963,10 @@ fn parse_localconfig_playtime(content: &str) -> Result<Vec<(String, PlaytimeSeco
                                 .all(|(expected, actual)| actual.eq_ignore_ascii_case(expected));
                         if in_app && key.eq_ignore_ascii_case("Playtime") {
                             let app_id = &stack[APPS_PATH.len()];
-                            let seconds = text.trim().parse::<i64>().ok()
+                            let seconds = text
+                                .trim()
+                                .parse::<i64>()
+                                .ok()
                                 .filter(|minutes| *minutes > 0)
                                 .and_then(|minutes| minutes.checked_mul(60))
                                 .and_then(|seconds| PlaytimeSeconds::new(seconds).ok());
@@ -1260,10 +1275,8 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let id = NEXT.fetch_add(1, Ordering::Relaxed);
-        let path = env::temp_dir().join(format!(
-            "horizon-steam-{name}-{}-{id}",
-            std::process::id()
-        ));
+        let path =
+            env::temp_dir().join(format!("horizon-steam-{name}-{}-{id}", std::process::id()));
         fs::create_dir_all(&path).expect("temp directory");
         path
     }
@@ -1392,7 +1405,9 @@ mod tests {
         .expect("write manifest");
 
         let source = SteamSource::with_roots(vec![root.clone()]).expect("source");
-        let discovery = source.discover_root(&root).expect("manifest-only discovery");
+        let discovery = source
+            .discover_root(&root)
+            .expect("manifest-only discovery");
 
         assert_eq!(discovery.games.len(), 1);
         assert_eq!(discovery.games[0].external_id().as_str(), "480");
@@ -1426,7 +1441,11 @@ mod tests {
     #[test]
     fn steam_advertises_lifetime_playtime() {
         let source = SteamSource::with_roots(vec![]).expect("source");
-        assert!(source.descriptor().supports(SourceCapability::LifetimePlaytime));
+        assert!(
+            source
+                .descriptor()
+                .supports(SourceCapability::LifetimePlaytime)
+        );
     }
 
     const LOCALCONFIG: &str = r#""UserLocalConfigStore"
@@ -1468,7 +1487,10 @@ mod tests {
     fn localconfig_rejects_incomplete_snapshots() {
         // Steam rewrites this cache while running. Do not commit a truncated
         // snapshot after successfully reading an earlier game's Playtime.
-        let truncated = LOCALCONFIG.trim_end().strip_suffix('}').expect("closing brace");
+        let truncated = LOCALCONFIG
+            .trim_end()
+            .strip_suffix('}')
+            .expect("closing brace");
         assert!(parse_localconfig_playtime(truncated).is_err());
         assert!(parse_localconfig_playtime(&format!("{LOCALCONFIG}}}")).is_err());
         assert!(parse_localconfig_playtime(&format!("{LOCALCONFIG}\"Unclosed")).is_err());
@@ -1477,7 +1499,11 @@ mod tests {
     #[test]
     fn localconfig_skips_overflow_and_tolerates_escaped_unrelated_values() {
         let huge = LOCALCONFIG.replace("\"120\"", "\"9223372036854775807\"");
-        assert!(parse_localconfig_playtime(&huge).expect("valid snapshot").is_empty());
+        assert!(
+            parse_localconfig_playtime(&huge)
+                .expect("valid snapshot")
+                .is_empty()
+        );
 
         let escaped = LOCALCONFIG.replace(
             "\"570\" {",
@@ -1528,14 +1554,22 @@ mod tests {
         fs::create_dir_all(single.join("steamapps")).expect("steamapps");
         write_account(&single, "1000", 10);
         let source = SteamSource::with_roots(vec![single.clone()]).expect("source");
-        assert_eq!(source.lifetime_playtime_snapshot().expect("snapshot").len(), 1);
+        assert_eq!(
+            source.lifetime_playtime_snapshot().expect("snapshot").len(),
+            1
+        );
 
         let ambiguous = temp_dir("lifetime-ambiguous");
         fs::create_dir_all(ambiguous.join("steamapps")).expect("steamapps");
         write_account(&ambiguous, "1000", 10);
         write_account(&ambiguous, "2000", 30);
         let source = SteamSource::with_roots(vec![ambiguous.clone()]).expect("source");
-        assert!(source.lifetime_playtime_snapshot().expect("snapshot").is_empty());
+        assert!(
+            source
+                .lifetime_playtime_snapshot()
+                .expect("snapshot")
+                .is_empty()
+        );
 
         fs::remove_dir_all(single).expect("cleanup");
         fs::remove_dir_all(ambiguous).expect("cleanup");
@@ -1593,7 +1627,6 @@ mod tests {
         fs::remove_dir_all(root).expect("cleanup");
     }
 
-
     #[test]
     fn client_ico_chooses_largest_square_frame() {
         let root = temp_dir("multi-resolution-ico");
@@ -1624,11 +1657,7 @@ mod tests {
     #[test]
     fn linux_icon_png_selection_prefers_largest_true_square() {
         fn png(width: u32, height: u32) -> Vec<u8> {
-            let image = image::RgbaImage::from_pixel(
-                width,
-                height,
-                image::Rgba([20, 40, 60, 255]),
-            );
+            let image = image::RgbaImage::from_pixel(width, height, image::Rgba([20, 40, 60, 255]));
             let mut bytes = Vec::new();
             image::DynamicImage::ImageRgba8(image)
                 .write_to(
@@ -1675,8 +1704,10 @@ mod tests {
         assert_eq!(states.get("1462040"), Some(&true));
         assert_eq!(states.get("480"), Some(&true));
 
-        let ended = format!("{log}[2026-10-07 10:03:00] Remove 1462040 from running list
-");
+        let ended = format!(
+            "{log}[2026-10-07 10:03:00] Remove 1462040 from running list
+"
+        );
         let states = parse_gameprocess_running_states(&ended);
         assert_eq!(states.get("1462040"), Some(&false));
         assert_eq!(states.get("480"), Some(&true));

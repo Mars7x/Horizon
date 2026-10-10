@@ -1,0 +1,5 @@
+# Formatting-only commits, skipped by `git blame`.
+# Enable locally with: git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# Apply rustfmt to the whole codebase
+5ddc53c61256c43b7cd0e7d40d2b80d577b72a30

@@ -50,13 +50,18 @@ pub struct AppearancePreferences {
 
 impl AppearancePreferences {
     pub fn theme_index(self) -> i32 {
-        match self.theme { ThemePreference::System => 0, ThemePreference::Light => 1, ThemePreference::Dark => 2 }
+        match self.theme {
+            ThemePreference::System => 0,
+            ThemePreference::Light => 1,
+            ThemePreference::Dark => 2,
+        }
     }
 
     pub fn accent_index(self) -> i32 {
         match self.accent {
             AccentPreference::System => 0,
-            AccentPreference::Custom(color) => ACCENT_PRESETS.iter()
+            AccentPreference::Custom(color) => ACCENT_PRESETS
+                .iter()
                 .position(|(_, preset)| *preset == color)
                 .map_or(0, |index| index as i32 + 1),
         }
@@ -73,23 +78,12 @@ impl Default for AppearancePreferences {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SystemAppearance {
     pub preferred_theme: Option<EffectiveTheme>,
     pub accent: Option<Rgb>,
     pub high_contrast: bool,
     pub reduced_motion: bool,
-}
-
-impl Default for SystemAppearance {
-    fn default() -> Self {
-        Self {
-            preferred_theme: None,
-            accent: None,
-            high_contrast: false,
-            reduced_motion: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -152,57 +146,58 @@ impl Palette {
     }
 
     fn new(theme: EffectiveTheme, accent: Rgb, high_contrast: bool) -> Self {
-        let (
-            background,
-            surface,
-            surface_raised,
-            foreground,
-            secondary_foreground,
-            divider,
-        ) = match (theme, high_contrast) {
-            (EffectiveTheme::Light, false) => (
-                Rgb::new(255, 255, 255),
-                Rgb::new(245, 245, 247),
-                Rgb::new(255, 255, 255),
-                Rgb::new(24, 24, 27),
-                Rgb::new(99, 99, 107),
-                Rgb::new(218, 218, 224),
-            ),
-            (EffectiveTheme::Dark, false) => (
-                Rgb::new(17, 17, 19),
-                Rgb::new(27, 27, 31),
-                Rgb::new(35, 35, 40),
-                Rgb::new(246, 246, 247),
-                Rgb::new(165, 165, 173),
-                Rgb::new(56, 56, 63),
-            ),
-            (EffectiveTheme::Light, true) => (
-                Rgb::WHITE,
-                Rgb::WHITE,
-                Rgb::WHITE,
-                Rgb::BLACK,
-                Rgb::new(45, 45, 45),
-                Rgb::BLACK,
-            ),
-            (EffectiveTheme::Dark, true) => (
-                Rgb::BLACK,
-                Rgb::BLACK,
-                Rgb::new(16, 16, 16),
-                Rgb::WHITE,
-                Rgb::new(220, 220, 220),
-                Rgb::WHITE,
-            ),
-        };
+        let (background, surface, surface_raised, foreground, secondary_foreground, divider) =
+            match (theme, high_contrast) {
+                (EffectiveTheme::Light, false) => (
+                    Rgb::new(255, 255, 255),
+                    Rgb::new(245, 245, 247),
+                    Rgb::new(255, 255, 255),
+                    Rgb::new(24, 24, 27),
+                    Rgb::new(99, 99, 107),
+                    Rgb::new(218, 218, 224),
+                ),
+                (EffectiveTheme::Dark, false) => (
+                    Rgb::new(17, 17, 19),
+                    Rgb::new(27, 27, 31),
+                    Rgb::new(35, 35, 40),
+                    Rgb::new(246, 246, 247),
+                    Rgb::new(165, 165, 173),
+                    Rgb::new(56, 56, 63),
+                ),
+                (EffectiveTheme::Light, true) => (
+                    Rgb::WHITE,
+                    Rgb::WHITE,
+                    Rgb::WHITE,
+                    Rgb::BLACK,
+                    Rgb::new(45, 45, 45),
+                    Rgb::BLACK,
+                ),
+                (EffectiveTheme::Dark, true) => (
+                    Rgb::BLACK,
+                    Rgb::BLACK,
+                    Rgb::new(16, 16, 16),
+                    Rgb::WHITE,
+                    Rgb::new(220, 220, 220),
+                    Rgb::WHITE,
+                ),
+            };
 
         // Accents are used for text and focus strokes across differently toned
         // surfaces. A white or yellow swatch on light mode cannot also be its
         // readable focus token; shade it while preserving the chosen hue.
         // 4.5:1 also exceeds the 3:1 non-text focus contrast requirement.
         let threshold = if high_contrast { 7.0 } else { 4.5 };
-        let target = match theme { EffectiveTheme::Light => Rgb::BLACK, EffectiveTheme::Dark => Rgb::WHITE };
-        let accent = (0..=100).map(|step| accent.mix(target, step as f32 / 100.0))
-            .find(|candidate| [background, surface, surface_raised].iter()
-                .all(|surface| candidate.contrast_against(*surface) >= threshold))
+        let target = match theme {
+            EffectiveTheme::Light => Rgb::BLACK,
+            EffectiveTheme::Dark => Rgb::WHITE,
+        };
+        let accent = (0..=100)
+            .map(|step| accent.mix(target, step as f32 / 100.0))
+            .find(|candidate| {
+                [background, surface, surface_raised]
+                    .iter()
+                    .all(|surface| candidate.contrast_against(*surface) >= threshold)
+            })
             .unwrap_or(target);
 
         let (accent_hover, accent_pressed, accent_subtle) = match theme {
@@ -238,8 +233,8 @@ impl Palette {
 #[cfg(test)]
 mod tests {
     use super::{
-        AccentPreference, AppearanceState, EffectiveTheme, Rgb, SystemAppearance, ThemePreference,
-        DEFAULT_ACCENT, Palette,
+        AccentPreference, AppearanceState, DEFAULT_ACCENT, EffectiveTheme, Palette, Rgb,
+        SystemAppearance, ThemePreference,
     };
 
     #[test]
@@ -249,9 +244,14 @@ mod tests {
                 for (_, swatch) in super::ACCENT_PRESETS {
                     let palette = super::Palette::new(theme, swatch, high_contrast);
                     let min_ratio = if high_contrast { 7.0 } else { 4.5 };
-                    for background in [palette.background, palette.surface, palette.surface_raised] {
-                        assert!(palette.accent.contrast_against(background) >= min_ratio,
-                            "accent {:?} on {:?}: insufficient contrast", swatch, background);
+                    for background in [palette.background, palette.surface, palette.surface_raised]
+                    {
+                        assert!(
+                            palette.accent.contrast_against(background) >= min_ratio,
+                            "accent {:?} on {:?}: insufficient contrast",
+                            swatch,
+                            background
+                        );
                     }
                     assert!(palette.accent_foreground.contrast_against(palette.accent) >= 4.5);
                 }
@@ -277,7 +277,10 @@ mod tests {
     fn system_defaults_are_deterministic_without_a_portal_preference() {
         let resolved = AppearanceState::default().resolve();
         assert_eq!(resolved.theme, EffectiveTheme::Light);
-        assert_eq!(resolved.palette.accent, Palette::new(EffectiveTheme::Light, DEFAULT_ACCENT, false).accent);
+        assert_eq!(
+            resolved.palette.accent,
+            Palette::new(EffectiveTheme::Light, DEFAULT_ACCENT, false).accent
+        );
     }
 
     #[test]
@@ -320,6 +323,13 @@ mod tests {
         state.preferences.accent = AccentPreference::Custom(custom);
 
         assert_eq!(state.preferences.accent, AccentPreference::Custom(custom));
-        assert!(state.resolve().palette.accent.contrast_against(state.resolve().palette.background) >= 4.5);
+        assert!(
+            state
+                .resolve()
+                .palette
+                .accent
+                .contrast_against(state.resolve().palette.background)
+                >= 4.5
+        );
     }
 }

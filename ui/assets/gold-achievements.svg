@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80" fill="none">
+  <title>Achievements</title>
+  <desc>A rounded gold trophy with white interior, white outer outline, and a soft shadow.</desc>
+  <defs><filter id="shadow" x="-40%" y="-30%" width="180%" height="180%" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="2.3"/></filter></defs>
+  <g fill="black" stroke="black" stroke-width="10" stroke-linejoin="round" stroke-linecap="round" opacity=".16" filter="url(#shadow)" transform="translate(0 4)">
+    <path d="M25 24H16V29Q16 41 30 41 M55 24H64V29Q64 41 50 41"/>
+    <path d="M40 46V58 M29 62H51"/>
+    <path d="M25 18H55V30C55 40 49 47 40 47C31 47 25 40 25 30Z"/>
+    <path d="M32 57H48L51 63H29Z"/>
+  </g>
+  <g fill="white" stroke="white" stroke-width="12" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M25 24H16V29Q16 41 30 41 M55 24H64V29Q64 41 50 41"/>
+    <path d="M40 46V58"/>
+    <path d="M25 18H55V30C55 40 49 47 40 47C31 47 25 40 25 30Z"/>
+    <path d="M32 57H48L51 63H29Z"/>
+  </g>
+  <g stroke="#e8ad26" stroke-width="5.5" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M25 24H16V29Q16 41 30 41 M55 24H64V29Q64 41 50 41"/>
+    <path d="M40 46V58"/>
+    <path d="M25 18H55V30C55 40 49 47 40 47C31 47 25 40 25 30Z" fill="white"/>
+    <path d="M32 57H48L51 63H29Z" fill="#e8ad26"/>
+  </g>
+  <path d="M40 25L42 29.1L46.5 29.8L43.25 33L44 37.5L40 35.4L36 37.5L36.75 33L33.5 29.8L38 29.1Z" fill="#e8ad26" stroke="#e8ad26" stroke-width="1" stroke-linejoin="round"/>
+</svg>

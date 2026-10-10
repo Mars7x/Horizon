@@ -23,7 +23,9 @@ mod tests {
 
     #[test]
     fn held_repeat_stops_at_both_boundaries() {
-        for item in 0..9 { assert_eq!(step(item, 0, 9, 1, true), item + 1); }
+        for item in 0..9 {
+            assert_eq!(step(item, 0, 9, 1, true), item + 1);
+        }
         assert_eq!(step(9, 0, 9, 1, true), 9);
         assert_eq!(step(0, 0, 9, -1, true), 0);
     }

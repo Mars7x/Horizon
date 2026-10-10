@@ -1,5 +1,8 @@
 # Phase 2 home UI
 
+> **Current-state guide:** Home’s original focus geometry, selected-card scale, and marquee are protected reference behavior. Older phase sections below include intentionally rejected/reverted title masks and focus experiments; inspect the present `ui/pages/home.slint` and its components before copying any implementation. See [PROJECT_STATE.md](PROJECT_STATE.md).
+
+
 Phase 2 replaces the Phase 1 appearance verification screen with the first real Horizon home shell.
 
 ## Goals
@@ -545,15 +548,6 @@ followed by the first SDL-connected gamepad that actually reports power.
 The battery icon disappears when neither has valid information, without leaving
 an empty battery-shaped slot. Charging adds a bolt. Neither source is inferred
 from window focus or program launch; all readings may be hardware estimates.
-
-### Peripheral presence motion (Phase 9.5.44.73)
-
-Top-right battery and bottom-left controller symbol use the same restrained
-status-motion family: 7px or less directional slide with alpha fade, 220ms on
-appearance and 155ms on disappearance. Indicator elements are persistent, not
-conditionally removed at the end of a connection; this preserves animated exit.
-They remain independent of the GameCard focus-bracket design. With Reduced
-Motion both the opacity and position change immediately.
 
 ### Peripheral presence motion (Phase 9.5.44.73)
 

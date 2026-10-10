@@ -24,14 +24,26 @@ impl SourcePlaytimeSync {
         library_games: &[LibraryGame],
         activity: &ActivityService<R>,
     ) -> Result<bool, R::Error> {
-        let index: BTreeMap<_, _> = library_games.iter()
-            .flat_map(|game| game.sources().iter().map(move |reference| {
-                ((reference.source_id().clone(), reference.external_id().clone()), game.game().id())
-            }))
+        let index: BTreeMap<_, _> = library_games
+            .iter()
+            .flat_map(|game| {
+                game.sources().iter().map(move |reference| {
+                    (
+                        (
+                            reference.source_id().clone(),
+                            reference.external_id().clone(),
+                        ),
+                        game.game().id(),
+                    )
+                })
+            })
             .collect();
         let mut changed = false;
         for source in registry.iter() {
-            if !source.descriptor().supports(SourceCapability::LifetimePlaytime) {
+            if !source
+                .descriptor()
+                .supports(SourceCapability::LifetimePlaytime)
+            {
                 continue;
             }
             let source_id = source.descriptor().id();
@@ -51,7 +63,10 @@ impl SourcePlaytimeSync {
                     continue;
                 }
                 let report = SourceLifetimePlaytime::new(
-                    *game_id, source_id.clone(), duration, Utc::now().timestamp(),
+                    *game_id,
+                    source_id.clone(),
+                    duration,
+                    Utc::now().timestamp(),
                 );
                 activity.record_source_lifetime_playtime(&report)?;
                 self.last_written.borrow_mut().insert(key, duration);
@@ -64,14 +79,23 @@ impl SourcePlaytimeSync {
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::RefCell, rc::Rc, sync::{Arc, atomic::{AtomicI64, Ordering}}};
+    use std::{
+        cell::RefCell,
+        rc::Rc,
+        sync::{
+            Arc,
+            atomic::{AtomicI64, Ordering},
+        },
+    };
 
     use super::*;
     use crate::{
         domain::{ExternalGameId, Game, GameTitle, SourceGameRef},
         persistence::SqliteLibraryRepository,
         services::library::{DiscoveredGame, LibraryRepository},
-        sources::{GameSource, SourceDescriptor, SourceDiscovery, SourceError, SourceUnavailableReason},
+        sources::{
+            GameSource, SourceDescriptor, SourceDiscovery, SourceError, SourceUnavailableReason,
+        },
     };
 
     struct TestSource {
@@ -80,17 +104,27 @@ mod tests {
     }
 
     impl GameSource for TestSource {
-        fn descriptor(&self) -> &SourceDescriptor { &self.descriptor }
-        fn discover(&self) -> Result<SourceDiscovery, SourceError> {
-            Ok(SourceDiscovery::Unavailable(SourceUnavailableReason::NotInstalled))
+        fn descriptor(&self) -> &SourceDescriptor {
+            &self.descriptor
         }
-        fn lifetime_playtime_snapshot(&self) -> Result<Vec<(ExternalGameId, PlaytimeSeconds)>, SourceError> {
+        fn discover(&self) -> Result<SourceDiscovery, SourceError> {
+            Ok(SourceDiscovery::Unavailable(
+                SourceUnavailableReason::NotInstalled,
+            ))
+        }
+        fn lifetime_playtime_snapshot(
+            &self,
+        ) -> Result<Vec<(ExternalGameId, PlaytimeSeconds)>, SourceError> {
             let minutes = self.minutes.load(Ordering::Relaxed);
             Ok(vec![
-                (ExternalGameId::new("legendary:Known").expect("external"),
-                    PlaytimeSeconds::new(minutes * 60).expect("time")),
-                (ExternalGameId::new("legendary:Unknown").expect("external"),
-                    PlaytimeSeconds::new(500 * 60).expect("time")),
+                (
+                    ExternalGameId::new("legendary:Known").expect("external"),
+                    PlaytimeSeconds::new(minutes * 60).expect("time"),
+                ),
+                (
+                    ExternalGameId::new("legendary:Unknown").expect("external"),
+                    PlaytimeSeconds::new(500 * 60).expect("time"),
+                ),
             ])
         }
     }
@@ -102,33 +136,53 @@ mod tests {
         let repository = Rc::new(RefCell::new(
             SqliteLibraryRepository::open(":memory:").expect("repository"),
         ));
-        let game_id = repository.borrow_mut().upsert_discovered_game(&DiscoveredGame::new(
-            source_id.clone(), external_id.clone(), GameTitle::new("Known Game").expect("title"),
-        )).expect("game id");
+        let game_id = repository
+            .borrow_mut()
+            .upsert_discovered_game(&DiscoveredGame::new(
+                source_id.clone(),
+                external_id.clone(),
+                GameTitle::new("Known Game").expect("title"),
+            ))
+            .expect("game id");
         let games = vec![LibraryGame::new(
             Game::new(game_id, GameTitle::new("Known Game").expect("title")),
             vec![SourceGameRef::new(source_id.clone(), external_id)],
         )];
         let minutes = Arc::new(AtomicI64::new(40));
         let mut registry = SourceRegistry::new();
-        registry.register(TestSource {
-            descriptor: SourceDescriptor::new(
-                source_id, "Heroic", vec![SourceCapability::LifetimePlaytime],
-            ).expect("descriptor"),
-            minutes: Arc::clone(&minutes),
-        }).expect("register");
+        registry
+            .register(TestSource {
+                descriptor: SourceDescriptor::new(
+                    source_id,
+                    "Heroic",
+                    vec![SourceCapability::LifetimePlaytime],
+                )
+                .expect("descriptor"),
+                minutes: Arc::clone(&minutes),
+            })
+            .expect("register");
         let activity = ActivityService::new(Rc::clone(&repository));
         let sync = SourcePlaytimeSync::default();
 
-        assert!(sync.refresh(&registry, &games, &activity).expect("first sync"));
-        assert!(!sync.refresh(&registry, &games, &activity).expect("unchanged sync"));
+        assert!(
+            sync.refresh(&registry, &games, &activity)
+                .expect("first sync")
+        );
+        assert!(
+            !sync
+                .refresh(&registry, &games, &activity)
+                .expect("unchanged sync")
+        );
         let overview = activity.overview(6, 4).expect("overview");
         assert_eq!(overview.reported_playtime().get(), 40 * 60);
         assert_eq!(overview.reported_games().len(), 1);
         assert_eq!(overview.observed_playtime().get(), 0);
 
         minutes.store(70, Ordering::Relaxed);
-        assert!(sync.refresh(&registry, &games, &activity).expect("changed sync"));
+        assert!(
+            sync.refresh(&registry, &games, &activity)
+                .expect("changed sync")
+        );
         let overview = activity.overview(6, 4).expect("overview");
         assert_eq!(overview.reported_playtime().get(), 70 * 60);
         assert_eq!(overview.reported_games().len(), 1);

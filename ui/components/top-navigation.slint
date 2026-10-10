@@ -1,7 +1,7 @@
 import { Theme, Metrics, Motion } from "../theme/theme.slint";
 import { SelectionFocusSurface } from "selection-focus-surface.slint";
 import { NetworkStatusGlyph } from "network-status-glyph.slint";
-import { FriendsIcon, AlbumIcon, ActivityIcon, WebIcon, SettingsIcon, ShopIcon } from "utility-icons.slint";
+import { FriendsIcon, AlbumIcon, ActivityIcon, AchievementsIcon, WebIcon, SettingsIcon, ShopIcon } from "utility-icons.slint";
 
 component Separator inherits Rectangle {
     width: 1px;
@@ -291,7 +291,7 @@ export component TopNavigation inherits Rectangle {
         UtilityFocusSurface {
             width: 40px; height: 40px;
             focused: root.utility-focus-visible && root.focused-utility-index == 3;
-            WebIcon {
+            AchievementsIcon {
                 render-scale: root.icon-render-scale;
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2 + parent.focus-lift;
@@ -304,7 +304,7 @@ export component TopNavigation inherits Rectangle {
         UtilityFocusSurface {
             width: 40px; height: 40px;
             focused: root.utility-focus-visible && root.focused-utility-index == 4;
-            SettingsIcon {
+            WebIcon {
                 render-scale: root.icon-render-scale;
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2 + parent.focus-lift;
@@ -317,7 +317,7 @@ export component TopNavigation inherits Rectangle {
         UtilityFocusSurface {
             width: 40px; height: 40px;
             focused: root.utility-focus-visible && root.focused-utility-index == 5;
-            ShopIcon {
+            SettingsIcon {
                 render-scale: root.icon-render-scale;
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2 + parent.focus-lift;
@@ -326,6 +326,19 @@ export component TopNavigation inherits Rectangle {
                 animate y { duration: Motion.focus-duration; easing: ease-in-out; }
             }
             TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(5); } }
+        }
+        UtilityFocusSurface {
+            width: 40px; height: 40px;
+            focused: root.utility-focus-visible && root.focused-utility-index == 6;
+            ShopIcon {
+                render-scale: root.icon-render-scale;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2 + parent.focus-lift;
+                width: Metrics.utility-cell-size;
+                height: Metrics.utility-cell-size;
+                animate y { duration: Motion.focus-duration; easing: ease-in-out; }
+            }
+            TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(6); } }
         }
     }
 

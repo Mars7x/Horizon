@@ -1,11 +1,19 @@
 use std::{
-    cell::{Cell, RefCell}, collections::{BTreeMap, HashSet}, rc::Rc, sync::{Arc, atomic::{AtomicU64, Ordering}, mpsc::{self, Receiver, Sender}},
-    path::PathBuf, time::Duration,
+    cell::{Cell, RefCell},
+    collections::{BTreeMap, HashSet},
+    path::PathBuf,
+    rc::Rc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+        mpsc::{self, Receiver, Sender},
+    },
+    time::Duration,
 };
 
 use slint::{
     Color, ComponentHandle, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString,
-    VecModel, Timer,
+    Timer, VecModel,
 };
 use tracing::{debug, warn};
 
@@ -14,15 +22,16 @@ use crate::{
     domain::{GameId, LibraryGame},
     input::{UiAction, UiActionEvent},
     navigation::step_with_edge_wrap,
+    presentation::CallbackSlot,
     services::{
         activity::LaunchActivitySink,
         artwork::{ArtworkService, SquareArtwork},
         launch::{GameLaunchMode, GameLaunchService},
+        runtime::{RuntimeObservationEvent, RuntimeObservationId},
+        session::ManagedSessionId,
         settings::ArtworkPreferences,
         steamgriddb::SteamGridDbLookup,
         steamgriddb_artwork::{self, ArtworkLookupJob, ArtworkWorkerEvent},
-        runtime::{RuntimeObservationEvent, RuntimeObservationId},
-        session::ManagedSessionId,
     },
 };
 
@@ -54,9 +63,8 @@ impl HomeState {
         }
 
         let max_index = game_count.saturating_sub(1) as i32;
-        self.selected_index = step_with_edge_wrap(
-            self.selected_index, 0, max_index, delta, !allow_wrap,
-        );
+        self.selected_index =
+            step_with_edge_wrap(self.selected_index, 0, max_index, delta, !allow_wrap);
 
         self.selected_index
     }
@@ -112,10 +120,10 @@ impl PlayingState {
                 self.running_runtime.insert(*observation_id, index);
                 Some(index)
             }
-            RuntimeObservationEvent::Terminal { observation_id, .. } => {
-                self.pending_runtime.remove(observation_id)
-                    .or_else(|| self.running_runtime.remove(observation_id))
-            }
+            RuntimeObservationEvent::Terminal { observation_id, .. } => self
+                .pending_runtime
+                .remove(observation_id)
+                .or_else(|| self.running_runtime.remove(observation_id)),
         }
     }
 
@@ -128,7 +136,9 @@ impl PlayingState {
     }
 
     fn is_playing(&self, index: i32) -> bool {
-        self.running_runtime.values().any(|running| *running == index)
+        self.running_runtime
+            .values()
+            .any(|running| *running == index)
             || self.managed.values().any(|running| *running == index)
     }
 }
@@ -158,7 +168,7 @@ pub struct HomeController {
     // Invalidates an old press-release callback on failure, navigation or a
     // subsequent launch; the visual press is independent of session lifetime.
     press_generation: Rc<Cell<u64>>,
-    card_changed: RefCell<Option<Rc<dyn Fn(usize, GameCardData)>>>,
+    card_changed: CallbackSlot<dyn Fn(usize, GameCardData)>,
 }
 
 impl HomeController {
@@ -176,19 +186,24 @@ impl HomeController {
             .map(|game| game_card(game, artwork_service))
             .collect::<Vec<_>>();
         let titles = card_data.iter().map(|game| game.title.clone()).collect();
-        let artwork_lookup_jobs = library_games.iter().enumerate().map(|(index, game)| {
-            ArtworkLookupJob {
+        let artwork_lookup_jobs = library_games
+            .iter()
+            .enumerate()
+            .map(|(index, game)| ArtworkLookupJob {
                 index,
                 identity: steamgriddb_artwork::cache_identity(game),
                 lookup: SteamGridDbLookup::for_game(game, registry),
-            }
-        }).collect();
+            })
+            .collect();
         let (artwork_sender, artwork_receiver) = mpsc::channel();
         let card_data_for_fallback = card_data.clone();
         let cards = Rc::new(VecModel::from(card_data));
         let home_order = ordered_home_indices(&library_games, recent_game_ids);
         let home_cards = Rc::new(VecModel::from(
-            home_order.iter().filter_map(|index| cards.row_data(*index)).collect::<Vec<_>>(),
+            home_order
+                .iter()
+                .filter_map(|index| cards.row_data(*index))
+                .collect::<Vec<_>>(),
         ));
         ui.set_games(ModelRc::from(Rc::clone(&home_cards)));
 
@@ -247,13 +262,28 @@ impl HomeController {
                 self.publish_card(index, card.clone());
             }
         }
-        let Some(api_key) = preferences.api_key else { return; };
-        let jobs = self.artwork_lookup_jobs.iter().filter(|job| {
-            needs_external_artwork(preferences.prefer_steamgriddb, self.source_cards[job.index].has_artwork)
-        }).cloned().collect();
+        let Some(api_key) = preferences.api_key else {
+            return;
+        };
+        let jobs = self
+            .artwork_lookup_jobs
+            .iter()
+            .filter(|job| {
+                needs_external_artwork(
+                    preferences.prefer_steamgriddb,
+                    self.source_cards[job.index].has_artwork,
+                )
+            })
+            .cloned()
+            .collect();
         steamgriddb_artwork::start_artwork_worker(
-            generation, Arc::clone(&self.artwork_generation), self.artwork_sender.clone(),
-            api_key, self.artwork_cache_root.clone(), jobs, force_refresh,
+            generation,
+            Arc::clone(&self.artwork_generation),
+            self.artwork_sender.clone(),
+            api_key,
+            self.artwork_cache_root.clone(),
+            jobs,
+            force_refresh,
         );
     }
 
@@ -261,26 +291,44 @@ impl HomeController {
     /// VecModel updates belong. The original source card is always available.
     pub fn collect_steamgriddb_results(&self, ui: &AppWindow) {
         for _ in 0..32 {
-            let Ok(event) = self.artwork_receiver.borrow().try_recv() else { break; };
+            let Ok(event) = self.artwork_receiver.borrow().try_recv() else {
+                break;
+            };
             match event {
                 ArtworkWorkerEvent::Artwork(result) => {
-                    if result.generation != self.artwork_generation.load(Ordering::Acquire) { continue; }
-                    let Some(fallback) = self.source_cards.get(result.index) else { continue; };
+                    if result.generation != self.artwork_generation.load(Ordering::Acquire) {
+                        continue;
+                    }
+                    let Some(fallback) = self.source_cards.get(result.index) else {
+                        continue;
+                    };
                     let mut card = fallback.clone();
                     card.pixelated_artwork = result.artwork.pixelated();
                     card.artwork = square_artwork_to_slint(result.artwork);
                     card.has_artwork = true;
                     self.publish_card(result.index, card);
                 }
-                ArtworkWorkerEvent::RefreshProgress { generation, completed, total,
-                    finished, error } => {
-                    if generation != self.artwork_generation.load(Ordering::Acquire) { continue; }
+                ArtworkWorkerEvent::RefreshProgress {
+                    generation,
+                    completed,
+                    total,
+                    finished,
+                    error,
+                } => {
+                    if generation != self.artwork_generation.load(Ordering::Acquire) {
+                        continue;
+                    }
                     ui.set_settings_refresh_completed(completed.min(i32::MAX as usize) as i32);
                     ui.set_settings_refresh_total(total.min(i32::MAX as usize) as i32);
                     ui.set_settings_refresh_error(error.unwrap_or_default().into());
-                    if finished { ui.set_settings_refresh_running(false); }
+                    if finished {
+                        ui.set_settings_refresh_running(false);
+                    }
                 }
-                ArtworkWorkerEvent::Status { generation, message } => {
+                ArtworkWorkerEvent::Status {
+                    generation,
+                    message,
+                } => {
                     if generation == self.artwork_generation.load(Ordering::Acquire) {
                         ui.set_settings_artwork_status(message.into());
                     }
@@ -291,19 +339,36 @@ impl HomeController {
 
     pub fn refresh_recent_games(&self, ui: &AppWindow, ids: &[GameId]) {
         let order = ordered_home_indices(&self.library_games, ids);
-        if *self.home_order.borrow() == order { return; }
+        if *self.home_order.borrow() == order {
+            return;
+        }
         let previous = self.state.borrow().selected_index as usize;
         let previous_catalog_index = self.home_order.borrow().get(previous).copied();
         let next_selection = previous_catalog_index
             .and_then(|index| order.iter().position(|item| *item == index))
-            .unwrap_or_else(|| if previous == self.home_order.borrow().len() { order.len() } else { 0 });
-        self.home_cards.set_vec(order.iter().filter_map(|index| self.cards.row_data(*index)).collect::<Vec<_>>());
+            .unwrap_or_else(|| {
+                if previous == self.home_order.borrow().len() {
+                    order.len()
+                } else {
+                    0
+                }
+            });
+        self.home_cards.set_vec(
+            order
+                .iter()
+                .filter_map(|index| self.cards.row_data(*index))
+                .collect::<Vec<_>>(),
+        );
         *self.home_order.borrow_mut() = order;
-        self.state.borrow_mut().select(next_selection as i32, self.home_item_count());
+        self.state
+            .borrow_mut()
+            .select(next_selection as i32, self.home_item_count());
         self.publish_selection(ui, self.state.borrow().selected_index);
     }
 
-    fn home_item_count(&self) -> usize { self.home_order.borrow().len() + 1 }
+    fn home_item_count(&self) -> usize {
+        self.home_order.borrow().len() + 1
+    }
 
     pub fn library_tile_selected(&self) -> bool {
         self.state.borrow().selected_index as usize == self.home_order.borrow().len()
@@ -399,27 +464,46 @@ impl HomeController {
     fn publish_card(&self, index: usize, mut card: GameCardData) {
         card.is_playing = self.playing.borrow().is_playing(index as i32);
         self.cards.set_row_data(index, card.clone());
-        if let Some(home_index) = self.home_order.borrow().iter().position(|item| *item == index) {
+        if let Some(home_index) = self
+            .home_order
+            .borrow()
+            .iter()
+            .position(|item| *item == index)
+        {
             self.home_cards.set_row_data(home_index, card.clone());
         }
-        if let Some(listener) = self.card_changed.borrow().as_ref() { listener(index, card); }
+        if let Some(listener) = self.card_changed.borrow().as_ref() {
+            listener(index, card);
+        }
     }
 
     fn refresh_playing_card(&self, index: i32) {
-        let Ok(index) = usize::try_from(index) else { return; };
+        let Ok(index) = usize::try_from(index) else {
+            return;
+        };
         if let Some(mut card) = self.cards.row_data(index) {
             card.is_playing = self.playing.borrow().is_playing(index as i32);
             self.cards.set_row_data(index, card.clone());
-        if let Some(home_index) = self.home_order.borrow().iter().position(|item| *item == index) {
-            self.home_cards.set_row_data(home_index, card.clone());
-        }
-            if let Some(listener) = self.card_changed.borrow().as_ref() { listener(index, card); }
+            if let Some(home_index) = self
+                .home_order
+                .borrow()
+                .iter()
+                .position(|item| *item == index)
+            {
+                self.home_cards.set_row_data(home_index, card.clone());
+            }
+            if let Some(listener) = self.card_changed.borrow().as_ref() {
+                listener(index, card);
+            }
         }
     }
 
     pub fn handle_action(&self, ui: &AppWindow, event: UiActionEvent) {
         if self.launch_feedback.borrow().handoff_pending()
-            && matches!(event.action, UiAction::Left | UiAction::Right | UiAction::Accept)
+            && matches!(
+                event.action,
+                UiAction::Left | UiAction::Right | UiAction::Accept
+            )
         {
             debug!(
                 action = ?event.action,
@@ -432,7 +516,7 @@ impl HomeController {
             UiAction::Left => self.move_selection(ui, -1, !event.repeated),
             UiAction::Right => self.move_selection(ui, 1, !event.repeated),
             UiAction::Accept if !event.repeated => self.launch_selected(ui),
-            UiAction::Accept => {},
+            UiAction::Accept => {}
             UiAction::Up
             | UiAction::Down
             | UiAction::Back
@@ -453,7 +537,9 @@ impl HomeController {
     }
 
     fn launch_index(&self, ui: &AppWindow, index: i32) {
-        if self.launch_feedback.borrow().handoff_pending() { return; }
+        if self.launch_feedback.borrow().handoff_pending() {
+            return;
+        }
         let Some(game) = usize::try_from(index)
             .ok()
             .and_then(|index| self.library_games.get(index))
@@ -462,9 +548,19 @@ impl HomeController {
             return;
         };
 
-        let visual_index = self.home_order.borrow().iter().position(|item| *item == index as usize)
-            .map(|position| position as i32).unwrap_or(-1);
-        self.set_launch_feedback(ui, LaunchFeedbackState::Launching { index: visual_index });
+        let visual_index = self
+            .home_order
+            .borrow()
+            .iter()
+            .position(|item| *item == index as usize)
+            .map(|position| position as i32)
+            .unwrap_or(-1);
+        self.set_launch_feedback(
+            ui,
+            LaunchFeedbackState::Launching {
+                index: visual_index,
+            },
+        );
 
         match self.launch_service.launch_game(game) {
             Ok(receipt) => {
@@ -516,9 +612,7 @@ impl HomeController {
                 };
                 // Handoff/press feedback stays transient; source-confirmed
                 // runtime and managed lifecycles drive per-card Playing.
-                self.set_launch_feedback(ui, LaunchFeedbackState::Dispatched {
-                    managed_session,
-                });
+                self.set_launch_feedback(ui, LaunchFeedbackState::Dispatched { managed_session });
                 self.schedule_press_release(ui);
             }
             Err(error) => {
@@ -537,14 +631,16 @@ impl HomeController {
         *self.launch_feedback.borrow_mut() = state;
         match state {
             LaunchFeedbackState::Launching { index } => {
-                self.press_generation.set(self.press_generation.get().wrapping_add(1));
+                self.press_generation
+                    .set(self.press_generation.get().wrapping_add(1));
                 ui.set_launching_game_index(index);
             }
             LaunchFeedbackState::Dispatched { .. } => {
                 // Keep the short press held until the release timer fires.
             }
             LaunchFeedbackState::Idle | LaunchFeedbackState::Failed => {
-                self.press_generation.set(self.press_generation.get().wrapping_add(1));
+                self.press_generation
+                    .set(self.press_generation.get().wrapping_add(1));
                 ui.set_launching_game_index(-1);
             }
         }
@@ -558,7 +654,9 @@ impl HomeController {
         // Give the press-in frame time to render before releasing it. The card
         // springs back without modifying a game's lifecycle-backed pill.
         Timer::single_shot(Duration::from_millis(125), move || {
-            if press_generation.get() != current { return; }
+            if press_generation.get() != current {
+                return;
+            }
             if let Some(ui) = ui_weak.upgrade() {
                 ui.set_launching_game_index(-1);
             }
@@ -577,10 +675,10 @@ impl HomeController {
 
     fn move_selection(&self, ui: &AppWindow, delta: i32, allow_wrap: bool) {
         self.clear_launch_feedback(ui);
-        let selected_index = self
-            .state
-            .borrow_mut()
-            .move_by(delta, self.home_item_count(), allow_wrap);
+        let selected_index =
+            self.state
+                .borrow_mut()
+                .move_by(delta, self.home_item_count(), allow_wrap);
         self.publish_selection(ui, selected_index);
     }
 
@@ -607,10 +705,11 @@ impl HomeController {
             .unwrap_or_default();
         ui.set_selected_title(if self.library_tile_selected() {
             "Library".into()
-        } else { title });
+        } else {
+            title
+        });
     }
 }
-
 
 const HOME_RECENT_LIMIT: usize = 15;
 
@@ -637,13 +736,16 @@ fn ordered_home_indices(catalog: &[LibraryGame], ids: &[GameId]) -> Vec<usize> {
 
     // Never label an unplayed game as recently played. It occupies only an
     // otherwise empty Home slot, in case-insensitive A–Z order.
-    let mut fallback: Vec<usize> = catalog.iter().enumerate()
+    let mut fallback: Vec<usize> = catalog
+        .iter()
+        .enumerate()
         .filter_map(|(index, game)| (!seen.contains(&game.game().id())).then_some(index))
         .collect();
     fallback.sort_by(|&left, &right| {
         let lhs = catalog[left].game().title().as_str();
         let rhs = catalog[right].game().title().as_str();
-        lhs.to_lowercase().cmp(&rhs.to_lowercase())
+        lhs.to_lowercase()
+            .cmp(&rhs.to_lowercase())
             .then_with(|| lhs.cmp(rhs))
             .then_with(|| catalog[left].game().id().cmp(&catalog[right].game().id()))
     });
@@ -712,16 +814,17 @@ fn monogram(title: &str) -> String {
         .collect::<String>()
 }
 
-fn fallback_palette(game_id: i64, title: &str) -> ((u8, u8, u8), (u8, u8, u8), (u8, u8, u8)) {
+type Rgb8 = (u8, u8, u8);
+
+fn fallback_palette(game_id: i64, title: &str) -> (Rgb8, Rgb8, Rgb8) {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64 ^ game_id as u64;
     for byte in title.bytes() {
         hash ^= u64::from(byte);
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
 
-    let channel = |shift: u32, base: u8, span: u8| {
-        base.saturating_add(((hash >> shift) as u8) % span)
-    };
+    let channel =
+        |shift: u32, base: u8, span: u8| base.saturating_add(((hash >> shift) as u8) % span);
     let primary = (
         channel(0, 32, 112),
         channel(8, 42, 112),
@@ -746,17 +849,29 @@ fn rgb((red, green, blue): (u8, u8, u8)) -> Color {
 
 #[cfg(test)]
 mod tests {
-    use super::{HomeState, LaunchFeedbackState, PlayingState, monogram, needs_external_artwork, ordered_home_indices, HOME_RECENT_LIMIT};
-    use crate::services::runtime::{RuntimeObservationEvent, RuntimeObservationId, RuntimeObservationTerminalState};
+    use super::{
+        HOME_RECENT_LIMIT, HomeState, LaunchFeedbackState, PlayingState, monogram,
+        needs_external_artwork, ordered_home_indices,
+    };
     use crate::domain::{Game, GameId, GameTitle, LibraryGame};
+    use crate::services::runtime::{
+        RuntimeObservationEvent, RuntimeObservationId, RuntimeObservationTerminalState,
+    };
 
     fn catalogue(titles: &[&str]) -> Vec<LibraryGame> {
-        titles.iter().enumerate().map(|(index, title)| {
-            LibraryGame::new(
-                Game::new(GameId::new(index as i64 + 1).unwrap(), GameTitle::new(*title).unwrap()),
-                vec![],
-            )
-        }).collect()
+        titles
+            .iter()
+            .enumerate()
+            .map(|(index, title)| {
+                LibraryGame::new(
+                    Game::new(
+                        GameId::new(index as i64 + 1).unwrap(),
+                        GameTitle::new(*title).unwrap(),
+                    ),
+                    vec![],
+                )
+            })
+            .collect()
     }
     use crate::services::session::ManagedSessionId;
 
@@ -767,7 +882,6 @@ mod tests {
         assert!(needs_external_artwork(true, true));
         assert!(needs_external_artwork(true, false));
     }
-
 
     #[test]
     fn imported_titles_get_stable_short_monograms() {
@@ -782,7 +896,9 @@ mod tests {
         assert!(launching.handoff_pending());
         assert_eq!(launching.status_text(), "");
 
-        let dispatched = LaunchFeedbackState::Dispatched { managed_session: None };
+        let dispatched = LaunchFeedbackState::Dispatched {
+            managed_session: None,
+        };
         assert!(dispatched.handoff_pending());
         assert_eq!(dispatched.status_text(), "");
 
@@ -796,15 +912,25 @@ mod tests {
         let id = RuntimeObservationId::new(7).unwrap();
         state.arm_runtime(id, 3);
         assert!(!state.is_playing(3));
-        assert_eq!(state.runtime_event(&RuntimeObservationEvent::Started {
-            observation_id: id, started_at: 12,
-        }), Some(3));
+        assert_eq!(
+            state.runtime_event(&RuntimeObservationEvent::Started {
+                observation_id: id,
+                started_at: 12,
+            }),
+            Some(3)
+        );
         assert!(state.is_playing(3));
         assert!(!state.is_playing(2));
-        assert_eq!(state.runtime_event(&RuntimeObservationEvent::Terminal {
-            observation_id: id,
-            terminal: RuntimeObservationTerminalState::Exited { started_at: 12, ended_at: 30 },
-        }), Some(3));
+        assert_eq!(
+            state.runtime_event(&RuntimeObservationEvent::Terminal {
+                observation_id: id,
+                terminal: RuntimeObservationTerminalState::Exited {
+                    started_at: 12,
+                    ended_at: 30
+                },
+            }),
+            Some(3)
+        );
         assert!(!state.is_playing(3));
     }
 
@@ -814,11 +940,15 @@ mod tests {
         for value in [1, 2] {
             let id = RuntimeObservationId::new(value).unwrap();
             state.arm_runtime(id, 4);
-            state.runtime_event(&RuntimeObservationEvent::Started { observation_id: id, started_at: 1 });
+            state.runtime_event(&RuntimeObservationEvent::Started {
+                observation_id: id,
+                started_at: 1,
+            });
         }
         let first = RuntimeObservationId::new(1).unwrap();
         state.runtime_event(&RuntimeObservationEvent::Terminal {
-            observation_id: first, terminal: RuntimeObservationTerminalState::Lost,
+            observation_id: first,
+            terminal: RuntimeObservationTerminalState::Lost,
         });
         assert!(state.is_playing(4));
     }
@@ -844,7 +974,10 @@ mod tests {
         let id = RuntimeObservationId::new(11).unwrap();
         assert!(handoff.handoff_pending());
         badge.arm_runtime(id, 6);
-        badge.runtime_event(&RuntimeObservationEvent::Started { observation_id: id, started_at: 100 });
+        badge.runtime_event(&RuntimeObservationEvent::Started {
+            observation_id: id,
+            started_at: 100,
+        });
         handoff = LaunchFeedbackState::Idle; // app loses focus
         assert!(!handoff.handoff_pending());
         assert!(badge.is_playing(6));
@@ -858,12 +991,20 @@ mod tests {
     #[test]
     fn home_recent_projection_maps_to_full_catalogue_without_duplicate_entries() {
         let games = (1..=18)
-            .map(|number| LibraryGame::new(
-                Game::new(GameId::new(number).unwrap(), GameTitle::new(format!("Game {number}")).unwrap()),
-                vec![],
-            ))
+            .map(|number| {
+                LibraryGame::new(
+                    Game::new(
+                        GameId::new(number).unwrap(),
+                        GameTitle::new(format!("Game {number}")).unwrap(),
+                    ),
+                    vec![],
+                )
+            })
             .collect::<Vec<_>>();
-        let ids = (1..=18).rev().map(|number| GameId::new(number).unwrap()).collect::<Vec<_>>();
+        let ids = (1..=18)
+            .rev()
+            .map(|number| GameId::new(number).unwrap())
+            .collect::<Vec<_>>();
         let order = ordered_home_indices(&games, &ids);
         assert_eq!(order.len(), HOME_RECENT_LIMIT);
         assert_eq!(order[0], 17);
@@ -874,23 +1015,32 @@ mod tests {
     #[test]
     fn home_without_play_history_fills_fifteen_games_alphabetically() {
         let games = catalogue(&[
-            "Zelda", "alpha", "Moss", "banana", "Delta", "game 7",
-            "Game 1", "Echo", "stardew", "Lunar", "Oxygen", "Quartz",
-            "Terraria", "Portal", "Cobalt", "Yonder", "Ridge",
+            "Zelda", "alpha", "Moss", "banana", "Delta", "game 7", "Game 1", "Echo", "stardew",
+            "Lunar", "Oxygen", "Quartz", "Terraria", "Portal", "Cobalt", "Yonder", "Ridge",
         ]);
         let order = ordered_home_indices(&games, &[]);
         assert_eq!(order.len(), HOME_RECENT_LIMIT);
-        let names = order.iter().map(|&index| games[index].game().title().as_str()).collect::<Vec<_>>();
-        assert_eq!(names, vec![
-            "alpha", "banana", "Cobalt", "Delta", "Echo", "Game 1", "game 7",
-            "Lunar", "Moss", "Oxygen", "Portal", "Quartz", "Ridge", "stardew", "Terraria",
-        ]);
+        let names = order
+            .iter()
+            .map(|&index| games[index].game().title().as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            vec![
+                "alpha", "banana", "Cobalt", "Delta", "Echo", "Game 1", "game 7", "Lunar", "Moss",
+                "Oxygen", "Portal", "Quartz", "Ridge", "stardew", "Terraria",
+            ]
+        );
     }
 
     #[test]
     fn played_games_precede_alphabetical_fallback_without_duplicates() {
         let games = catalogue(&["Zelda", "Alpha", "Mario", "stardew", "Terraria"]);
-        let ids = [GameId::new(5).unwrap(), GameId::new(3).unwrap(), GameId::new(5).unwrap()];
+        let ids = [
+            GameId::new(5).unwrap(),
+            GameId::new(3).unwrap(),
+            GameId::new(5).unwrap(),
+        ];
         // Two distinct recently played games, then all three unplayed A–Z.
         assert_eq!(ordered_home_indices(&games, &ids), vec![4, 2, 1, 3, 0]);
     }
@@ -898,13 +1048,23 @@ mod tests {
     #[test]
     fn partial_history_fills_remaining_slots_without_repeating_played_games() {
         let titles = (0..20).map(|n| format!("Game {n:02}")).collect::<Vec<_>>();
-        let games = titles.iter().enumerate().map(|(index, title)| {
-            LibraryGame::new(
-                Game::new(GameId::new(index as i64 + 1).unwrap(), GameTitle::new(title.as_str()).unwrap()),
-                vec![],
-            )
-        }).collect::<Vec<_>>();
-        let played_ids = (7..=19).rev().map(|n| GameId::new(n).unwrap()).collect::<Vec<_>>();
+        let games = titles
+            .iter()
+            .enumerate()
+            .map(|(index, title)| {
+                LibraryGame::new(
+                    Game::new(
+                        GameId::new(index as i64 + 1).unwrap(),
+                        GameTitle::new(title.as_str()).unwrap(),
+                    ),
+                    vec![],
+                )
+            })
+            .collect::<Vec<_>>();
+        let played_ids = (7..=19)
+            .rev()
+            .map(|n| GameId::new(n).unwrap())
+            .collect::<Vec<_>>();
         let order = ordered_home_indices(&games, &played_ids);
         assert_eq!(order.len(), HOME_RECENT_LIMIT);
         assert_eq!(&order[..13], &(6..19).rev().collect::<Vec<_>>()[..]);
@@ -916,19 +1076,29 @@ mod tests {
         let games = catalogue(&["Zulu", "Bravo", "alpha"]);
         let absent = GameId::new(999).unwrap();
         assert_eq!(ordered_home_indices(&games, &[absent]), vec![2, 1, 0]);
-        assert_eq!(ordered_home_indices(&games, &[GameId::new(1).unwrap()]), vec![0, 2, 1]);
+        assert_eq!(
+            ordered_home_indices(&games, &[GameId::new(1).unwrap()]),
+            vec![0, 2, 1]
+        );
         assert!(ordered_home_indices(&[], &[]).is_empty());
     }
 
     #[test]
     fn a_newly_played_game_moves_to_front_and_evicts_the_last_fallback() {
         let titles = (0..18).map(|n| format!("Game {n:02}")).collect::<Vec<_>>();
-        let games = titles.iter().enumerate().map(|(index, title)| {
-            LibraryGame::new(
-                Game::new(GameId::new(index as i64 + 1).unwrap(), GameTitle::new(title.as_str()).unwrap()),
-                vec![],
-            )
-        }).collect::<Vec<_>>();
+        let games = titles
+            .iter()
+            .enumerate()
+            .map(|(index, title)| {
+                LibraryGame::new(
+                    Game::new(
+                        GameId::new(index as i64 + 1).unwrap(),
+                        GameTitle::new(title.as_str()).unwrap(),
+                    ),
+                    vec![],
+                )
+            })
+            .collect::<Vec<_>>();
         let before = ordered_home_indices(&games, &[]);
         let after = ordered_home_indices(&games, &[GameId::new(18).unwrap()]);
         assert_eq!(before, (0..15).collect::<Vec<_>>());

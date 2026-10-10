@@ -15,9 +15,8 @@ impl Rgb {
 
     pub fn mix(self, other: Self, amount: f32) -> Self {
         let amount = amount.clamp(0.0, 1.0);
-        let mix_channel = |a: u8, b: u8| {
-            ((a as f32 * (1.0 - amount)) + (b as f32 * amount)).round() as u8
-        };
+        let mix_channel =
+            |a: u8, b: u8| ((a as f32 * (1.0 - amount)) + (b as f32 * amount)).round() as u8;
 
         Self::new(
             mix_channel(self.red, other.red),
@@ -26,7 +25,9 @@ impl Rgb {
         )
     }
 
-    pub fn contrast_against(self, other: Self) -> f64 { contrast_ratio(self, other) }
+    pub fn contrast_against(self, other: Self) -> f64 {
+        contrast_ratio(self, other)
+    }
 
     pub fn best_foreground(self) -> Self {
         let white_contrast = contrast_ratio(self, Self::WHITE);
@@ -56,9 +57,7 @@ fn relative_luminance(color: Rgb) -> f64 {
         }
     }
 
-    (0.2126 * channel(color.red))
-        + (0.7152 * channel(color.green))
-        + (0.0722 * channel(color.blue))
+    (0.2126 * channel(color.red)) + (0.7152 * channel(color.green)) + (0.0722 * channel(color.blue))
 }
 
 #[cfg(test)]
