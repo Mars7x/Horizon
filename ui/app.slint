@@ -104,8 +104,9 @@ export component AppWindow inherits Window {
         : root.current-route == AppRouteView.album ? (root.album-viewing
             ? (root.album-viewer-is-video
                 ? (root.album-can-delete
-                    ? [{ button: "A", label: root.album-viewer-playing ? "Pause" : "Play" },
-                       { button: "X", label: "Delete" }, { button: "B", label: "Back" }]
+                    ? [{ button: "X", label: "Delete" },
+                       { button: "A", label: root.album-viewer-playing ? "Pause" : "Play" },
+                       { button: "B", label: "Back" }]
                     : [{ button: "A", label: root.album-viewer-playing ? "Pause" : "Play" },
                        { button: "B", label: "Back" }])
                 : (root.album-can-delete
@@ -113,12 +114,12 @@ export component AppWindow inherits Window {
                     : [{ button: "B", label: "Back" }]))
             : root.album-selecting
             ? (root.album-selected-count > 0
-                ? [{ button: "A", label: "Select" }, { button: "X", label: "Delete" },
+                ? [{ button: "X", label: "Delete" }, { button: "A", label: "Select" },
                    { button: "B", label: "Done" }]
                 : [{ button: "A", label: "Select" }, { button: "B", label: "Done" }])
             : root.album-total-count == 0 ? [{ button: "B", label: "Back" }]
             : root.album-has-deletable
-            ? [{ button: "A", label: "View" }, { button: "X", label: "Delete" },
+            ? [{ button: "X", label: "Delete" }, { button: "A", label: "View" },
                { button: "B", label: "Back" }]
             : [{ button: "A", label: "View" }, { button: "B", label: "Back" }])
         : root.current-route == AppRouteView.settings
@@ -171,7 +172,6 @@ export component AppWindow inherits Window {
     in property <string> library-filter-text: "All sources";
     in property <string> library-sort-text: "Alphabetical";
     in property <int> library-total-count: 0;
-    in property <string> library-count-text: "0 games";
     in property <int> library-collection-count: 0;
     in property <string> library-selected-title: "";
     in property <string> library-selected-source: "";
@@ -223,7 +223,6 @@ export component AppWindow inherits Window {
     in property <int> album-total-count: 0;
     in property <int> album-collection-count: 0;
     in property <string> album-status: "";
-    in property <string> album-count-text: "0 captures";
     in property <string> album-game-text: "All games";
     in property <string> album-kind-text: "All";
     in property <int> album-selected-index: 0;
@@ -475,7 +474,6 @@ export component AppWindow inherits Window {
                     has-previous-grid: root.library-has-previous-grid;
                     selected-index: root.library-selected-index;
                     total-count: root.library-total-count;
-                    count-text: root.library-count-text;
                     collection-count: root.library-collection-count;
                     browse-sequence: root.library-browse-sequence;
                     browse-transition-kind: root.library-browse-transition-kind;
@@ -540,7 +538,6 @@ export component AppWindow inherits Window {
                     total-count: root.album-total-count;
                     collection-count: root.album-collection-count;
                     status: root.album-status;
-                    count-text: root.album-count-text;
                     game-text: root.album-game-text;
                     kind-text: root.album-kind-text;
                     selected-index: root.album-selected-index;
@@ -802,6 +799,9 @@ export component AppWindow inherits Window {
                 width: parent.width;
                 height: Metrics.top-chrome-height;
                 visible: root.shell-chrome-visible;
+                // Above the page layers (z 1-2): a leaving page shrinks to
+                // 94% and must not cover the chrome unevenly while it fades.
+                z: 3;
                 opacity: root.chrome-opacity;
                 transform-scale: root.chrome-scale;
                 transform-origin: { x: self.width / 2, y: root.height / 2 - self.y };
@@ -823,6 +823,9 @@ export component AppWindow inherits Window {
                 height: Metrics.top-chrome-height;
                 icon-render-scale: root.ui-scale;
                 visible: root.shell-chrome-visible;
+                // Above the page layers (z 1-2): a leaving page shrinks to
+                // 94% and must not cover the chrome unevenly while it fades.
+                z: 3;
                 opacity: root.chrome-opacity;
                 transform-scale: root.chrome-scale;
                 transform-origin: { x: self.width / 2, y: root.height / 2 - self.y };
@@ -844,6 +847,9 @@ export component AppWindow inherits Window {
                 width: parent.width;
                 height: Metrics.footer-height;
                 visible: root.shell-chrome-visible;
+                // Above the page layers (z 1-2): a leaving page shrinks to
+                // 94% and must not cover the chrome unevenly while it fades.
+                z: 3;
                 opacity: root.chrome-opacity;
                 transform-scale: root.chrome-scale;
                 transform-origin: { x: self.width / 2, y: root.height / 2 - self.y };

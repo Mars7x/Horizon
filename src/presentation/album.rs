@@ -1195,10 +1195,16 @@ impl AlbumController {
             s.mounted_start = start;
         }
 
+        // Bottom bar, left: a notice, the selection count while selecting,
+        // otherwise when the selected capture was taken.
         let selected_text = s.notice.clone().unwrap_or_else(|| {
-            s.current()
-                .map(|capture| when_text(capture.captured_at()))
-                .unwrap_or_default()
+            if s.selecting {
+                format!("{} selected", s.checked.len())
+            } else {
+                s.current()
+                    .map(|capture| when_text(capture.captured_at()))
+                    .unwrap_or_default()
+            }
         });
         ui.set_album_selecting(s.selecting);
         ui.set_album_selected_count(s.checked.len() as i32);
@@ -1220,17 +1226,6 @@ impl AlbumController {
             }
             .into(),
         );
-        ui.set_album_count_text(
-            if s.selecting {
-                format!("{} selected", s.checked.len())
-            } else {
-                format!(
-                    "{count} {}",
-                    if count == 1 { "capture" } else { "captures" }
-                )
-            }
-            .into(),
-        );
         ui.set_album_game_text(game_text.into());
         ui.set_album_kind_text(s.kind.label().into());
         ui.set_album_scroll_row(s.scroll_top as i32);
@@ -1238,15 +1233,7 @@ impl AlbumController {
         ui.set_album_selected_text(selected_text.into());
         ui.set_album_visit_revision(s.visit_revision);
         if let Some(capture) = s.current().filter(|_| s.viewing) {
-            ui.set_album_viewer_text(
-                format!(
-                    "{}  ·  {} of {}",
-                    when_text(capture.captured_at()),
-                    s.selection + 1,
-                    count
-                )
-                .into(),
-            );
+            ui.set_album_viewer_text(when_text(capture.captured_at()).into());
             ui.set_album_viewer_is_video(capture.kind() == MediaKind::Video);
         }
         ui.set_album_slide_key(s.slide_key);

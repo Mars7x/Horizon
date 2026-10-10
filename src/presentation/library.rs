@@ -414,9 +414,6 @@ impl LibraryController {
         ui.set_library_filter_text(filter.into());
         ui.set_library_sort_text(sort.into());
         ui.set_library_total_count(count as i32);
-        ui.set_library_count_text(
-            format!("{} {}", count, if count == 1 { "game" } else { "games" }).into(),
-        );
         ui.set_library_collection_count(self.catalog.len() as i32);
     }
 
