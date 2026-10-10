@@ -162,25 +162,36 @@ export component AlbumPage inherits Rectangle {
     in property <bool> viewer-is-video: false;
     in property <bool> viewer-playing: false;
     in property <string> viewer-problem: "";
-    // Video clock. Rust anchors the position (on start, pause, seek and a
-    // regular resync); between anchors the clock runs on frame time, so the
-    // bar and time move continuously and exactly together.
+    // Video clock. Every shown frame anchors it at that frame's own place in
+    // the video (Rust, from GStreamer's timestamps); between frames it runs
+    // on frame time, at most one frame gap past the last frame, so the bar
+    // and time move continuously, match the picture, and never run ahead
+    // through a stall or the start-up before audio opens.
     in property <int> video-position-ms: 0;
     in property <int> video-duration-ms: 0;
     in property <int> video-anchor: 0;
-    // Playing with frames on screen: only then does the clock advance.
+    // Playing and not at the end (Rust), and the last frame came from
+    // running playback rather than a paused still (`video-frame-live`).
     in property <bool> video-clock-running: false;
+    in property <bool> video-frame-live: false;
+    // How far the clock may run past the last frame: the measured gap
+    // between frames (the video's own rate), so normal playback glides
+    // exactly to the next frame and a stall overshoots by one frame at most.
+    private property <duration> video-coast: 40ms;
     private property <duration> anchor-tick: 0ms;
     // Until the handler below has run (a frame late), use the anchored
     // position as it is rather than time since the previous anchor.
     private property <int> anchor-seen: 0;
     changed video-anchor => {
+        root.video-coast = root.video-frame-live
+            ? max(16ms, min(100ms, animation-tick() - root.anchor-tick)) : 40ms;
         root.anchor-tick = animation-tick();
         root.anchor-seen = root.video-anchor;
     }
     private property <float> clock-ms: min(root.video-duration-ms,
-        root.video-position-ms + (root.viewing && root.video-clock-running && root.anchor-seen == root.video-anchor
-            ? (animation-tick() - root.anchor-tick) / 1ms : 0));
+        root.video-position-ms + (root.viewing && root.video-clock-running && root.video-frame-live
+            && root.anchor-seen == root.video-anchor
+            ? min(root.video-coast, animation-tick() - root.anchor-tick) / 1ms : 0));
     private property <float> video-progress: root.video-duration-ms > 0
         ? max(0.0, min(1.0, root.clock-ms / root.video-duration-ms)) : 0.0;
     pure function clock-text(ms: float) -> string {
