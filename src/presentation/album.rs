@@ -1,7 +1,7 @@
 //! Album presentation: the capture grid and the full-screen viewer.
 //!
 //! Everything slow happens elsewhere: scans on a thread per visit, decoding
-//! on `MediaLoader` workers, video on GStreamer's threads. Results come back
+//! on `MediaLoader` workers, video on its own decoder and presenter threads. Results come back
 //! through one worker channel that wakes the UI thread once per burst, so an idle
 //! Album costs nothing (no polling timer). Only rows near the camera are
 //! mounted, only their thumbnails are requested, and memory is bounded by
@@ -60,6 +60,7 @@ const RELEASE_AFTER_LEAVING: Duration = Duration::from_secs(1);
 enum AlbumEvent {
     Scanned(Vec<Capture>),
     Media(MediaResult),
+    VideoDuration(u64),
     VideoEnded(u64),
     VideoFailed(u64, String),
 }
@@ -453,6 +454,11 @@ impl AlbumController {
                         video.ended = true;
                     }
                     self.publish_video(&ui);
+                }
+                AlbumEvent::VideoDuration(generation) => {
+                    if self.video_generation.load(Ordering::SeqCst) == generation {
+                        self.publish_video(&ui);
+                    }
                 }
                 AlbumEvent::VideoFailed(generation, error) => {
                     if self.video_generation.load(Ordering::SeqCst) == generation {
@@ -1431,7 +1437,7 @@ fn clock_text(duration: Duration) -> String {
     }
 }
 
-/// One copy out of GStreamer's buffer into Slint's: a single memcpy when
+/// One copy out of the decoder's buffer into Slint's: a single memcpy when
 /// rows are tightly packed (the usual case), never a zero-filled buffer
 /// first.
 fn copy_frame(frame: &VideoFrame<'_>) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
@@ -1514,6 +1520,10 @@ impl VideoSink for UiVideoSink {
 
     fn ended(&self) {
         let _ = self.sender.send(AlbumEvent::VideoEnded(self.generation));
+    }
+
+    fn duration(&self, _duration: Duration) {
+        let _ = self.sender.send(AlbumEvent::VideoDuration(self.generation));
     }
 
     fn failed(&self, message: String) {

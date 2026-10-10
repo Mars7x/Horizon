@@ -63,7 +63,7 @@ game starts). Leaving the Album stops playback.
   files.
 
 Supported formats are decided by extension: PNG and JPEG photos; MP4, M4V,
-MKV, WebM and MOV videos (whatever GStreamer can decode).
+MKV, WebM and MOV videos (whatever the runtime's FFmpeg can decode).
 
 ## Deleting
 
@@ -80,7 +80,7 @@ says so.
 The timeline is a steady clock running at real-time speed, so the bar moves
 perfectly evenly even when frames reach the screen unevenly (start-up
 bursts, a busy frame). Each shown frame carries its stream time and length
-from GStreamer. The frames correct the clock only when it drifts more than
+from the decoder. The frames correct the clock only when it drifts more than
 two frames from the picture, or on a still (start, pause, seek). The clock
 never runs more than one and a half frames past the frame on screen, so a
 stall, or the start-up while audio opens, holds the bar instead of running
@@ -90,21 +90,39 @@ ahead.
   (`seek_epoch`) never move the timeline back.
 - At the end, the clock rests on the duration.
 - Nothing polls the pipeline: an idle or paused video costs no timer.
-- The first Album visit loads GStreamer's decoders and audio output in the
-  background (`VideoBackend::warm_up`), so the first video starts as fast as
-  later ones.
-- **Sound and the start-up pause.** Playback through the PulseAudio socket
-  is clocked by the audio stream, which barely moves for its first few
-  hundred milliseconds: the picture held still at the start of every video.
-  Horizon now sends sound straight to PipeWire when it can connect (the
-  Flatpak grants `xdg-run/pipewire-0` for this)
-  (PipeWire's sink clocks smoothly from the first frame), and otherwise runs
-  playback on the system clock with the PulseAudio sink following it.
-  Measured: frames arrive on time from the first one on both paths.
+- **Starting: still, then smooth.** Sound reaches your ears after the
+  output's latency (about 250 ms over Bluetooth, a few ms on speakers).
+  Pressing play, seeking or resuming shows the still picture and holds it
+  until the sound there is heard, then the picture runs and keeps running:
+  it never starts, stops and starts again, and no sound is skipped (the
+  user's choice). If no sound arrives within a second, the picture starts
+  anyway. From then on the sound steers the clock by at most 4 ms per frame,
+  which absorbs a latency estimate that settles after start-up without a
+  visible jump. Measured over Bluetooth: the still picture after 83-100 ms,
+  motion about 230 ms later, then a frame every 31-33 ms with none dropped.
 
-Frames are copied once from GStreamer's buffer into Slint's (one memcpy
-when rows are packed, never into a zero-filled buffer first). While a frame
-waits to be drawn, newer ones are dropped before copying.
+## Video player
+
+`services::album::VideoBackend` is the contract and
+`platform::video::FfmpegVideo` implements it (ADR 0169):
+
+- **Decoding:** FFmpeg, through Horizon's small C shim (`csrc/horizon_media.c`)
+  compiled against the SDK's headers. The runtime ships FFmpeg, with the full
+  codec set from its `codecs-extra` extension, so nothing is bundled. Frames
+  come out scaled to fit the window as packed RGBA (bilinear), and decoding
+  uses every core.
+- **Sound:** a native PipeWire stream (`platform::pipewire`, `csrc/horizon_audio.c`),
+  48 kHz stereo, fed straight from a half-second queue on PipeWire's
+  real-time thread.
+- **Threads:** each video has a decoder thread (opens the file, decodes in
+  file order, a few frames and half a second of sound ahead) and a presenter
+  thread (shows each frame on time). The UI only sends requests: opening,
+  pausing and seeking never wait on the disk or the audio server.
+- **Copies:** one copy from FFmpeg into a reused frame buffer, one into
+  Slint's (a single memcpy). While a frame waits to be drawn, newer ones are
+  dropped before copying.
+- A zero-copy GPU path (hardware decoding into textures Slint draws) is
+  possible later behind the same trait.
 
 ## Writing captures (for the screenshot and recording features)
 
@@ -117,8 +135,8 @@ media extension, so a half-written file never appears. Pass the game's
 ## How it stays fast
 
 - **Nothing on the UI thread blocks.** The scan runs on its own thread per
-  visit. Decoding runs on two `MediaLoader` workers. Video runs on
-  GStreamer's threads. Results return through one `services::worker`
+  visit. Decoding runs on two `MediaLoader` workers. Each video has its own
+  decoder and presenter threads. Results return through one `services::worker`
   channel that wakes the UI thread once per burst, so an idle Album uses no
   CPU (no polling timer).
 - **Demand-driven decoding.** The controller tells the loader what the screen
@@ -133,21 +151,10 @@ media extension, so a half-written file never appears. Pass the game's
   gets a new thumbnail. Entries for vanished captures are pruned after each
   scan. Bump `ALBUM_CACHE_VERSION` to change the format.
 - **Right-sized pixels.** Full-screen photos are decoded at the window's
-  physical size, never larger. Videos are scaled by GStreamer to fit the
-  window, and frames are copied once from GStreamer's buffer into Slint's.
-  While a frame waits to be drawn, newer ones are dropped before copying.
+  physical size, never larger. Videos are scaled by FFmpeg to fit the
+  window.
 - **Instant first image.** Opening or stepping shows the thumbnail
   immediately; the full-resolution photo sharpens it in place when ready.
-
-## Video backend
-
-`services::album::VideoBackend` is the contract and `platform::video::GstVideo`
-implements it with GStreamer (`playbin`, `videoconvertscale`, `appsink`). The
-runtime ships GStreamer and its codec extensions; hardware decoders are used
-when GStreamer ranks them first. Without GStreamer, `NoVideo` is used: videos
-still list, with a "Can't play this video" message. A zero-copy GPU path
-(sharing decoder textures with Slint's renderer) is possible later behind the
-same trait.
 
 ## Not yet
 

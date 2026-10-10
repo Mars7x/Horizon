@@ -1,123 +1,103 @@
-//! Video through GStreamer, which the Flatpak runtime ships (with its codec
-//! extensions). Implements `services::album::VideoBackend`.
+//! Video through FFmpeg (`platform::ffmpeg`) with sound straight to PipeWire
+//! (`platform::pipewire`). Implements `services::album::VideoBackend`.
 //!
-//! Frames are converted and scaled by GStreamer to RGBA that fits the
-//! requested box, then handed to the sink straight from GStreamer's buffer.
-//! The appsink keeps one buffer and drops late ones, and the sink can refuse
-//! a frame before it is copied, so a busy UI thread costs skipped frames,
-//! never a growing queue. Hardware decoders are used when GStreamer ranks
-//! them first.
+//! Each playing video has two threads:
+//! - **Decoder:** opens the file, decodes in file order, keeps about half a
+//!   second of sound queued for PipeWire and a few frames ahead.
+//! - **Presenter:** shows each frame on time by one clock (`AudioClock`).
 //!
-//! Sound goes straight to PipeWire when Horizon can reach it
-//! (`platform::audio_output`). PipeWire's sink clocks playback from the
-//! first frame. Through the PulseAudio socket, the stream's clock barely
-//! moves for the first few hundred milliseconds while the stream starts,
-//! which held the picture still at the start of every video. Without
-//! PipeWire, playback runs on the system clock instead and the PulseAudio
-//! sink keeps sound in step with it.
+//! Pressing play (or seeking, or resuming) holds the picture still until its
+//! sound is actually heard: sound reaches the ears after the output's
+//! latency (about 250 ms over Bluetooth, a few ms on speakers). Then the
+//! picture starts and keeps going. It never starts, stops and starts again,
+//! and no sound is skipped. If sound never arrives, the picture starts anyway
+//! after `SOUND_WAIT`. A clip without sound, or the tail after its sound
+//! ends, runs on the system clock.
 //!
-//! State changes and seeks run on each video's own control thread: starting
-//! a pipeline connects to the audio server, which can stall when the server
-//! is unwell, and that must never freeze the UI.
+//! Frames come out of FFmpeg already scaled to fit the requested box, as
+//! packed RGBA. The UI side never waits: opening, seeking and pausing are
+//! requests to these threads, and a stalled audio server only silences the
+//! sound.
 use std::{
-    path::{Path, PathBuf},
-    sync::{Arc, mpsc},
-    time::Duration,
+    collections::VecDeque,
+    path::Path,
+    sync::{
+        Arc, Condvar, Mutex, MutexGuard,
+        atomic::{AtomicI64, AtomicU64, Ordering},
+    },
+    time::{Duration, Instant},
 };
 
-use gstreamer::{self as gst, prelude::*};
-use gstreamer_app as gst_app;
-use gstreamer_video::{self as gst_video, prelude::*};
 use image::RgbaImage;
 
-use crate::platform::audio_output::AudioOutput;
-use crate::services::album::{
-    MediaError, VideoBackend, VideoFrame, VideoPlayback, VideoSink, media::VideoProbe,
+use crate::{
+    platform::{
+        ffmpeg::{Media, Unit},
+        pipewire::{AudioStream, Role},
+    },
+    services::{
+        album::{
+            MediaError, VideoBackend, VideoFrame, VideoPlayback, VideoSink, media::VideoProbe,
+        },
+        worker::spawn,
+    },
 };
-use crate::services::worker::spawn;
 
-const PREROLL_TIMEOUT: Duration = Duration::from_secs(5);
 /// The poster frame: a second in, or a tenth of a short clip, past fades.
 const POSTER_OFFSET: Duration = Duration::from_secs(1);
+/// Sound is decoded to this, and PipeWire converts it for the device.
+const AUDIO_RATE: u32 = 48_000;
+const AUDIO_CHANNELS: u32 = 2;
+/// Frames PipeWire asks for per cycle for video sound (about 21 ms).
+const AUDIO_LATENCY_FRAMES: u32 = 1024;
+/// How much sound the decoder keeps queued ahead.
+const AUDIO_AHEAD: Duration = Duration::from_millis(500);
+/// Decoded frames kept ahead of the screen, and the most ever held.
+const FRAMES_AHEAD: usize = 3;
+const FRAMES_MAX: usize = 12;
 
-pub struct GstVideo;
+pub struct FfmpegVideo;
 
-impl GstVideo {
-    /// Fails when GStreamer or its playback plugins are missing; the Album
-    /// then lists videos without playing them.
+impl FfmpegVideo {
+    /// FFmpeg is linked from the runtime, so this can't fail today; kept
+    /// fallible so the Album can still fall back to `NoVideo`.
     pub fn new() -> Result<Self, String> {
-        gst::init().map_err(|error| error.to_string())?;
-        for element in ["playbin", "videoconvertscale", "appsink"] {
-            if gst::ElementFactory::find(element).is_none() {
-                return Err(format!("GStreamer element {element} is missing"));
-            }
-        }
         Ok(Self)
     }
 }
 
-/// Plugins a typical playback loads: containers, common decoders, the
-/// converter and the audio output. Loading is a one-off dlopen.
-const WARM_UP_ELEMENTS: &[&str] = &[
-    "playbin",
-    "decodebin3",
-    "uridecodebin3",
-    "qtdemux",
-    "matroskademux",
-    "avdec_h264",
-    "avdec_h265",
-    "vp9dec",
-    "vp8dec",
-    "dav1ddec",
-    "avdec_aac",
-    "opusdec",
-    "vorbisdec",
-    "videoconvertscale",
-    "audioconvert",
-    "audioresample",
-    "pipewiresink",
-    "pulsesink",
-    "autoaudiosink",
-];
-
-impl VideoBackend for GstVideo {
-    fn warm_up(&self) {
-        spawn("video-warm-up", move || {
-            AudioOutput::detect();
-            for name in WARM_UP_ELEMENTS {
-                if let Some(factory) = gst::ElementFactory::find(name) {
-                    // Missing optional plugins are fine; playback picks others.
-                    let _ = factory.load();
-                }
-            }
-        });
-    }
-
+impl VideoBackend for FfmpegVideo {
     fn probe(&self, path: &Path, max: (u32, u32)) -> Result<VideoProbe, MediaError> {
         let failed = |message: String| MediaError::Video {
             path: path.to_owned(),
             message,
         };
-        let pipeline = Pipeline::new(path, max, None).map_err(failed)?;
-        let result = (|| {
-            pipeline.preroll()?;
-            let duration = pipeline.duration();
-            let offset = duration.map_or(POSTER_OFFSET, |d| POSTER_OFFSET.min(d / 10));
-            if !offset.is_zero() {
-                pipeline.seek(offset, gst::SeekFlags::KEY_UNIT)?;
-                pipeline.wait_async_done()?;
+        let mut media = Media::open(path, max, None).map_err(failed)?;
+        let duration = media.info().duration;
+        let offset = duration.map_or(POSTER_OFFSET, |d| POSTER_OFFSET.min(d / 10));
+        // The keyframe at or before the offset, or the first frame.
+        for (attempt, start) in [offset, Duration::ZERO].into_iter().enumerate() {
+            if attempt > 0 || !start.is_zero() {
+                media.seek(start, false).map_err(failed)?;
             }
-            let sample = pipeline
-                .appsink
-                .try_pull_preroll(Some(clock(PREROLL_TIMEOUT)))
-                .ok_or_else(|| "no frame".to_owned())?;
-            Ok(VideoProbe {
-                poster: sample_to_image(&sample)?,
-                duration,
-            })
-        })();
-        pipeline.stop();
-        result.map_err(failed)
+            loop {
+                match media.decode_next().map_err(failed)? {
+                    Unit::Video {
+                        pixels,
+                        width,
+                        height,
+                        ..
+                    } => {
+                        let poster = RgbaImage::from_raw(width, height, pixels.to_vec())
+                            .ok_or_else(|| failed("bad frame size".into()))?;
+                        return Ok(VideoProbe { poster, duration });
+                    }
+                    Unit::Audio { .. } => {}
+                    Unit::End => break,
+                }
+            }
+        }
+        Err(failed("no frame".into()))
     }
 
     fn play(
@@ -126,359 +106,650 @@ impl VideoBackend for GstVideo {
         max: (u32, u32),
         sink: Arc<dyn VideoSink>,
     ) -> Result<Box<dyn VideoPlayback>, MediaError> {
-        // Detection runs during the Album's warm-up; until it has answered,
-        // use the default output rather than wait for the audio server.
-        let output = AudioOutput::detected().unwrap_or(AudioOutput::Default);
-        let failed = |message: String| MediaError::Video {
-            path: path.to_owned(),
-            message,
+        let shared = Arc::new(Shared::default());
+        let decoder = {
+            let shared = Arc::clone(&shared);
+            let sink = Arc::clone(&sink);
+            let path = path.to_owned();
+            spawn("video-decode", move || {
+                decode(&shared, &path, max, sink.as_ref())
+            })
         };
-        let pipeline = Pipeline::new(path, max, Some(output)).map_err(failed)?;
-        let frames = Arc::clone(&sink);
-        let deliver = move |appsink: &gst_app::AppSink, preroll: bool| {
-            let sample = if preroll {
-                appsink.pull_preroll()
-            } else {
-                appsink.pull_sample()
-            }
-            .map_err(|_| gst::FlowError::Eos)?;
-            if frames.wants_frame() {
-                deliver_sample(&sample, frames.as_ref(), !preroll);
-            }
-            Ok(gst::FlowSuccess::Ok)
+        let presenter = decoder && {
+            let shared = Arc::clone(&shared);
+            spawn("video-present", move || present(&shared, sink.as_ref()))
         };
-        let preroll = deliver.clone();
-        pipeline.appsink.set_callbacks(
-            gst_app::AppSinkCallbacks::builder()
-                // A paused seek shows its frame through preroll.
-                .new_preroll(move |appsink| preroll(appsink, true))
-                .new_sample(move |appsink| deliver(appsink, false))
-                .build(),
-        );
-        // No GLib main loop: end-of-stream and errors go straight to the
-        // sink from GStreamer's threads. Nothing else reads this bus.
-        if let Some(bus) = pipeline.playbin.bus() {
-            let events = Arc::clone(&sink);
-            bus.set_sync_handler(move |_, message| {
-                match message.view() {
-                    gst::MessageView::Eos(_) => events.ended(),
-                    gst::MessageView::Error(error) => events.failed(error.error().to_string()),
-                    _ => {}
-                }
-                gst::BusSyncReply::Drop
+        if !presenter {
+            shared.stop();
+            return Err(MediaError::Video {
+                path: path.to_owned(),
+                message: "video threads did not start".into(),
             });
         }
-        let (commands, received) = mpsc::channel();
-        let control = pipeline.playbin.clone();
-        let started = spawn("video-control", move || {
-            run_control(&pipeline, &received, sink.as_ref());
-        });
-        if !started {
-            return Err(failed("video control thread did not start".into()));
-        }
-        Ok(Box::new(GstPlayback {
-            playbin: control,
-            commands,
-        }))
+        Ok(Box::new(Playback { shared }))
     }
 }
 
-struct Pipeline {
-    playbin: gst::Element,
-    appsink: gst_app::AppSink,
-    path: PathBuf,
+/// A decoded frame waiting for its moment.
+struct Frame {
+    pixels: Vec<u8>,
+    width: u32,
+    height: u32,
+    position: Option<Duration>,
+    duration: Option<Duration>,
 }
 
-impl Pipeline {
-    /// `audio`: `None` for a silent pipeline (posters), or where sound goes.
-    fn new(
-        path: &Path,
-        (width, height): (u32, u32),
-        audio: Option<AudioOutput>,
-    ) -> Result<Self, String> {
-        let uri = gst::glib::filename_to_uri(path, None).map_err(|error| error.to_string())?;
-        let caps = gst_video::VideoCapsBuilder::new()
-            .format(gst_video::VideoFormat::Rgba)
-            .width_range(1..=clamp_dimension(width))
-            .height_range(1..=clamp_dimension(height))
-            .pixel_aspect_ratio(gst::Fraction::new(1, 1))
-            .build();
-        let appsink = gst_app::AppSink::builder()
-            .caps(&caps)
-            .max_buffers(1)
-            .drop(true)
-            .build();
-        let convert = gst::ElementFactory::make("videoconvertscale")
-            .build()
-            .map_err(|error| error.to_string())?;
-        // Scaling keeps the display aspect ratio (videoconvertscale fixates
-        // the size to fit the caps box without distorting).
-        let bin = gst::Bin::new();
-        bin.add_many([&convert, appsink.upcast_ref()])
-            .map_err(|error| error.to_string())?;
-        convert.link(&appsink).map_err(|error| error.to_string())?;
-        let target = convert
-            .static_pad("sink")
-            .ok_or_else(|| "videoconvertscale has no sink pad".to_owned())?;
-        let ghost = gst::GhostPad::with_target(&target).map_err(|error| error.to_string())?;
-        bin.add_pad(&ghost).map_err(|error| error.to_string())?;
+#[derive(Default)]
+struct State {
+    playing: bool,
+    stop: bool,
+    seek: Option<Duration>,
+    frames: VecDeque<Frame>,
+    /// Spare frame buffers, so steady playback doesn't allocate.
+    spare: Vec<Vec<u8>>,
+    /// The next frame is shown at once, still (after opening or a seek).
+    still: bool,
+    decoded_all: bool,
+    ended: bool,
+    /// The clip has sound going to PipeWire.
+    audio: bool,
+    /// The sound has ended; the last frames run on the system clock.
+    tail: bool,
+}
 
-        let playbin = gst::ElementFactory::make("playbin")
-            .property("uri", uri.as_str())
-            .property("video-sink", &bin)
-            .build()
-            .map_err(|error| error.to_string())?;
-        // Posters need video only; playback also plays sound. Never
-        // subtitles.
-        playbin.set_property_from_str(
-            "flags",
-            if audio.is_some() {
-                "video+audio+soft-volume"
-            } else {
-                "video"
-            },
-        );
-        match audio {
-            Some(output @ AudioOutput::PipeWire) => {
-                playbin.set_property("audio-sink", output.sink()?);
-            }
-            Some(AudioOutput::Default) => {
-                if let Some(pipeline) = playbin.downcast_ref::<gst::Pipeline>() {
-                    pipeline.use_clock(Some(&gst::SystemClock::obtain()));
-                }
-            }
-            None => {}
-        }
-        Ok(Self {
-            playbin,
-            appsink,
-            path: path.to_owned(),
-        })
-    }
+/// Sound queued for PipeWire. Its fill runs on PipeWire's real-time thread
+/// and only ever `try_lock`s this.
+#[derive(Default)]
+struct Sound {
+    samples: VecDeque<f32>,
+    /// The position of the first queued sample.
+    next: Duration,
+    playing: bool,
+}
 
-    fn preroll(&self) -> Result<(), String> {
-        self.playbin
-            .set_state(gst::State::Paused)
-            .map_err(|error| error.to_string())?;
-        self.wait_async_done()
-    }
+#[derive(Default)]
+struct Shared {
+    state: Mutex<State>,
+    changed: Condvar,
+    sound: Arc<Mutex<Sound>>,
+    clock: Arc<AudioClock>,
+    output: Mutex<Option<AudioStream>>,
+    /// Microseconds, or `u64::MAX` while unknown.
+    duration_us: AtomicU64,
+}
 
-    fn wait_async_done(&self) -> Result<(), String> {
-        let bus = self.playbin.bus().ok_or_else(|| "no bus".to_owned())?;
-        match bus.timed_pop_filtered(
-            clock(PREROLL_TIMEOUT),
-            &[gst::MessageType::AsyncDone, gst::MessageType::Error],
-        ) {
-            Some(message) => match message.view() {
-                gst::MessageView::Error(error) => Err(error.error().to_string()),
-                _ => Ok(()),
-            },
-            None => Err(format!("{} did not start in time", self.path.display())),
-        }
-    }
-
-    fn duration(&self) -> Option<Duration> {
-        self.playbin
-            .query_duration::<gst::ClockTime>()
-            .map(|time| Duration::from_nanos(time.nseconds()))
-    }
-
-    fn seek(&self, position: Duration, accuracy: gst::SeekFlags) -> Result<(), String> {
-        self.playbin
-            .seek_simple(gst::SeekFlags::FLUSH | accuracy, clock(position))
-            .map_err(|error| error.to_string())
+impl Shared {
+    fn lock(&self) -> MutexGuard<'_, State> {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     fn stop(&self) {
-        let _ = self.playbin.set_state(gst::State::Null);
+        self.lock().stop = true;
+        self.changed.notify_all();
+    }
+
+    fn sound(&self) -> MutexGuard<'_, Sound> {
+        self.sound
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
 
-enum Command {
-    Play(bool),
-    Seek(Duration),
+/// Playback's one clock. Held (paused, or before playing), or running on
+/// the system clock from where it started, steered by the sound.
+///
+/// Each buffer PipeWire takes anchors where the sound is: its first sample's
+/// position at the time it was taken, less the output latency. The picture
+/// follows the system clock, nudged toward the sound by at most `STEER` per
+/// reading, so a latency estimate that settles after start-up (Bluetooth
+/// reports a smaller one at first) is absorbed smoothly instead of jumping
+/// the picture. Only a gap over `RESYNC` jumps.
+const STEER: Duration = Duration::from_millis(4);
+const RESYNC: Duration = Duration::from_secs(1);
+/// The longest the picture waits for its sound before starting anyway.
+const SOUND_WAIT: Duration = Duration::from_secs(1);
+
+struct AudioClock {
+    epoch: Instant,
+    /// Where the clock was held or started (microseconds).
+    held_us: AtomicI64,
+    /// When it started running (ns since `epoch`); `u64::MAX` while held.
+    started_ns: AtomicU64,
+    /// Since when it has waited for sound to be heard; `u64::MAX` if not.
+    waiting_ns: AtomicU64,
+    /// The latest buffer's position (microseconds); -1 before any.
+    anchor_us: AtomicI64,
+    anchor_ns: AtomicU64,
+    span_us: AtomicU64,
+    delay_us: AtomicU64,
 }
 
-/// One video's control thread: prerolls, then applies commands in order.
-/// When the handle drops (the channel closes) it detaches the bus handler
-/// and stops the pipeline, freeing the decoder.
-fn run_control(pipeline: &Pipeline, commands: &mpsc::Receiver<Command>, sink: &dyn VideoSink) {
-    if let Err(error) = pipeline.playbin.set_state(gst::State::Paused) {
-        sink.failed(error.to_string());
+impl Default for AudioClock {
+    fn default() -> Self {
+        Self {
+            epoch: Instant::now(),
+            held_us: AtomicI64::new(0),
+            started_ns: AtomicU64::new(u64::MAX),
+            waiting_ns: AtomicU64::new(u64::MAX),
+            anchor_us: AtomicI64::new(-1),
+            anchor_ns: AtomicU64::new(0),
+            span_us: AtomicU64::new(0),
+            delay_us: AtomicU64::new(0),
+        }
     }
-    for command in commands {
-        match command {
-            Command::Play(playing) => {
-                let state = if playing {
-                    gst::State::Playing
-                } else {
-                    gst::State::Paused
-                };
-                if let Err(error) = pipeline.playbin.set_state(state) {
-                    tracing::warn!(%error, "video state change failed");
+}
+
+impl AudioClock {
+    fn now_ns(&self) -> u64 {
+        u64::try_from(self.epoch.elapsed().as_nanos()).unwrap_or(u64::MAX - 1)
+    }
+
+    /// Run from `position` now (no sound to wait for).
+    fn start(&self, position: Duration) {
+        self.anchor_us.store(-1, Ordering::Release);
+        self.waiting_ns.store(u64::MAX, Ordering::Release);
+        self.held_us
+            .store(signed_micros(position), Ordering::Release);
+        self.started_ns.store(self.now_ns(), Ordering::Release);
+    }
+
+    /// Hold at `position` until the sound there is heard, then run.
+    fn start_with_sound(&self, position: Duration) {
+        self.hold(position);
+        self.waiting_ns.store(self.now_ns(), Ordering::Release);
+    }
+
+    /// Stop at `position`.
+    fn hold(&self, position: Duration) {
+        self.anchor_us.store(-1, Ordering::Release);
+        self.started_ns.store(u64::MAX, Ordering::Release);
+        self.waiting_ns.store(u64::MAX, Ordering::Release);
+        self.held_us
+            .store(signed_micros(position), Ordering::Release);
+    }
+
+    fn anchored(&self) -> bool {
+        self.anchor_us.load(Ordering::Acquire) >= 0
+    }
+
+    /// The system clock's position since the last start (or the hold).
+    fn system(&self) -> Duration {
+        let held = self.held_us.load(Ordering::Acquire);
+        let started = self.started_ns.load(Ordering::Acquire);
+        let running = if started == u64::MAX {
+            0
+        } else {
+            self.now_ns().saturating_sub(started) / 1_000
+        };
+        Duration::from_micros(u64::try_from(held).unwrap_or(0) + running)
+    }
+
+    /// PipeWire took `span` of sound starting at `position`; it is heard
+    /// after `delay`.
+    fn taken(&self, position: Duration, span: Duration, delay: Duration) {
+        self.anchor_ns.store(self.now_ns(), Ordering::Release);
+        self.span_us.store(micros(span), Ordering::Release);
+        self.delay_us.store(micros(delay), Ordering::Release);
+        self.anchor_us
+            .store(signed_micros(position), Ordering::Release);
+    }
+
+    /// Where the sound being heard is (microseconds), once PipeWire has
+    /// taken some. Negative while its first sample is still on its way.
+    fn heard_us(&self) -> Option<i64> {
+        let anchor = self.anchor_us.load(Ordering::Acquire);
+        if anchor < 0 {
+            return None;
+        }
+        let elapsed = self
+            .now_ns()
+            .saturating_sub(self.anchor_ns.load(Ordering::Acquire))
+            / 1_000;
+        let elapsed = elapsed.min(self.span_us.load(Ordering::Acquire));
+        let delay = self.delay_us.load(Ordering::Acquire);
+        Some(anchor + i64::try_from(elapsed).unwrap_or(0) - i64::try_from(delay).unwrap_or(0))
+    }
+
+    fn heard(&self) -> Option<Duration> {
+        self.heard_us()
+            .map(|heard| Duration::from_micros(u64::try_from(heard).unwrap_or(0)))
+    }
+
+    fn position(&self) -> Duration {
+        let waiting = self.waiting_ns.load(Ordering::Acquire);
+        if waiting != u64::MAX {
+            let held = self.held_us.load(Ordering::Acquire);
+            let heard = self.heard_us().is_some_and(|heard| heard >= held);
+            let gave_up = self.now_ns().saturating_sub(waiting) > micros(SOUND_WAIT) * 1_000;
+            if !heard && !gave_up {
+                return self.system(); // still held
+            }
+            // The sound is heard: the picture starts from here and runs on.
+            self.waiting_ns.store(u64::MAX, Ordering::Release);
+            self.started_ns.store(self.now_ns(), Ordering::Release);
+        }
+        let system = self.system();
+        let Some(heard) = self.heard() else {
+            return system;
+        };
+        if self.started_ns.load(Ordering::Acquire) == u64::MAX {
+            return system; // held
+        }
+        let gap = signed_micros(heard) - signed_micros(system);
+        if gap.unsigned_abs() > micros(RESYNC) {
+            self.held_us.fetch_add(gap, Ordering::AcqRel);
+            return heard;
+        }
+        let steer = (gap / 8).clamp(-signed_micros(STEER), signed_micros(STEER));
+        self.held_us.fetch_add(steer, Ordering::AcqRel);
+        self.system()
+    }
+}
+
+fn micros(duration: Duration) -> u64 {
+    u64::try_from(duration.as_micros()).unwrap_or(u64::MAX)
+}
+
+fn signed_micros(duration: Duration) -> i64 {
+    i64::try_from(duration.as_micros()).unwrap_or(i64::MAX)
+}
+
+/// PipeWire's fill: hand over queued sound, silence when there is none (the
+/// clock then holds instead of running ahead).
+fn fill(sound: &Mutex<Sound>, clock: &AudioClock, out: &mut [f32], delay: Duration) {
+    let Ok(mut sound) = sound.try_lock() else {
+        out.fill(0.0);
+        return;
+    };
+    if !sound.playing {
+        out.fill(0.0);
+        return;
+    }
+    if sound.samples.is_empty() {
+        out.fill(0.0);
+        return;
+    }
+    let count = out.len().min(sound.samples.len());
+    let count = count - count % AUDIO_CHANNELS as usize;
+    for (slot, sample) in out.iter_mut().zip(sound.samples.drain(..count)) {
+        *slot = sample;
+    }
+    out[count..].fill(0.0);
+    let span = frames_duration(count / AUDIO_CHANNELS as usize);
+    clock.taken(sound.next, span, delay);
+    sound.next += span;
+}
+
+fn frames_duration(frames: usize) -> Duration {
+    Duration::from_nanos(frames as u64 * 1_000_000_000 / u64::from(AUDIO_RATE))
+}
+
+/// The decoder thread.
+fn decode(shared: &Shared, path: &Path, max: (u32, u32), sink: &dyn VideoSink) {
+    let mut media = match Media::open(path, max, Some((AUDIO_RATE, AUDIO_CHANNELS))) {
+        Ok(media) => media,
+        Err(message) => {
+            sink.failed(message);
+            shared.stop();
+            return;
+        }
+    };
+    let info = media.info();
+    shared
+        .duration_us
+        .store(info.duration.map_or(u64::MAX, micros), Ordering::Release);
+    if let Some(duration) = info.duration {
+        sink.duration(duration);
+    }
+    let output = if info.has_audio {
+        open_output(shared)
+    } else {
+        None
+    };
+    let audio = output.is_some();
+    *shared
+        .output
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = output;
+    let playing = {
+        let mut state = shared.lock();
+        state.audio = audio;
+        state.still = true;
+        state.playing
+    };
+    set_sound_playing(shared, playing);
+    shared.changed.notify_all();
+
+    loop {
+        let mut state = shared.lock();
+        if state.stop {
+            break;
+        }
+        if let Some(position) = state.seek.take() {
+            state.frames.clear();
+            state.decoded_all = false;
+            state.ended = false;
+            state.tail = false;
+            state.still = true;
+            let (playing, audio) = (state.playing, state.audio);
+            drop(state);
+            if let Err(message) = media.seek(position, true) {
+                tracing::warn!(%message, "video seek failed");
+            }
+            {
+                let mut sound = shared.sound();
+                sound.samples.clear();
+                sound.next = position;
+            }
+            if playing && audio {
+                shared.clock.start_with_sound(position);
+            } else if playing {
+                shared.clock.start(position);
+            } else {
+                shared.clock.hold(position);
+            }
+            shared.changed.notify_all();
+            continue;
+        }
+        let sound_ahead = if state.audio {
+            frames_duration(shared.sound().samples.len() / AUDIO_CHANNELS as usize)
+        } else {
+            AUDIO_AHEAD
+        };
+        let full = state.frames.len() >= FRAMES_MAX
+            || (state.frames.len() >= FRAMES_AHEAD && sound_ahead >= AUDIO_AHEAD);
+        if state.decoded_all || full {
+            drop(wait_for(shared, state, Duration::from_millis(20)));
+            continue;
+        }
+        let spare = state.spare.pop();
+        drop(state);
+
+        match media.decode_next() {
+            Ok(Unit::Video {
+                pixels,
+                width,
+                height,
+                position,
+                duration,
+            }) => {
+                let mut buffer = spare.unwrap_or_default();
+                buffer.clear();
+                buffer.extend_from_slice(pixels);
+                shared.lock().frames.push_back(Frame {
+                    pixels: buffer,
+                    width,
+                    height,
+                    position,
+                    duration,
+                });
+                shared.changed.notify_all();
+            }
+            Ok(Unit::Audio { samples, position }) => {
+                if audio {
+                    let mut sound = shared.sound();
+                    if sound.samples.is_empty()
+                        && let Some(position) = position
+                    {
+                        sound.next = position;
+                    }
+                    sound.samples.extend(samples.iter().copied());
                 }
             }
-            Command::Seek(position) => {
-                if let Err(error) = pipeline.seek(position, gst::SeekFlags::ACCURATE) {
-                    tracing::warn!(%error, "video seek failed");
-                }
+            Ok(Unit::End) => {
+                shared.lock().decoded_all = true;
+                shared.changed.notify_all();
+            }
+            Err(message) => {
+                sink.failed(message);
+                break;
             }
         }
     }
-    if let Some(bus) = pipeline.playbin.bus() {
-        bus.unset_sync_handler();
+    // Close the sound here, off the UI thread.
+    let output = shared
+        .output
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .take();
+    drop(output);
+}
+
+fn open_output(shared: &Shared) -> Option<AudioStream> {
+    let sound = Arc::clone(&shared.sound);
+    let clock = Arc::clone(&shared.clock);
+    match AudioStream::open(
+        "Horizon video",
+        Role::Movie,
+        AUDIO_RATE,
+        AUDIO_CHANNELS,
+        AUDIO_LATENCY_FRAMES,
+        Box::new(move |out: &mut [f32], delay| fill(&sound, &clock, out, delay)),
+    ) {
+        Ok(stream) => {
+            stream.set_active(false);
+            Some(stream)
+        }
+        Err(error) => {
+            tracing::warn!(%error, "video sound unavailable; playing silently");
+            None
+        }
     }
-    pipeline.stop();
 }
 
-/// The UI's handle: commands go to the control thread and never block.
-/// Position and duration are queries, answered without waiting.
-struct GstPlayback {
-    playbin: gst::Element,
-    commands: mpsc::Sender<Command>,
+fn set_sound_playing(shared: &Shared, playing: bool) {
+    shared.sound().playing = playing;
+    if let Ok(output) = shared.output.lock()
+        && let Some(stream) = output.as_ref()
+    {
+        stream.set_active(playing);
+    }
 }
 
-impl VideoPlayback for GstPlayback {
+/// The presenter thread.
+fn present(shared: &Shared, sink: &dyn VideoSink) {
+    let mut state = shared.lock();
+    loop {
+        if state.stop {
+            return;
+        }
+        if state.still {
+            if let Some(frame) = state.frames.pop_front() {
+                state.still = false;
+                // Time runs from the first picture, not from the press: the
+                // file may take a moment to open.
+                if state.playing {
+                    let from = frame.position.unwrap_or_else(|| shared.clock.position());
+                    if state.audio {
+                        shared.clock.start_with_sound(from);
+                    } else {
+                        shared.clock.start(from);
+                    }
+                }
+                shared.changed.notify_all();
+                drop(state);
+                show(shared, sink, frame, false);
+                state = shared.lock();
+                continue;
+            }
+        } else if state.playing {
+            // The sound has ended before the picture: finish on the system clock.
+            if state.audio
+                && !state.tail
+                && state.decoded_all
+                && shared.clock.anchored()
+                && shared.sound().samples.is_empty()
+            {
+                state.tail = true;
+                shared.clock.start(shared.clock.position());
+            }
+            let due = state.frames.front().map(|frame| frame.position);
+            let now = shared.clock.position();
+            match due {
+                Some(due) => {
+                    let due = due.unwrap_or(now);
+                    if due > now {
+                        let wait = (due - now).min(Duration::from_millis(20));
+                        state = wait_for(shared, state, wait);
+                        continue;
+                    }
+                    let Some(frame) = state.frames.pop_front() else {
+                        continue;
+                    };
+                    shared.changed.notify_all();
+                    // Running late: skip to the newest frame that is due.
+                    let next_due = state
+                        .frames
+                        .front()
+                        .is_some_and(|next| next.position.is_some_and(|position| position <= now));
+                    if next_due {
+                        state.spare.push(frame.pixels);
+                        continue;
+                    }
+                    drop(state);
+                    show(shared, sink, frame, true);
+                    state = shared.lock();
+                    continue;
+                }
+                None => {
+                    let sound_done = !state.audio || shared.sound().samples.is_empty();
+                    if state.decoded_all && sound_done && !state.ended {
+                        state.ended = true;
+                        drop(state);
+                        sink.ended();
+                        state = shared.lock();
+                        continue;
+                    }
+                }
+            }
+        }
+        state = wait_for(shared, state, Duration::from_millis(20));
+    }
+}
+
+fn wait_for<'a>(
+    shared: &'a Shared,
+    state: MutexGuard<'a, State>,
+    wait: Duration,
+) -> MutexGuard<'a, State> {
+    shared
+        .changed
+        .wait_timeout(state, wait)
+        .map(|(state, _)| state)
+        .unwrap_or_else(|poisoned| poisoned.into_inner().0)
+}
+
+fn show(shared: &Shared, sink: &dyn VideoSink, frame: Frame, live: bool) {
+    if sink.wants_frame() {
+        sink.frame(VideoFrame {
+            width: frame.width,
+            height: frame.height,
+            stride: frame.width as usize * 4,
+            data: &frame.pixels,
+            position: frame.position,
+            frame_duration: frame.duration,
+            live,
+        });
+    }
+    let mut state = shared.lock();
+    if state.spare.len() < FRAMES_AHEAD {
+        state.spare.push(frame.pixels);
+    }
+}
+
+/// The UI's handle. Every call returns at once; dropping it stops both
+/// threads and frees the decoder and the sound stream.
+struct Playback {
+    shared: Arc<Shared>,
+}
+
+impl VideoPlayback for Playback {
     fn set_playing(&self, playing: bool) {
-        let _ = self.commands.send(Command::Play(playing));
+        let mut state = self.shared.lock();
+        if state.playing != playing {
+            let position = self.shared.clock.position();
+            if playing && state.audio {
+                self.shared.clock.start_with_sound(position);
+            } else if playing {
+                self.shared.clock.start(position);
+            } else {
+                self.shared.clock.hold(position);
+            }
+            state.playing = playing;
+        }
+        drop(state);
+        set_sound_playing(&self.shared, playing);
+        self.shared.changed.notify_all();
     }
 
     fn seek(&self, position: Duration) {
-        let _ = self.commands.send(Command::Seek(position));
+        self.shared.lock().seek = Some(position);
+        self.shared.changed.notify_all();
     }
 
     fn position(&self) -> Option<Duration> {
-        self.playbin
-            .query_position::<gst::ClockTime>()
-            .map(|time| Duration::from_nanos(time.nseconds()))
+        Some(self.shared.clock.position())
     }
 
     fn duration(&self) -> Option<Duration> {
-        self.playbin
-            .query_duration::<gst::ClockTime>()
-            .map(|time| Duration::from_nanos(time.nseconds()))
+        match self.shared.duration_us.load(Ordering::Acquire) {
+            u64::MAX => None,
+            micros => Some(Duration::from_micros(micros)),
+        }
     }
 }
 
-fn clock(duration: Duration) -> gst::ClockTime {
-    gst::ClockTime::from_nseconds(u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX))
-}
-
-fn clamp_dimension(value: u32) -> i32 {
-    i32::try_from(value.max(1)).unwrap_or(i32::MAX)
-}
-
-fn deliver_sample(sample: &gst::Sample, sink: &dyn VideoSink, live: bool) {
-    let Some(frame) = readable_frame(sample) else {
-        return;
-    };
-    let (Ok(data), Some(stride)) = (frame.plane_data(0), frame.plane_stride().first()) else {
-        return;
-    };
-    sink.frame(VideoFrame {
-        width: frame.width(),
-        height: frame.height(),
-        stride: usize::try_from(*stride).unwrap_or(0),
-        data,
-        position: stream_time(sample),
-        frame_duration: sample
-            .buffer()
-            .and_then(|buffer| buffer.duration())
-            .map(|duration| Duration::from_nanos(duration.nseconds())),
-        live,
-    });
-}
-
-/// The sample's stream time: its timestamp within the video, as the
-/// timeline shows it (unaffected by seeks' segment bookkeeping).
-fn stream_time(sample: &gst::Sample) -> Option<Duration> {
-    let pts = sample.buffer()?.pts()?;
-    let segment = sample.segment()?.downcast_ref::<gst::ClockTime>()?;
-    let time = segment.to_stream_time(pts)?;
-    Some(Duration::from_nanos(time.nseconds()))
-}
-
-fn readable_frame(sample: &gst::Sample) -> Option<gst_video::VideoFrameRef<&gst::BufferRef>> {
-    let info = gst_video::VideoInfo::from_caps(sample.caps()?).ok()?;
-    gst_video::VideoFrameRef::from_buffer_ref_readable(sample.buffer()?, &info).ok()
-}
-
-fn sample_to_image(sample: &gst::Sample) -> Result<RgbaImage, String> {
-    let frame = readable_frame(sample).ok_or_else(|| "unreadable frame".to_owned())?;
-    let data = frame.plane_data(0).map_err(|error| error.to_string())?;
-    let stride = frame
-        .plane_stride()
-        .first()
-        .and_then(|stride| usize::try_from(*stride).ok())
-        .ok_or_else(|| "no stride".to_owned())?;
-    let (width, height) = (frame.width(), frame.height());
-    let row = width as usize * 4;
-    let mut pixels = Vec::with_capacity(row * height as usize);
-    for line in data.chunks(stride).take(height as usize) {
-        pixels.extend_from_slice(line.get(..row).ok_or_else(|| "short row".to_owned())?);
+impl Drop for Playback {
+    fn drop(&mut self) {
+        self.shared.stop();
     }
-    RgbaImage::from_raw(width, height, pixels).ok_or_else(|| "frame size mismatch".to_owned())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{
-        Mutex,
-        atomic::{AtomicBool, Ordering},
-    };
+    use std::{path::PathBuf, sync::atomic::AtomicBool};
 
-    /// Encode a short test clip with whatever encoder the system has.
-    fn test_clip(dir: &Path) -> Option<PathBuf> {
-        gst::init().ok()?;
-        let path = dir.join("clip.webm");
-        let description = format!(
-            "videotestsrc num-buffers=90 ! video/x-raw,width=1280,height=720,framerate=30/1 \
-             ! vp8enc deadline=1 ! webmmux ! filesink location={}",
-            path.display()
-        );
-        let pipeline = gst::parse::launch(&description).ok()?;
-        pipeline.set_state(gst::State::Playing).ok()?;
-        let bus = pipeline.bus()?;
-        let done = bus.timed_pop_filtered(
-            gst::ClockTime::from_seconds(30),
-            &[gst::MessageType::Eos, gst::MessageType::Error],
-        )?;
-        pipeline.set_state(gst::State::Null).ok()?;
-        matches!(done.view(), gst::MessageView::Eos(_)).then_some(path)
-    }
-
-    /// One folder per test: tests run in parallel and each encodes a clip.
-    fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("horizon-video-{name}-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+    fn fixture(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures")
+            .join(name)
     }
 
     #[test]
     fn probe_scales_to_fit_and_reports_the_duration() {
-        let Ok(backend) = GstVideo::new() else {
-            eprintln!("GStreamer unavailable; skipping");
-            return;
-        };
-        let dir = temp_dir("probe");
-        let Some(clip) = test_clip(&dir) else {
-            eprintln!("no VP8 encoder; skipping");
-            return;
-        };
-        let probe = backend.probe(&clip, (480, 480)).expect("probe");
+        let backend = FfmpegVideo::new().unwrap();
+        let probe = backend
+            .probe(&fixture("clip-h264-aac.mp4"), (480, 480))
+            .expect("probe");
         assert_eq!(probe.poster.dimensions(), (480, 270), "aspect ratio kept");
         let duration = probe.duration.expect("duration");
         assert!(
             (2900..=3100).contains(&duration.as_millis()),
             "{duration:?}"
         );
-        let _ = std::fs::remove_dir_all(dir);
+
+        let silent = backend
+            .probe(&fixture("clip-vp8-silent.webm"), (1920, 1080))
+            .expect("probe");
+        assert_eq!(silent.poster.dimensions(), (640, 360), "never scaled up");
+    }
+
+    #[test]
+    fn a_missing_file_fails_cleanly() {
+        let backend = FfmpegVideo::new().unwrap();
+        assert!(
+            backend
+                .probe(Path::new("/nonexistent/clip.mp4"), (64, 64))
+                .is_err()
+        );
     }
 
     #[derive(Default)]
     struct Recorder {
-        frames: Mutex<Vec<(u32, u32)>>,
+        frames: Mutex<Vec<(u32, u32, bool)>>,
         positions: Mutex<Vec<Duration>>,
         ended: AtomicBool,
     }
@@ -487,15 +758,15 @@ mod tests {
             true
         }
         fn frame(&self, frame: VideoFrame<'_>) {
-            assert!(frame.stride >= frame.width as usize * 4);
+            assert_eq!(frame.stride, frame.width as usize * 4);
+            assert_eq!(frame.data.len(), frame.stride * frame.height as usize);
             if let Some(position) = frame.position {
                 self.positions.lock().unwrap().push(position);
             }
-            assert!(frame.data.len() >= frame.stride * (frame.height as usize - 1));
             self.frames
                 .lock()
                 .unwrap()
-                .push((frame.width, frame.height));
+                .push((frame.width, frame.height, frame.live));
         }
         fn ended(&self) {
             self.ended.store(true, Ordering::SeqCst);
@@ -505,48 +776,128 @@ mod tests {
         }
     }
 
-    #[test]
-    fn playback_delivers_scaled_frames_until_the_end() {
-        let Ok(backend) = GstVideo::new() else {
-            return;
-        };
-        let dir = temp_dir("playback");
-        let Some(clip) = test_clip(&dir) else {
-            return;
-        };
+    fn play_to_end(clip: &str, max: (u32, u32)) -> Arc<Recorder> {
         let recorder = Arc::new(Recorder::default());
-        let playback = backend
-            .play(&clip, (640, 640), recorder.clone())
+        let playback = FfmpegVideo::new()
+            .unwrap()
+            .play(&fixture(clip), max, recorder.clone())
             .expect("play");
         playback.set_playing(true);
-        let deadline = std::time::Instant::now() + Duration::from_secs(15);
-        while !recorder.ended.load(Ordering::SeqCst) && std::time::Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(50));
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while !recorder.ended.load(Ordering::SeqCst) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
         }
         assert!(recorder.ended.load(Ordering::SeqCst), "reached the end");
+        recorder
+    }
+
+    #[test]
+    fn playback_delivers_scaled_frames_in_order_until_the_end() {
+        let recorder = play_to_end("clip-h264-aac.mp4", (640, 640));
         let frames = recorder.frames.lock().unwrap();
-        assert!(frames.len() > 10, "{} frames", frames.len());
-        assert!(frames.iter().all(|size| *size == (640, 360)));
-        // Every frame carries its place in the video, in order, from the start
-        // to the end of the 3-second clip.
+        assert!(frames.len() > 60, "{} frames", frames.len());
+        assert!(frames.iter().all(|(w, h, _)| (*w, *h) == (640, 360)));
+        assert!(!frames[0].2, "the first frame is a still");
         let positions = recorder.positions.lock().unwrap();
-        assert_eq!(positions.len(), frames.len());
         assert!(positions.windows(2).all(|pair| pair[0] <= pair[1]));
-        assert!(positions.first().unwrap().as_millis() < 100);
-        assert!(positions.last().unwrap().as_millis() > 2800);
-        drop(playback);
-        let _ = std::fs::remove_dir_all(dir);
+        assert!(positions.first().unwrap().as_millis() < 50);
+        assert!(positions.last().unwrap().as_millis() > 2900);
+    }
+
+    #[test]
+    fn a_silent_clip_runs_on_the_system_clock() {
+        let started = Instant::now();
+        let recorder = play_to_end("clip-vp8-silent.webm", (320, 320));
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed >= Duration::from_millis(1900),
+            "real time: {elapsed:?}"
+        );
+        assert!(recorder.frames.lock().unwrap().len() > 50);
+    }
+
+    #[test]
+    fn the_clock_holds_runs_and_follows_the_sound() {
+        let clock = AudioClock::default();
+        assert_eq!(clock.position(), Duration::ZERO);
+        clock.hold(Duration::from_secs(2));
+        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!(clock.position(), Duration::from_secs(2), "held");
+        clock.start(Duration::from_secs(2));
+        std::thread::sleep(Duration::from_millis(30));
+        assert!(
+            clock.position() >= Duration::from_millis(2030),
+            "runs at once"
+        );
+        // Sound heard 100 ms ahead: the picture is steered toward it a
+        // little per reading, never jumped.
+        let before = clock.position();
+        let heard = before + Duration::from_millis(100);
+        clock.taken(
+            heard + Duration::from_millis(10),
+            Duration::from_millis(500),
+            Duration::from_millis(10),
+        );
+        let mut last = clock.position();
+        assert!(
+            last - before <= STEER + Duration::from_millis(2),
+            "{before:?} -> {last:?}"
+        );
+        for _ in 0..200 {
+            let next = clock.position();
+            assert!(next >= last, "never backwards");
+            last = next;
+        }
+        let gap = clock.heard().unwrap().abs_diff(clock.position());
+        assert!(gap < Duration::from_millis(5), "converged: {gap:?}");
+    }
+
+    #[test]
+    fn starting_holds_the_picture_until_its_sound_is_heard() {
+        let clock = AudioClock::default();
+        clock.start_with_sound(Duration::from_secs(1));
+        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!(clock.position(), Duration::from_secs(1), "held");
+        // PipeWire took the sound at 1 s; it is heard 30 ms later.
+        clock.taken(
+            Duration::from_secs(1),
+            Duration::from_millis(100),
+            Duration::from_millis(30),
+        );
+        assert_eq!(clock.position(), Duration::from_secs(1), "still on its way");
+        std::thread::sleep(Duration::from_millis(40));
+        let started = clock.position();
+        assert!(
+            started <= Duration::from_millis(1015),
+            "starts where it held: {started:?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+        let mut last = clock.position();
+        assert!(last > started, "then runs");
+        for _ in 0..100 {
+            let next = clock.position();
+            assert!(next >= last, "never backwards");
+            last = next;
+        }
+    }
+
+    #[test]
+    fn a_picture_waiting_for_silent_sound_starts_anyway() {
+        let clock = AudioClock::default();
+        clock.start_with_sound(Duration::ZERO);
+        std::thread::sleep(SOUND_WAIT + Duration::from_millis(20));
+        let first = clock.position();
+        std::thread::sleep(Duration::from_millis(20));
+        assert!(clock.position() > first);
     }
 }
 
-/// Start-up timing with real sound output (run by hand: it needs an audio
-/// server). `CLIP=<file>` times a real capture instead of a generated one.
-/// Each frame's arrival should track its position from the first frame.
+/// Start-up timing with real sound output (run by hand: it needs PipeWire).
+/// `CLIP=<file>` times a real capture instead of the fixture. Each frame's
+/// arrival should track its position from the first frame.
 #[cfg(test)]
 mod startup_timing {
     use super::*;
-    use std::sync::Mutex;
-    use std::time::Instant;
 
     struct Log(Mutex<Vec<(Instant, bool, Option<Duration>)>>);
     impl VideoSink for Log {
@@ -568,35 +919,22 @@ mod startup_timing {
     #[test]
     #[ignore]
     fn video_startup_timing() {
-        gst::init().unwrap();
-        let dir = std::env::temp_dir().join("horizon-timing");
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = std::env::var("CLIP").map(PathBuf::from).unwrap_or_else(|_| {
-            let path = dir.join("av.webm");
-            let d = format!("webmmux name=m ! filesink location={} \
-                videotestsrc num-buffers=150 ! video/x-raw,width=1920,height=1080,framerate=30/1 ! vp8enc deadline=1 ! m. \
-                audiotestsrc num-buffers=250 ! audioconvert ! vorbisenc ! m.", path.display());
-            let p = gst::parse::launch(&d).unwrap();
-            p.set_state(gst::State::Playing).unwrap();
-            p.bus().unwrap().timed_pop_filtered(gst::ClockTime::from_seconds(60), &[gst::MessageType::Eos, gst::MessageType::Error]);
-            p.set_state(gst::State::Null).unwrap();
-            path
-        });
-        let video = GstVideo::new().unwrap();
+        let path = std::env::var("CLIP")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| {
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/clip-h264-aac.mp4")
+            });
+        let video = FfmpegVideo::new().unwrap();
         for round in 0..3 {
             let log = Arc::new(Log(Mutex::new(Vec::new())));
             let t0 = Instant::now();
             let playback = video.play(&path, (1280, 720), log.clone()).unwrap();
-            let t_play = t0.elapsed();
             playback.set_playing(true);
-            let t_set = t0.elapsed();
+            let t_play = t0.elapsed();
             std::thread::sleep(Duration::from_millis(1500));
             drop(playback);
             let frames = log.0.lock().unwrap();
-            eprintln!(
-                "round {round}: play() {t_play:?}, set_playing {t_set:?}, frames {}",
-                frames.len()
-            );
+            eprintln!("round {round}: play() {t_play:?}, frames {}", frames.len());
             for (i, (at, live, pos)) in frames.iter().take(14).enumerate() {
                 eprintln!(
                     "  #{i:02} t={:>7.1}ms live={live} pos={:?}",

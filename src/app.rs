@@ -17,7 +17,7 @@ use crate::{
         session_helper::DbusManagedSessionExecutor,
         slint_backend,
         system_status::{StatusMonitor, SystemStatus},
-        video::GstVideo,
+        video::FfmpegVideo,
     },
     presentation::{
         achievements::AchievementsController,
@@ -303,8 +303,8 @@ pub fn run() -> Result<(), AppError> {
     let navigation_sound = Rc::new(RefCell::new(UiSounds::new(
         appearance.preferences().ui_sounds_enabled,
     )));
-    // Give the window its first frame, then warm SDL playback once while idle.
-    // The first actual menu cue should not pay audio-device opening latency.
+    // Give the window its first frame, then open the sound stream once while
+    // idle, so the first menu cue doesn't pay for opening it.
     let warm_sounds = Rc::clone(&navigation_sound);
     Timer::single_shot(Duration::from_millis(75), move || {
         warm_sounds.borrow_mut().prepare();
@@ -356,7 +356,7 @@ pub fn run() -> Result<(), AppError> {
         settings,
     );
     navigation.set_achievements(achievements, &ui);
-    let video: Arc<dyn VideoBackend> = match GstVideo::new() {
+    let video: Arc<dyn VideoBackend> = match FfmpegVideo::new() {
         Ok(video) => Arc::new(video),
         Err(error) => {
             warn!(%error, "video playback unavailable; Album lists videos without playing them");
@@ -527,8 +527,10 @@ pub fn run() -> Result<(), AppError> {
     let activation_activity = Rc::clone(&activity_service);
     let activation_album = Rc::clone(&album);
     let activation_ui = ui.as_weak();
+    let activation_sound = Rc::clone(&navigation_sound);
     ui.on_application_active_changed(move |active| {
         activation_input.set_ui_input_enabled(active);
+        activation_sound.borrow_mut().set_foreground(active);
         if let Some(ui) = activation_ui.upgrade() {
             ui.global::<crate::Motion>().set_loops_paused(!active);
         }

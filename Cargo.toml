@@ -13,9 +13,6 @@ ashpd = { version = "0.13", default-features = false, features = ["open_uri", "s
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 futures-util = "0.3"
 # Album video: playback and poster frames through the runtime's GStreamer.
-gstreamer = { version = "0.25", features = ["v1_24"] }
-gstreamer-app = "0.25"
-gstreamer-video = "0.25"
 image = { version = "0.25", default-features = false, features = ["ico", "jpeg", "png"] }
 ico = "0.5"
 rusqlite = { version = "0.37", features = ["bundled"] }
@@ -34,6 +31,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [build-dependencies]
+cc = "1"
+pkg-config = "0.3"
 slint-build = "~1.18"
 
 [profile.release]

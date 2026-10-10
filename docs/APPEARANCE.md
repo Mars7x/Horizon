@@ -126,13 +126,16 @@ For this initial sound phase, Horizon plays the user-provided
 `ui/assets/horizon-navigation.wav` **only when keyboard/gamepad directional
 navigation changes the selected item or region**. There is no sound on ignored
 keys, pointer clicks, initial page load, launching games or opening dialogs.
-Rapid movement drops cues instead of queueing them. **Current playback (ADR 0168):**
-GStreamer on its own `ui-sounds` thread, 48 kHz mono PCM16, to PipeWire when it
-can connect (`platform::audio_output`), otherwise GStreamer's automatic sink. The
-UI thread only posts a cue and never waits, so a stalled audio server silences
-the clicks but cannot freeze Horizon (SDL audio did: its PipeWire backend waits
-for the server with no timeout, on the main thread). The output opens shortly
-after start-up and closes after 20 quiet seconds.
+A newer cue replaces the one playing instead of layering. **Current playback
+(ADR 0169):** a native PipeWire stream (`platform::pipewire`), 48 kHz mono, asking
+the graph for 256-frame (about 5 ms) cycles. Playing a cue is one atomic store
+that PipeWire's next cycle picks up; nothing queues between the press and the
+sound. A small `ui-sounds` thread opens the stream shortly after start-up,
+pauses it after 10 quiet seconds (so the device can sleep) and while a game has
+the foreground, and resumes it on the next cue. The UI thread never waits on
+PipeWire, so a stalled audio server silences the clicks but cannot freeze
+Horizon (SDL audio did: its PipeWire backend waits for the server with no
+timeout, on the main thread).
 
 Phase 9.5.44.58 replaces the initial bundled navigation cue with the owner-supplied
 `horizon-navigation.wav` without re-encoding or gain changes. The retired

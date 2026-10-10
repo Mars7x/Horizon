@@ -131,19 +131,24 @@ The existing Apache-2.0 and MIT license texts cover these dual-licensed dependen
 
 The existing MIT license text is included as `LICENSES/MIT.txt`.
 
-### Album video dependencies
+### Video and sound libraries (not bundled)
 
-- **gstreamer-rs 0.25.x** (`gstreamer`, `gstreamer-app`, `gstreamer-video`)
-  - Upstream: https://gitlab.freedesktop.org/gstreamer/gstreamer-rs
-  - License: MIT OR Apache-2.0
-  - Use in Horizon: Rust bindings used to play Album videos and read their
-    poster frames and durations.
-  - Modification: none; consumed as Cargo dependencies.
+- **FFmpeg** (`libavformat`, `libavcodec`, `libavutil`, `libswscale`, `libswresample`)
+  - Upstream: https://ffmpeg.org/
+  - License: LGPL-2.1-or-later, or GPL-2.0-or-later for builds with GPL parts
+  - Use in Horizon: decodes Album videos, their poster frames and their sound.
+- **PipeWire** (`libpipewire-0.3`)
+  - Upstream: https://pipewire.org/
+  - License: MIT
+  - Use in Horizon: plays UI sounds and video sound.
 
-GStreamer itself and its codec plugins are not bundled by Horizon; they are
-provided by the Flatpak runtime (`org.freedesktop.Platform`) and its codec
-extensions under their own licenses. The existing MIT and Apache-2.0 license
-texts cover the bindings.
+Horizon bundles neither. It links dynamically against the copies the Flatpak
+runtime (`org.freedesktop.Platform`) ships, including FFmpeg's full codec set
+from the runtime's `codecs-extra` extension, under their own licenses; all are
+compatible with Horizon's GPL-3.0-or-later. Horizon's own C shims over them
+(`csrc/`) are part of Horizon. The build uses the **cc** and **pkg-config**
+crates (MIT OR Apache-2.0), consumed as Cargo build dependencies without
+modification.
 
 **Gamescope is not bundled by Horizon.** Phase 9.5 may use an independently
 installed host Gamescope executable through the optional helper. Horizon neither

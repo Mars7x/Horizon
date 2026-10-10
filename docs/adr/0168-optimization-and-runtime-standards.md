@@ -1,6 +1,6 @@
 # ADR 0168: Optimization phase and runtime standards
 
-**Status:** Implemented. Builds, and the gate passes. Measurements were taken in the Flatpak SDK on this machine (aarch64); the user should confirm video start-up and idle behaviour in the running app.
+**Status:** Implemented. Builds, and the gate passes. Its video and sound parts are superseded by [ADR 0169](0169-ffmpeg-and-pipewire-media.md) (FFmpeg and native PipeWire replace GStreamer). Measurements were taken in the Flatpak SDK on this machine (aarch64); the user should confirm video start-up and idle behaviour in the running app.
 
 ## Context
 
