@@ -109,29 +109,24 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
-fn cache_directory(steam_id: &str) -> Option<PathBuf> {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    let root = std::env::var_os("XDG_CACHE_HOME")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| home.map(|path| path.join(".cache")))?;
-    if !root.is_absolute() {
+/// Bump when the snapshot or badge file format changes; the folder is cleared.
+/// (2: badge files are keyed by locked/unlocked state.)
+pub const ACHIEVEMENTS_CACHE_VERSION: &str = "achievements-v2";
+
+/// One private folder per SteamID inside the achievements cache folder that
+/// `platform::data_paths` hands to the controller.
+fn cache_directory(cache_root: Option<&Path>, steam_id: &str) -> Option<PathBuf> {
+    if steam_id.len() != 17 || !steam_id.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
-    let dir = root
-        .join("io.github.Mars7x.Horizon")
-        .join("achievements")
-        .join(format!("steam-{steam_id}"));
+    let dir = cache_root?.join(format!("steam-{steam_id}"));
     fs::create_dir_all(&dir).ok()?;
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).ok()?;
     Some(dir)
 }
 
-pub fn purge_achievement_cache(steam_id: &str) {
-    if steam_id.len() != 17 || !steam_id.bytes().all(|b| b.is_ascii_digit()) {
-        return;
-    }
-    if let Some(dir) = cache_directory(steam_id) {
+pub fn purge_achievement_cache(cache_root: Option<&Path>, steam_id: &str) {
+    if let Some(dir) = cache_directory(cache_root, steam_id) {
         let _ = fs::remove_dir_all(dir);
     }
 }
@@ -308,10 +303,11 @@ fn badge_urls(json: &str) -> HashMap<String, (String, String)> {
 pub fn import_steam_achievements(
     credentials: SteamAccountCredentials,
     games: Vec<SteamGame>,
+    cache_root: Option<PathBuf>,
     sender: Sender<AchievementImportEvent>,
 ) {
     let steam_id = credentials.steam_id64().to_owned();
-    let directory = cache_directory(&steam_id);
+    let directory = cache_directory(cache_root.as_deref(), &steam_id);
     let requested = games.iter().map(|g| g.app_id).collect::<Vec<_>>();
     if let Some((cached, fresh)) = directory
         .as_ref()
@@ -468,9 +464,10 @@ fn download_badges<'a>(
 pub fn hydrate_game_badges(
     credentials: SteamAccountCredentials,
     mut game: SteamGameAchievements,
+    cache_root: Option<PathBuf>,
     sender: Sender<AchievementImportEvent>,
 ) {
-    let directory = cache_directory(credentials.steam_id64());
+    let directory = cache_directory(cache_root.as_deref(), credentials.steam_id64());
     let missing = game
         .achievements
         .iter()

@@ -18,6 +18,7 @@
 | External credentials or appearance? | [Settings](SETTINGS.md), [Appearance](APPEARANCE.md) | `src/services/steam_account.rs`, `src/presentation/settings.rs` |
 | Imports and provider capabilities? | [Sources](SOURCES.md), [Steam](STEAM.md), [Heroic](HEROIC.md) | `src/sources/`, `src/services/import.rs` |
 | Database or migrations? | [Database](DATABASE.md), [Domain](DOMAIN.md) | `src/persistence/`, `src/domain/` |
+| Where are files kept on disk? | [Files on disk](STORAGE.md) | `src/platform/data_paths.rs` |
 | Art, attribution, permission review? | [Artwork](ARTWORK.md), [Licensing](LICENSING.md) | `ui/assets/`, `REUSE.toml`, `THIRD_PARTY_NOTICES.md` |
 
 Additional focused guides: [Input](INPUT.md), [Clock](CLOCK.md), [Live status](STATUS.md), [Managed sessions](MANAGED_SESSIONS.md), [Shell hardening](SHELL_HARDENING.md), and [Flatpak notes](../flatpak/README.md).

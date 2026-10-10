@@ -66,19 +66,11 @@ usable square asset at all, Horizon uses its procedural fallback.
 
 ## Persistent cache
 
-Canonical artwork is cached under:
+Canonical artwork is cached in `cache/artwork/local/<game-key>.png` (see
+[Files on disk](STORAGE.md)), with a `<game-key>.filter` file recording whether
+it is drawn as pixel art. The folder's `.version` is `LOCAL_ARTWORK_CACHE_VERSION`.
 
-```text
-$XDG_CACHE_HOME/horizon/artwork/square-v6/<game-key>.png
-```
-
-or, when `XDG_CACHE_HOME` is unavailable:
-
-```text
-$HOME/.cache/horizon/artwork/square-v6/<game-key>.png
-```
-
-`square-v6` invalidates the earlier cache so artwork is rebuilt with the
+Version `square-v6` invalidated the earlier cache so artwork is rebuilt with the
 pixel-art rendering classification introduced in 9.5.38. A cached image created
 with smooth interpolation must never keep a pixel-art source blurred after the
 policy changes.
@@ -136,8 +128,8 @@ pixelated OR smooth
 ## Phases 9.5.40–9.5.43 — SteamGridDB square artwork
 
 The original `ArtworkService` keeps source-owned local art and its existing
-`square-v6` normalization path. SteamGridDB uses an isolated
-`square-v6/steamgriddb/` cache; it never changes source files or the source
+`square-v6` normalization path. SteamGridDB uses its own
+`cache/artwork/steamgriddb/` folder; it never changes source files or the source
 normalization cache. The API matches Steam games via exact AppID first. If
 SteamGridDB has no mapping for the AppID, it can use a unique exact title
 match; Heroic and Bottles likewise use unique exact titles. Fuzzy or

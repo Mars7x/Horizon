@@ -4,19 +4,7 @@ Horizon uses SQLite through `rusqlite`. SQL is confined to `src/persistence/`; p
 
 ## Location
 
-The native database path is resolved by the platform layer:
-
-```text
-$XDG_DATA_HOME/io.github.Mars7x.Horizon/library.sqlite3
-```
-
-If `XDG_DATA_HOME` is unset, Horizon follows the XDG default under:
-
-```text
-$HOME/.local/share/io.github.Mars7x.Horizon/library.sqlite3
-```
-
-Inside the Flatpak, `XDG_DATA_HOME` already points at Horizon's per-application writable data area, so no broad host filesystem permission is required.
+`library.sqlite3` lives directly in Horizon's data directory: `~/.var/app/io.github.Mars7x.Horizon/data/library.sqlite3` under Flatpak, or `$XDG_DATA_HOME/io.github.Mars7x.Horizon/library.sqlite3` (default `~/.local/share/…`) otherwise. See [Files on disk](STORAGE.md). No broad host filesystem permission is required.
 
 ## Migration policy
 

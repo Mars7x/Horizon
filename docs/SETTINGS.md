@@ -21,7 +21,7 @@ layout, persistence, and contrast rules.
 
 Enter a personal key at **Settings → Third-Party → SteamGridDB → API key**. Generate keys at
 https://www.steamgriddb.com/profile/preferences/api. Horizon stores keys in
-`$XDG_CONFIG_HOME/io.github.Mars7x.Horizon/third-party.json` (the Flatpak
+`config/steamgriddb.json` (see [Files on disk](STORAGE.md); the Flatpak
 config directory is sandbox-local), with mode 0600 under a mode-0700 directory.
 Keys are not encrypted; same-user programs can read this file. Key entry uses
 Horizon-styled masked input with normal Slint text-editing shortcuts, including
@@ -80,7 +80,7 @@ Metadata requests have a bounded retry for transient gateway errors; connect
 and total timeouts avoid indefinitely waiting for network access. Work occurs
 on a dedicated worker thread; controller input/UI are never blocked by API IO.
 
-Cache: `$XDG_CACHE_HOME/horizon/artwork/square-v6/steamgriddb/`. Entries use
+Cache: `cache/artwork/steamgriddb/` (see [Files on disk](STORAGE.md)). Entries use
 non-identifying stable filenames with a normalized 512×512 PNG and companion
 JSON containing SteamGridDB game and grid IDs, matching method, original HTTPS
 URL, author, a pixel-art rendering flag, and a checksum over normalized pixels.
