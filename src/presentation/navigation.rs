@@ -71,12 +71,19 @@ impl NavigationController {
         *self.activity_on_enter.borrow_mut() = Some(callback);
     }
 
-    pub fn set_achievements(&self, controller: Rc<AchievementsController>, ui: &AppWindow) {
+    pub fn set_achievements(
+        self: &Rc<Self>,
+        controller: Rc<AchievementsController>,
+        ui: &AppWindow,
+    ) {
         *self.achievements.borrow_mut() = Some(Rc::clone(&controller));
         let weak = ui.as_weak();
+        let navigation = Rc::clone(self);
         ui.on_achievements_select(move |index| {
-            if let Some(ui) = weak.upgrade() {
-                controller.choose_game(&ui, index);
+            if let Some(ui) = weak.upgrade()
+                && controller.choose_game(&ui, index)
+            {
+                navigation.cue(UiSoundCue::Ok);
             }
         });
         let controller = self
@@ -636,17 +643,17 @@ impl NavigationController {
                         match event.action {
                             UiAction::Up => controller.move_entries(ui, -1),
                             UiAction::Down => controller.move_entries(ui, 1),
-                            UiAction::Left => {
-                                controller.exit_entries(ui);
-                            }
                             _ => {}
                         }
                     } else {
                         match event.action {
                             UiAction::Up => controller.move_game(ui, -1),
                             UiAction::Down => controller.move_game(ui, 1),
-                            UiAction::Right | UiAction::Accept if !event.repeated => {
-                                controller.enter_entries(ui)
+                            // Only A (or a click) opens a game; Right does nothing.
+                            UiAction::Accept if !event.repeated => {
+                                if controller.enter_entries(ui) {
+                                    self.cue(UiSoundCue::Ok);
+                                }
                             }
                             UiAction::LeftBumper if !event.repeated => {
                                 controller.cycle_source(ui, -1)
