@@ -1,0 +1,41 @@
+// Time since `key` last changed, for choreography one `animate` can't
+// express (staggered reveals, sequenced fades). It reads animation-tick()
+// only while `running`, so a page at rest never redraws: a binding that
+// reads animation-tick() keeps the window drawing every frame for as long as
+// it is evaluated.
+//
+// `elapsed` is 0 the moment `key` changes (derived, so no handler runs a
+// frame late), counts up to `length`, and rests there. A zero `length`
+// (Reduced Motion) is always finished. Drive `key` from a counter bumped in
+// the same handler that swaps the content, so the first frame of the
+// choreography is also the first frame of the new content.
+export component Stopwatch {
+    in property <int> key: 0;
+    in property <duration> length: 0ms;
+    private property <int> seen-key: 0;
+    private property <bool> ticking: false;
+    private property <duration> started: 0ms;
+    out property <bool> running: root.length > 0ms && (root.key != root.seen-key || root.ticking);
+    out property <duration> elapsed: !root.running ? root.length
+        : root.key != root.seen-key ? 0ms
+        : max(0ms, min(root.length, animation-tick() - root.started));
+    // elapsed / length, 1.0 when finished.
+    out property <float> progress: root.running ? root.elapsed / root.length : 1.0;
+
+    init => { root.seen-key = root.key; }
+    changed key => {
+        root.seen-key = root.key;
+        root.started = animation-tick();
+        root.ticking = true;
+        timer.stop();
+        timer.start();
+    }
+    timer := Timer {
+        interval: max(1ms, root.length);
+        running: false;
+        triggered => {
+            self.stop();
+            root.ticking = false;
+        }
+    }
+}

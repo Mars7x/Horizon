@@ -6,6 +6,7 @@ import { ListRow, Surface, BadgeIcon } from "../components/list-row.slint";
 import { MarqueeText } from "../components/marquee-text.slint";
 import { TransitionDriver, TransitionLayer } from "../components/transition.slint";
 import { Scroll, CameraSettle } from "../components/scroll.slint";
+import { Stopwatch } from "../components/stopwatch.slint";
 
 // One full-width games list, then one full-width, read-only achievement list.
 // Both views remain mounted; opening a game zooms between them.
@@ -18,11 +19,16 @@ export component AchievementsPage inherits Rectangle {
     in property <int> catalog-revision: 0;
     private property <int> previous-catalog-count: 0;
     private property <int> displayed-catalog-count: 0;
-    private property <duration> catalog-arrival-at: 0ms;
+    // New rows slide in once a catalog arrives; rows already shown stay put.
+    private property <int> catalog-arrivals: 0;
     changed catalog-revision => {
         root.previous-catalog-count = root.displayed-catalog-count;
         root.displayed-catalog-count = root.games.length;
-        root.catalog-arrival-at = animation-tick();
+        root.catalog-arrivals += 1;
+    }
+    arrival-clock := Stopwatch {
+        key: root.catalog-arrivals;
+        length: Motion.value-swap-duration;
     }
     in property <int> first-entry: 0;
     in property <bool> viewing-entries: false;
@@ -158,8 +164,8 @@ export component AchievementsPage inherits Rectangle {
                 }
             }
             for game[i] in root.games : ListRow {
-                private property <float> entrance: Motion.reduced-motion || i < root.previous-catalog-count
-                    ? 1.0 : min(1.0, max(0.0, (animation-tick() - root.catalog-arrival-at) / 195ms));
+                private property <float> entrance: i < root.previous-catalog-count
+                    ? 1.0 : 1.0 - (1.0 - arrival-clock.progress) * (1.0 - arrival-clock.progress);
                 opacity: self.entrance;
                 x: 1px + (1.0 - self.entrance) * 8px;
                 y: i * root.row-stride - root.game-camera + 2px;
@@ -193,7 +199,7 @@ export component AchievementsPage inherits Rectangle {
                         x: 0px; y: 0px; height: parent.height;
                         width: parent.width * max(0.0, min(1.0, game.fraction));
                         border-radius: 2px; background: Theme.accent;
-                        animate width { duration: Motion.carousel-duration; easing: ease-in-out; }
+                        animate width { duration: Motion.value-swap-duration; easing: ease-out; }
                     }
                 }
                 Text {

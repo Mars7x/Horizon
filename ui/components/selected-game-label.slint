@@ -17,13 +17,7 @@ export component SelectedGameLabel inherits Rectangle {
         root.title-overflows
             ? root.title-natural-width - root.title-viewport-width + 4px
             : 0px;
-    private property <duration> marquee-travel-duration:
-        root.marquee-distance <= 16px ? 650ms :
-        root.marquee-distance <= 32px ? 850ms :
-        root.marquee-distance <= 56px ? 1100ms :
-        root.marquee-distance <= 90px ? 1450ms :
-        root.marquee-distance <= 140px ? 1900ms :
-        root.marquee-distance <= 200px ? 2500ms : 3100ms;
+    private property <duration> marquee-travel-duration: Motion.marquee-travel(root.marquee-distance);
     private property <length> marquee-offset: 0px;
     private property <bool> marquee-animate: false;
     private property <float> marquee-text-opacity: 1.0;
@@ -111,7 +105,7 @@ export component SelectedGameLabel inherits Rectangle {
 
             animate opacity {
                 enabled: root.marquee-opacity-animate && !root.reduced-motion;
-                duration: root.marquee-text-opacity < 0.5 ? 140ms : 180ms;
+                duration: root.marquee-text-opacity < 0.5 ? Motion.marquee-fade-out : Motion.marquee-fade-in;
                 easing: ease-in-out;
             }
         }
@@ -144,7 +138,7 @@ export component SelectedGameLabel inherits Rectangle {
                 // otherwise a newly selected overflowing title visibly flashes
                 // unmasked for the first ~120 ms.
                 enabled: root.marquee-animate && !root.reduced-motion;
-                duration: 120ms;
+                duration: Motion.marquee-edge-fade;
                 easing: ease-in-out;
             }
         }
@@ -176,7 +170,7 @@ export component SelectedGameLabel inherits Rectangle {
 
             animate opacity {
                 enabled: root.marquee-animate && !root.reduced-motion;
-                duration: 120ms;
+                duration: Motion.marquee-edge-fade;
                 easing: ease-in-out;
             }
         }
@@ -187,7 +181,7 @@ export component SelectedGameLabel inherits Rectangle {
     //   -> fade in at the beginning -> rest -> repeat.
     // The fade-through reset avoids both a pendulum return and a visible snap.
     delay-timer := Timer {
-        interval: 2s;
+        interval: Motion.marquee-start-delay;
         running: false;
         triggered => {
             self.stop();
@@ -209,7 +203,7 @@ export component SelectedGameLabel inherits Rectangle {
     }
 
     end-pause-timer := Timer {
-        interval: 2.4s;
+        interval: Motion.marquee-end-pause;
         running: false;
         triggered => {
             self.stop();
@@ -222,7 +216,7 @@ export component SelectedGameLabel inherits Rectangle {
     }
 
     reset-fade-out-timer := Timer {
-        interval: 140ms;
+        interval: Motion.marquee-fade-out;
         running: false;
         triggered => {
             self.stop();
@@ -237,7 +231,7 @@ export component SelectedGameLabel inherits Rectangle {
     }
 
     reset-fade-in-timer := Timer {
-        interval: 180ms;
+        interval: Motion.marquee-fade-in;
         running: false;
         triggered => {
             self.stop();

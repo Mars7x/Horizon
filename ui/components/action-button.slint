@@ -22,7 +22,7 @@ export component ActionButton inherits Rectangle {
     opacity: root.enabled ? 1.0 : 0.48;
     animate background { duration: Motion.hover-duration; easing: ease-in-out; }
     animate border-color { duration: Motion.focus-duration; easing: ease-in-out; }
-    animate opacity { duration: Motion.hover-duration; }
+    animate opacity { duration: Motion.hover-duration; easing: ease-in-out; }
     // A clean outline-only focus ring (including on filled action buttons).
     // No selection fill or shadow; the primary Save button retains its normal
     // accent-coloured *button* background, independent of focus.
@@ -31,7 +31,6 @@ export component ActionButton inherits Rectangle {
         width: parent.width + 10px; height: parent.height + 10px;
         corner-radius: Metrics.radius-md + 5px;
         focused: root.focused && root.enabled;
-        reveal-duration: Motion.focus-duration;
         filled: false;
         soft-shadow: false;
     }

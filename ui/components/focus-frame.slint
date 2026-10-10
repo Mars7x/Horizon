@@ -10,7 +10,7 @@ export component FocusFrame inherits Rectangle {
     private property <float> motion-strength: root.active
         && !Motion.reduced-motion && !Theme.high-contrast ? 1.0 : 0.0;
     animate motion-strength {
-        duration: Motion.reduced-motion ? 0ms : 220ms;
+        duration: Motion.focus-idle-fade;
         easing: ease-in-out;
     }
     private property <float> cursor-cycle: root.motion-strength > 0.0

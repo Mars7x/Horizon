@@ -319,6 +319,11 @@ never overlaps artwork, and both light/dark themes show a subtle edge shadow.
 
 ### Phase 10.3.1 — Source and Sort animation separation
 
+> **Superseded (ADR 0167):** Source and Sort now share the grid refresh
+> (`components/grid-refresh.slint`), which is the former Source animation
+> below. Album's Game and Type filters use it too. The separate Sort
+> animation is gone.
+
 - **Source (LB / click):** The frozen prior viewport fades away over 85ms.
   Incoming card shells then fade in and settle upward 6px, revealing by
   **column** at 7ms intervals. Each card starts at 97% shell size and eases

@@ -22,13 +22,7 @@ export component MarqueeText inherits Rectangle {
     private property <bool> overflows: root.natural-width > root.width;
     private property <length> distance: root.overflows
         ? root.natural-width - root.width + 4px : 0px;
-    private property <duration> travel-duration:
-        root.distance <= 16px ? 650ms :
-        root.distance <= 32px ? 850ms :
-        root.distance <= 56px ? 1100ms :
-        root.distance <= 90px ? 1450ms :
-        root.distance <= 140px ? 1900ms :
-        root.distance <= 200px ? 2500ms : 3100ms;
+    private property <duration> travel-duration: Motion.marquee-travel(root.distance);
     private property <length> offset: 0px;
     private property <bool> animate-travel: false;
     private property <bool> animate-fade: false;
@@ -73,7 +67,7 @@ export component MarqueeText inherits Rectangle {
         opacity: root.text-opacity;
         animate opacity {
             enabled: root.animate-fade && !Motion.reduced-motion;
-            duration: root.text-opacity < 0.5 ? 140ms : 180ms;
+            duration: root.text-opacity < 0.5 ? Motion.marquee-fade-out : Motion.marquee-fade-in;
             easing: ease-in-out;
         }
     }
@@ -95,7 +89,7 @@ export component MarqueeText inherits Rectangle {
         easing: linear;
     }
     delay := Timer {
-        interval: 2s;
+        interval: Motion.marquee-start-delay;
         running: false;
         triggered => {
             self.stop();
@@ -112,7 +106,7 @@ export component MarqueeText inherits Rectangle {
         triggered => { self.stop(); end-pause.start(); }
     }
     end-pause := Timer {
-        interval: 2.4s;
+        interval: Motion.marquee-end-pause;
         running: false;
         triggered => {
             self.stop();
@@ -124,7 +118,7 @@ export component MarqueeText inherits Rectangle {
         }
     }
     fade-out := Timer {
-        interval: 140ms;
+        interval: Motion.marquee-fade-out;
         running: false;
         triggered => {
             self.stop();
@@ -135,7 +129,7 @@ export component MarqueeText inherits Rectangle {
         }
     }
     fade-in := Timer {
-        interval: 180ms;
+        interval: Motion.marquee-fade-in;
         running: false;
         triggered => {
             self.stop();
