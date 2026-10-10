@@ -126,10 +126,13 @@ For this initial sound phase, Horizon plays the user-provided
 `ui/assets/horizon-navigation.wav` **only when keyboard/gamepad directional
 navigation changes the selected item or region**. There is no sound on ignored
 keys, pointer clicks, initial page load, launching games or opening dialogs.
-Rapid movement replaces pending samples instead of layering sounds. Playback
-uses the already-linked SDL3 audio API, 48 kHz mono PCM16, with a lazily opened
-audio device. The Flatpak adds `--socket=pulseaudio` for the ordinary host audio
-server (including PipeWire's PulseAudio compatibility).
+Rapid movement drops cues instead of queueing them. **Current playback (ADR 0168):**
+GStreamer on its own `ui-sounds` thread, 48 kHz mono PCM16, to PipeWire when it
+can connect (`platform::audio_output`), otherwise GStreamer's automatic sink. The
+UI thread only posts a cue and never waits, so a stalled audio server silences
+the clicks but cannot freeze Horizon (SDL audio did: its PipeWire backend waits
+for the server with no timeout, on the main thread). The output opens shortly
+after start-up and closes after 20 quiet seconds.
 
 Phase 9.5.44.58 replaces the initial bundled navigation cue with the owner-supplied
 `horizon-navigation.wav` without re-encoding or gain changes. The retired

@@ -55,6 +55,15 @@ The lifecycle polls (250–500 ms, about 9 wake-ups a second) are unchanged: the
 - One `ActivityController::refresh` instead of seven copies.
 - Album's dedicated `album-media-ready` callback is gone.
 
+## Audio never blocks the UI (follow-up)
+
+After the PipeWire grant, Horizon froze before showing its window. SDL3's PipeWire audio backend (`PIPEWIRE_PREFERRED_Init`) waits for the server's device listing with no timeout, on the main thread, and the host audio server had stalled (GNOME Settings' sound streams timed out too, after WirePlumber errors on a Bluetooth headset; restarting PipeWire and WirePlumber recovered it). Decisions:
+- UI sounds move from SDL to GStreamer on their own thread (`audio.rs`). The UI posts cues and never waits; a stalled server only silences them. Measured with the server stalled: 20 cues cost the UI thread 0.18 ms.
+- Each video's state changes and seeks run on its own control thread; the UI's handle only sends commands and queries.
+- The output choice (`platform::audio_output`) is shared and detected off the UI thread.
+
+SDL remains for controllers only.
+
 ## Sandbox
 
 `--socket=pulseaudio` alone doesn't let `pipewiresink` connect. At the user's choice the manifest adds `--filesystem=xdg-run/pipewire-0`, so the shipped app uses PipeWire, keeping sound and picture in step from the first sample. The system-clock path remains the fallback (older hosts, or the permission removed).
