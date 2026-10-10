@@ -178,7 +178,7 @@ export component AlbumPage inherits Rectangle {
     in property <bool> viewer-playing: false;
     in property <string> viewer-problem: "";
     // Video clock: a steady clock at real-time speed, so the bar moves
-    // perfectly evenly. Frames (Rust, from GStreamer's timestamps) correct
+    // perfectly evenly. Frames (Rust, from the decoder's timestamps) correct
     // it only when it drifts more than two frames from the picture, or on a
     // still (start, pause, seek). It never runs more than one and a half
     // frames past the frame on screen, so a stall (or the start-up while

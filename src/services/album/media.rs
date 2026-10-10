@@ -63,6 +63,9 @@ pub trait VideoSink: Send + Sync {
     /// decoder then drops this one without copying it.
     fn wants_frame(&self) -> bool;
     fn frame(&self, frame: VideoFrame<'_>);
+    /// The video's length, once the file is open (it opens off the UI
+    /// thread, after `play` returns).
+    fn duration(&self, _duration: Duration) {}
     fn ended(&self);
     fn failed(&self, message: String);
 }
@@ -82,7 +85,8 @@ pub struct VideoProbe {
     pub duration: Option<Duration>,
 }
 
-/// The video decoder Horizon runs on (GStreamer, from the platform layer).
+/// The video decoder Horizon runs on (FFmpeg and PipeWire, from the
+/// platform layer).
 /// Frames are scaled by the decoder to fit `max`, so a 4K clip on a 1080p
 /// screen never moves 4K frames.
 pub trait VideoBackend: Send + Sync {

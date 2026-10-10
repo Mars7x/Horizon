@@ -1,32 +1,37 @@
 //! Optional UI feedback sounds (Navigate, OK, Back).
 //! This module owns UI sound playback. Presentation and input adapters remain silent.
 //!
-//! Sounds play through GStreamer on their own thread, to PipeWire when it
-//! can connect (`platform::audio_output`). The UI thread only posts a cue
-//! and never waits: an audio server that stalls (it happens, for example
-//! with a Bluetooth headset changing profile) silences the clicks but can
-//! never freeze Horizon. The output stays open while the user navigates and
-//! closes after a quiet spell, so an idle Horizon holds no audio stream.
+//! Sounds play on a native PipeWire stream (`platform::pipewire`) that asks
+//! the graph for about 5 ms per cycle. Playing a cue is one atomic store,
+//! which PipeWire's next cycle picks up: nothing queues between a press and
+//! the sound. A small controller thread opens the stream, pauses it after a
+//! quiet spell (so the device can sleep) and resumes it on the next cue.
+//! The UI thread never waits on PipeWire: a stalled server only silences
+//! the clicks.
 use std::{
-    sync::mpsc::{self, RecvTimeoutError, SyncSender, TrySendError},
-    time::Duration,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+        mpsc::{self, RecvTimeoutError, SyncSender, TrySendError},
+    },
+    time::{Duration, Instant},
 };
 
-use gstreamer::{self as gst, prelude::*};
-use gstreamer_app as gst_app;
 use tracing::warn;
 
-use crate::platform::audio_output::AudioOutput;
+use crate::platform::pipewire::{AudioStream, Role};
 
 const NAVIGATION_WAV: &[u8] = include_bytes!("../ui/assets/horizon-navigation.wav");
 const OK_WAV: &[u8] = include_bytes!("../ui/assets/horizon-ok.wav");
 const BACK_WAV: &[u8] = include_bytes!("../ui/assets/horizon-back.wav");
 
-const SAMPLE_RATE: i32 = 48_000;
-/// The output closes after this long without a sound.
-const IDLE_CLOSE: Duration = Duration::from_secs(20);
-/// Cues waiting for the sound thread; more than this are dropped, not queued.
-const QUEUE: usize = 4;
+const SAMPLE_RATE: u32 = 48_000;
+/// Frames per PipeWire cycle while sounds are live (about 5 ms).
+const LATENCY_FRAMES: u32 = 256;
+/// The stream pauses after this long without a cue.
+const IDLE_PAUSE: Duration = Duration::from_secs(10);
+/// A failed open is retried no sooner than this.
+const RETRY_DELAY: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiSoundCue {
@@ -45,33 +50,50 @@ impl UiSoundCue {
     }
 }
 
+/// The latest cue: a sequence number (so the same cue can replay) and the
+/// cue's index, packed for one atomic store.
+#[derive(Default)]
+struct Request(AtomicU64);
+
+impl Request {
+    fn post(&self, cue: UiSoundCue) {
+        let sequence = (self.0.load(Ordering::Relaxed) >> 8) + 1;
+        self.0
+            .store(sequence << 8 | cue.index() as u64, Ordering::Release);
+    }
+}
+
 enum Command {
-    /// Open the output ahead of the first sound.
-    Prepare,
-    Play(UiSoundCue),
-    /// Sounds were turned off: close the output.
-    Close,
+    /// A cue was posted: make sure the stream runs.
+    Wake,
+    /// Horizon gained or lost the foreground.
+    Foreground(bool),
 }
 
 pub struct UiSounds {
     enabled: bool,
-    samples: Option<[Vec<u8>; 3]>,
-    worker: Option<SyncSender<Command>>,
+    samples: Arc<[Vec<f32>; 3]>,
+    request: Arc<Request>,
+    controller: Option<SyncSender<Command>>,
+    last_failed_open: Option<Instant>,
 }
 
 impl UiSounds {
     pub fn new(enabled: bool) -> Self {
         // A malformed bundled asset is a packaging error, not a user's runtime error.
         let samples = [NAVIGATION_WAV, OK_WAV, BACK_WAV].map(|wav| {
-            pcm_bytes(
-                &decode_pcm16_mono_48k(wav)
-                    .expect("bundled Horizon UI WAV must be PCM16 mono 48 kHz"),
-            )
+            decode_pcm16_mono_48k(wav)
+                .expect("bundled Horizon UI WAV must be PCM16 mono 48 kHz")
+                .into_iter()
+                .map(|sample| f32::from(sample) / 32_768.0)
+                .collect()
         });
         Self {
             enabled,
-            samples: Some(samples),
-            worker: None,
+            samples: Arc::new(samples),
+            request: Arc::new(Request::default()),
+            controller: None,
+            last_failed_open: None,
         }
     }
 
@@ -80,156 +102,131 @@ impl UiSounds {
     }
 
     pub fn set_enabled(&mut self, enabled: bool) {
-        if !enabled && self.enabled {
-            self.send(Command::Close);
+        if !enabled {
+            // Dropping the sender ends the controller, which closes the stream.
+            self.controller = None;
         }
         self.enabled = enabled;
     }
 
-    /// Open the output before the user navigates. Never blocks.
+    /// Open the stream before the user navigates. Never blocks.
     pub fn prepare(&mut self) {
-        if self.enabled {
-            self.send(Command::Prepare);
+        if !self.enabled || self.controller.is_some() {
+            return;
+        }
+        if self
+            .last_failed_open
+            .is_some_and(|at| at.elapsed() < RETRY_DELAY)
+        {
+            return;
+        }
+        let (sender, commands) = mpsc::sync_channel(8);
+        let samples = Arc::clone(&self.samples);
+        let request = Arc::clone(&self.request);
+        if crate::services::worker::spawn("ui-sounds", move || {
+            control(&samples, &request, &commands)
+        }) {
+            self.controller = Some(sender);
+        } else {
+            self.last_failed_open = Some(Instant::now());
         }
     }
 
     /// Call only after a semantic UI action succeeds; no sound on ignored
     /// input. Never blocks.
     pub fn play(&mut self, cue: UiSoundCue) {
-        if self.enabled {
-            self.send(Command::Play(cue));
+        if !self.enabled {
+            return;
         }
+        self.prepare();
+        self.request.post(cue);
+        self.send(Command::Wake);
+    }
+
+    /// While another app (a game) has the foreground the stream stays paused.
+    pub fn set_foreground(&mut self, foreground: bool) {
+        self.send(Command::Foreground(foreground));
     }
 
     fn send(&mut self, command: Command) {
-        if self.worker.is_none() {
-            let Some(samples) = self.samples.take() else {
-                return;
-            };
-            let (sender, commands) = mpsc::sync_channel(QUEUE);
-            if !crate::services::worker::spawn("ui-sounds", move || run(&samples, &commands)) {
-                return;
-            }
-            self.worker = Some(sender);
-        }
-        if let Some(worker) = &self.worker {
-            match worker.try_send(command) {
-                // A busy or stalled output drops cues instead of queueing them.
+        if let Some(controller) = &self.controller {
+            match controller.try_send(command) {
                 Ok(()) | Err(TrySendError::Full(_)) => {}
-                Err(TrySendError::Disconnected(_)) => self.worker = None,
+                Err(TrySendError::Disconnected(_)) => {
+                    // The stream couldn't open; try again later.
+                    self.controller = None;
+                    self.last_failed_open = Some(Instant::now());
+                }
             }
         }
     }
 }
 
-/// The sound thread: opens the output on demand, plays cues, and closes it
-/// after a quiet spell or when sounds are turned off.
-fn run(samples: &[Vec<u8>; 3], commands: &mpsc::Receiver<Command>) {
-    if let Err(error) = gst::init() {
-        warn!(%error, "UI sounds unavailable; menus remain usable");
-        return;
-    }
-    let output = AudioOutput::detect();
-    let mut player: Option<Player> = None;
+/// The controller thread: owns the stream, pauses it when quiet.
+fn control(
+    samples: &Arc<[Vec<f32>; 3]>,
+    request: &Arc<Request>,
+    commands: &mpsc::Receiver<Command>,
+) {
+    let voice = Arc::clone(samples);
+    let cues = Arc::clone(request);
+    let mut seen = cues.0.load(Ordering::Acquire);
+    let mut playing: Option<(usize, usize)> = None;
+    let stream = match AudioStream::open(
+        "Horizon UI sounds",
+        Role::Game,
+        SAMPLE_RATE,
+        1,
+        LATENCY_FRAMES,
+        Box::new(move |out: &mut [f32], _delay| {
+            // A newer cue replaces the one playing (no pile-up on held input).
+            let latest = cues.0.load(Ordering::Acquire);
+            if latest != seen {
+                seen = latest;
+                playing = Some(((latest & 0xff) as usize, 0));
+            }
+            let mut written = 0;
+            if let Some((cue, position)) = playing.as_mut() {
+                let sound = &voice[*cue];
+                let count = out.len().min(sound.len() - *position);
+                out[..count].copy_from_slice(&sound[*position..*position + count]);
+                *position += count;
+                written = count;
+                if *position >= sound.len() {
+                    playing = None;
+                }
+            }
+            out[written..].fill(0.0);
+        }),
+    ) {
+        Ok(stream) => stream,
+        Err(error) => {
+            warn!(%error, "UI sounds unavailable; menus remain usable");
+            return;
+        }
+    };
+    let mut foreground = true;
+    let mut active = true;
     loop {
-        let command = if player.is_some() {
-            commands.recv_timeout(IDLE_CLOSE)
+        let command = if active {
+            commands.recv_timeout(IDLE_PAUSE)
         } else {
             commands.recv().map_err(|_| RecvTimeoutError::Disconnected)
         };
-        match command {
-            Ok(Command::Prepare) => {
-                if player.is_none() {
-                    player = Player::open(output);
-                }
+        let want = match command {
+            Ok(Command::Wake) => foreground,
+            Ok(Command::Foreground(now)) => {
+                foreground = now;
+                false
             }
-            Ok(Command::Play(cue)) => {
-                if player.is_none() {
-                    player = Player::open(output);
-                }
-                if let Some(open) = &player
-                    && let Err(error) = open.push(&samples[cue.index()])
-                {
-                    warn!(%error, "UI sound could not play");
-                    player = None;
-                }
-            }
-            Ok(Command::Close) | Err(RecvTimeoutError::Timeout) => player = None,
+            Err(RecvTimeoutError::Timeout) => false,
             Err(RecvTimeoutError::Disconnected) => break,
+        };
+        if want != active {
+            stream.set_active(want);
+            active = want;
         }
     }
-}
-
-/// An open output: a live source feeding the sink. Dropping it stops it.
-struct Player {
-    pipeline: gst::Pipeline,
-    source: gst_app::AppSrc,
-}
-
-impl Player {
-    fn open(output: AudioOutput) -> Option<Self> {
-        Self::try_open(output)
-            .inspect_err(|error| warn!(%error, "UI audio output unavailable; menus remain usable"))
-            .ok()
-    }
-
-    fn try_open(output: AudioOutput) -> Result<Self, String> {
-        let caps = gst::Caps::builder("audio/x-raw")
-            .field("format", "S16LE")
-            .field("layout", "interleaved")
-            .field("rate", SAMPLE_RATE)
-            .field("channels", 1)
-            .build();
-        let source = gst_app::AppSrc::builder()
-            .caps(&caps)
-            .format(gst::Format::Time)
-            .is_live(true)
-            .do_timestamp(true)
-            .build();
-        let convert = make("audioconvert")?;
-        let resample = make("audioresample")?;
-        let sink = output.sink()?;
-        // Play each cue the moment it arrives.
-        if sink.has_property("sync") {
-            sink.set_property("sync", false);
-        }
-        let pipeline = gst::Pipeline::new();
-        pipeline
-            .add_many([source.upcast_ref(), &convert, &resample, &sink])
-            .map_err(|error| error.to_string())?;
-        gst::Element::link_many([source.upcast_ref(), &convert, &resample, &sink])
-            .map_err(|error| error.to_string())?;
-        pipeline
-            .set_state(gst::State::Playing)
-            .map_err(|error| error.to_string())?;
-        Ok(Self { pipeline, source })
-    }
-
-    fn push(&self, pcm: &[u8]) -> Result<(), String> {
-        self.source
-            .push_buffer(gst::Buffer::from_slice(pcm.to_vec()))
-            .map(|_| ())
-            .map_err(|error| error.to_string())
-    }
-}
-
-impl Drop for Player {
-    fn drop(&mut self) {
-        let _ = self.pipeline.set_state(gst::State::Null);
-    }
-}
-
-fn make(name: &str) -> Result<gst::Element, String> {
-    gst::ElementFactory::make(name)
-        .build()
-        .map_err(|error| error.to_string())
-}
-
-fn pcm_bytes(samples: &[i16]) -> Vec<u8> {
-    samples
-        .iter()
-        .flat_map(|sample| sample.to_le_bytes())
-        .collect()
 }
 
 fn decode_pcm16_mono_48k(wav: &[u8]) -> Option<Vec<i16>> {
@@ -306,11 +303,17 @@ mod tests {
         let mut sound = UiSounds::new(false);
         sound.prepare();
         sound.play_navigation();
-        assert!(sound.worker.is_none());
+        assert!(sound.controller.is_none());
     }
 
     #[test]
-    fn samples_are_little_endian_pcm() {
-        assert_eq!(pcm_bytes(&[1, -2]), [1, 0, 0xfe, 0xff]);
+    fn each_cue_is_a_new_request_even_when_repeated() {
+        let request = Request::default();
+        request.post(UiSoundCue::Ok);
+        let first = request.0.load(Ordering::Acquire);
+        request.post(UiSoundCue::Ok);
+        let second = request.0.load(Ordering::Acquire);
+        assert_ne!(first, second);
+        assert_eq!(second & 0xff, UiSoundCue::Ok.index() as u64);
     }
 }
