@@ -12,7 +12,7 @@ import { Surface } from "../components/list-row.slint";
 // read-only and scrolls with Up/Down; no session row receives focus.
 // Game launch is deliberately not available.
 // Horizon-observed and source-reported playtime remain distinct measurements.
-// Shared Rise: details rise over the Activity overview and drop on Back.
+// Shared Zoom: details zoom in over the Activity overview, and out on Back.
 // Clear above the content so the overview's "Activity" header stays still.
 export component ActivityGameDetailsPage inherits TransitionLayer {
     in property <GameCardData> game;

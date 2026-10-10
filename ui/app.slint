@@ -70,9 +70,12 @@ export component AppWindow inherits Window {
     // changes keep a single outgoing transition instead of accumulating several
     // half-visible retained pages.
     in property <AppRouteView> transition-from-route: AppRouteView.home;
-    // Route transitions use the shared "Rise" (components/transition.slint).
+    // Page changes use the shared Zoom (components/transition.slint).
     // Leaving Home is forward; returning to Home is Back.
-    route-transition := TransitionDriver { prewarm: true; key: root.route-key(root.current-route); }
+    route-transition := TransitionDriver {
+        prewarm: true;
+        key: root.route-key(root.current-route);
+    }
     pure function route-key(route: AppRouteView) -> int {
         return route == AppRouteView.home ? 0 : route == AppRouteView.library ? 1
             : route == AppRouteView.friends ? 2 : route == AppRouteView.album ? 3
@@ -106,14 +109,17 @@ export component AppWindow inherits Window {
     // a durable full-shell destination, like Settings and other submenu routes.
     // The route on screen: the outgoing one until the transition starts.
     // Chrome and hints follow it so they switch together with the pages.
-    // Home's chrome belongs to Home: it stays while Home is under a rising
-    // page and dims with it, and is back at full strength once Home is.
+    // Home's chrome belongs to Home: it zooms and fades with Home, around the
+    // window centre, exactly as Home's page layer does.
     private property <bool> shell-chrome-visible: root.current-route == AppRouteView.home
         || (root.transition-from-route == AppRouteView.home && root.route-phase < 3);
     private property <float> chrome-opacity: root.current-route == AppRouteView.home
-        ? (root.route-back && root.route-phase <= 1 ? 0.6 : 1.0)
-        : (root.route-phase >= 2 ? 0.6 : 1.0);
-    animate chrome-opacity {
+        ? (root.route-back && root.route-phase <= 1 ? 0.0 : 1.0)
+        : (root.route-phase >= 2 ? 0.0 : 1.0);
+    private property <float> chrome-scale: root.current-route == AppRouteView.home
+        ? (root.route-back && root.route-phase == 1 ? 1.06 : 1.0)
+        : (root.route-phase >= 2 ? 1.06 : 1.0);
+    animate chrome-opacity, chrome-scale {
         duration: root.route-phase == 2 ? Motion.page-duration : 0ms;
         easing: ease-out;
     }
@@ -329,7 +335,7 @@ export component AppWindow inherits Window {
 
             // Only Home occupies the centre between its persistent chrome.
             // Library and utility pages own the full logical surface.
-            // Retaining every route layer preserves the Rise overlap and local
+            // Retaining every route layer preserves the Zoom overlap and local
             // presentation state without moving navigation ownership into Slint.
             TransitionLayer {
                 x: 0px;
@@ -477,16 +483,6 @@ export component AppWindow inherits Window {
                     choose-game(index) => {
                         if (root.current-route == AppRouteView.activity) { root.activity-choose(index); }
                     }
-                }
-                // Dims the overview's content (not its header) under the
-                // rising details, like the outgoing layer of any other Rise.
-                Rectangle {
-                    y: Metrics.page-header-height;
-                    width: parent.width;
-                    height: parent.height - Metrics.page-header-height;
-                    background: Theme.background;
-                    opacity: root.activity-details-visible ? 0.4 : 0.0;
-                    animate opacity { duration: Motion.page-duration; easing: ease-out; }
                 }
                 activity-details-page := ActivityGameDetailsPage {
                     width: parent.width;
@@ -650,7 +646,7 @@ export component AppWindow inherits Window {
                 height: Metrics.hint-row-height;
                 visible: root.current-route != AppRouteView.home;
                 z: 3;
-                // Appears once the page has risen into place. Its opacity is
+                // Appears once the page has zoomed into place. Its opacity is
                 // also 0 while hidden on Home, so becoming visible always
                 // fades in from 0 (never down from a stale 1 and back up).
                 // Dialogs carry their own focusable buttons, so the bar fades
@@ -671,6 +667,8 @@ export component AppWindow inherits Window {
                 height: Metrics.top-chrome-height;
                 visible: root.shell-chrome-visible;
                 opacity: root.chrome-opacity;
+                transform-scale: root.chrome-scale;
+                transform-origin: { x: self.width / 2, y: root.height / 2 - self.y };
                 background: Theme.surface.with-alpha(Theme.is-dark ? 0.78 : 0.92);
 
                 Rectangle {
@@ -690,6 +688,8 @@ export component AppWindow inherits Window {
                 icon-render-scale: root.ui-scale;
                 visible: root.shell-chrome-visible;
                 opacity: root.chrome-opacity;
+                transform-scale: root.chrome-scale;
+                transform-origin: { x: self.width / 2, y: root.height / 2 - self.y };
                 utility-focus-visible: root.top-utilities-focused;
                 focused-utility-index: root.focused-utility-index;
                 network-kind: root.status-network-kind;
@@ -709,6 +709,8 @@ export component AppWindow inherits Window {
                 height: Metrics.footer-height;
                 visible: root.shell-chrome-visible;
                 opacity: root.chrome-opacity;
+                transform-scale: root.chrome-scale;
+                transform-origin: { x: self.width / 2, y: root.height / 2 - self.y };
                 connected-controller-count: root.connected-controller-count;
                 clock-time: root.clock-time;
                 clock-suffix: root.clock-suffix;

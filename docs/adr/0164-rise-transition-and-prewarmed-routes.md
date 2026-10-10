@@ -1,5 +1,7 @@
 # ADR 0164 — "Rise" replaces crossfade; routes prewarm before animating
 
+> **Superseded in part by [ADR 0165](0165-zoom-transition-everywhere.md):** Rise was replaced by Zoom everywhere. Prewarming and the key-derived transition phase still stand.
+
 **Status:** Implemented. Compiles; tests, clippy and fmt pass. Checked with offscreen frame-by-frame renders, including a simulated 300ms first frame; hands-on testing pending.
 
 ## Problem

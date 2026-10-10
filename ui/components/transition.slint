@@ -1,17 +1,20 @@
 import { Theme, Motion } from "../theme/theme.slint";
 
-// Horizon's one transition, "Rise", used for routes and sub-pages alike.
-// Forward: the incoming layer rises from below over the outgoing one, which
-// dims underneath. Back: the outgoing layer drops away, revealing the
-// incoming one as it brightens. Reduced Motion makes both instant.
+// Horizon's one transition, Zoom, for pages and sub-pages alike.
+// Forward: the incoming layer grows in from 0.94 while the outgoing one grows
+// past to 1.06 and fades. Back mirrors it: the incoming layer settles from
+// 1.06 while the outgoing one shrinks to 0.94 and fades. Section headers
+// stay still (sub-page layers are clear above them). Motion.page-duration;
+// Reduced Motion makes it instant.
 //
 // A transition steps through four phases (TransitionDriver.phase):
 //   0  prewarm  incoming drawn once at near-zero opacity, so its first slow
 //               frame (artwork upload, text layout) happens before timing
 //               starts; the outgoing layer stays fully shown
-//   1  placed   start positions, applied without animation
-//   2  running  animate to end positions over Motion.page-duration
+//   1  placed   start scale and opacity, applied without animation
+//   2  running  animate to end values
 //   3  settled  outgoing layer hidden
+
 
 export component TransitionDriver {
     // Routes prewarm; in-page sub-views are already drawn and start at 1.
@@ -60,32 +63,29 @@ export component TransitionLayer inherits Rectangle {
     in property <bool> active: false;
     // This layer is the source of the current transition.
     in property <bool> outgoing: false;
-    // True when returning to a shallower layer (Back).
+    // True when returning to a shallower layer (Back): the zoom reverses.
     in property <bool> returning: false;
     in property <int> phase: 3;
     in property <length> rest-y: 0px;
-    // How far the layer travels: far enough to leave the visible area.
-    in property <length> travel: self.height;
-    // Paint Theme.background from this y down, so a rising layer covers
+    // Paint Theme.background from this y down, so the incoming layer covers
     // what is under it. Header areas above it stay transparent and still.
     in property <bool> opaque: false;
     in property <length> cover-from: 0px;
 
     private property <bool> leaving: root.outgoing && !root.active && root.phase < 3;
-    // The moving layer is drawn on top: incoming going forward, outgoing going back.
-    private property <bool> on-top: root.active ? !root.returning : (root.leaving && root.returning);
-    private property <length> offset: root.active
-        ? (!root.returning && root.phase == 1 ? root.travel : 0px)
-        : (root.leaving && root.returning && root.phase >= 2 ? root.travel : 0px);
+    private property <float> scale: root.active
+        ? (root.phase == 1 ? (root.returning ? 1.06 : 0.94) : 1.0)
+        : (root.leaving && root.phase >= 2 ? (root.returning ? 0.94 : 1.06) : 1.0);
 
     background: transparent;
-    y: root.rest-y + root.offset;
-    opacity: root.active
-        ? (root.phase == 0 ? 0.01 : (root.returning && root.phase == 1 ? 0.6 : 1.0))
-        : (root.leaving ? (!root.returning && root.phase >= 2 ? 0.6 : 1.0) : 0.0);
+    y: root.rest-y;
+    transform-scale: root.scale;
+    opacity: root.active ? (root.phase == 0 ? 0.01 : (root.phase == 1 ? 0.0 : 1.0))
+        : (root.leaving ? (root.phase >= 2 ? 0.0 : 1.0) : 0.0);
     visible: root.active || root.leaving;
-    z: root.on-top ? 2 : (root.active || root.leaving ? 1 : 0);
-    animate y, opacity {
+    // The incoming layer is drawn over the one it replaces.
+    z: root.active ? 2 : (root.leaving ? 1 : 0);
+    animate opacity, transform-scale {
         duration: root.phase == 2 ? Motion.page-duration : 0ms;
         easing: ease-out;
     }
