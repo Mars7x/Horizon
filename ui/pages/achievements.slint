@@ -2,7 +2,7 @@ import { Wheel } from "../components/wheel.slint";
 import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { AchievementGameData, AchievementEntryData } from "../models/achievements.slint";
 import { PageHeader, HeaderValue, Breadcrumb, ScrollEdgeShadow } from "../components/page-header.slint";
-import { ListRow, Surface } from "../components/list-row.slint";
+import { ListRow, Surface, BadgeIcon } from "../components/list-row.slint";
 import { MarqueeText } from "../components/marquee-text.slint";
 
 // One full-width games list, then one full-width, read-only achievement list.
@@ -33,7 +33,9 @@ export component AchievementsPage inherits Rectangle {
     in property <bool> has-source-choice: false;
     in property <string> status: "Connect an account in Third-Party settings.";
     in property <bool> loading: false;
-    in property <bool> showing-saved-data: false;
+    // False while this page is fading out: bottom-bar chrome (the bottom
+    // shadows) switches with the route like the hint bar.
+    in property <bool> active: true;
     callback choose-game(int);
     callback scroll-entries(int);
     callback cycle-source(int);
@@ -109,23 +111,10 @@ export component AchievementsPage inherits Rectangle {
             HeaderValue {
                 width: 190px; label: "Source"; value: root.source-label;
                 interactive: root.has-source-choice && !root.viewing-entries;
-                cycles: root.has-source-choice;
                 opacity: 1.0 - root.detail-reveal;
                 clicked => { root.cycle-source(1); }
             }
         }
-    }
-
-    // Bottom bar, left side: whether these are saved results.
-    if root.games.length > 0 && (root.loading || root.showing-saved-data) : MarqueeText {
-        x: Metrics.page-margin;
-        y: root.height - Metrics.hint-row-center-from-bottom - self.height / 2;
-        width: (root.width - Metrics.page-margin * 2) / 2;
-        height: Metrics.hint-row-height;
-        text: root.showing-saved-data
-            ? (root.loading ? "Saved results · updating…" : "Saved results") : "Updating…";
-        text-color: Theme.secondary-foreground;
-        font-size: Typography.caption-size;
     }
 
     games-view := Rectangle {
@@ -170,7 +159,7 @@ export component AchievementsPage inherits Rectangle {
                 wheel(rows) => { root.pan-games(rows); }
 
                 Text {
-                    x: parent.width - (root.narrow ? 158px : 273px); y: 17px;
+                    x: parent.width - (root.narrow ? 158px : 273px); y: 12px;
                     width: root.narrow ? 119px : 231px; height: 29px;
                     text: root.narrow ? game.compact-progress : game.progress;
                     color: Theme.foreground; font-size: Typography.body-size;
@@ -178,7 +167,7 @@ export component AchievementsPage inherits Rectangle {
                     horizontal-alignment: right; vertical-alignment: center;
                 }
                 Rectangle {
-                    x: parent.width - (root.narrow ? 153px : 233px); y: 55px;
+                    x: parent.width - (root.narrow ? 153px : 233px); y: 52px;
                     width: root.narrow ? 112px : 192px;
                     height: 4px; border-radius: 2px;
                     background: Theme.divider.with-alpha(0.76);
@@ -207,7 +196,7 @@ export component AchievementsPage inherits Rectangle {
             x: 0px; y: root.game-top; width: root.width;
             strength: root.game-camera / root.row-stride;
         }
-        if root.games.length > 0 : ScrollEdgeShadow {
+        if root.active && root.games.length > 0 : ScrollEdgeShadow {
             x: 0px; y: root.list-bottom - self.height; width: root.width;
             bottom: true;
             strength: (root.games.length * root.row-stride - Metrics.list-row-gap
@@ -273,39 +262,27 @@ export component AchievementsPage inherits Rectangle {
                 width: parent.width - 2px; height: Metrics.list-row-height;
                 visible: i * root.entry-stride >= root.entry-camera - 4 * root.entry-stride
                     && i * root.entry-stride <= root.entry-camera + root.detail-viewport-height + 4 * root.entry-stride;
-                Rectangle {
-                    x: 13px; y: 13px; width: 58px; height: 58px;
-                    border-radius: Metrics.radius-md; clip: true;
-                    background: achievement.has-badge ? transparent : Theme.surface-raised;
-                    if achievement.has-badge : Image {
-                        width: parent.width; height: parent.height;
-                        source: achievement.badge; image-fit: contain;
-                    }
-                    if !achievement.has-badge : Text {
-                        width: parent.width; height: parent.height;
-                        // Missing schema/CDN artwork is not an unlocked badge.
-                        // Never substitute a misleading star for a Steam icon.
-                        text: "◇";
-                        color: achievement.unlocked ? Theme.accent : Theme.secondary-foreground;
-                        font-size: 29px; horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
+                BadgeIcon {
+                    x: 11px; y: 11px; width: 58px; height: 58px;
+                    badge: achievement.badge;
+                    has-badge: achievement.has-badge;
+                    unlocked: achievement.unlocked;
                 }
                 MarqueeText {
-                    x: 89px; y: 8px; width: parent.width - 108px; height: 25px;
+                    x: 87px; y: 6px; width: parent.width - 106px; height: 25px;
                     text: achievement.title;
                     edge-color: Theme.surface;
                     font-weight: Typography.emphasis-weight;
                 }
                 MarqueeText {
-                    x: 89px; y: 33px; width: parent.width - 108px; height: 22px;
+                    x: 87px; y: 30px; width: parent.width - 106px; height: 22px;
                     text: achievement.description != "" ? achievement.description : achievement.when;
                     edge-color: Theme.surface;
                     text-color: Theme.secondary-foreground;
                     font-size: Typography.caption-size;
                 }
                 MarqueeText {
-                    x: 89px; y: 55px; width: parent.width - 108px; height: 22px;
+                    x: 87px; y: 52px; width: parent.width - 106px; height: 22px;
                     text: achievement.description != "" ? achievement.when : "";
                     edge-color: Theme.surface;
                     text-color: Theme.secondary-foreground;
@@ -322,7 +299,7 @@ export component AchievementsPage inherits Rectangle {
             x: 0px; y: root.detail-top; width: root.width;
             strength: root.entry-camera / root.entry-stride;
         }
-        if root.entries.length > 0 : ScrollEdgeShadow {
+        if root.active && root.entries.length > 0 : ScrollEdgeShadow {
             x: 0px; y: root.list-bottom - self.height; width: root.width;
             bottom: true;
             strength: (root.entries.length * root.entry-stride - Metrics.list-row-gap

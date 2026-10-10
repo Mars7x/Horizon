@@ -52,7 +52,9 @@ export global Metrics {
     out property <length> page-title-y: 20px;
     out property <length> page-title-height: 48px;
     out property <length> page-header-height: 88px;
-    out property <length> page-bottom-bar-height: 64px;
+    // Same height as Home's footer, so hints are centred in every page's bar
+    // and on exactly the same line as Home's "A OK".
+    out property <length> page-bottom-bar-height: footer-height;
     // Hints and bottom-bar context share ONE line on every page, Home
     // included: the vertical midpoint of Home's footer.
     out property <length> hint-row-height: 40px;
@@ -63,7 +65,7 @@ export global Metrics {
     // Sub-pages open with a "Section  /  Page" breadcrumb at the content top.
     out property <length> breadcrumb-height: 26px;
     // Every focusable list row (Settings, Achievements) shares one height.
-    out property <length> list-row-height: 84px;
+    out property <length> list-row-height: 80px;
     out property <length> list-row-gap: 8px;
     out property <length> scroll-edge-shadow-height: 11px;
 

@@ -5,7 +5,7 @@ import { ActivityCoverData, ActivityDayData } from "../models/activity.slint";
 import { AchievementEntryData } from "../models/achievements.slint";
 import { PageHeader, HeaderValue } from "../components/page-header.slint";
 import { MarqueeText } from "../components/marquee-text.slint";
-import { Surface } from "../components/list-row.slint";
+import { Surface, BadgeIcon } from "../components/list-row.slint";
 
 // Phase 10.3.0: one controller focus region, shared cover/focus design from
 // Home, and two quiet informational panels. Recent unlocks are Steam-derived.
@@ -62,11 +62,11 @@ export component ActivityPage inherits Rectangle {
     private property <length> camera-offset: min(
         root.first-visible * root.card-stride,
         max(0px, root.strip-width - root.covers-width));
-    private property <length> covers-top: Metrics.page-header-height + (root.height < 630px ? 69px : 87px);
+    private property <length> covers-top: Metrics.page-header-height + 69px;
     // The lower sections always begin after BOTH caption lines, with a
-    // comfortable 28px separation, even when focus enlarges the cover.
+    // comfortable 20px separation, even when focus enlarges the cover.
     private property <length> panels-top: root.covers-top + root.cover-label-top
-        + 36px + 20px + 28px;
+        + 36px + 20px + 20px;
     private property <length> panels-gap: 18px;
     private property <length> panel-width: (root.width - Metrics.page-margin * 2 - root.panels-gap) / 2;
     private property <length> panels-height: max(150px, root.height - root.panels-top - Metrics.page-bottom-bar-height);
@@ -289,26 +289,11 @@ export component ActivityPage inherits Rectangle {
             width: parent.width - 36px; height: 64px;
             visible: i < 3 && 52px + (i + 1) * 66px <= root.panels-height - 4px;
             background: transparent;
-            Rectangle {
+            BadgeIcon {
                 x: 0px; y: 5px; width: 54px; height: 54px;
-                border-radius: Metrics.radius-md;
-                background: Theme.background;
-                if achievement.has-badge : Image {
-                    x: 3px; y: 3px;
-                    width: parent.width - 6px; height: parent.height - 6px;
-                    source: achievement.badge;
-                    image-fit: contain;
-                }
-                if !achievement.has-badge : Text {
-                    x: 0px; y: 0px;
-                    width: parent.width; height: parent.height;
-                    // Same placeholder as Achievements: never a fake badge.
-                    text: "◇";
-                    color: Theme.accent;
-                    font-size: 27px;
-                    vertical-alignment: center;
-                    horizontal-alignment: center;
-                }
+                badge: achievement.badge;
+                has-badge: achievement.has-badge;
+                unlocked: achievement.unlocked;
             }
             MarqueeText {
                 x: 67px; y: 5px; width: parent.width - 70px; height: 24px;

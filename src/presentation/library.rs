@@ -15,7 +15,7 @@ use crate::{
 // Keep all the viewport thresholds and dimensions in lockstep with
 // ui/pages/library.slint. Slint renders in logical pixels, not physical pixels.
 const CONTENT_TOP: f32 = 88.0; // Metrics.page-header-height
-const CONTENT_BOTTOM: f32 = 64.0; // Metrics.page-bottom-bar-height
+const CONTENT_BOTTOM: f32 = 92.0; // Metrics.page-bottom-bar-height (= footer-height)
 const GRID_PAD: f32 = 22.0;
 const HORIZONTAL_GUTTER: f32 = 48.0; // gallery viewport x = page-margin - 16px
 const CARD_GAP: f32 = 28.0;

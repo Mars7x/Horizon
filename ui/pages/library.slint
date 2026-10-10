@@ -372,7 +372,9 @@ export component LibraryPage inherits Rectangle {
         width: parent.width;
         strength: (root.peek-limit - gallery.y) / root.row-stride;
     }
-    if root.total-count > 0 : ScrollEdgeShadow {
+    // Bottom-bar chrome (this shadow, the selected game) switches with the
+    // route like the hint bar instead of crossfading into Home's footer.
+    if root.total-count > 0 && root.focus-visible : ScrollEdgeShadow {
         x: 0px; y: grid-viewport.y + grid-viewport.height - self.height;
         width: parent.width;
         bottom: true;
@@ -383,6 +385,7 @@ export component LibraryPage inherits Rectangle {
     // owns the right side. Title and source swap independently; unchanged
     // strings stay still. The selected identity/revision is owned by Rust.
     title-window := Rectangle {
+        visible: root.focus-visible;
         x: Metrics.page-margin;
         // Title on the shared hint line; source directly below it.
         y: root.height - Metrics.hint-row-center-from-bottom - self.height / 2;
@@ -405,6 +408,7 @@ export component LibraryPage inherits Rectangle {
         }
     }
     source-window := Rectangle {
+        visible: root.focus-visible;
         x: Metrics.page-margin;
         y: title-window.y + title-window.height;
         width: title-window.width;

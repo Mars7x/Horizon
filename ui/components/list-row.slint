@@ -46,7 +46,7 @@ export component ListRow inherits Rectangle {
     accessible-enabled: root.enabled;
 
     MarqueeText {
-        x: 24px; y: 14px;
+        x: 24px; y: 12px;
         width: max(40px, parent.width - 24px - root.trailing-width);
         height: 30px;
         text: root.title;
@@ -57,7 +57,7 @@ export component ListRow inherits Rectangle {
         font-weight: Typography.heading-weight;
     }
     MarqueeText {
-        x: 24px; y: 46px;
+        x: 24px; y: 44px;
         width: max(40px, parent.width - 24px - root.trailing-width);
         height: 24px;
         text: root.subtitle;
@@ -78,5 +78,30 @@ export component ListRow inherits Rectangle {
             }
             reject
         }
+    }
+}
+
+// The one achievement badge (Achievements entries, Activity Milestones):
+// artwork clipped to a rounded square with nothing behind it. Missing
+// artwork is the neutral "◇" on a raised tile, never a fake badge.
+export component BadgeIcon inherits Rectangle {
+    in property <image> badge;
+    in property <bool> has-badge: false;
+    in property <bool> unlocked: false;
+    border-radius: Metrics.radius-md;
+    clip: true;
+    background: root.has-badge ? transparent : Theme.surface-raised;
+    if root.has-badge : Image {
+        width: parent.width; height: parent.height;
+        source: root.badge;
+        image-fit: cover;
+    }
+    if !root.has-badge : Text {
+        width: parent.width; height: parent.height;
+        text: "◇";
+        color: root.unlocked ? Theme.accent : Theme.secondary-foreground;
+        font-size: parent.height / 2;
+        horizontal-alignment: center;
+        vertical-alignment: center;
     }
 }

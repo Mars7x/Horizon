@@ -35,7 +35,6 @@ pub struct AchievementsController {
     started: Cell<bool>,
     finished: Cell<bool>,
     unavailable: Cell<usize>,
-    using_saved_data: Cell<bool>,
     requested_badges: RefCell<BTreeSet<u32>>,
 }
 
@@ -64,7 +63,6 @@ impl AchievementsController {
             started: Cell::new(false),
             finished: Cell::new(false),
             unavailable: Cell::new(0),
-            using_saved_data: Cell::new(false),
             requested_badges: RefCell::new(BTreeSet::new()),
         });
         controller.publish(ui);
@@ -138,7 +136,6 @@ impl AchievementsController {
         self.started.set(false);
         self.finished.set(false);
         self.unavailable.set(0);
-        self.using_saved_data.set(false);
         self.selected.set(0);
         self.source_index.set(0);
         self.entry_scroll.set(0);
@@ -174,7 +171,6 @@ impl AchievementsController {
             }
             match event {
                 AchievementImportEvent::Cached(mut results) => {
-                    self.using_saved_data.set(true);
                     results.sort_by_key(|a| a.game.title.to_lowercase());
                     *self.loaded.borrow_mut() = results;
                 }
@@ -186,7 +182,6 @@ impl AchievementsController {
                         self.loaded
                             .borrow_mut()
                             .retain(|game| valid_ids.contains(&game.game.app_id));
-                        self.using_saved_data.set(false);
                     }
                 }
                 AchievementImportEvent::Imported(result) => {
@@ -268,7 +263,6 @@ impl AchievementsController {
         let selected = self.selected.get().min(rows.len().saturating_sub(1));
         self.selected.set(selected);
         ui.set_achievements_selected_index(selected as i32);
-        ui.set_achievements_saved_data(self.using_saved_data.get());
         ui.set_achievements_game_count(format!("{} games", rows.len()).into());
         ui.set_achievement_games(ModelRc::from(Rc::new(VecModel::from(rows))));
         ui.set_achievements_source_label(
