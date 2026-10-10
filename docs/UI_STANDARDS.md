@@ -78,6 +78,11 @@ values), `list-camera-duration` (held-direction list scrolling, linear), and
 the text caret) may keep local timings with a comment. Everything respects
 Reduced Motion.
 
+An element hidden with `visible: false` must also hold its hidden value for any
+animated property (for example `opacity: 0`). Otherwise it animates from a stale
+value the moment it becomes visible (the hint bar once flashed in, faded out,
+then faded in again).
+
 ## Mouse wheel
 
 Wheel input moves the camera only, never selection or focus, and always goes
