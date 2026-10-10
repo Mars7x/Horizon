@@ -34,7 +34,7 @@ button through the same Rust input path as a controller press (`hint-activated`
 → `UiAction::from_hint`), so it does exactly what the controller would, for
 whatever is focused (Home's footer "A OK" included). A pair activates the
 glyph clicked and its label the first. A faded-out bar takes no clicks.
-Buttons: A (Accept), B (Back), X (`Secondary`; Album: Delete), LB/RB (only
+Order, left to right: X, B, then A, always rightmost (as Home's footer "A OK"). Buttons: A (Accept), B (Back), X (`Secondary`; Album: Delete), LB/RB (only
 in headers). A shared action can show two glyphs (`button2`). While a dialog is open the bar fades out with the page behind the backdrop; dialogs show their own focusable buttons.
 
 ## Lists and surfaces
