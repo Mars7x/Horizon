@@ -207,3 +207,5 @@ The Slint input scope forwards logical directional presses **and releases** to `
 ## Phase 10.4.3.3 — Mouse wheel is camera input, not navigation
 
 On scrollable lists, pointer-wheel deltas pan the camera without emitting controller/keyboard Up or Down events or changing selection. The Achievements game catalog and Library grid now explicitly decouple viewport position from focus. Read-only Achievements and Activity session details wheel-scroll their existing history windows without focusing any rows. Directional keys and gamepad inputs continue using the established navigation actions and repeat caps. See [ADR 0162](adr/0162-achievement-input-and-lazy-badge-parity.md).
+
+Wheel direction follows the desktop's scrolling setting (natural/reverse or traditional). The compositor applies that setting before Horizon sees the event, so Horizon must map Slint's sign faithfully: a positive `delta-y` moves the camera **up**. Every wheel handler uses the shared `Wheel.rows()` helper in `ui/components/wheel.slint`; never hand-write the mapping.
