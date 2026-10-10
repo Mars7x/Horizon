@@ -43,7 +43,7 @@ Phase 6 defines capability vocabulary for:
 - artwork;
 - source-reported lifetime playtime.
 
-Capability metadata describes behavior exposed through generic contracts. Phase 7 added the first concrete consumer of `Launch`; Phase 9.5 added `ManagedSession` and `RuntimeObservation`; Phase 9.5.29 adds the first concrete `Artwork` consumer through a source-neutral artwork service. Steam still does not advertise `LifetimePlaytime` until the adapter has a reliable value to publish.
+Capability metadata describes behavior exposed through generic contracts. Phase 7 added the first concrete consumer of `Launch`; Phase 9.5 added `ManagedSession` and `RuntimeObservation`; Phase 9.5.29 adds the first concrete `Artwork` consumer through a source-neutral artwork service. Steam now advertises `LifetimePlaytime` and reads local `localconfig.vdf` where available; provider-reported totals remain distinct from Horizon-observed sessions. See `src/sources/steam.rs` and `STEAM.md`.
 
 ## Registry
 

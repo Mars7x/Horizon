@@ -29,8 +29,8 @@ const ANALOG_ENTER_THRESHOLD: i32 = 18_000;
 const ANALOG_EXIT_THRESHOLD: i32 = 12_000;
 const ANALOG_INITIAL_REPEAT_DELAY: Duration = Duration::from_millis(300);
 const ANALOG_REPEAT_INTERVAL: Duration = Duration::from_millis(115);
-const DIGITAL_INITIAL_REPEAT_DELAY: Duration = Duration::from_millis(300);
-const DIGITAL_REPEAT_INTERVAL: Duration = Duration::from_millis(115);
+pub(super) const DIGITAL_INITIAL_REPEAT_DELAY: Duration = Duration::from_millis(300);
+pub(super) const DIGITAL_REPEAT_INTERVAL: Duration = Duration::from_millis(115);
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ControllerStatus {
@@ -71,8 +71,8 @@ impl SdlGamepadInput {
         action_sink: Rc<dyn Fn(UiActionEvent)>,
         status_sink: Rc<dyn Fn(ControllerStatus)>,
     ) -> Result<Self, GamepadInputError> {
-        let sdl = sdl3::init()
-            .map_err(|error| GamepadInputError::Initialization(error.to_string()))?;
+        let sdl =
+            sdl3::init().map_err(|error| GamepadInputError::Initialization(error.to_string()))?;
         let gamepad_subsystem = sdl
             .gamepad()
             .map_err(|error| GamepadInputError::GamepadSubsystem(error.to_string()))?;
@@ -100,11 +100,7 @@ impl SdlGamepadInput {
         let timer_status_sink = Rc::clone(&status_sink);
 
         timer.start(TimerMode::Repeated, POLL_INTERVAL, move || {
-            poll_gamepad_events(
-                &timer_state,
-                &timer_action_sink,
-                &timer_status_sink,
-            );
+            poll_gamepad_events(&timer_state, &timer_action_sink, &timer_status_sink);
         });
 
         info!(
@@ -170,9 +166,7 @@ impl DigitalNavigation {
         }
 
         self.active_direction = self.fallback_direction();
-        self.next_repeat = self
-            .active_direction
-            .map(|_| now + DIGITAL_REPEAT_INTERVAL);
+        self.next_repeat = self.active_direction.map(|_| now + DIGITAL_REPEAT_INTERVAL);
     }
 
     fn repeat_due(&mut self, now: Instant) -> Option<UiAction> {
@@ -224,12 +218,7 @@ struct AnalogNavigation {
 }
 
 impl AnalogNavigation {
-    fn axis_motion(
-        &mut self,
-        axis: Axis,
-        value: i16,
-        now: Instant,
-    ) -> Option<UiAction> {
+    fn axis_motion(&mut self, axis: Axis, value: i16, now: Instant) -> Option<UiAction> {
         match axis {
             Axis::LeftX => self.left_x = value,
             Axis::LeftY => self.left_y = value,
@@ -275,7 +264,11 @@ impl AnalogNavigation {
                 UiAction::Left | UiAction::Right
                     if abs_x >= ANALOG_EXIT_THRESHOLD && abs_x >= abs_y =>
                 {
-                    return Some(if x < 0 { UiAction::Left } else { UiAction::Right });
+                    return Some(if x < 0 {
+                        UiAction::Left
+                    } else {
+                        UiAction::Right
+                    });
                 }
                 UiAction::Up | UiAction::Down
                     if abs_y >= ANALOG_EXIT_THRESHOLD && abs_y > abs_x =>
@@ -291,7 +284,11 @@ impl AnalogNavigation {
         }
 
         if abs_x >= abs_y && abs_x >= ANALOG_ENTER_THRESHOLD {
-            Some(if x < 0 { UiAction::Left } else { UiAction::Right })
+            Some(if x < 0 {
+                UiAction::Left
+            } else {
+                UiAction::Right
+            })
         } else if abs_y >= ANALOG_ENTER_THRESHOLD {
             Some(if y < 0 { UiAction::Up } else { UiAction::Down })
         } else {
@@ -390,8 +387,9 @@ impl SdlState {
 // but never infer charging from an unknown state. Do not invent a percentage
 // for an unsupported dongle (SDL reports -1 in that case).
 fn battery_from_sdl(state: PowerLevel, percentage: i32) -> Option<ControllerBattery> {
-    if !(0..=100).contains(&percentage) ||
-        matches!(state, PowerLevel::NoBattery | PowerLevel::Error) {
+    if !(0..=100).contains(&percentage)
+        || matches!(state, PowerLevel::NoBattery | PowerLevel::Error)
+    {
         return None;
     }
     Some(ControllerBattery {
@@ -430,7 +428,9 @@ fn poll_gamepad_events(
             _ if !state.enabled => {}
             Event::GamepadAxisMotion { axis, value, .. } => {
                 if let Some(action) =
-                    state.analog_navigation.axis_motion(axis, value, Instant::now())
+                    state
+                        .analog_navigation
+                        .axis_motion(axis, value, Instant::now())
                 {
                     debug!(?action, "left-stick UI action");
                     action_sink(UiActionEvent::fresh(action));
@@ -480,13 +480,12 @@ fn poll_gamepad_events(
     }
 }
 
-
 pub const fn direction_for_button(button: &Button) -> Option<UiAction> {
-    match button {
-        &Button::DPadUp => Some(UiAction::Up),
-        &Button::DPadDown => Some(UiAction::Down),
-        &Button::DPadLeft => Some(UiAction::Left),
-        &Button::DPadRight => Some(UiAction::Right),
+    match *button {
+        Button::DPadUp => Some(UiAction::Up),
+        Button::DPadDown => Some(UiAction::Down),
+        Button::DPadLeft => Some(UiAction::Left),
+        Button::DPadRight => Some(UiAction::Right),
         _ => None,
     }
 }
@@ -514,7 +513,7 @@ mod tests {
     use sdl3::gamepad::{Axis, Button};
 
     use super::{
-        ANALOG_INITIAL_REPEAT_DELAY, DIGITAL_INITIAL_REPEAT_DELAY, AnalogNavigation,
+        ANALOG_INITIAL_REPEAT_DELAY, AnalogNavigation, DIGITAL_INITIAL_REPEAT_DELAY,
         DigitalNavigation, action_for_button,
     };
     use crate::input::actions::UiAction;
@@ -636,16 +635,21 @@ mod tests {
     }
 }
 
-
 #[cfg(test)]
 mod battery_tests {
-    use super::{battery_from_sdl, ControllerBattery};
+    use super::{ControllerBattery, battery_from_sdl};
     use sdl3::joystick::PowerLevel;
 
     #[test]
     fn valid_unknown_state_does_not_discard_reported_percent() {
-        assert_eq!(battery_from_sdl(PowerLevel::Unknown, 46),
-            Some(ControllerBattery { percent: 46, charging: false, charging_known: false }));
+        assert_eq!(
+            battery_from_sdl(PowerLevel::Unknown, 46),
+            Some(ControllerBattery {
+                percent: 46,
+                charging: false,
+                charging_known: false
+            })
+        );
     }
 
     #[test]
@@ -658,7 +662,13 @@ mod battery_tests {
 
     #[test]
     fn charging_from_sdl_is_preserved() {
-        assert_eq!(battery_from_sdl(PowerLevel::Charging, 39),
-            Some(ControllerBattery { percent: 39, charging: true, charging_known: true }));
+        assert_eq!(
+            battery_from_sdl(PowerLevel::Charging, 39),
+            Some(ControllerBattery {
+                percent: 39,
+                charging: true,
+                charging_known: true
+            })
+        );
     }
 }

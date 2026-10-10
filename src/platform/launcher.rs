@@ -29,13 +29,17 @@ impl LaunchExecutor for PortalLaunchExecutor {
 }
 
 fn open_uri(value: &str) -> Result<(), PortalLaunchError> {
-    let uri = Uri::parse(value).map_err(|error| PortalLaunchError::InvalidUri(error.to_string()))?;
+    let uri =
+        Uri::parse(value).map_err(|error| PortalLaunchError::InvalidUri(error.to_string()))?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
 
     runtime.block_on(async {
-        OpenFileRequest::default().send_uri(&uri).await?.response()?;
+        OpenFileRequest::default()
+            .send_uri(&uri)
+            .await?
+            .response()?;
         Ok(())
     })
 }

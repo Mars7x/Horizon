@@ -1,10 +1,4 @@
-use std::{
-    cell::RefCell,
-    collections::BTreeSet,
-    error::Error,
-    fmt,
-    rc::Rc,
-};
+use std::{cell::RefCell, collections::BTreeSet, error::Error, fmt, rc::Rc};
 
 use thiserror::Error;
 use tracing::warn;
@@ -14,11 +8,12 @@ use crate::{
     services::{
         runtime::{
             RuntimeObservationEvent, RuntimeObservationExecutor, RuntimeObservationId,
-            RuntimeObservationStartOutcome, RuntimeObservationState, RuntimeObservationTerminalState,
+            RuntimeObservationStartOutcome, RuntimeObservationState,
+            RuntimeObservationTerminalState,
         },
         session::{
-            ManagedSessionCompletion, ManagedSessionExecutor, ManagedSessionId, ManagedSessionState,
-            ManagedSessionTerminalState, ManagedStartOutcome,
+            ManagedSessionCompletion, ManagedSessionExecutor, ManagedSessionId,
+            ManagedSessionState, ManagedSessionTerminalState, ManagedStartOutcome,
         },
     },
     sources::{SourceCapability, SourceLaunchTarget, SourceRegistry},
@@ -151,7 +146,9 @@ impl GameLaunchService {
             };
 
             let source_id = source.descriptor().id().clone();
-            if source.descriptor().supports(SourceCapability::ManagedSession)
+            if source
+                .descriptor()
+                .supports(SourceCapability::ManagedSession)
                 && let Some(managed_executor) = &self.managed_executor
             {
                 match managed_executor.start_session(&source_id, source_ref.external_id()) {
@@ -162,8 +159,8 @@ impl GameLaunchService {
                             GameLaunchMode::Managed(session_id),
                         ));
                     }
-                    Ok(ManagedStartOutcome::Unsupported)
-                    | Ok(ManagedStartOutcome::Unavailable) => {}
+                    Ok(ManagedStartOutcome::Unsupported) | Ok(ManagedStartOutcome::Unavailable) => {
+                    }
                     Err(error) => {
                         warn!(
                             source = %source_id,
@@ -262,7 +259,9 @@ impl GameLaunchService {
                 }
             };
 
-            self.active_managed_sessions.borrow_mut().remove(&session_id);
+            self.active_managed_sessions
+                .borrow_mut()
+                .remove(&session_id);
             if let Err(error) = executor.forget_session(session_id) {
                 warn!(
                     session_id = session_id.get(),
@@ -406,8 +405,8 @@ mod tests {
         domain::{ExternalGameId, Game, GameTitle, SourceGameRef},
         services::{
             runtime::{
-                RuntimeObservationError, RuntimeObservationExecutor, RuntimeObservationState,
-                RuntimeObservationStartOutcome,
+                RuntimeObservationError, RuntimeObservationExecutor,
+                RuntimeObservationStartOutcome, RuntimeObservationState,
             },
             session::{
                 ManagedSessionExecutionError, ManagedSessionExecutor, ManagedSessionState,
@@ -585,8 +584,8 @@ mod tests {
         let managed: Rc<dyn ManagedSessionExecutor> = Rc::new(FakeManagedExecutor {
             start: ManagedStartOutcome::Started(managed_id),
         });
-        let service = GameLaunchService::new(registry, external.clone())
-            .with_managed_executor(managed);
+        let service =
+            GameLaunchService::new(registry, external.clone()).with_managed_executor(managed);
 
         let receipt = service.launch_game(&game("provider")).expect("launch");
         assert_eq!(receipt.mode(), GameLaunchMode::Managed(managed_id));
@@ -604,8 +603,8 @@ mod tests {
         let managed: Rc<dyn ManagedSessionExecutor> = Rc::new(FakeManagedExecutor {
             start: ManagedStartOutcome::Unavailable,
         });
-        let service = GameLaunchService::new(registry, external.clone())
-            .with_managed_executor(managed);
+        let service =
+            GameLaunchService::new(registry, external.clone()).with_managed_executor(managed);
 
         let receipt = service.launch_game(&game("provider")).expect("launch");
         assert_eq!(receipt.mode(), GameLaunchMode::External);
@@ -623,12 +622,11 @@ mod tests {
         let observer: Rc<dyn RuntimeObservationExecutor> = Rc::new(FakeRuntimeObserver {
             start: RuntimeObservationStartOutcome::Started(observation_id),
         });
-        let service = GameLaunchService::new(registry, external.clone())
-            .with_runtime_observer(observer);
+        let service =
+            GameLaunchService::new(registry, external.clone()).with_runtime_observer(observer);
 
         let receipt = service.launch_game(&game("provider")).expect("launch");
         assert_eq!(receipt.mode(), GameLaunchMode::Observed(observation_id));
         assert_eq!(external.targets.borrow().len(), 1);
     }
-
 }

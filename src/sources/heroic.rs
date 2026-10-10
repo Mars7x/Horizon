@@ -15,9 +15,11 @@ use crate::domain::{DomainValidationError, ExternalGameId, GameTitle, PlaytimeSe
 
 use super::{
     GameSource, SourceCapability, SourceDescriptor, SourceDiscovery, SourceError, SourceGame,
-    SourceInitializationError, SourceLaunchTarget, SourceRuntimeState, SourceSnapshot, SourceSnapshotError,
-    SourceUnavailableReason,
-    support::{dedupe_paths, home_dir, host_config_home, host_state_home, percent_encode_component},
+    SourceInitializationError, SourceLaunchTarget, SourceRuntimeState, SourceSnapshot,
+    SourceSnapshotError, SourceUnavailableReason,
+    support::{
+        dedupe_paths, home_dir, host_config_home, host_state_home, percent_encode_component,
+    },
 };
 
 const HEROIC_SOURCE_ID: &str = "heroic";
@@ -130,25 +132,33 @@ impl HeroicSource {
         // Flatpak launch of the same Epic identity.
         let mut latest: Option<HeroicLogObservation> = None;
         for store in &self.runtime_stores {
-            if let Some(observation) = heroic_log_observation(store, app_name)
-                .map_err(SourceError::new)?
-            {
-                if latest.as_ref().is_none_or(|previous| {
+            if let Some(observation) =
+                heroic_log_observation(store, app_name).map_err(SourceError::new)?
+                && latest.as_ref().is_none_or(|previous| {
                     observation.modified_ms > previous.modified_ms
                         || (observation.modified_ms == previous.modified_ms
-                            && !observation.active && previous.active)
-                }) {
-                    latest = Some(observation);
-                }
+                            && !observation.active
+                            && previous.active)
+                })
+            {
+                latest = Some(observation);
             }
         }
         let running = latest.is_some_and(|observation| {
-            observation.active && armed_ms.is_none_or(|armed| {
-                observation.modified_ms >= armed.saturating_sub(HEROIC_LOG_ARM_GRACE_MS)
-            })
+            observation.active
+                && armed_ms.is_none_or(|armed| {
+                    observation.modified_ms >= armed.saturating_sub(HEROIC_LOG_ARM_GRACE_MS)
+                })
         });
-        Ok(self.legendary_roots.iter().any(|root| root.is_dir())
-            .then_some(if running { SourceRuntimeState::Running } else { SourceRuntimeState::Stopped }))
+        Ok(self
+            .legendary_roots
+            .iter()
+            .any(|root| root.is_dir())
+            .then_some(if running {
+                SourceRuntimeState::Running
+            } else {
+                SourceRuntimeState::Stopped
+            }))
     }
 
     fn discover_legendary_root(
@@ -171,12 +181,11 @@ impl HeroicSource {
                 });
             }
         };
-        let installed: Value = serde_json::from_str(&installed_text).map_err(|source| {
-            HeroicDiscoveryError::Json {
+        let installed: Value =
+            serde_json::from_str(&installed_text).map_err(|source| HeroicDiscoveryError::Json {
                 path: installed_path.clone(),
                 source,
-            }
-        })?;
+            })?;
         let installed = installed
             .as_object()
             .ok_or_else(|| HeroicDiscoveryError::InvalidInstalledRoot(installed_path.clone()))?;
@@ -232,7 +241,9 @@ impl GameSource for HeroicSource {
             .filter(|root| root.is_dir())
             .collect::<Vec<_>>();
         if roots.is_empty() {
-            return Ok(SourceDiscovery::Unavailable(SourceUnavailableReason::NotInstalled));
+            return Ok(SourceDiscovery::Unavailable(
+                SourceUnavailableReason::NotInstalled,
+            ));
         }
 
         let mut merged = BTreeMap::<String, SourceGame>::new();
@@ -278,7 +289,11 @@ impl GameSource for HeroicSource {
                 .as_str()
                 .to_lowercase()
                 .cmp(&right.title().as_str().to_lowercase())
-                .then_with(|| left.external_id().as_str().cmp(right.external_id().as_str()))
+                .then_with(|| {
+                    left.external_id()
+                        .as_str()
+                        .cmp(right.external_id().as_str())
+                })
         });
 
         let snapshot = if all_succeeded {
@@ -292,7 +307,10 @@ impl GameSource for HeroicSource {
         Ok(SourceDiscovery::Available(snapshot))
     }
 
-    fn runtime_state(&self, external_id: &ExternalGameId) -> Result<Option<SourceRuntimeState>, SourceError> {
+    fn runtime_state(
+        &self,
+        external_id: &ExternalGameId,
+    ) -> Result<Option<SourceRuntimeState>, SourceError> {
         self.runtime_state_inner(external_id, None)
     }
 
@@ -335,8 +353,8 @@ impl GameSource for HeroicSource {
             for (app_name, seconds) in parse_timestamp_values(&values) {
                 // The same Epic app can occur in both native and Flatpak Heroic
                 // stores. Match discovery's native-first precedence; never sum.
-                let id = heroic_external_id(LEGENDARY_RUNNER, &app_name)
-                    .map_err(SourceError::new)?;
+                let id =
+                    heroic_external_id(LEGENDARY_RUNNER, &app_name).map_err(SourceError::new)?;
                 reported.entry(id).or_insert(seconds);
             }
         }
@@ -395,10 +413,11 @@ fn read_legendary_title(
             return Err(HeroicDiscoveryError::Read { path, source });
         }
     };
-    let value: Value = serde_json::from_str(&text).map_err(|source| HeroicDiscoveryError::Json {
-        path: path.clone(),
-        source,
-    })?;
+    let value: Value =
+        serde_json::from_str(&text).map_err(|source| HeroicDiscoveryError::Json {
+            path: path.clone(),
+            source,
+        })?;
     let title = value
         .pointer("/metadata/title")
         .and_then(Value::as_str)
@@ -415,26 +434,36 @@ fn read_legendary_title(
 /// for older or manually exported data. Missing/invalid values stay unknown.
 fn parse_timestamp_values(value: &Value) -> Vec<(String, PlaytimeSeconds)> {
     fn collect(value: &Value, prefix: &str, result: &mut BTreeMap<String, PlaytimeSeconds>) {
-        let Some(object) = value.as_object() else { return };
+        let Some(object) = value.as_object() else {
+            return;
+        };
         // electron-store dot keys can nest a dotted app ID at arbitrary depth.
-        if !prefix.is_empty() {
-            if let Some(duration) = object.get("totalPlayed").and_then(valid_minutes) {
-                result.entry(prefix.to_owned()).or_insert(duration);
-            }
+        if !prefix.is_empty()
+            && let Some(duration) = object.get("totalPlayed").and_then(valid_minutes)
+        {
+            result.entry(prefix.to_owned()).or_insert(duration);
         }
         for (key, child) in object {
             if key == "totalPlayed" || key == "firstPlayed" || key == "lastPlayed" {
                 continue;
             }
             if let Some(name) = key.strip_suffix(".totalPlayed") {
-                let full_name = if prefix.is_empty() { name.to_owned() } else { format!("{prefix}.{name}") };
-                if !full_name.is_empty() {
-                    if let Some(duration) = valid_minutes(child) {
-                        result.entry(full_name).or_insert(duration);
-                    }
+                let full_name = if prefix.is_empty() {
+                    name.to_owned()
+                } else {
+                    format!("{prefix}.{name}")
+                };
+                if !full_name.is_empty()
+                    && let Some(duration) = valid_minutes(child)
+                {
+                    result.entry(full_name).or_insert(duration);
                 }
             } else if child.is_object() {
-                let full_name = if prefix.is_empty() { key.to_owned() } else { format!("{prefix}.{key}") };
+                let full_name = if prefix.is_empty() {
+                    key.to_owned()
+                } else {
+                    format!("{prefix}.{key}")
+                };
                 collect(child, &full_name, result);
             }
         }
@@ -480,7 +509,9 @@ fn valid_log_identity(app_name: &str) -> bool {
     !app_name.is_empty()
         && app_name != "."
         && app_name != ".."
-        && !app_name.chars().any(|character| matches!(character, '/' | '\\' | '\0'))
+        && !app_name
+            .chars()
+            .any(|character| matches!(character, '/' | '\\' | '\0'))
 }
 
 fn unix_millis() -> i64 {
@@ -521,7 +552,9 @@ fn last_played_millis(path: &Path, app_name: &str) -> io::Result<Option<i64>> {
     let Ok(root) = serde_json::from_str::<Value>(&json) else {
         return Ok(None); // A corrupt optional timestamp store is not a start signal.
     };
-    let nested = app_name.split('.').try_fold(&root, |node, key| node.get(key));
+    let nested = app_name
+        .split('.')
+        .try_fold(&root, |node, key| node.get(key));
     let value = nested
         .and_then(|game| game.get("lastPlayed"))
         .or_else(|| root.get(format!("{app_name}.lastPlayed").as_str()));
@@ -541,7 +574,9 @@ fn heroic_log_observation(
     store: &HeroicRuntimeStore,
     app_name: &str,
 ) -> io::Result<Option<HeroicLogObservation>> {
-    let path = store.game_logs.join("games")
+    let path = store
+        .game_logs
+        .join("games")
         .join(format!("{app_name}_{LEGENDARY_RUNNER}"))
         .join("launch.log");
     let mut file = match fs::File::open(&path) {
@@ -579,7 +614,9 @@ fn default_timestamp_paths() -> Vec<PathBuf> {
         paths.push(config.join("heroic/store/timestamp.json"));
     }
     if let Some(home) = home_dir() {
-        paths.push(home.join(".var/app/com.heroicgameslauncher.hgl/config/heroic/store/timestamp.json"));
+        paths.push(
+            home.join(".var/app/com.heroicgameslauncher.hgl/config/heroic/store/timestamp.json"),
+        );
     }
     dedupe_paths(paths)
 }
@@ -604,11 +641,7 @@ fn default_legendary_roots() -> Vec<PathBuf> {
     dedupe_paths(candidates)
 }
 
-fn push_preferred_legendary_root(
-    candidates: &mut Vec<PathBuf>,
-    current: PathBuf,
-    legacy: PathBuf,
-) {
+fn push_preferred_legendary_root(candidates: &mut Vec<PathBuf>, current: PathBuf, legacy: PathBuf) {
     if current.is_dir() {
         candidates.push(current);
     } else if legacy.is_dir() {
@@ -634,10 +667,8 @@ mod tests {
     fn temp_root(name: &str) -> PathBuf {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let id = NEXT.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!(
-            "horizon-heroic-{name}-{}-{id}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("horizon-heroic-{name}-{}-{id}", std::process::id()));
         fs::create_dir_all(root.join("metadata")).expect("metadata directory");
         root
     }
@@ -663,7 +694,10 @@ mod tests {
         assert!(snapshot.is_authoritative());
         assert_eq!(snapshot.games().len(), 1);
         assert_eq!(snapshot.games()[0].title().as_str(), "Satisfactory");
-        assert_eq!(snapshot.games()[0].external_id().as_str(), "legendary:CrabEA");
+        assert_eq!(
+            snapshot.games()[0].external_id().as_str(),
+            "legendary:CrabEA"
+        );
         assert_eq!(
             snapshot
                 .authoritative_membership()
@@ -683,10 +717,12 @@ mod tests {
 
         assert!(snapshot.is_authoritative());
         assert!(snapshot.games().is_empty());
-        assert!(snapshot
-            .authoritative_membership()
-            .expect("membership")
-            .is_empty());
+        assert!(
+            snapshot
+                .authoritative_membership()
+                .expect("membership")
+                .is_empty()
+        );
     }
 
     #[test]
@@ -711,14 +747,16 @@ mod tests {
         assert_eq!(
             target,
             Some(SourceLaunchTarget::Uri(
-                "heroic://launch?appName=Game%20%26%20Friends%3F%23&runner=legendary&gui=false".to_owned()
+                "heroic://launch?appName=Game%20%26%20Friends%3F%23&runner=legendary&gui=false"
+                    .to_owned()
             ))
         );
     }
 
     #[test]
     fn timestamp_nested_entries_are_normalized_to_seconds() {
-        let json: Value = serde_json::from_str(r#"{
+        let json: Value = serde_json::from_str(
+            r#"{
             "CrabEA": {"totalPlayed": 73, "lastPlayed": "2026-10-08"},
             "Zero": {"totalPlayed": 0},
             "Negative": {"totalPlayed": -1},
@@ -727,7 +765,9 @@ mod tests {
             "Huge": {"totalPlayed": 18446744073709551615},
             "Partial": {"firstPlayed": "2026-10-08"},
             "Dotted": {"App": {"totalPlayed": 5}}
-        }"#).expect("fixture");
+        }"#,
+        )
+        .expect("fixture");
         let reports = parse_timestamp_values(&json);
         assert_eq!(reports.len(), 3);
         assert_eq!(reports[0].0, "CrabEA");
@@ -743,8 +783,11 @@ mod tests {
         let path_a = temp_root("timestamp-native").join("timestamp.json");
         let path_b = temp_root("timestamp-flatpak").join("timestamp.json");
         fs::write(&path_a, r#"{"CrabEA.totalPlayed": 60}"#).expect("native");
-        fs::write(&path_b, r#"{"CrabEA": {"totalPlayed": 80}, "Another": {"totalPlayed": 2}}"#)
-            .expect("flatpak");
+        fs::write(
+            &path_b,
+            r#"{"CrabEA": {"totalPlayed": 80}, "Another": {"totalPlayed": 2}}"#,
+        )
+        .expect("flatpak");
         let mut source = HeroicSource::with_roots(vec![]).expect("source");
         source.timestamp_paths = vec![path_a, path_b];
         let reports = source.lifetime_playtime_snapshot().expect("snapshot");
@@ -766,7 +809,6 @@ mod tests {
         let reports = source.lifetime_playtime_snapshot().expect("snapshot");
         assert_eq!(reports[0].1.get(), 720);
     }
-
 }
 
 #[cfg(test)]
@@ -778,7 +820,8 @@ mod automatic_runtime_tests {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
             "horizon-heroic-auto-{}-{}",
-            std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
         ));
         let logs = root.join("state/Heroic/logs");
         let config = root.join("config/heroic/store/timestamp.json");
@@ -786,7 +829,10 @@ mod automatic_runtime_tests {
         fs::create_dir_all(config.parent().unwrap()).unwrap();
         let mut source = HeroicSource::with_roots(vec![root.join("installed")]).unwrap();
         fs::create_dir_all(&source.legendary_roots[0]).unwrap();
-        source.runtime_stores = vec![HeroicRuntimeStore { game_logs: logs, timestamp: config }];
+        source.runtime_stores = vec![HeroicRuntimeStore {
+            game_logs: logs,
+            timestamp: config,
+        }];
         (root, source)
     }
 
@@ -794,12 +840,27 @@ mod automatic_runtime_tests {
     fn unconfigured_game_watches_native_log_without_any_wrapper() {
         let (root, source) = fixture();
         let id = ExternalGameId::new("legendary:GameId").unwrap();
-        assert_eq!(source.runtime_state(&id).unwrap(), Some(SourceRuntimeState::Stopped));
-        let log = source.runtime_stores[0].game_logs.join("games/GameId_legendary/launch.log");
+        assert_eq!(
+            source.runtime_state(&id).unwrap(),
+            Some(SourceRuntimeState::Stopped)
+        );
+        let log = source.runtime_stores[0]
+            .game_logs
+            .join("games/GameId_legendary/launch.log");
         fs::write(&log, "IMPORTANT: Logs are disabled\n").unwrap();
-        assert_eq!(source.runtime_state(&id).unwrap(), Some(SourceRuntimeState::Running));
-        fs::write(&log, "IMPORTANT: Logs are disabled\n============= End of log =============\n").unwrap();
-        assert_eq!(source.runtime_state(&id).unwrap(), Some(SourceRuntimeState::Stopped));
+        assert_eq!(
+            source.runtime_state(&id).unwrap(),
+            Some(SourceRuntimeState::Running)
+        );
+        fs::write(
+            &log,
+            "IMPORTANT: Logs are disabled\n============= End of log =============\n",
+        )
+        .unwrap();
+        assert_eq!(
+            source.runtime_state(&id).unwrap(),
+            Some(SourceRuntimeState::Stopped)
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -807,25 +868,52 @@ mod automatic_runtime_tests {
     fn timestamp_completion_terminates_log_without_end_marker() {
         let (root, source) = fixture();
         let id = ExternalGameId::new("legendary:GameId").unwrap();
-        let log = source.runtime_stores[0].game_logs.join("games/GameId_legendary/launch.log");
+        let log = source.runtime_stores[0]
+            .game_logs
+            .join("games/GameId_legendary/launch.log");
         fs::write(&log, "IMPORTANT: Logs are disabled\n").unwrap();
-        assert_eq!(source.runtime_state(&id).unwrap(), Some(SourceRuntimeState::Running));
+        assert_eq!(
+            source.runtime_state(&id).unwrap(),
+            Some(SourceRuntimeState::Running)
+        );
         let timestamp = source.runtime_stores[0].timestamp.clone();
         // Guaranteed to be after the log file's last modified time.
         let future = chrono::Utc::now() + chrono::Duration::seconds(10);
-        fs::write(timestamp, format!(r#"{{"GameId":{{"lastPlayed":"{}"}}}}"#, future.to_rfc3339())).unwrap();
-        assert_eq!(source.runtime_state(&id).unwrap(), Some(SourceRuntimeState::Stopped));
+        fs::write(
+            timestamp,
+            format!(r#"{{"GameId":{{"lastPlayed":"{}"}}}}"#, future.to_rfc3339()),
+        )
+        .unwrap();
+        assert_eq!(
+            source.runtime_state(&id).unwrap(),
+            Some(SourceRuntimeState::Stopped)
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn incomplete_old_log_and_future_timestamps_are_rejected() {
         let now = unix_millis();
-        assert!(!log_session_appears_active("live", now - HEROIC_LOG_MAX_IDLE_MS - 1, None, now));
-        assert!(!log_session_appears_active("live", now + HEROIC_LOG_CLOCK_SKEW_MS + 1, None, now));
+        assert!(!log_session_appears_active(
+            "live",
+            now - HEROIC_LOG_MAX_IDLE_MS - 1,
+            None,
+            now
+        ));
+        assert!(!log_session_appears_active(
+            "live",
+            now + HEROIC_LOG_CLOCK_SKEW_MS + 1,
+            None,
+            now
+        ));
         assert!(!log_session_appears_active("live", now, Some(now), now));
         assert!(!log_session_appears_active("", now, None, now));
-        assert!(log_session_appears_active("live", now, Some(now - 5_000), now));
+        assert!(log_session_appears_active(
+            "live",
+            now,
+            Some(now - 5_000),
+            now
+        ));
     }
 
     #[test]
@@ -841,15 +929,26 @@ mod automatic_runtime_tests {
     fn orphaned_open_log_does_not_start_new_observation() {
         let (root, source) = fixture();
         let id = ExternalGameId::new("legendary:GameId").unwrap();
-        let log = source.runtime_stores[0].game_logs.join("games/GameId_legendary/launch.log");
+        let log = source.runtime_stores[0]
+            .game_logs
+            .join("games/GameId_legendary/launch.log");
         fs::write(&log, "IMPORTANT: Logs are disabled\n").unwrap();
         // The unscoped check remains useful for the helper's capability probe.
-        assert_eq!(source.runtime_state(&id).unwrap(), Some(SourceRuntimeState::Running));
+        assert_eq!(
+            source.runtime_state(&id).unwrap(),
+            Some(SourceRuntimeState::Running)
+        );
         let future = SystemTime::now() + std::time::Duration::from_secs(90);
-        assert_eq!(source.runtime_state_for_observation(&id, future).unwrap(),
-            Some(SourceRuntimeState::Stopped));
-        assert_eq!(source.runtime_state_for_observation(&id, SystemTime::now()).unwrap(),
-            Some(SourceRuntimeState::Running));
+        assert_eq!(
+            source.runtime_state_for_observation(&id, future).unwrap(),
+            Some(SourceRuntimeState::Stopped)
+        );
+        assert_eq!(
+            source
+                .runtime_state_for_observation(&id, SystemTime::now())
+                .unwrap(),
+            Some(SourceRuntimeState::Running)
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -857,7 +956,9 @@ mod automatic_runtime_tests {
     fn newest_completed_store_beats_older_open_store() {
         let (root, mut source) = fixture();
         let id = ExternalGameId::new("legendary:GameId").unwrap();
-        let old_log = source.runtime_stores[0].game_logs.join("games/GameId_legendary/launch.log");
+        let old_log = source.runtime_stores[0]
+            .game_logs
+            .join("games/GameId_legendary/launch.log");
         fs::write(&old_log, "IMPORTANT: Logs are disabled\n").unwrap();
         std::thread::sleep(std::time::Duration::from_millis(30));
         let second = root.join("flatpak/logs");
@@ -868,7 +969,10 @@ mod automatic_runtime_tests {
             game_logs: second,
             timestamp: root.join("other_timestamp.json"),
         });
-        assert_eq!(source.runtime_state(&id).unwrap(), Some(SourceRuntimeState::Stopped));
+        assert_eq!(
+            source.runtime_state(&id).unwrap(),
+            Some(SourceRuntimeState::Stopped)
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -876,7 +980,9 @@ mod automatic_runtime_tests {
     fn newest_open_store_beats_older_closed_store() {
         let (root, mut source) = fixture();
         let id = ExternalGameId::new("legendary:GameId").unwrap();
-        let old_log = source.runtime_stores[0].game_logs.join("games/GameId_legendary/launch.log");
+        let old_log = source.runtime_stores[0]
+            .game_logs
+            .join("games/GameId_legendary/launch.log");
         fs::write(&old_log, "============= End of log =============\n").unwrap();
         std::thread::sleep(std::time::Duration::from_millis(30));
         let second = root.join("flatpak/logs");
@@ -887,7 +993,10 @@ mod automatic_runtime_tests {
             game_logs: second,
             timestamp: root.join("other_timestamp.json"),
         });
-        assert_eq!(source.runtime_state(&id).unwrap(), Some(SourceRuntimeState::Running));
+        assert_eq!(
+            source.runtime_state(&id).unwrap(),
+            Some(SourceRuntimeState::Running)
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -895,14 +1004,30 @@ mod automatic_runtime_tests {
     fn separate_games_cannot_trigger_each_others_playing_state() {
         let (root, source) = fixture();
         fs::write(
-            source.runtime_stores[0].game_logs.join("games/GameId_legendary/launch.log"),
-            "launching\n"
-        ).unwrap();
-        assert_eq!(source.runtime_state(&ExternalGameId::new("legendary:AnotherGame").unwrap()).unwrap(),
-            Some(SourceRuntimeState::Stopped));
-        assert_eq!(source.runtime_state(&ExternalGameId::new("legendary:GameId").unwrap()).unwrap(),
-            Some(SourceRuntimeState::Running));
-        assert_eq!(source.runtime_state(&ExternalGameId::new("gog:GameId").unwrap()).unwrap(), None);
+            source.runtime_stores[0]
+                .game_logs
+                .join("games/GameId_legendary/launch.log"),
+            "launching\n",
+        )
+        .unwrap();
+        assert_eq!(
+            source
+                .runtime_state(&ExternalGameId::new("legendary:AnotherGame").unwrap())
+                .unwrap(),
+            Some(SourceRuntimeState::Stopped)
+        );
+        assert_eq!(
+            source
+                .runtime_state(&ExternalGameId::new("legendary:GameId").unwrap())
+                .unwrap(),
+            Some(SourceRuntimeState::Running)
+        );
+        assert_eq!(
+            source
+                .runtime_state(&ExternalGameId::new("gog:GameId").unwrap())
+                .unwrap(),
+            None
+        );
         fs::remove_dir_all(root).unwrap();
     }
 }

@@ -2,9 +2,7 @@ use std::{sync::Arc, thread::JoinHandle};
 
 use ashpd::desktop::{
     Color,
-    settings::{
-        APPEARANCE_NAMESPACE, ColorScheme, Contrast, ReducedMotion, Settings,
-    },
+    settings::{APPEARANCE_NAMESPACE, ColorScheme, Contrast, ReducedMotion, Settings},
 };
 use futures_util::StreamExt;
 use thiserror::Error;

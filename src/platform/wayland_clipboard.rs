@@ -30,7 +30,9 @@ impl WaylandClipboard {
         // this clipboard for no longer than the application's window lifetime;
         // its own Wayland event queue stays on the connected display.
         let clipboard = unsafe { smithay_clipboard::Clipboard::new(display) };
-        Ok(Self { clipboard: Mutex::new(clipboard) })
+        Ok(Self {
+            clipboard: Mutex::new(clipboard),
+        })
     }
 
     /// Called from a worker, never Slint's event loop. Clipboard content is
@@ -53,8 +55,13 @@ impl WaylandClipboard {
 
 fn validate_token(text: &str) -> Option<String> {
     let key = text.trim();
-    if key.is_empty() || key.len() > 512 || !key.is_ascii() ||
-        key.bytes().any(|byte| byte.is_ascii_whitespace() || byte.is_ascii_control()) {
+    if key.is_empty()
+        || key.len() > 512
+        || !key.is_ascii()
+        || key
+            .bytes()
+            .any(|byte| byte.is_ascii_whitespace() || byte.is_ascii_control())
+    {
         return None;
     }
     Some(key.to_owned())
@@ -66,7 +73,10 @@ mod tests {
 
     #[test]
     fn clipboard_accepts_one_token_and_trims_external_newlines() {
-        assert_eq!(validate_token("  ab-CD_123\n").as_deref(), Some("ab-CD_123"));
+        assert_eq!(
+            validate_token("  ab-CD_123\n").as_deref(),
+            Some("ab-CD_123")
+        );
         assert!(validate_token(" \t\n").is_none());
         assert!(validate_token("ab CD").is_none());
         assert!(validate_token("ab\nCD").is_none());

@@ -294,8 +294,11 @@ export component LibraryPage inherits Rectangle {
         TouchArea {
             width: parent.width; height: parent.height;
             scroll-event(event) => {
-                root.scroll-rows(event.delta-y > 0px ? 1 : -1);
-                accept
+                if event.delta-y != 0px {
+                    root.scroll-rows(event.delta-y > 0px ? 1 : -1);
+                    return accept;
+                }
+                reject
             }
         }
 
@@ -467,8 +470,11 @@ export component LibraryPage inherits Rectangle {
                         && row.absolute-index < (root.scroll-row + root.displayed-rows) * root.grid-columns;
                     clicked => { root.choose-card(row.absolute-index); }
                     scroll-event(event) => {
-                        root.scroll-rows(event.delta-y > 0px ? 1 : -1);
-                        accept
+                        if event.delta-y != 0px {
+                            root.scroll-rows(event.delta-y > 0px ? 1 : -1);
+                            return accept;
+                        }
+                        reject
                     }
                 }
             }
@@ -477,12 +483,17 @@ export component LibraryPage inherits Rectangle {
 
     }
 
-    // Adwaita-like scroll-edge elevation, NOT a tinted toolbar surface or
-    // a rule. Only the 10px penumbra enters the gallery: the rest of the page
-    // remains exactly Theme.background. It does not intercept mouse input.
+    // Full-shell, adwaita-like header elevation without a tinted header band.
+    // gallery.y is animated during normal row scrolling. Use its CURRENT
+    // offset (not the destination row) to fade the shadow in as a previous
+    // row passes beneath the fixed header, and back out at the first row.
+    // No shadow at the initial scroll position; the existing footer boundary
+    // remains unchanged.
     if root.total-count > 0 : Rectangle {
         x: 0px; y: grid-viewport.y;
         width: parent.width; height: 11px;
+        opacity: min(1.0, max(0.0,
+            (root.peek-limit - gallery.y) / root.row-stride));
         background: @linear-gradient(180deg,
             Theme.shadow.with-alpha(Theme.is-dark ? 0.23 : 0.11) 0%,
             Theme.shadow.with-alpha(0.0) 100%);

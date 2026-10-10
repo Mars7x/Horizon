@@ -230,13 +230,17 @@ component AccentSwatch inherits Rectangle {
 }
 
 export component SettingsPage inherits Rectangle {
-    in property <int> view: 0; // 0 Settings, 1 Appearance, 2 Third-Party
+    in property <int> view: 0; // 0 Settings, 1 Appearance, 2 Third-Party, 3 Steam Account
     in property <int> theme-index: 0; // System, Light, Dark
     in property <int> accent-index: 0; // System, nine spectrum colours
     in property <bool> ui-sounds-enabled: true;
     in property <string> appearance-feedback: "";
     in property <int> selection: 0;
     in property <bool> key-present: false;
+    in property <string> steam-identity: "Not configured";
+    in property <bool> steam-connected: false;
+    in property <bool> steam-saved: false;
+    in property <int> editor-kind: 0; // 0 SteamGridDB, 1 SteamID64, 2 Steam Web API key
     in property <bool> prefer-artwork: false;
     in property <bool> editing-key: false;
     in property <int> editor-target: 0; // 0 input, 1 eye, 2 Cancel, 3 Save
@@ -297,7 +301,7 @@ export component SettingsPage inherits Rectangle {
     Text {
         x: Metrics.page-margin; y: 31px;
         width: root.content-width; height: 47px;
-        text: root.view == 0 ? "Settings" : root.view == 1 ? "Appearance" : "Third-Party";
+        text: root.view == 0 ? "Settings" : root.view == 1 ? "Appearance" : root.view == 2 ? "Third-Party" : "Steam Account";
         color: Theme.foreground;
         font-size: Typography.title-size;
         font-weight: Typography.title-weight;
@@ -569,8 +573,8 @@ export component SettingsPage inherits Rectangle {
             vertical-alignment: center;
         }
         SettingsRow {
-            x: 0px; y: 96px;
-            width: parent.width; height: 90px;
+            x: 0px; y: 88px;
+            width: parent.width; height: 83px;
             heading: "API key";
             summary: root.key-present ? "Saved locally · key hidden" : "Not configured";
             trailing: root.key-present ? "Replace  ›" : "Add key  ›";
@@ -578,8 +582,8 @@ export component SettingsPage inherits Rectangle {
             activated => { if (root.view == 2 && !root.editing-key && !root.refresh-open) { root.activate(0); } }
         }
         SettingsRow {
-            x: 0px; y: 200px;
-            width: parent.width; height: 90px;
+            x: 0px; y: 182px;
+            width: parent.width; height: 83px;
             heading: "Prefer SteamGridDB artwork";
             summary: "Use SteamGridDB first; keep existing art as fallback";
             toggle: true;
@@ -589,8 +593,8 @@ export component SettingsPage inherits Rectangle {
             activated => { if (root.view == 2 && !root.editing-key && !root.refresh-open) { root.activate(1); } }
         }
         SettingsRow {
-            x: 0px; y: 304px;
-            width: parent.width; height: 90px;
+            x: 0px; y: 276px;
+            width: parent.width; height: 83px;
             heading: "Refresh artwork";
             summary: "Check SteamGridDB for updated square covers";
             trailing: root.key-present ? "Refresh  ›" : "Unavailable";
@@ -599,8 +603,8 @@ export component SettingsPage inherits Rectangle {
             activated => { if (root.view == 2 && !root.editing-key && !root.refresh-open) { root.activate(2); } }
         }
         SettingsRow {
-            x: 0px; y: 408px;
-            width: parent.width; height: 90px;
+            x: 0px; y: 370px;
+            width: parent.width; height: 83px;
             heading: "Remove API key";
             summary: root.key-present ? "Disconnect SteamGridDB and keep cached files" : "No key is currently saved";
             trailing: root.key-present ? "Remove  ›" : "Unavailable";
@@ -608,7 +612,103 @@ export component SettingsPage inherits Rectangle {
             focused: root.view == 2 && root.selection == 3;
             activated => { if (root.view == 2 && !root.editing-key && !root.refresh-open) { root.activate(3); } }
         }
+        // Shared Steam account integration is a separate service, not a
+        // SteamGridDB preference or another item in its artwork group.
+        Rectangle {
+            x: 0px; y: 465px; width: parent.width; height: 1px;
+            background: Theme.divider.with-alpha(0.70);
+        }
+        Text {
+            x: 0px; y: 477px; width: parent.width; height: 33px;
+            text: "Steam";
+            color: Theme.foreground;
+            font-size: Typography.heading-size;
+            font-weight: Typography.heading-weight;
+            vertical-alignment: center;
+        }
+        SettingsRow {
+            x: 0px; y: 517px;
+            width: parent.width; height: 86px;
+            heading: "Steam Account";
+            summary: root.steam-connected ? "Configured for achievements and future Steam services" : "Configure SteamID64 and Web API key";
+            trailing: "Open  ›";
+            focused: root.view == 2 && root.selection == 4;
+            activated => { if (root.view == 2 && !root.editing-key && !root.refresh-open) { root.activate(4); } }
+        }
+    }
 
+    steam-account := Rectangle {
+        x: Metrics.page-margin + (root.view == 3 ? 0px : 12px);
+        y: 109px;
+        width: root.content-width; height: root.height - 109px;
+        background: transparent;
+        opacity: root.view == 3 ? 1.0 : 0.0;
+        visible: self.opacity > 0.01;
+        animate x { duration: Motion.page-duration; easing: ease-in-out; }
+        animate opacity { duration: Motion.page-duration; }
+
+        Text {
+            x: 0px; y: 0px; width: parent.width; height: 26px;
+            text: "Settings  /  Third-Party  /  Steam Account";
+            color: Theme.secondary-foreground;
+            font-size: Typography.caption-size;
+            vertical-alignment: center;
+        }
+        Text {
+            x: 0px; y: 38px; width: parent.width; height: 36px;
+            text: "Steam Web API";
+            color: Theme.foreground;
+            font-size: Typography.heading-size;
+            font-weight: Typography.heading-weight;
+            vertical-alignment: center;
+        }
+        Text {
+            x: 0px; y: 74px; width: parent.width; height: 32px;
+            text: root.steam-connected ? "Configured for read-only achievements"
+                : "Set your SteamID64 and Web API key; this is not a Steam login.";
+            color: Theme.secondary-foreground;
+            font-size: Typography.caption-size;
+            vertical-alignment: center;
+        }
+        SettingsRow {
+            x: 0px; y: 120px; width: parent.width; height: 90px;
+            heading: "SteamID64";
+            summary: root.steam-identity;
+            trailing: root.steam-identity == "Not configured" ? "Set ID  ›" : "Change  ›";
+            focused: root.view == 3 && root.selection == 0;
+            activated => { if (root.view == 3 && !root.editing-key) { root.activate(0); } }
+        }
+        SettingsRow {
+            x: 0px; y: 224px; width: parent.width; height: 90px;
+            heading: "Steam Web API key";
+            summary: root.steam-connected ? "Configured · key hidden" : "Required to retrieve achievements";
+            trailing: root.steam-connected ? "Replace  ›" : "Add key  ›";
+            focused: root.view == 3 && root.selection == 1;
+            activated => { if (root.view == 3 && !root.editing-key) { root.activate(1); } }
+        }
+        SettingsRow {
+            x: 0px; y: 328px; width: parent.width; height: 90px;
+            heading: "Disconnect Steam";
+            summary: root.steam-saved ? "Delete Horizon's saved key and SteamID64" : "No locally saved account";
+            trailing: root.steam-saved ? "Remove  ›" : "Unavailable";
+            enabled: root.steam-saved;
+            focused: root.view == 3 && root.selection == 2;
+            activated => { if (root.view == 3 && !root.editing-key && root.steam-saved) { root.activate(2); } }
+        }
+        Text {
+            x: 0px; y: 443px; width: parent.width; height: 72px;
+            text: "Stored locally with private file permissions; not encrypted. API keys are never shown after saving. Account connection does not grant Steam login access.";
+            color: Theme.secondary-foreground;
+            font-size: Typography.caption-size;
+            wrap: word-wrap;
+        }
+        Text {
+            x: 0px; y: 530px; width: parent.width; height: 30px;
+            text: root.feedback;
+            visible: root.view == 3 && root.feedback != "";
+            color: Theme.accent;
+            font-size: Typography.caption-size;
+        }
     }
 
     // Retain the editor while it fades out; it blocks pointer input until fully
@@ -638,7 +738,9 @@ export component SettingsPage inherits Rectangle {
             Text {
                 x: 26px; y: 22px;
                 width: parent.width - 52px; height: 34px;
-                text: root.key-present ? "Replace SteamGridDB API key" : "Add SteamGridDB API key";
+                text: root.editor-kind == 1 ? "SteamID64"
+                    : root.editor-kind == 2 ? "Steam Web API key"
+                    : root.key-present ? "Replace SteamGridDB API key" : "Add SteamGridDB API key";
                 color: Theme.foreground;
                 font-size: Typography.heading-size;
                 font-weight: Typography.heading-weight;
@@ -647,8 +749,9 @@ export component SettingsPage inherits Rectangle {
             Text {
                 x: 26px; y: 60px;
                 width: parent.width - 52px; height: 24px;
-                text: root.key-present
-                    ? "Saved keys stay hidden. Enter a new key to replace it."
+                text: root.editor-kind == 1 ? "Your 17-digit numeric Steam identity."
+                    : root.editor-kind == 2 ? "Enter a Web API key; stored locally, never shown again."
+                    : root.key-present ? "Saved keys stay hidden. Enter a new key to replace it."
                     : "Enter your personal key to enable SteamGridDB artwork.";
                 color: Theme.secondary-foreground;
                 font-size: Typography.body-size;
@@ -687,14 +790,14 @@ export component SettingsPage inherits Rectangle {
                         }
                         height: parent.height;
                         text <=> root.key-draft;
-                        input-type: root.reveal-draft ? text : password;
+                        input-type: root.editor-kind == 1 || root.reveal-draft ? text : password;
                         input-method-hints: { capitalization: CapitalizationMode.none, auto-correct: false, auto-complete: false };
                         font-family: Typography.family;
                         font-size: Typography.body-size;
                         color: Theme.foreground;
                         selection-background-color: Theme.accent;
                         selection-foreground-color: Theme.accent-foreground;
-                        accessible-label: "SteamGridDB API key";
+                        accessible-label: root.editor-kind == 1 ? "SteamID64" : root.editor-kind == 2 ? "Steam Web API key" : "SteamGridDB API key";
                         // Disable the abrupt native blink; the clipped overlay
                         // below fades smoothly at Slint's own cursor position.
                         text-cursor-width: 0px;
@@ -806,6 +909,7 @@ export component SettingsPage inherits Rectangle {
                 // An accessible icon-only reveal control. The default is masked;
                 // only the unsaved draft is ever revealed, never the saved key.
                 reveal-button := Rectangle {
+                    visible: root.editor-kind != 1;
                     x: parent.width - 48px; y: 8px;
                     width: 40px; height: 40px;
                     border-radius: Metrics.radius-md;
@@ -814,7 +918,7 @@ export component SettingsPage inherits Rectangle {
                     border-width: reveal-touch.has-hover ? 1px : 0px;
                     border-color: Theme.divider;
                     accessible-role: button;
-                    accessible-label: root.reveal-draft ? "Hide API key" : "Show API key";
+                    accessible-label: root.editor-kind == 1 ? "SteamID64 shown" : root.reveal-draft ? "Hide API key" : "Show API key";
                     animate background { duration: Motion.hover-duration; }
                     SelectionFocusSurface {
                         x: -2px; y: -2px;
@@ -879,7 +983,7 @@ export component SettingsPage inherits Rectangle {
                 x: parent.width - 138px; y: 191px;
                 width: 112px; height: 43px;
                 primary: true;
-                label: "Save key";
+                label: root.editor-kind == 1 ? "Save ID" : "Save key";
                 focused: root.editor-target == 3;
                 enabled: root.key-draft != "";
                 activated => { root.save-key(root.key-draft); }

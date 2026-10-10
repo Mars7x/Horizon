@@ -20,6 +20,8 @@ pub enum AppError {
     Settings(#[from] SettingsStoreError),
     #[error(transparent)]
     Appearance(#[from] AppearanceStoreError),
+    #[error("Steam account configuration: {0}")]
+    SteamAccount(String),
     #[error(transparent)]
     SourceRegistryBuild(#[from] SourceRegistryBuildError),
     #[error(transparent)]

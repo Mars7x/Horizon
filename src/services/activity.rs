@@ -9,9 +9,7 @@ use crate::{
         SourceId, SourceLifetimePlaytime,
     },
     services::{
-        runtime::{
-            RuntimeObservationEvent, RuntimeObservationId, RuntimeObservationTerminalState,
-        },
+        runtime::{RuntimeObservationEvent, RuntimeObservationId, RuntimeObservationTerminalState},
         session::{ManagedSessionId, ManagedSessionTerminalState},
     },
 };
@@ -92,12 +90,22 @@ pub struct ReportedGameSummary {
 
 impl ReportedGameSummary {
     pub fn new(title: GameTitle, source_id: SourceId, lifetime: PlaytimeSeconds) -> Self {
-        Self { title, source_id, lifetime }
+        Self {
+            title,
+            source_id,
+            lifetime,
+        }
     }
 
-    pub fn title(&self) -> &GameTitle { &self.title }
-    pub fn source_id(&self) -> &SourceId { &self.source_id }
-    pub const fn lifetime(&self) -> PlaytimeSeconds { self.lifetime }
+    pub fn title(&self) -> &GameTitle {
+        &self.title
+    }
+    pub fn source_id(&self) -> &SourceId {
+        &self.source_id
+    }
+    pub const fn lifetime(&self) -> PlaytimeSeconds {
+        self.lifetime
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,14 +156,22 @@ impl ActivityOverview {
 
     /// Each day is a local calendar day, not a fixed UTC 24-hour block.
     /// Only persisted completed/recovered time is included here.
-    pub fn with_calendar_playtime(mut self, week_days: Vec<(String, i64)>, month_seconds: i64) -> Self {
+    pub fn with_calendar_playtime(
+        mut self,
+        week_days: Vec<(String, i64)>,
+        month_seconds: i64,
+    ) -> Self {
         self.week_days = week_days;
         self.month_seconds = month_seconds;
         self
     }
 
-    pub fn week_days(&self) -> &[(String, i64)] { &self.week_days }
-    pub fn month_seconds(&self) -> i64 { self.month_seconds }
+    pub fn week_days(&self) -> &[(String, i64)] {
+        &self.week_days
+    }
+    pub fn month_seconds(&self) -> i64 {
+        self.month_seconds
+    }
 
     pub const fn reported_playtime(&self) -> PlaytimeSeconds {
         self.reported_playtime
@@ -239,10 +255,7 @@ pub trait ActivityRepository {
         ended_at: i64,
     ) -> Result<(), Self::Error>;
 
-    fn interrupt_play_session(
-        &mut self,
-        session_id: PlaySessionId,
-    ) -> Result<(), Self::Error>;
+    fn interrupt_play_session(&mut self, session_id: PlaySessionId) -> Result<(), Self::Error>;
 
     fn checkpoint_open_play_sessions(&mut self, observed_at: i64) -> Result<usize, Self::Error>;
 
@@ -423,9 +436,7 @@ where
                 } else {
                     FOREGROUND_RETURN_GRACE_MS
                 };
-                let confirm_after_millis = now_millis
-                    .saturating_add(grace)
-                    .max(startup_window_end);
+                let confirm_after_millis = now_millis.saturating_add(grace).max(startup_window_end);
 
                 self.foreground_return
                     .borrow_mut()
@@ -658,7 +669,12 @@ where
         source_id: &SourceId,
         now: i64,
     ) -> Result<PlaySessionId, R::Error> {
-        if let Some(existing) = self.managed_sessions.borrow().get(&managed_session_id).copied() {
+        if let Some(existing) = self
+            .managed_sessions
+            .borrow()
+            .get(&managed_session_id)
+            .copied()
+        {
             return Ok(existing);
         }
 
@@ -715,17 +731,22 @@ where
         let today = now.date_naive();
         let start_of_day = |date: chrono::NaiveDate| {
             let midnight = date.and_hms_opt(0, 0, 0).expect("midnight time");
-            Local.from_local_datetime(&midnight).earliest()
+            Local
+                .from_local_datetime(&midnight)
+                .earliest()
                 .or_else(|| Local.from_local_datetime(&midnight).latest())
                 .map(|datetime| datetime.timestamp())
                 .unwrap_or_else(|| midnight.and_utc().timestamp())
         };
-        let days: Vec<_> = (0..7).rev().map(|offset| {
-            let date = today - ChronoDuration::days(offset);
-            let start = start_of_day(date);
-            let end = start_of_day(date + ChronoDuration::days(1));
-            (date.format("%a").to_string(), (start, end))
-        }).collect();
+        let days: Vec<_> = (0..7)
+            .rev()
+            .map(|offset| {
+                let date = today - ChronoDuration::days(offset);
+                let start = start_of_day(date);
+                let end = start_of_day(date + ChronoDuration::days(1));
+                (date.format("%a").to_string(), (start, end))
+            })
+            .collect();
         let month_start = start_of_day(today.with_day(1).expect("month has first day"));
         let mut ranges = days.iter().map(|(_, range)| *range).collect::<Vec<_>>();
         ranges.push((month_start, now.timestamp().saturating_add(1)));
@@ -733,8 +754,11 @@ where
         let overview = repo.activity_overview(recent_limit, top_games_limit)?;
         let mut totals = repo.observed_seconds_in_ranges(&ranges)?;
         let month_seconds = totals.pop().unwrap_or_default();
-        let week_days = days.into_iter().zip(totals).map(|((label, _), seconds)|
-            (label, seconds.max(0))).collect();
+        let week_days = days
+            .into_iter()
+            .zip(totals)
+            .map(|((label, _), seconds)| (label, seconds.max(0)))
+            .collect();
         Ok(overview.with_calendar_playtime(week_days, month_seconds.max(0)))
     }
 
@@ -874,17 +898,19 @@ mod tests {
             Ok(())
         }
 
-        fn interrupt_play_session(
-            &mut self,
-            session_id: PlaySessionId,
-        ) -> Result<(), Self::Error> {
+        fn interrupt_play_session(&mut self, session_id: PlaySessionId) -> Result<(), Self::Error> {
             let index = self
                 .sessions
                 .iter()
                 .position(|session| session.id() == session_id)
                 .expect("open session");
             let session = self.sessions[index].clone();
-            let confirmed_through = self.checkpoints.get(&session_id).copied();
+            // Mirrors SQLite: no checkpoint past the start means unknown.
+            let confirmed_through = self
+                .checkpoints
+                .get(&session_id)
+                .copied()
+                .filter(|&at| at > session.started_at());
             self.sessions[index] = PlaySession::new(
                 session.id(),
                 session.game_id(),
@@ -898,7 +924,10 @@ mod tests {
             Ok(())
         }
 
-        fn checkpoint_open_play_sessions(&mut self, observed_at: i64) -> Result<usize, Self::Error> {
+        fn checkpoint_open_play_sessions(
+            &mut self,
+            observed_at: i64,
+        ) -> Result<usize, Self::Error> {
             let mut checkpointed = 0;
             for session in &self.sessions {
                 if session.state() != PlaySessionState::Open || observed_at < session.started_at() {
@@ -917,7 +946,11 @@ mod tests {
                     continue;
                 }
                 interrupted += 1;
-                let confirmed_through = self.checkpoints.get(&session.id()).copied();
+                let confirmed_through = self
+                    .checkpoints
+                    .get(&session.id())
+                    .copied()
+                    .filter(|&at| at > session.started_at());
                 *session = PlaySession::new(
                     session.id(),
                     session.game_id(),
@@ -935,11 +968,15 @@ mod tests {
         fn recent_game_ids(&self, limit: usize) -> Result<Vec<GameId>, Self::Error> {
             let mut latest = BTreeMap::<GameId, i64>::new();
             for session in &self.sessions {
-                latest.entry(session.game_id()).and_modify(|time| *time = (*time).max(session.started_at()))
+                latest
+                    .entry(session.game_id())
+                    .and_modify(|time| *time = (*time).max(session.started_at()))
                     .or_insert(session.started_at());
             }
             let mut values: Vec<_> = latest.into_iter().collect();
-            values.sort_by(|(a_id, a_time), (b_id, b_time)| b_time.cmp(a_time).then_with(|| a_id.cmp(b_id)));
+            values.sort_by(|(a_id, a_time), (b_id, b_time)| {
+                b_time.cmp(a_time).then_with(|| a_id.cmp(b_id))
+            });
             Ok(values.into_iter().take(limit).map(|(id, _)| id).collect())
         }
 
@@ -1036,7 +1073,10 @@ mod tests {
 
         let repository = repository.borrow();
         assert_eq!(repository.sessions[0].state(), PlaySessionState::Completed);
-        assert_eq!(repository.sessions[0].duration().expect("duration").get(), 120);
+        assert_eq!(
+            repository.sessions[0].duration().expect("duration").get(),
+            120
+        );
     }
 
     #[test]
@@ -1062,7 +1102,10 @@ mod tests {
             .handle_application_active_changed_at_millis(false, 125_000)
             .expect("game took focus");
         assert_eq!(repository.borrow().sessions.len(), 1);
-        assert_eq!(repository.borrow().sessions[0].state(), PlaySessionState::Open);
+        assert_eq!(
+            repository.borrow().sessions[0].state(),
+            PlaySessionState::Open
+        );
 
         service
             .handle_application_active_changed_at_millis(true, 280_000)
@@ -1076,7 +1119,10 @@ mod tests {
 
         let repository = repository.borrow();
         assert_eq!(repository.sessions[0].state(), PlaySessionState::Completed);
-        assert_eq!(repository.sessions[0].duration().expect("duration").get(), 180);
+        assert_eq!(
+            repository.sessions[0].duration().expect("duration").get(),
+            180
+        );
     }
 
     #[test]
@@ -1106,7 +1152,10 @@ mod tests {
 
         let repository = repository.borrow();
         assert_eq!(repository.sessions[0].state(), PlaySessionState::Completed);
-        assert_eq!(repository.sessions[0].duration().expect("duration").get(), 1);
+        assert_eq!(
+            repository.sessions[0].duration().expect("duration").get(),
+            1
+        );
     }
 
     #[test]
@@ -1151,8 +1200,14 @@ mod tests {
 
         assert_eq!(service.recover_interrupted_sessions().expect("recover"), 1);
         let repository = repository.borrow();
-        assert_eq!(repository.sessions[0].state(), PlaySessionState::Interrupted);
-        assert_eq!(repository.sessions[0].duration().expect("duration").get(), 45);
+        assert_eq!(
+            repository.sessions[0].state(),
+            PlaySessionState::Interrupted
+        );
+        assert_eq!(
+            repository.sessions[0].duration().expect("duration").get(),
+            45
+        );
     }
 
     #[test]
@@ -1210,16 +1265,16 @@ mod tests {
         service.managed_session_started(managed_id, game_id(), source_id());
         assert!(matches!(
             service
-                .handle_managed_session_terminal(
-                    managed_id,
-                    &ManagedSessionTerminalState::Lost,
-                )
+                .handle_managed_session_terminal(managed_id, &ManagedSessionTerminalState::Lost,)
                 .expect("managed interruption"),
             ActivitySessionTransition::Interrupted(_)
         ));
 
         let repository = repository.borrow();
-        assert_eq!(repository.sessions[0].state(), PlaySessionState::Interrupted);
+        assert_eq!(
+            repository.sessions[0].state(),
+            PlaySessionState::Interrupted
+        );
         assert_eq!(repository.sessions[0].duration(), None);
     }
 
@@ -1250,7 +1305,10 @@ mod tests {
         service
             .handle_application_active_changed_at_millis(false, 160_000)
             .expect("focus out");
-        assert_eq!(repository.borrow().sessions[0].state(), PlaySessionState::Open);
+        assert_eq!(
+            repository.borrow().sessions[0].state(),
+            PlaySessionState::Open
+        );
 
         assert!(matches!(
             service
@@ -1265,7 +1323,10 @@ mod tests {
             ActivitySessionTransition::Completed(_)
         ));
         assert_eq!(
-            repository.borrow().sessions[0].duration().expect("duration").get(),
+            repository.borrow().sessions[0]
+                .duration()
+                .expect("duration")
+                .get(),
             180
         );
     }
@@ -1310,7 +1371,11 @@ mod tests {
             .expect("report");
 
         assert_eq!(
-            service.overview(5, 5).expect("overview").observed_playtime().get(),
+            service
+                .overview(5, 5)
+                .expect("overview")
+                .observed_playtime()
+                .get(),
             0
         );
     }

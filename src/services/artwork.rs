@@ -81,7 +81,9 @@ impl ArtworkService {
     }
 
     pub fn steamgriddb_cache_root(&self) -> Option<PathBuf> {
-        self.cache_root.as_ref().map(|root| root.join("steamgriddb"))
+        self.cache_root
+            .as_ref()
+            .map(|root| root.join("steamgriddb"))
     }
 
     pub fn square_artwork(&self, game: &LibraryGame) -> Option<SquareArtwork> {
@@ -204,7 +206,14 @@ impl ArtworkService {
             .map(cache_timestamp_is_fresh)
             .unwrap_or(false);
 
-        let pixelated = looks_like_pixel_art(&image);
+        // Detection must run on the source image, not the 512px cached copy:
+        // upscaling changes its edge statistics. Reuse the recorded decision
+        // and only re-detect for entries cached before it was recorded.
+        let pixelated = match fs::read(filter_marker_path(&path)).as_deref() {
+            Ok(b"nearest") => true,
+            Ok(b"smooth") => false,
+            _ => looks_like_pixel_art(&image),
+        };
         Some(CachedArtwork {
             artwork: square_artwork_from_rgba(image, pixelated),
             fresh,
@@ -238,6 +247,18 @@ impl ArtworkService {
             return;
         }
 
+        let marker = filter_marker_path(&path);
+        let filter: &[u8] = if artwork.pixelated() {
+            b"nearest"
+        } else {
+            b"smooth"
+        };
+        if let Err(error) = fs::write(&marker, filter) {
+            // Without the marker, loading falls back to re-detection.
+            debug!(path = %marker.display(), %error, "artwork filter marker could not be written");
+            let _ = fs::remove_file(&marker);
+        }
+
         if let Err(error) = fs::rename(&temporary, &path) {
             debug!(path = %path.display(), %error, "normalized artwork cache entry could not be committed");
             let _ = fs::remove_file(&temporary);
@@ -245,6 +266,10 @@ impl ArtworkService {
     }
 }
 
+/// Records the scaling filter chosen from the original source image.
+fn filter_marker_path(cache_path: &Path) -> PathBuf {
+    cache_path.with_extension("filter")
+}
 
 fn artwork_cache_identity(game: &LibraryGame) -> u64 {
     // Stable FNV-1a is sufficient for a disposable cache key and avoids tying
@@ -373,9 +398,7 @@ fn looks_like_pixel_art(image: &RgbaImage) -> bool {
     // classified solely from one edge statistic.
     let sample_step = if width > 512 { 2 } else { 1 };
     let mut quantized_colors = HashSet::new();
-    let mut flat_edges = 0_u64;
-    let mut soft_edges = 0_u64;
-    let mut sharp_edges = 0_u64;
+    let mut edges = EdgeStats::default();
 
     let mut y = 0;
     while y < height {
@@ -387,22 +410,10 @@ fn looks_like_pixel_art(image: &RgbaImage) -> bool {
             }
 
             if x + sample_step < width {
-                classify_edge(
-                    pixel,
-                    image.get_pixel(x + sample_step, y).0,
-                    &mut flat_edges,
-                    &mut soft_edges,
-                    &mut sharp_edges,
-                );
+                classify_edge(pixel, image.get_pixel(x + sample_step, y).0, &mut edges);
             }
             if y + sample_step < height {
-                classify_edge(
-                    pixel,
-                    image.get_pixel(x, y + sample_step).0,
-                    &mut flat_edges,
-                    &mut soft_edges,
-                    &mut sharp_edges,
-                );
+                classify_edge(pixel, image.get_pixel(x, y + sample_step).0, &mut edges);
             }
 
             x += sample_step;
@@ -410,40 +421,45 @@ fn looks_like_pixel_art(image: &RgbaImage) -> bool {
         y += sample_step;
     }
 
-    let total_edges = flat_edges + soft_edges + sharp_edges;
+    let total_edges = edges.flat + edges.soft + edges.sharp;
     if total_edges == 0 {
         return false;
     }
 
-    let flat_ratio = flat_edges as f64 / total_edges as f64;
-    let soft_ratio = soft_edges as f64 / total_edges as f64;
-    let sharp_ratio = sharp_edges as f64 / total_edges as f64;
+    let flat_ratio = edges.flat as f64 / total_edges as f64;
+    let soft_ratio = edges.soft as f64 / total_edges as f64;
+    let sharp_ratio = edges.sharp as f64 / total_edges as f64;
+    // A smooth gradient also looks "flat" (neighbours differ by 1-2), but
+    // pixel art's flat runs are mostly exactly identical pixels. Flat runs
+    // only count as pixel-art evidence when at least half are exact.
+    let flat_is_discrete = edges.exact * 2 >= edges.flat;
     let color_count = quantized_colors.len();
 
     if width <= 256 {
         color_count <= 2048
             && soft_ratio <= 0.14
-            && (flat_ratio >= 0.42 || sharp_ratio >= 0.28)
+            && ((flat_ratio >= 0.42 && flat_is_discrete) || sharp_ratio >= 0.28)
     } else {
         color_count <= 4096
             && soft_ratio <= 0.10
-            && (flat_ratio >= 0.52 || sharp_ratio >= 0.34)
+            && ((flat_ratio >= 0.52 && flat_is_discrete) || sharp_ratio >= 0.34)
     }
 }
 
-fn quantized_rgb(pixel: [u8; 4]) -> u16 {
-    (u16::from(pixel[0] >> 3) << 10)
-        | (u16::from(pixel[1] >> 3) << 5)
-        | u16::from(pixel[2] >> 3)
+#[derive(Default)]
+struct EdgeStats {
+    /// Identical neighbours; a subset of `flat`.
+    exact: u64,
+    flat: u64,
+    soft: u64,
+    sharp: u64,
 }
 
-fn classify_edge(
-    first: [u8; 4],
-    second: [u8; 4],
-    flat_edges: &mut u64,
-    soft_edges: &mut u64,
-    sharp_edges: &mut u64,
-) {
+fn quantized_rgb(pixel: [u8; 4]) -> u16 {
+    (u16::from(pixel[0] >> 3) << 10) | (u16::from(pixel[1] >> 3) << 5) | u16::from(pixel[2] >> 3)
+}
+
+fn classify_edge(first: [u8; 4], second: [u8; 4], edges: &mut EdgeStats) {
     if first[3] < 16 && second[3] < 16 {
         return;
     }
@@ -456,11 +472,14 @@ fn classify_edge(
         .unwrap_or(0);
 
     if delta <= 2 {
-        *flat_edges += 1;
+        edges.flat += 1;
+        if delta == 0 {
+            edges.exact += 1;
+        }
     } else if delta <= 24 {
-        *soft_edges += 1;
+        edges.soft += 1;
     } else {
-        *sharp_edges += 1;
+        edges.sharp += 1;
     }
 }
 
@@ -527,12 +546,7 @@ mod tests {
                 image.put_pixel(
                     x,
                     y,
-                    image::Rgba([
-                        x as u8,
-                        y as u8,
-                        ((x + y) / 2) as u8,
-                        255,
-                    ]),
+                    image::Rgba([x as u8, y as u8, ((x + y) / 2) as u8, 255]),
                 );
             }
         }

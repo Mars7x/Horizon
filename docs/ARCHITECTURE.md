@@ -1,5 +1,11 @@
 # Architecture
 
+> **Current-state note:** This document includes the original per-phase architecture record. The implementation is now beyond those phases. Start with [PROJECT_STATE.md](PROJECT_STATE.md) and [INDEX.md](INDEX.md) for the current feature inventory, and inspect the checked-out source before relying on an older phase boundary. Do not reintroduce a retired route, provider, or animation from an early phase description.
+
+**Current layers:** `src/navigation/` and `src/input/` own semantic navigation; `src/presentation/` maps controllers to `ui/`; `src/services/` coordinates source-neutral use cases; `src/domain/` defines pure concepts; `src/persistence/`, `src/sources/` and `src/platform/` implement infrastructure. `ui/app.slint` composes Home, full-shell Library and seven utility routes. Production game adapters are **Steam and Heroic**. Shared Steam account configuration lives in `src/services/steam_account.rs`, outside Achievements, to permit future (not yet implemented) Steam Friends support.
+
+## Architectural history (original phase boundaries)
+
 ## Dependency direction
 
 The project uses strict inward dependency flow:

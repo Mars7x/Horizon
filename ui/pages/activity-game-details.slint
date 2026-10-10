@@ -21,6 +21,7 @@ export component ActivityGameDetailsPage inherits Rectangle {
     in property <[ActivityHistoryRowData]> rows;
     in property <int> session-count: 0;
     callback back();
+    callback scroll-history(int);
 
     background: Theme.background;
     // Settings-style page handoff: crossfade + 12px settle. Keep the outgoing
@@ -274,6 +275,18 @@ export component ActivityGameDetailsPage inherits Rectangle {
         width: root.history-width; height: root.list-height;
         background: transparent;
         clip: true;
+        // Pointer wheel pans the read-only session list; it never selects a row.
+        TouchArea {
+            width: parent.width; height: parent.height;
+            enabled: root.active;
+            scroll-event(event) => {
+                if event.delta-y != 0px {
+                    root.scroll-history(event.delta-y > 0px ? 1 : -1);
+                    return accept;
+                }
+                reject
+            }
+        }
         if root.session-count == 0 : Text {
             x: 4px; y: 17px; width: parent.width - 8px;
             text: "No sessions recorded by Horizon yet.";
