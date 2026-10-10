@@ -74,11 +74,22 @@ says so.
 
 ## Video timeline
 
-Rust anchors the clock to GStreamer's real position when a video starts
-showing frames, on play/pause and seeks, and once a second. Slint advances
-it on frame time between anchors, so the bar, playhead and time move
-continuously and always agree. After a seek the target is shown until the
-pipeline reports the new position.
+The timeline follows the frames on screen. Each frame carries its own stream
+time (from GStreamer's timestamp); when it is shown, it anchors the clock.
+Between frames, Slint advances the clock on frame time, but never more than
+one measured frame gap past the last frame. Playback therefore glides
+smoothly, and a stall (or the start-up while audio opens) holds the bar
+instead of running ahead and snapping back.
+
+- A paused still (preroll) anchors without running.
+- A seek anchors at its target at once. Frames decoded before the seek
+  (`seek_epoch`) never move the timeline back.
+- At the end, the clock rests on the duration.
+- Nothing polls the pipeline: an idle or paused video costs no timer.
+
+Frames are copied once from GStreamer's buffer into Slint's (one memcpy
+when rows are packed, never into a zero-filled buffer first). While a frame
+waits to be drawn, newer ones are dropped before copying.
 
 ## Writing captures (for the screenshot and recording features)
 

@@ -52,9 +52,6 @@ const THUMBNAIL_MEMORY: usize = 96;
 const DISPLAY_MEMORY: usize = 4;
 const MEDIA_WORKERS: usize = 2;
 const SKIP: Duration = Duration::from_secs(10);
-/// How often the video clock is re-anchored to the real playback position.
-/// Between anchors Slint advances it every frame.
-const VIDEO_CLOCK_INTERVAL: Duration = Duration::from_secs(1);
 /// Longer than the route transition, so the leaving page keeps its tiles.
 const RELEASE_AFTER_LEAVING: Duration = Duration::from_secs(1);
 
@@ -62,9 +59,6 @@ enum AlbumEvent {
     Scanned(Vec<Capture>),
     Media(MediaResult),
     VideoEnded(u64),
-    /// The first frame of a playback (or after a seek) is on screen: the
-    /// clock starts from the real position.
-    VideoShowing(u64),
     VideoFailed(u64, String),
 }
 
@@ -231,11 +225,6 @@ struct ActiveVideo {
     playback: Box<dyn VideoPlayback>,
     playing: bool,
     ended: bool,
-    /// A seek's target, reported until the pipeline's own position catches
-    /// up (a position query right after a seek can still be the old one).
-    seeked_to: Option<Duration>,
-    /// Frames are on screen; before that the clock holds still.
-    showing: bool,
 }
 
 pub struct AlbumController {
@@ -258,7 +247,9 @@ pub struct AlbumController {
     active_video: RefCell<Option<ActiveVideo>>,
     /// Which playback may deliver frames; older ones are ignored.
     video_generation: Arc<AtomicU64>,
-    video_clock: Timer,
+    /// Bumped by every seek: frames decoded before it never move the
+    /// timeline back.
+    seek_epoch: Arc<AtomicU64>,
     ui: slint::Weak<AppWindow>,
     this: std::rc::Weak<Self>,
 }
@@ -316,7 +307,7 @@ impl AlbumController {
             display: RefCell::new(ImageMemory::new(DISPLAY_MEMORY)),
             active_video: RefCell::new(None),
             video_generation: Arc::new(AtomicU64::new(0)),
-            video_clock: Timer::default(),
+            seek_epoch: Arc::new(AtomicU64::new(0)),
             ui: ui.as_weak(),
             this: this.clone(),
         });
@@ -460,14 +451,6 @@ impl AlbumController {
                     {
                         video.playing = false;
                         video.ended = true;
-                    }
-                    self.publish_video(&ui);
-                }
-                AlbumEvent::VideoShowing(generation) => {
-                    if self.video_generation.load(Ordering::SeqCst) == generation
-                        && let Some(video) = self.active_video.borrow_mut().as_mut()
-                    {
-                        video.showing = true;
                     }
                     self.publish_video(&ui);
                 }
@@ -1018,11 +1001,13 @@ impl AlbumController {
             generation,
             current: Arc::clone(&self.video_generation),
             pending: Arc::new(AtomicBool::new(false)),
-            showing: AtomicBool::new(false),
+            seek_epoch: Arc::clone(&self.seek_epoch),
             ui: self.ui.clone(),
             sender: self.sender.clone(),
             wake: Arc::clone(&self.wake),
         });
+        // The timeline starts still at 0 and runs once live frames arrive.
+        set_clock(ui, Duration::ZERO, false);
         match self.video.play(capture.path(), display_size(ui), sink) {
             Ok(playback) => {
                 playback.set_playing(true);
@@ -1031,22 +1016,7 @@ impl AlbumController {
                     playback,
                     playing: true,
                     ended: false,
-                    seeked_to: None,
-                    showing: false,
                 });
-                let this = self.this.clone();
-                // Only the clock text needs polling; frames push themselves.
-                self.video_clock.start(
-                    slint::TimerMode::Repeated,
-                    VIDEO_CLOCK_INTERVAL,
-                    move || {
-                        if let Some(controller) = this.upgrade()
-                            && let Some(ui) = controller.ui.upgrade()
-                        {
-                            controller.publish_video(&ui);
-                        }
-                    },
-                );
             }
             Err(error) => {
                 warn!(%error, "Album video could not start");
@@ -1058,7 +1028,6 @@ impl AlbumController {
 
     fn stop_video(&self, ui: &AppWindow) {
         self.video_generation.fetch_add(1, Ordering::SeqCst);
-        self.video_clock.stop();
         // Dropping the playback stops it and frees the decoder.
         *self.active_video.borrow_mut() = None;
         self.publish_video(ui);
@@ -1069,9 +1038,10 @@ impl AlbumController {
             && video.playing != playing
         {
             if playing && video.ended {
+                self.seek_epoch.fetch_add(1, Ordering::SeqCst);
                 video.playback.seek(Duration::ZERO);
                 video.ended = false;
-                video.seeked_to = Some(Duration::ZERO);
+                set_clock(ui, Duration::ZERO, false);
             }
             video.playback.set_playing(playing);
             video.playing = playing;
@@ -1102,9 +1072,10 @@ impl AlbumController {
                 .playback
                 .duration()
                 .map_or(target, |duration| target.min(duration));
+            self.seek_epoch.fetch_add(1, Ordering::SeqCst);
             video.playback.seek(target);
             video.ended = false;
-            video.seeked_to = Some(target);
+            set_clock(ui, target, false);
         }
         self.publish_video(ui);
     }
@@ -1115,48 +1086,38 @@ impl AlbumController {
             && let Some(duration) = video.playback.duration()
         {
             let target = duration.mul_f32(fraction.clamp(0.0, 1.0));
+            self.seek_epoch.fetch_add(1, Ordering::SeqCst);
             video.playback.seek(target);
             video.ended = false;
-            video.seeked_to = Some(target);
+            set_clock(ui, target, false);
         }
         self.publish_video(ui);
     }
 
-    /// Anchor the video clock to the real playback position. Slint runs it
-    /// on from here each frame while playing (`video-anchor`).
+    /// Play state and length. The position itself comes with each frame
+    /// (`UiVideoSink`), so the timeline shows exactly the frame on screen;
+    /// nothing polls the pipeline.
     fn publish_video(&self, ui: &AppWindow) {
-        let mut video = self.active_video.borrow_mut();
-        let Some(video) = video.as_mut() else {
+        let video = self.active_video.borrow();
+        let Some(video) = video.as_ref() else {
             ui.set_album_viewer_playing(false);
+            ui.set_album_video_clock_running(false);
             ui.set_album_video_duration_ms(0);
-            ui.set_album_video_position_ms(0);
-            bump_anchor(ui);
+            set_clock(ui, Duration::ZERO, false);
             return;
         };
         let duration = video
             .playback
             .duration()
             .or_else(|| self.durations.borrow().get(&video.path).copied());
-        let reported = video.playback.position();
-        let position = if video.ended {
-            duration
-        } else if let Some(target) = video.seeked_to {
-            // Trust the pipeline again once it reports the new place.
-            if reported.is_some_and(|p| p.abs_diff(target) < Duration::from_millis(500)) {
-                video.seeked_to = None;
-                reported
-            } else {
-                Some(target)
-            }
-        } else {
-            reported
-        };
-        // The clock runs only while frames are actually flowing.
         ui.set_album_viewer_playing(video.playing);
-        ui.set_album_video_clock_running(video.playing && video.showing && !video.ended);
+        ui.set_album_video_clock_running(video.playing && !video.ended);
         ui.set_album_video_duration_ms(millis(duration.unwrap_or_default()));
-        ui.set_album_video_position_ms(millis(position.unwrap_or_default()));
-        bump_anchor(ui);
+        if video.ended
+            && let Some(duration) = duration
+        {
+            set_clock(ui, duration, false);
+        }
     }
 
     // ----- publishing -------------------------------------------------
@@ -1378,7 +1339,11 @@ fn millis(duration: Duration) -> i32 {
     i32::try_from(duration.as_millis()).unwrap_or(i32::MAX)
 }
 
-fn bump_anchor(ui: &AppWindow) {
+/// Anchor the timeline at `position`. `live`: it runs on from here until
+/// the next frame (playing); otherwise it holds.
+fn set_clock(ui: &AppWindow, position: Duration, live: bool) {
+    ui.set_album_video_position_ms(millis(position));
+    ui.set_album_video_frame_live(live);
     ui.set_album_video_anchor(ui.get_album_video_anchor().wrapping_add(1));
 }
 
@@ -1463,14 +1428,41 @@ fn clock_text(duration: Duration) -> String {
     }
 }
 
+/// One copy out of GStreamer's buffer into Slint's: a single memcpy when
+/// rows are tightly packed (the usual case), never a zero-filled buffer
+/// first.
+fn copy_frame(frame: &VideoFrame<'_>) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+    let row = frame.width as usize * 4;
+    let height = frame.height as usize;
+    if frame.stride == row {
+        let bytes = frame.data.get(..row * height)?;
+        return Some(SharedPixelBuffer::clone_from_slice(
+            bytes,
+            frame.width,
+            frame.height,
+        ));
+    }
+    if frame.stride < row || frame.data.len() < frame.stride * height.saturating_sub(1) + row {
+        return None;
+    }
+    let mut buffer = SharedPixelBuffer::<Rgba8Pixel>::new(frame.width, frame.height);
+    for (out, line) in buffer
+        .make_mut_bytes()
+        .chunks_exact_mut(row)
+        .zip(frame.data.chunks(frame.stride))
+    {
+        out.copy_from_slice(line.get(..row)?);
+    }
+    Some(buffer)
+}
+
 /// Hands decoded frames to the UI thread, at most one in flight: while a
 /// frame waits to be shown, newer ones are dropped before being copied.
 struct UiVideoSink {
     generation: u64,
     current: Arc<AtomicU64>,
     pending: Arc<AtomicBool>,
-    /// The first frame has been handed over.
-    showing: AtomicBool,
+    seek_epoch: Arc<AtomicU64>,
     ui: slint::Weak<AppWindow>,
     sender: Sender<AlbumEvent>,
     wake: Arc<dyn Fn() + Send + Sync>,
@@ -1488,36 +1480,30 @@ impl VideoSink for UiVideoSink {
     }
 
     fn frame(&self, frame: VideoFrame<'_>) {
-        let row = frame.width as usize * 4;
-        if frame.stride < row {
+        let epoch = self.seek_epoch.load(Ordering::SeqCst);
+        let Some(buffer) = copy_frame(&frame) else {
             return;
-        }
-        let mut buffer = SharedPixelBuffer::<Rgba8Pixel>::new(frame.width, frame.height);
-        let target = buffer.make_mut_bytes();
-        for (out, line) in target
-            .chunks_exact_mut(row)
-            .zip(frame.data.chunks(frame.stride))
-        {
-            let Some(line) = line.get(..row) else {
-                return;
-            };
-            out.copy_from_slice(line);
-        }
+        };
         self.pending.store(true, Ordering::SeqCst);
         let pending = Arc::clone(&self.pending);
         let current = Arc::clone(&self.current);
+        let seek_epoch = Arc::clone(&self.seek_epoch);
         let generation = self.generation;
+        let (position, live) = (frame.position, frame.live);
         let _ = self.ui.upgrade_in_event_loop(move |ui| {
             pending.store(false, Ordering::SeqCst);
-            if current.load(Ordering::SeqCst) == generation {
-                ui.set_album_viewer_image(Image::from_rgba8(buffer));
-                ui.set_album_viewer_has_image(true);
+            if current.load(Ordering::SeqCst) != generation {
+                return;
+            }
+            ui.set_album_viewer_image(Image::from_rgba8(buffer));
+            ui.set_album_viewer_has_image(true);
+            // A frame decoded before a seek must not move the timeline back.
+            if let Some(position) = position
+                && seek_epoch.load(Ordering::SeqCst) == epoch
+            {
+                set_clock(&ui, position, live);
             }
         });
-        if !self.showing.swap(true, Ordering::SeqCst) {
-            let _ = self.sender.send(AlbumEvent::VideoShowing(self.generation));
-            (self.wake)();
-        }
     }
 
     fn ended(&self) {

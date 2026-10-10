@@ -24,5 +24,5 @@ Adding a capture source is one `CaptureSource` impl. The screenshot feature need
 ## Later additions
 
 - **Delete.** X (`UiAction::Secondary`) deletes Horizon's own captures: multi-select in the grid, a confirm dialog in fullscreen. Source captures are never deletable here.
-- **Video clock.** Slint advances the timeline on frame time between Rust anchors, so it moves continuously and accurately.
+- **Video clock.** Each shown frame anchors the timeline at its own stream time, and Slint glides to the next frame (at most one frame gap). The first version polled the pipeline once a second and ran ahead during start-up, then snapped back; that polling is gone.
 

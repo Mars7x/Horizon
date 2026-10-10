@@ -44,6 +44,12 @@ pub struct VideoFrame<'a> {
     pub height: u32,
     pub stride: usize,
     pub data: &'a [u8],
+    /// Where this frame is in the video (its stream time). The timeline
+    /// follows the frames on screen rather than polling the pipeline.
+    pub position: Option<Duration>,
+    /// From running playback. False for the still frame shown while paused
+    /// or before playback has started, so the timeline doesn't run on.
+    pub live: bool,
 }
 
 /// Receives playback output on the decoder's own threads.

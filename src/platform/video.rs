@@ -89,7 +89,7 @@ impl VideoBackend for GstVideo {
             }
             .map_err(|_| gst::FlowError::Eos)?;
             if frames.wants_frame() {
-                deliver_sample(&sample, frames.as_ref());
+                deliver_sample(&sample, frames.as_ref(), !preroll);
             }
             Ok(gst::FlowSuccess::Ok)
         };
@@ -271,7 +271,7 @@ fn clamp_dimension(value: u32) -> i32 {
     i32::try_from(value.max(1)).unwrap_or(i32::MAX)
 }
 
-fn deliver_sample(sample: &gst::Sample, sink: &dyn VideoSink) {
+fn deliver_sample(sample: &gst::Sample, sink: &dyn VideoSink, live: bool) {
     let Some(frame) = readable_frame(sample) else {
         return;
     };
@@ -283,7 +283,18 @@ fn deliver_sample(sample: &gst::Sample, sink: &dyn VideoSink) {
         height: frame.height(),
         stride: usize::try_from(*stride).unwrap_or(0),
         data,
+        position: stream_time(sample),
+        live,
     });
+}
+
+/// The sample's stream time: its timestamp within the video, as the
+/// timeline shows it (unaffected by seeks' segment bookkeeping).
+fn stream_time(sample: &gst::Sample) -> Option<Duration> {
+    let pts = sample.buffer()?.pts()?;
+    let segment = sample.segment()?.downcast_ref::<gst::ClockTime>()?;
+    let time = segment.to_stream_time(pts)?;
+    Some(Duration::from_nanos(time.nseconds()))
 }
 
 fn readable_frame(sample: &gst::Sample) -> Option<gst_video::VideoFrameRef<&gst::BufferRef>> {
@@ -336,8 +347,9 @@ mod tests {
         matches!(done.view(), gst::MessageView::Eos(_)).then_some(path)
     }
 
-    fn temp_dir() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("horizon-video-{}", std::process::id()));
+    /// One folder per test: tests run in parallel and each encodes a clip.
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("horizon-video-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -348,7 +360,7 @@ mod tests {
             eprintln!("GStreamer unavailable; skipping");
             return;
         };
-        let dir = temp_dir();
+        let dir = temp_dir("probe");
         let Some(clip) = test_clip(&dir) else {
             eprintln!("no VP8 encoder; skipping");
             return;
@@ -366,6 +378,7 @@ mod tests {
     #[derive(Default)]
     struct Recorder {
         frames: Mutex<Vec<(u32, u32)>>,
+        positions: Mutex<Vec<Duration>>,
         ended: AtomicBool,
     }
     impl VideoSink for Recorder {
@@ -374,6 +387,9 @@ mod tests {
         }
         fn frame(&self, frame: VideoFrame<'_>) {
             assert!(frame.stride >= frame.width as usize * 4);
+            if let Some(position) = frame.position {
+                self.positions.lock().unwrap().push(position);
+            }
             assert!(frame.data.len() >= frame.stride * (frame.height as usize - 1));
             self.frames
                 .lock()
@@ -393,7 +409,7 @@ mod tests {
         let Ok(backend) = GstVideo::new() else {
             return;
         };
-        let dir = temp_dir();
+        let dir = temp_dir("playback");
         let Some(clip) = test_clip(&dir) else {
             return;
         };
@@ -410,6 +426,13 @@ mod tests {
         let frames = recorder.frames.lock().unwrap();
         assert!(frames.len() > 10, "{} frames", frames.len());
         assert!(frames.iter().all(|size| *size == (640, 360)));
+        // Every frame carries its place in the video, in order, from the start
+        // to the end of the 3-second clip.
+        let positions = recorder.positions.lock().unwrap();
+        assert_eq!(positions.len(), frames.len());
+        assert!(positions.windows(2).all(|pair| pair[0] <= pair[1]));
+        assert!(positions.first().unwrap().as_millis() < 100);
+        assert!(positions.last().unwrap().as_millis() > 2800);
         drop(playback);
         let _ = std::fs::remove_dir_all(dir);
     }
