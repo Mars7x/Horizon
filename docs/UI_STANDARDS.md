@@ -12,7 +12,7 @@ utilities, footer) and is not changed by these rules. See
 | Header | Title only, at `Metrics.page-title-y`, same on every page. The title is the section name (Library, Activity, Achievements, Settings); it does not change in sub-pages. | `PageHeader` in `ui/components/page-header.slint` |
 | Header values | Read-outs or pointer-clickable pickers sit on the title row, right-aligned: a small `label-size` caption over a bold value. Value changes slide and crossfade over `Motion.value-swap-duration`. | `HeaderValue` |
 | Content | Starts at `Metrics.page-header-height` and ends at the bottom bar. | — |
-| Bottom bar | `Metrics.page-bottom-bar-height`. Left: page context (Library's selected game, Achievements' "Saved results"). Right: controller hints. | `HintBar` in `ui/app.slint` |
+| Bottom bar | `Metrics.page-bottom-bar-height`. Left: page context (Library's selected game, Achievements' "Saved results"). Right: controller hints. Hints and context sit on one line, `Metrics.hint-row-center-from-bottom` (Home's footer midline), and end at the page margin, so Home's footer "A OK" (the same `HintBar`) lines up with every page. | `HintBar` in `ui/app.slint` and `ui/components/footer.slint` |
 | Sub-pages | Open with a clickable `‹  Section  /  Page` breadcrumb at the content top. Clicking it is Back. | `Breadcrumb` |
 | Scroll edges | Top shadow only once content has scrolled under the header; bottom shadow only while more content is below. Driven by the animated camera where there is one. | `ScrollEdgeShadow` |
 

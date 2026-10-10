@@ -53,6 +53,10 @@ export global Metrics {
     out property <length> page-title-height: 48px;
     out property <length> page-header-height: 88px;
     out property <length> page-bottom-bar-height: 64px;
+    // Hints and bottom-bar context share ONE line on every page, Home
+    // included: the vertical midpoint of Home's footer.
+    out property <length> hint-row-height: 40px;
+    out property <length> hint-row-center-from-bottom: footer-height / 2;
     // Header accessories (Source/Sort pickers) sit on the title row, right side.
     out property <length> page-accessory-height: 52px;
     out property <length> page-accessory-y: page-title-y + (page-title-height - page-accessory-height) / 2;

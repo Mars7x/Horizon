@@ -14,6 +14,7 @@ component ButtonGlyph inherits Rectangle {
     Text {
         text: root.button;
         color: Theme.background;
+        font-family: Typography.family;
         font-size: root.shoulder ? 11px : 12px;
         font-weight: Typography.emphasis-weight;
         horizontal-alignment: center;
@@ -44,6 +45,8 @@ export component HintBar inherits Rectangle {
             Text {
                 text: hint.label;
                 color: Theme.secondary-foreground;
+                // Explicit: Home's footer does not inherit the app font.
+                font-family: Typography.family;
                 font-size: Typography.caption-size;
                 font-weight: Typography.emphasis-weight;
                 vertical-alignment: center;
