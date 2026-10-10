@@ -3,6 +3,7 @@
 use std::{
     cell::{Cell, RefCell},
     collections::BTreeSet,
+    path::PathBuf,
     rc::Rc,
     sync::mpsc::Sender,
     sync::mpsc::{self, Receiver},
@@ -22,6 +23,7 @@ use crate::{
 };
 
 pub struct AchievementsController {
+    cache_root: Option<PathBuf>,
     account: Rc<RefCell<SteamAccountService>>,
     cache_identity: RefCell<Option<String>>,
     steam_games: Vec<SteamGame>,
@@ -43,6 +45,9 @@ impl AchievementsController {
         ui: &AppWindow,
         library: &[LibraryGame],
         account: Rc<RefCell<SteamAccountService>>,
+        // Achievements cache folder from `platform::data_paths`; `None`
+        // disables the cache.
+        cache_root: Option<PathBuf>,
     ) -> Rc<Self> {
         let (sender, receiver) = mpsc::channel();
         let identity = account
@@ -51,6 +56,7 @@ impl AchievementsController {
             .map(|c| c.steam_id64().to_owned());
         let controller = Rc::new(Self {
             account,
+            cache_root,
             cache_identity: RefCell::new(identity),
             steam_games: steam_games(library),
             sender: RefCell::new(sender),
@@ -111,7 +117,10 @@ impl AchievementsController {
         );
         let jobs = self.steam_games.clone();
         let sender = self.sender.borrow().clone();
-        std::thread::spawn(move || import_steam_achievements(credentials, jobs, sender));
+        let cache_root = self.cache_root.clone();
+        std::thread::spawn(move || {
+            import_steam_achievements(credentials, jobs, cache_root, sender)
+        });
     }
 
     /// Discard results from the previous account. Its background worker may
@@ -126,7 +135,7 @@ impl AchievementsController {
         // A replaced API key (even for the same SteamID) invalidates cached
         // data, as does switching accounts or disconnecting.
         if let Some(old) = previous {
-            purge_achievement_cache(&old);
+            purge_achievement_cache(self.cache_root.as_deref(), &old);
         }
         let (sender, receiver) = mpsc::channel();
         *self.sender.borrow_mut() = sender;
@@ -442,7 +451,10 @@ impl AchievementsController {
             {
                 if let Some(credentials) = self.account.borrow().credentials() {
                     let sender = self.sender.borrow().clone();
-                    std::thread::spawn(move || hydrate_game_badges(credentials, game, sender));
+                    let cache_root = self.cache_root.clone();
+                    std::thread::spawn(move || {
+                        hydrate_game_badges(credentials, game, cache_root, sender)
+                    });
                 } else {
                     self.requested_badges.borrow_mut().remove(&app_id);
                 }

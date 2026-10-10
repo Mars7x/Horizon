@@ -32,8 +32,9 @@ use crate::{
         status::StatusController,
     },
     services::{
+        achievements::ACHIEVEMENTS_CACHE_VERSION,
         activity::{ActivityService, ActivitySessionTransition, LaunchActivitySink},
-        artwork::ArtworkService,
+        artwork::{self, ArtworkService},
         import::{SourceImportOutcome, SourceImportService},
         launch::GameLaunchService,
         library::LibraryService,
@@ -188,7 +189,11 @@ pub fn run() -> Result<(), AppError> {
             Err(error) => warn!(%error, "source playtime refresh failed"),
         },
     );
-    let artwork_service = ArtworkService::new(Rc::clone(&registry));
+    let artwork_service = ArtworkService::new(
+        Rc::clone(&registry),
+        data_paths::local_artwork_cache_dir(artwork::LOCAL_ARTWORK_CACHE_VERSION),
+        data_paths::steamgriddb_cache_dir(artwork::STEAMGRIDDB_CACHE_VERSION),
+    );
     let mut launch_service =
         GameLaunchService::new(Rc::clone(&registry), Rc::new(PortalLaunchExecutor));
     match DbusManagedSessionExecutor::new() {
@@ -291,7 +296,7 @@ pub fn run() -> Result<(), AppError> {
         }
     }));
 
-    let settings_path = data_paths::third_party_settings_path()?;
+    let settings_path = data_paths::steamgriddb_settings_path()?;
     let settings_service = SettingsService::load(SettingsStore::new(settings_path))?;
     let steam_account = Rc::new(RefCell::new(
         SteamAccountService::load(data_paths::steam_account_settings_path()?)
@@ -347,8 +352,12 @@ pub fn run() -> Result<(), AppError> {
             artwork_home.collect_steamgriddb_results(&ui);
         }
     });
-    let achievements =
-        AchievementsController::new(&ui, &achievements_catalog, Rc::clone(&steam_account));
+    let achievements = AchievementsController::new(
+        &ui,
+        &achievements_catalog,
+        Rc::clone(&steam_account),
+        data_paths::achievements_cache_dir(ACHIEVEMENTS_CACHE_VERSION),
+    );
     let achievement_updates = Rc::clone(&achievements);
     let achievement_ui = ui.as_weak();
     settings.set_steam_account_changed(Rc::new(move || {

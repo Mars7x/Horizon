@@ -22,7 +22,7 @@ The portal is optional. If a setting or the entire portal is unavailable, Horizo
 - No contrast preference: normal contrast
 - No reduced-motion preference: normal motion
 
-Phase 9.5.44.55 implements **Settings → Appearance** as the first Settings category. Theme is **System, Light, Dark**. **System** follows only the desktop light/dark preference; it is not a third visual theme. Accent colour independently offers **System, Red, Orange, Yellow, Green, Teal, Blue, Purple, Pink, White**. The nine accessible preset choices run from warm red through cool blue/purple to pink, with neutral white last. Appearance choices take effect immediately, can be changed with mouse or controller, and persist in `$XDG_CONFIG_HOME/io.github.Mars7x.Horizon/appearance.json` (0600 under private 0700 config dir). Saving is atomic and a failed write leaves the previous selection active.
+Phase 9.5.44.55 implements **Settings → Appearance** as the first Settings category. Theme is **System, Light, Dark**. **System** follows only the desktop light/dark preference; it is not a third visual theme. Accent colour independently offers **System, Red, Orange, Yellow, Green, Teal, Blue, Purple, Pink, White**. The nine accessible preset choices run from warm red through cool blue/purple to pink, with neutral white last. Appearance choices take effect immediately, can be changed with mouse or controller, and persist in `config/appearance.json` (0600 under private 0700 config dir; see [Files on disk](STORAGE.md)). Saving is atomic and a failed write leaves the previous selection active.
 
 Phase 9.5.44.57 simplifies the settings UI: independent category rows cannot
 physically overlap, Theme choices show the selected value with accent text (no

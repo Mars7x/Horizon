@@ -28,7 +28,7 @@ Read this file **before** editing Horizon. It describes rules for the current re
 - `src/services/`: library/import/launch/activity/artwork/achievements/account coordination. Extend a shared boundary rather than duplicating provider logic.
 - `src/sources/`: **currently Steam and Heroic** game adapters. Lutris and Bottles were retired; migration history remains. Provider-specific parsing, paths and launch contracts stay here.
 - `src/persistence/`: durable data and numbered immutable migrations. Never edit an already deployed migration to change schema.
-- `src/platform/`: portals, backend startup, data paths, status, host integration. Never assume host paths/programs are available inside Flatpak.
+- `src/platform/`: portals, backend startup, data paths, status, host integration. Never assume host paths/programs are available inside Flatpak. `data_paths.rs` is the only code that chooses file locations; follow [docs/STORAGE.md](docs/STORAGE.md) (no `io.github.Mars7x.Horizon` subfolder inside Flatpak's private directories).
 - `src/input/` and `src/navigation/`: device normalization, route and focus policy; `src/presentation/`: Rust→Slint projections/controllers.
 - `ui/app.slint`, `ui/pages/`, `ui/models/`, `ui/components/`, `ui/theme/`: render and forward intent; avoid filesystem/network/business logic in Slint. Prefer existing components/tokens over duplicated layout constants.
 - `flatpak/io.github.Mars7x.Horizon.yml`: primary sandbox/build manifest, runtime branch **26.08**. `scripts/check.sh` is the repository quality gate.

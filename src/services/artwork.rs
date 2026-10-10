@@ -1,6 +1,6 @@
 use std::{
     collections::HashSet,
-    env, fs,
+    fs,
     path::{Path, PathBuf},
     rc::Rc,
     time::{Duration, SystemTime},
@@ -16,7 +16,10 @@ use crate::{
 
 const NORMALIZED_SQUARE_ARTWORK_PX: u32 = 512;
 const ARTWORK_CACHE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
-const ARTWORK_CACHE_VERSION: &str = "square-v6";
+/// Bump when the local cover cache format changes; the folder is cleared.
+pub const LOCAL_ARTWORK_CACHE_VERSION: &str = "square-v6";
+/// Bump when the SteamGridDB cache format changes; the folder is cleared.
+pub const STEAMGRIDDB_CACHE_VERSION: &str = "steamgriddb-v6";
 
 /// Source-neutral decoded artwork ready for presentation.
 ///
@@ -62,28 +65,30 @@ struct CachedArtwork {
 pub struct ArtworkService {
     registry: Rc<SourceRegistry>,
     cache_root: Option<PathBuf>,
+    steamgriddb_cache_root: Option<PathBuf>,
 }
 
 impl ArtworkService {
-    pub fn new(registry: Rc<SourceRegistry>) -> Self {
+    /// Cache folders come from `platform::data_paths`; `None` disables caching.
+    pub fn new(
+        registry: Rc<SourceRegistry>,
+        cache_root: Option<PathBuf>,
+        steamgriddb_cache_root: Option<PathBuf>,
+    ) -> Self {
         Self {
             registry,
-            cache_root: default_artwork_cache_root(),
+            cache_root,
+            steamgriddb_cache_root,
         }
     }
 
     #[cfg(test)]
     fn with_cache_root(registry: Rc<SourceRegistry>, cache_root: PathBuf) -> Self {
-        Self {
-            registry,
-            cache_root: Some(cache_root),
-        }
+        Self::new(registry, Some(cache_root), None)
     }
 
     pub fn steamgriddb_cache_root(&self) -> Option<PathBuf> {
-        self.cache_root
-            .as_ref()
-            .map(|root| root.join("steamgriddb"))
+        self.steamgriddb_cache_root.clone()
     }
 
     pub fn square_artwork(&self, game: &LibraryGame) -> Option<SquareArtwork> {
@@ -307,22 +312,6 @@ fn artwork_cache_identity(game: &LibraryGame) -> u64 {
     }
 
     hash
-}
-
-fn default_artwork_cache_root() -> Option<PathBuf> {
-    if let Some(cache_home) = env::var_os("XDG_CACHE_HOME") {
-        return Some(
-            PathBuf::from(cache_home)
-                .join("horizon/artwork")
-                .join(ARTWORK_CACHE_VERSION),
-        );
-    }
-
-    env::var_os("HOME").map(|home| {
-        PathBuf::from(home)
-            .join(".cache/horizon/artwork")
-            .join(ARTWORK_CACHE_VERSION)
-    })
 }
 
 fn cache_timestamp_is_fresh(modified: SystemTime) -> bool {
@@ -568,7 +557,7 @@ mod tests {
 
     #[test]
     fn cache_round_trip_reuses_canonical_artwork() {
-        let root = env::temp_dir().join(format!(
+        let root = std::env::temp_dir().join(format!(
             "horizon-artwork-cache-test-{}",
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
