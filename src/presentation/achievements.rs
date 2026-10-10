@@ -414,9 +414,10 @@ impl AchievementsController {
     }
 
     /// Pointer activation opens details; controller movement only changes focus.
-    pub fn choose_game(&self, ui: &AppWindow, index: i32) {
+    /// Returns true when the game's achievements opened.
+    pub fn choose_game(&self, ui: &AppWindow, index: i32) -> bool {
         self.select_game(ui, index);
-        self.enter_entries(ui);
+        self.enter_entries(ui)
     }
 
     pub fn move_game(&self, ui: &AppWindow, delta: i32) {
@@ -428,9 +429,11 @@ impl AchievementsController {
         self.select_game(ui, (current + delta).clamp(0, len as i32 - 1));
     }
 
-    pub fn enter_entries(&self, ui: &AppWindow) {
+    /// Returns true when the game's achievements opened (false when the
+    /// game has no achievement data to show).
+    pub fn enter_entries(&self, ui: &AppWindow) -> bool {
         if ui.get_achievement_entries().row_count() == 0 {
-            return;
+            return false;
         }
         self.viewing_entries.set(true);
         ui.set_achievements_viewing_entries(true);
@@ -451,6 +454,7 @@ impl AchievementsController {
                 }
             }
         }
+        true
     }
 
     pub fn exit_entries(&self, ui: &AppWindow) -> bool {
