@@ -29,7 +29,7 @@ Home intentionally shows **at most 15 distinct, currently imported games with Ho
 
 The permanent final Home tile is **Library**. It lives in the same world-space carousel track as normal games and uses the original Home focus frame, selected scale, and camera. Press Accept on the tile or click it to open Library directly. Home always shows this tile, even without activity history or installed games. The full Library catalogue and source-backed launch identifiers are never truncated to 15.
 
-Menu/Start and F10 are direct Library shortcuts; the Phase 10.0 shell menu overlay has been removed. Back uses Navigator's route history. The existing Library browsing grid is retained temporarily; its visual redesign is Phase 10.2.0. Recent-session ordering refreshes every three seconds after persisted Activity changes, preserving the previously selected game by catalogue identity where possible.
+Menu/Start and F10 are direct Library shortcuts; the Phase 10.0 shell menu overlay has been removed. Back uses Navigator's route history. The existing Library browsing grid is retained temporarily; its visual redesign is Phase 10.2.0. Recent-session ordering refreshes every three seconds after persisted Activity changes, preserving the previously selected game by catalogue identity where possible. Opening Library again (for example Library → Home → Library) is a fresh visit: the first game, scrolled to the top; Source and Sort are kept.
 
 ## Phase 10.1.1 — Home initial-game fallback
 

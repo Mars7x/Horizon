@@ -34,6 +34,7 @@ The current `AppRoute::uses_shell_chrome()` returns true for **Home only**. Do n
 - Back applies page-local Back behavior where supported (e.g. game Activity details to its overview, Achievements entries to game list, Settings subpage to parent), otherwise pops route history. At the root, Back does nothing.
 - Global Home clears navigation history and brings focus to the first Home game.
 - The navigation controller snapshots eligible route-local focus before changing routes and restores valid focus on Back. Full-shell routes cannot retain a hidden utility-row focus.
+- Every visit to **Library** is fresh: it opens on the first game, scrolled to the top (Source and Sort are kept; they are view choices, not focus). Within a visit, re-sorting keeps the selected game.
 - A **fresh** Activity visit starts on the first Most Played cover, but returning from an individual-game Activity details screen restores the same cover. Direct re-entry and route-history re-entry should agree; see Phase 10.3.3.
 - Input ownership is tied to Horizon window activation; SDL topology changes clear held repeat latches. Held directional navigation should respect edge-repeat behavior rather than wrapping continuously.
 

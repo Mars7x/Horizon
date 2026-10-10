@@ -226,6 +226,14 @@ struct State {
     browse_sequence: i32,
     browse_transition_kind: i32, // 0 none, 1 Source, 2 Sort
 }
+impl State {
+    fn start_fresh_visit(&mut self) {
+        self.selection = 0;
+        self.scroll_top = 0;
+        self.wheel_scrolled = false;
+    }
+}
+
 impl Default for State {
     fn default() -> Self {
         Self {
@@ -291,10 +299,12 @@ impl LibraryController {
         controller
     }
 
+    /// Every visit to Library is fresh: the first game, scrolled to the top.
+    /// Source and Sort are view choices, not focus, and are kept.
     pub fn on_enter(&self, ui: &AppWindow) {
-        let selected = self.selection_game_id();
+        self.state.borrow_mut().start_fresh_visit();
         self.refresh_metrics();
-        self.rebuild(ui, selected);
+        self.rebuild(ui, None);
     }
 
     fn refresh_metrics(&self) {
@@ -637,6 +647,25 @@ mod tests {
                 ExternalGameId::new(id.to_string()).unwrap(),
             )],
         )
+    }
+
+    #[test]
+    fn a_new_visit_forgets_focus_but_keeps_source_and_sort() {
+        let mut state = super::State {
+            source_index: 2,
+            sort: LibrarySort::RecentlyPlayed,
+            selection: 7,
+            scroll_top: 3,
+            wheel_scrolled: true,
+            ..Default::default()
+        };
+        state.start_fresh_visit();
+        assert_eq!(
+            (state.selection, state.scroll_top, state.wheel_scrolled),
+            (0, 0, false)
+        );
+        assert_eq!(state.source_index, 2);
+        assert_eq!(state.sort, LibrarySort::RecentlyPlayed);
     }
 
     #[test]
