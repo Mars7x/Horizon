@@ -315,7 +315,7 @@ impl<R: ActivityRepository + 'static> ActivityDetailsActions for ActivityDetails
 
     fn close(&self, ui: &AppWindow) {
         // Keep the outgoing details content mounted for the Settings-style
-        // reverse crossfade. The next open replaces this cached snapshot.
+        // drop-away transition. The next open replaces this cached snapshot.
         // Clearing the row model immediately would flash an empty history
         // while the old page is still animating out.
         ui.set_activity_details_visible(false);

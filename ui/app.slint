@@ -15,7 +15,7 @@ export { AppRouteView }
 
 import { TopNavigation } from "components/top-navigation.slint";
 
-import { PageTransitionLayer } from "components/page-transition-layer.slint";
+import { TransitionDriver, TransitionLayer } from "components/transition.slint";
 import { Footer } from "components/footer.slint";
 import { HintBar } from "components/hint-bar.slint";
 import { HintData } from "models/hints.slint";
@@ -67,9 +67,21 @@ export component AppWindow inherits Window {
     // the published presentation enum and may animate that presentation.
     in property <AppRouteView> current-route: AppRouteView.home;
     // Rust publishes only the immediate source route. This lets rapid route
-    // changes keep a single outgoing crossfade instead of accumulating several
+    // changes keep a single outgoing transition instead of accumulating several
     // half-visible retained pages.
     in property <AppRouteView> transition-from-route: AppRouteView.home;
+    // Route transitions use the shared "Rise" (components/transition.slint).
+    // Leaving Home is forward; returning to Home is Back.
+    route-transition := TransitionDriver { prewarm: true; key: root.route-key(root.current-route); }
+    pure function route-key(route: AppRouteView) -> int {
+        return route == AppRouteView.home ? 0 : route == AppRouteView.library ? 1
+            : route == AppRouteView.friends ? 2 : route == AppRouteView.album ? 3
+            : route == AppRouteView.activity ? 4 : route == AppRouteView.achievements ? 5
+            : route == AppRouteView.web ? 6 : route == AppRouteView.settings ? 7 : 8;
+    }
+    private property <int> route-phase: route-transition.phase;
+    private property <bool> route-back: root.current-route == AppRouteView.home
+        && root.transition-from-route != AppRouteView.home;
     // Controller hints per page state. Keep in step with the Rust handlers.
     private property <[HintData]> page-hints:
         root.current-route == AppRouteView.library ? (root.library-total-count > 0
@@ -92,8 +104,19 @@ export component AppWindow inherits Window {
 
     // Home alone owns its top utilities and status/footer chrome. Library is
     // a durable full-shell destination, like Settings and other submenu routes.
-    private property <bool> shell-chrome-visible:
-        root.current-route == AppRouteView.home;
+    // The route on screen: the outgoing one until the transition starts.
+    // Chrome and hints follow it so they switch together with the pages.
+    // Home's chrome belongs to Home: it stays while Home is under a rising
+    // page and dims with it, and is back at full strength once Home is.
+    private property <bool> shell-chrome-visible: root.current-route == AppRouteView.home
+        || (root.transition-from-route == AppRouteView.home && root.route-phase < 3);
+    private property <float> chrome-opacity: root.current-route == AppRouteView.home
+        ? (root.route-back && root.route-phase <= 1 ? 0.6 : 1.0)
+        : (root.route-phase >= 2 ? 0.6 : 1.0);
+    animate chrome-opacity {
+        duration: root.route-phase == 2 ? Motion.page-duration : 0ms;
+        easing: ease-out;
+    }
 
     // Read-only geometry telemetry for Rust-owned spatial focus transfer.
     // Slint reports where the presentation actually rendered things; Rust
@@ -306,14 +329,16 @@ export component AppWindow inherits Window {
 
             // Only Home occupies the centre between its persistent chrome.
             // Library and utility pages own the full logical surface.
-            // Retaining every route layer preserves crossfade overlap and local
+            // Retaining every route layer preserves the Rise overlap and local
             // presentation state without moving navigation ownership into Slint.
-            PageTransitionLayer {
+            TransitionLayer {
                 x: 0px;
-                base-y: Metrics.top-chrome-height;
+                rest-y: Metrics.top-chrome-height;
                 width: parent.width;
                 height: root.shell-content-height;
                 active: root.current-route == AppRouteView.home;
+                phase: root.route-phase;
+                returning: root.route-back;
                 outgoing: root.current-route != AppRouteView.home
                     && root.transition-from-route == AppRouteView.home;
 
@@ -326,7 +351,7 @@ export component AppWindow inherits Window {
                     launching-game-index: root.launching-game-index;
                     launch-feedback-text: root.launch-feedback-text;
                     // A retained outgoing Home page remains visible during the
-                    // crossfade, but it must not regain selection chrome after
+                    // transition, but it must not regain selection chrome after
                     // route-local focus switches to the destination route.
                     focus-visible: root.current-route == AppRouteView.home
                         && !root.top-utilities-focused;
@@ -338,11 +363,13 @@ export component AppWindow inherits Window {
                 }
             }
 
-            PageTransitionLayer {
+            TransitionLayer {
                 x: 0px;
                 width: parent.width;
                 height: parent.height;
                 active: root.current-route == AppRouteView.library;
+                phase: root.route-phase;
+                returning: root.route-back;
                 outgoing: root.current-route != AppRouteView.library
                     && root.transition-from-route == AppRouteView.library;
 
@@ -386,11 +413,13 @@ export component AppWindow inherits Window {
 
             // All seven top utilities are durable full-shell submenu routes. They
             // share one page component and normal Navigator history semantics.
-            PageTransitionLayer {
+            TransitionLayer {
                 x: 0px;
                 width: parent.width;
                 height: parent.height;
                 active: root.current-route == AppRouteView.friends;
+                phase: root.route-phase;
+                returning: root.route-back;
                 outgoing: root.current-route != AppRouteView.friends
                     && root.transition-from-route == AppRouteView.friends;
 
@@ -402,11 +431,13 @@ export component AppWindow inherits Window {
                 }
             }
 
-            PageTransitionLayer {
+            TransitionLayer {
                 x: 0px;
                 width: parent.width;
                 height: parent.height;
                 active: root.current-route == AppRouteView.album;
+                phase: root.route-phase;
+                returning: root.route-back;
                 outgoing: root.current-route != AppRouteView.album
                     && root.transition-from-route == AppRouteView.album;
 
@@ -418,11 +449,13 @@ export component AppWindow inherits Window {
                 }
             }
 
-            PageTransitionLayer {
+            TransitionLayer {
                 x: 0px;
                 width: parent.width;
                 height: parent.height;
                 active: root.current-route == AppRouteView.activity;
+                phase: root.route-phase;
+                returning: root.route-back;
                 outgoing: root.current-route != AppRouteView.activity
                     && root.transition-from-route == AppRouteView.activity;
 
@@ -441,20 +474,19 @@ export component AppWindow inherits Window {
                     pressed-index: root.activity-pressed-index;
                     details-open: root.activity-details-visible;
                     focus-visible: root.current-route == AppRouteView.activity && !root.activity-details-visible;
-                    opacity: root.activity-details-visible ? 0.0 : 1.0;
-                    x: root.activity-details-visible ? -12px : 0px;
-                    visible: self.opacity > 0.01;
-                    animate x {
-                        duration: Motion.reduced-motion ? 0ms : Motion.page-duration;
-                        easing: ease-in-out;
-                    }
-                    animate opacity {
-                        duration: Motion.reduced-motion ? 0ms : Motion.page-duration;
-                        easing: ease-in-out;
-                    }
                     choose-game(index) => {
                         if (root.current-route == AppRouteView.activity) { root.activity-choose(index); }
                     }
+                }
+                // Dims the overview's content (not its header) under the
+                // rising details, like the outgoing layer of any other Rise.
+                Rectangle {
+                    y: Metrics.page-header-height;
+                    width: parent.width;
+                    height: parent.height - Metrics.page-header-height;
+                    background: Theme.background;
+                    opacity: root.activity-details-visible ? 0.4 : 0.0;
+                    animate opacity { duration: Motion.page-duration; easing: ease-out; }
                 }
                 activity-details-page := ActivityGameDetailsPage {
                     width: parent.width;
@@ -481,11 +513,13 @@ export component AppWindow inherits Window {
                 }
             }
 
-            PageTransitionLayer {
+            TransitionLayer {
                 x: 0px;
                 width: parent.width;
                 height: parent.height;
                 active: root.current-route == AppRouteView.achievements;
+                phase: root.route-phase;
+                returning: root.route-back;
                 outgoing: root.current-route != AppRouteView.achievements
                     && root.transition-from-route == AppRouteView.achievements;
 
@@ -524,11 +558,13 @@ export component AppWindow inherits Window {
                 }
             }
 
-            PageTransitionLayer {
+            TransitionLayer {
                 x: 0px;
                 width: parent.width;
                 height: parent.height;
                 active: root.current-route == AppRouteView.web;
+                phase: root.route-phase;
+                returning: root.route-back;
                 outgoing: root.current-route != AppRouteView.web
                     && root.transition-from-route == AppRouteView.web;
 
@@ -540,11 +576,13 @@ export component AppWindow inherits Window {
                 }
             }
 
-            PageTransitionLayer {
+            TransitionLayer {
                 x: 0px;
                 width: parent.width;
                 height: parent.height;
                 active: root.current-route == AppRouteView.settings;
+                phase: root.route-phase;
+                returning: root.route-back;
                 outgoing: root.current-route != AppRouteView.settings
                     && root.transition-from-route == AppRouteView.settings;
 
@@ -583,11 +621,13 @@ export component AppWindow inherits Window {
                 }
             }
 
-            PageTransitionLayer {
+            TransitionLayer {
                 x: 0px;
                 width: parent.width;
                 height: parent.height;
                 active: root.current-route == AppRouteView.shop;
+                phase: root.route-phase;
+                returning: root.route-back;
                 outgoing: root.current-route != AppRouteView.shop
                     && root.transition-from-route == AppRouteView.shop;
 
@@ -609,11 +649,12 @@ export component AppWindow inherits Window {
                 width: parent.width - Metrics.page-margin * 2;
                 height: Metrics.hint-row-height;
                 visible: root.current-route != AppRouteView.home;
-                z: 2;
-                // Dialogs carry their own focusable buttons; the bar fades
-                // out with the page behind the dialog's dimmed backdrop.
-                opacity: root.current-route == AppRouteView.settings
-                    && (root.settings-refresh-open || root.settings-editing-key) ? 0.0 : 1.0;
+                z: 3;
+                // Appears once the page has risen into place. Dialogs carry
+                // their own focusable buttons, so the bar fades out with the
+                // page behind the dialog's dimmed backdrop.
+                opacity: root.route-phase < 3 || (root.current-route == AppRouteView.settings
+                    && (root.settings-refresh-open || root.settings-editing-key)) ? 0.0 : 1.0;
                 animate opacity { duration: Motion.page-duration; easing: ease-in-out; }
                 hints: root.page-hints;
             }
@@ -626,6 +667,7 @@ export component AppWindow inherits Window {
                 width: parent.width;
                 height: Metrics.top-chrome-height;
                 visible: root.shell-chrome-visible;
+                opacity: root.chrome-opacity;
                 background: Theme.surface.with-alpha(Theme.is-dark ? 0.78 : 0.92);
 
                 Rectangle {
@@ -644,6 +686,7 @@ export component AppWindow inherits Window {
                 height: Metrics.top-chrome-height;
                 icon-render-scale: root.ui-scale;
                 visible: root.shell-chrome-visible;
+                opacity: root.chrome-opacity;
                 utility-focus-visible: root.top-utilities-focused;
                 focused-utility-index: root.focused-utility-index;
                 network-kind: root.status-network-kind;
@@ -662,6 +705,7 @@ export component AppWindow inherits Window {
                 width: parent.width;
                 height: Metrics.footer-height;
                 visible: root.shell-chrome-visible;
+                opacity: root.chrome-opacity;
                 connected-controller-count: root.connected-controller-count;
                 clock-time: root.clock-time;
                 clock-suffix: root.clock-suffix;
