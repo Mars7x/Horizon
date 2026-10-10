@@ -1,3 +1,4 @@
+pub mod audio_output;
 pub mod clock;
 pub mod data_paths;
 pub mod launcher;

@@ -1,16 +1,32 @@
-//! Optional, non-blocking UI feedback (Navigate, OK, Back) via existing SDL3.
-//! This module owns audio playback. Presentation and input adapters remain silent.
-use std::time::{Duration, Instant};
-
-use sdl3::{
-    AudioSubsystem, Sdl,
-    audio::{AudioFormat, AudioSpec, AudioStreamOwner},
+//! Optional UI feedback sounds (Navigate, OK, Back).
+//! This module owns UI sound playback. Presentation and input adapters remain silent.
+//!
+//! Sounds play through GStreamer on their own thread, to PipeWire when it
+//! can connect (`platform::audio_output`). The UI thread only posts a cue
+//! and never waits: an audio server that stalls (it happens, for example
+//! with a Bluetooth headset changing profile) silences the clicks but can
+//! never freeze Horizon. The output stays open while the user navigates and
+//! closes after a quiet spell, so an idle Horizon holds no audio stream.
+use std::{
+    sync::mpsc::{self, RecvTimeoutError, SyncSender, TrySendError},
+    time::Duration,
 };
+
+use gstreamer::{self as gst, prelude::*};
+use gstreamer_app as gst_app;
 use tracing::warn;
+
+use crate::platform::audio_output::AudioOutput;
 
 const NAVIGATION_WAV: &[u8] = include_bytes!("../ui/assets/horizon-navigation.wav");
 const OK_WAV: &[u8] = include_bytes!("../ui/assets/horizon-ok.wav");
 const BACK_WAV: &[u8] = include_bytes!("../ui/assets/horizon-back.wav");
+
+const SAMPLE_RATE: i32 = 48_000;
+/// The output closes after this long without a sound.
+const IDLE_CLOSE: Duration = Duration::from_secs(20);
+/// Cues waiting for the sound thread; more than this are dropped, not queued.
+const QUEUE: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiSoundCue {
@@ -29,68 +45,33 @@ impl UiSoundCue {
     }
 }
 
-const RETRY_DELAY: Duration = Duration::from_secs(5);
-// One silent output period primes the backend before the first user cue;
-// this is not added to, or baked into, any of the three original WAV assets.
-const STARTUP_SILENCE: [i16; 480] = [0; 480];
-
-/// SDL objects remain on Slint's main thread, as with Horizon's SDL gamepad input.
-struct Playback {
-    // Drop the bound stream before its SDL subsystem/context.
-    stream: AudioStreamOwner,
-    _subsystem: AudioSubsystem,
-    _sdl: Sdl,
-}
-
-impl Playback {
-    fn open() -> Result<Self, String> {
-        let sdl = sdl3::init().map_err(|error| error.to_string())?;
-        let subsystem = sdl.audio().map_err(|error| error.to_string())?;
-        let spec = AudioSpec {
-            freq: Some(48_000),
-            channels: Some(1),
-            format: Some(AudioFormat::s16_sys()),
-        };
-        let device = subsystem
-            .open_playback_device(&spec)
-            .map_err(|error| error.to_string())?;
-        let stream = device
-            .open_device_stream(Some(&spec))
-            .map_err(|error| error.to_string())?;
-        // SDL opens the device initially paused. Resume only after a short
-        // silent primer is available, so the first *audible* sample is not
-        // also the first packet the backend ever sees.
-        stream
-            .put_data_i16(&STARTUP_SILENCE)
-            .map_err(|error| error.to_string())?;
-        stream.flush().map_err(|error| error.to_string())?;
-        stream.resume().map_err(|error| error.to_string())?;
-        Ok(Self {
-            stream,
-            _subsystem: subsystem,
-            _sdl: sdl,
-        })
-    }
+enum Command {
+    /// Open the output ahead of the first sound.
+    Prepare,
+    Play(UiSoundCue),
+    /// Sounds were turned off: close the output.
+    Close,
 }
 
 pub struct UiSounds {
     enabled: bool,
-    samples: [Vec<i16>; 3],
-    playback: Option<Playback>,
-    last_failed_open: Option<Instant>,
+    samples: Option<[Vec<u8>; 3]>,
+    worker: Option<SyncSender<Command>>,
 }
 
 impl UiSounds {
     pub fn new(enabled: bool) -> Self {
         // A malformed bundled asset is a packaging error, not a user's runtime error.
         let samples = [NAVIGATION_WAV, OK_WAV, BACK_WAV].map(|wav| {
-            decode_pcm16_mono_48k(wav).expect("bundled Horizon UI WAV must be PCM16 mono 48 kHz")
+            pcm_bytes(
+                &decode_pcm16_mono_48k(wav)
+                    .expect("bundled Horizon UI WAV must be PCM16 mono 48 kHz"),
+            )
         });
         Self {
             enabled,
-            samples,
-            playback: None,
-            last_failed_open: None,
+            samples: Some(samples),
+            worker: None,
         }
     }
 
@@ -100,60 +81,155 @@ impl UiSounds {
 
     pub fn set_enabled(&mut self, enabled: bool) {
         if !enabled && self.enabled {
-            // Immediately stop queued audio, including when the toggle is clicked.
-            if let Some(playback) = &self.playback {
-                let _ = playback.stream.clear();
-            }
+            self.send(Command::Close);
         }
         self.enabled = enabled;
     }
 
-    /// Open the reusable device once, before the user navigates. Call from
-    /// Slint's event loop after initial UI setup; never from an audio callback.
+    /// Open the output before the user navigates. Never blocks.
     pub fn prepare(&mut self) {
-        if !self.enabled || self.playback.is_some() {
-            return;
-        }
-        if self
-            .last_failed_open
-            .is_some_and(|at| at.elapsed() < RETRY_DELAY)
-        {
-            return;
-        }
-        match Playback::open() {
-            Ok(playback) => {
-                self.playback = Some(playback);
-                self.last_failed_open = None;
-            }
-            Err(error) => {
-                warn!(%error, "UI audio device unavailable; menus remain usable");
-                self.last_failed_open = Some(Instant::now());
-            }
+        if self.enabled {
+            self.send(Command::Prepare);
         }
     }
 
-    /// Call only after a semantic UI action succeeds; no sound on ignored input.
+    /// Call only after a semantic UI action succeeds; no sound on ignored
+    /// input. Never blocks.
     pub fn play(&mut self, cue: UiSoundCue) {
-        if !self.enabled {
-            return;
+        if self.enabled {
+            self.send(Command::Play(cue));
         }
-        self.prepare();
-        if let Some(playback) = &self.playback {
-            // No sound pile-up if the user navigates quickly or uses held-repeat.
-            let result = playback
-                .stream
-                .clear()
-                .and_then(|()| playback.stream.put_data_i16(&self.samples[cue.index()]))
-                // Short effects need an explicit flush so SDL's conversion
-                // buffer releases their complete tail promptly.
-                .and_then(|()| playback.stream.flush());
-            if let Err(error) = result {
-                warn!(%error, "UI sound could not play");
-                self.playback = None;
-                self.last_failed_open = Some(Instant::now());
+    }
+
+    fn send(&mut self, command: Command) {
+        if self.worker.is_none() {
+            let Some(samples) = self.samples.take() else {
+                return;
+            };
+            let (sender, commands) = mpsc::sync_channel(QUEUE);
+            if !crate::services::worker::spawn("ui-sounds", move || run(&samples, &commands)) {
+                return;
+            }
+            self.worker = Some(sender);
+        }
+        if let Some(worker) = &self.worker {
+            match worker.try_send(command) {
+                // A busy or stalled output drops cues instead of queueing them.
+                Ok(()) | Err(TrySendError::Full(_)) => {}
+                Err(TrySendError::Disconnected(_)) => self.worker = None,
             }
         }
     }
+}
+
+/// The sound thread: opens the output on demand, plays cues, and closes it
+/// after a quiet spell or when sounds are turned off.
+fn run(samples: &[Vec<u8>; 3], commands: &mpsc::Receiver<Command>) {
+    if let Err(error) = gst::init() {
+        warn!(%error, "UI sounds unavailable; menus remain usable");
+        return;
+    }
+    let output = AudioOutput::detect();
+    let mut player: Option<Player> = None;
+    loop {
+        let command = if player.is_some() {
+            commands.recv_timeout(IDLE_CLOSE)
+        } else {
+            commands.recv().map_err(|_| RecvTimeoutError::Disconnected)
+        };
+        match command {
+            Ok(Command::Prepare) => {
+                if player.is_none() {
+                    player = Player::open(output);
+                }
+            }
+            Ok(Command::Play(cue)) => {
+                if player.is_none() {
+                    player = Player::open(output);
+                }
+                if let Some(open) = &player
+                    && let Err(error) = open.push(&samples[cue.index()])
+                {
+                    warn!(%error, "UI sound could not play");
+                    player = None;
+                }
+            }
+            Ok(Command::Close) | Err(RecvTimeoutError::Timeout) => player = None,
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
+}
+
+/// An open output: a live source feeding the sink. Dropping it stops it.
+struct Player {
+    pipeline: gst::Pipeline,
+    source: gst_app::AppSrc,
+}
+
+impl Player {
+    fn open(output: AudioOutput) -> Option<Self> {
+        Self::try_open(output)
+            .inspect_err(|error| warn!(%error, "UI audio output unavailable; menus remain usable"))
+            .ok()
+    }
+
+    fn try_open(output: AudioOutput) -> Result<Self, String> {
+        let caps = gst::Caps::builder("audio/x-raw")
+            .field("format", "S16LE")
+            .field("layout", "interleaved")
+            .field("rate", SAMPLE_RATE)
+            .field("channels", 1)
+            .build();
+        let source = gst_app::AppSrc::builder()
+            .caps(&caps)
+            .format(gst::Format::Time)
+            .is_live(true)
+            .do_timestamp(true)
+            .build();
+        let convert = make("audioconvert")?;
+        let resample = make("audioresample")?;
+        let sink = output.sink()?;
+        // Play each cue the moment it arrives.
+        if sink.has_property("sync") {
+            sink.set_property("sync", false);
+        }
+        let pipeline = gst::Pipeline::new();
+        pipeline
+            .add_many([source.upcast_ref(), &convert, &resample, &sink])
+            .map_err(|error| error.to_string())?;
+        gst::Element::link_many([source.upcast_ref(), &convert, &resample, &sink])
+            .map_err(|error| error.to_string())?;
+        pipeline
+            .set_state(gst::State::Playing)
+            .map_err(|error| error.to_string())?;
+        Ok(Self { pipeline, source })
+    }
+
+    fn push(&self, pcm: &[u8]) -> Result<(), String> {
+        self.source
+            .push_buffer(gst::Buffer::from_slice(pcm.to_vec()))
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+}
+
+impl Drop for Player {
+    fn drop(&mut self) {
+        let _ = self.pipeline.set_state(gst::State::Null);
+    }
+}
+
+fn make(name: &str) -> Result<gst::Element, String> {
+    gst::ElementFactory::make(name)
+        .build()
+        .map_err(|error| error.to_string())
+}
+
+fn pcm_bytes(samples: &[i16]) -> Vec<u8> {
+    samples
+        .iter()
+        .flat_map(|sample| sample.to_le_bytes())
+        .collect()
 }
 
 fn decode_pcm16_mono_48k(wav: &[u8]) -> Option<Vec<i16>> {
@@ -218,15 +294,6 @@ mod tests {
     }
 
     #[test]
-    fn startup_primer_is_silent_and_does_not_touch_assets() {
-        assert_eq!(STARTUP_SILENCE.len(), 480);
-        assert!(STARTUP_SILENCE.iter().all(|sample| *sample == 0));
-        assert_eq!(decode_pcm16_mono_48k(NAVIGATION_WAV).unwrap().len(), 4080);
-        assert_eq!(decode_pcm16_mono_48k(OK_WAV).unwrap().len(), 9120);
-        assert_eq!(decode_pcm16_mono_48k(BACK_WAV).unwrap().len(), 6306);
-    }
-
-    #[test]
     fn malformed_wave_is_rejected() {
         assert!(decode_pcm16_mono_48k(b"not a wave").is_none());
         let mut invalid = NAVIGATION_WAV.to_vec();
@@ -239,6 +306,11 @@ mod tests {
         let mut sound = UiSounds::new(false);
         sound.prepare();
         sound.play_navigation();
-        assert!(sound.playback.is_none());
+        assert!(sound.worker.is_none());
+    }
+
+    #[test]
+    fn samples_are_little_endian_pcm() {
+        assert_eq!(pcm_bytes(&[1, -2]), [1, 0, 0xfe, 0xff]);
     }
 }

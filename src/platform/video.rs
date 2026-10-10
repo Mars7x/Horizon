@@ -8,15 +8,20 @@
 //! never a growing queue. Hardware decoders are used when GStreamer ranks
 //! them first.
 //!
-//! Sound goes straight to PipeWire when Horizon can reach it. PipeWire's
-//! sink clocks playback from the first frame. Through the PulseAudio
-//! socket, the stream's clock barely moves for the first few hundred
-//! milliseconds while the stream starts, which held the picture still at
-//! the start of every video. Without PipeWire, playback runs on the system
-//! clock instead and the PulseAudio sink keeps sound in step with it.
+//! Sound goes straight to PipeWire when Horizon can reach it
+//! (`platform::audio_output`). PipeWire's sink clocks playback from the
+//! first frame. Through the PulseAudio socket, the stream's clock barely
+//! moves for the first few hundred milliseconds while the stream starts,
+//! which held the picture still at the start of every video. Without
+//! PipeWire, playback runs on the system clock instead and the PulseAudio
+//! sink keeps sound in step with it.
+//!
+//! State changes and seeks run on each video's own control thread: starting
+//! a pipeline connects to the audio server, which can stall when the server
+//! is unwell, and that must never freeze the UI.
 use std::{
     path::{Path, PathBuf},
-    sync::{Arc, OnceLock},
+    sync::{Arc, mpsc},
     time::Duration,
 };
 
@@ -25,6 +30,7 @@ use gstreamer_app as gst_app;
 use gstreamer_video::{self as gst_video, prelude::*};
 use image::RgbaImage;
 
+use crate::platform::audio_output::AudioOutput;
 use crate::services::album::{
     MediaError, VideoBackend, VideoFrame, VideoPlayback, VideoSink, media::VideoProbe,
 };
@@ -34,21 +40,7 @@ const PREROLL_TIMEOUT: Duration = Duration::from_secs(5);
 /// The poster frame: a second in, or a tenth of a short clip, past fades.
 const POSTER_OFFSET: Duration = Duration::from_secs(1);
 
-pub struct GstVideo {
-    // Decided once, by actually connecting (the socket can be visible in the
-    // sandbox without being usable). The Album's warm-up decides it ahead
-    // of the first video.
-    audio: Arc<OnceLock<AudioOutput>>,
-}
-
-/// Where a playing video's sound goes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AudioOutput {
-    /// PipeWire's own sink, which also clocks the pipeline.
-    PipeWire,
-    /// GStreamer's default sink (PulseAudio), with the system clock.
-    Default,
-}
+pub struct GstVideo;
 
 impl GstVideo {
     /// Fails when GStreamer or its playback plugins are missing; the Album
@@ -60,33 +52,7 @@ impl GstVideo {
                 return Err(format!("GStreamer element {element} is missing"));
             }
         }
-        Ok(Self {
-            audio: Arc::new(OnceLock::new()),
-        })
-    }
-
-    fn audio(&self) -> AudioOutput {
-        *self.audio.get_or_init(AudioOutput::detect)
-    }
-}
-
-impl AudioOutput {
-    /// PipeWire when its sink can connect, otherwise the default.
-    fn detect() -> Self {
-        let connects = gst::ElementFactory::make("pipewiresink")
-            .build()
-            .is_ok_and(|sink| {
-                let ready = sink.set_state(gst::State::Ready).is_ok();
-                let _ = sink.set_state(gst::State::Null);
-                ready
-            });
-        let output = if connects {
-            Self::PipeWire
-        } else {
-            Self::Default
-        };
-        tracing::debug!(?output, "video sound output");
-        output
+        Ok(Self)
     }
 }
 
@@ -116,9 +82,8 @@ const WARM_UP_ELEMENTS: &[&str] = &[
 
 impl VideoBackend for GstVideo {
     fn warm_up(&self) {
-        let audio = Arc::clone(&self.audio);
         spawn("video-warm-up", move || {
-            audio.get_or_init(AudioOutput::detect);
+            AudioOutput::detect();
             for name in WARM_UP_ELEMENTS {
                 if let Some(factory) = gst::ElementFactory::find(name) {
                     // Missing optional plugins are fine; playback picks others.
@@ -161,11 +126,14 @@ impl VideoBackend for GstVideo {
         max: (u32, u32),
         sink: Arc<dyn VideoSink>,
     ) -> Result<Box<dyn VideoPlayback>, MediaError> {
-        let pipeline =
-            Pipeline::new(path, max, Some(self.audio())).map_err(|message| MediaError::Video {
-                path: path.to_owned(),
-                message,
-            })?;
+        // Detection runs during the Album's warm-up; until it has answered,
+        // use the default output rather than wait for the audio server.
+        let output = AudioOutput::detected().unwrap_or(AudioOutput::Default);
+        let failed = |message: String| MediaError::Video {
+            path: path.to_owned(),
+            message,
+        };
+        let pipeline = Pipeline::new(path, max, Some(output)).map_err(failed)?;
         let frames = Arc::clone(&sink);
         let deliver = move |appsink: &gst_app::AppSink, preroll: bool| {
             let sample = if preroll {
@@ -200,14 +168,18 @@ impl VideoBackend for GstVideo {
                 gst::BusSyncReply::Drop
             });
         }
-        pipeline
-            .playbin
-            .set_state(gst::State::Paused)
-            .map_err(|error| MediaError::Video {
-                path: path.to_owned(),
-                message: error.to_string(),
-            })?;
-        Ok(Box::new(GstPlayback { pipeline }))
+        let (commands, received) = mpsc::channel();
+        let control = pipeline.playbin.clone();
+        let started = spawn("video-control", move || {
+            run_control(&pipeline, &received, sink.as_ref());
+        });
+        if !started {
+            return Err(failed("video control thread did not start".into()));
+        }
+        Ok(Box::new(GstPlayback {
+            playbin: control,
+            commands,
+        }))
     }
 }
 
@@ -267,11 +239,8 @@ impl Pipeline {
             },
         );
         match audio {
-            Some(AudioOutput::PipeWire) => {
-                let sink = gst::ElementFactory::make("pipewiresink")
-                    .build()
-                    .map_err(|error| error.to_string())?;
-                playbin.set_property("audio-sink", &sink);
+            Some(output @ AudioOutput::PipeWire) => {
+                playbin.set_property("audio-sink", output.sink()?);
             }
             Some(AudioOutput::Default) => {
                 if let Some(pipeline) = playbin.downcast_ref::<gst::Pipeline>() {
@@ -325,46 +294,69 @@ impl Pipeline {
     }
 }
 
+enum Command {
+    Play(bool),
+    Seek(Duration),
+}
+
+/// One video's control thread: prerolls, then applies commands in order.
+/// When the handle drops (the channel closes) it detaches the bus handler
+/// and stops the pipeline, freeing the decoder.
+fn run_control(pipeline: &Pipeline, commands: &mpsc::Receiver<Command>, sink: &dyn VideoSink) {
+    if let Err(error) = pipeline.playbin.set_state(gst::State::Paused) {
+        sink.failed(error.to_string());
+    }
+    for command in commands {
+        match command {
+            Command::Play(playing) => {
+                let state = if playing {
+                    gst::State::Playing
+                } else {
+                    gst::State::Paused
+                };
+                if let Err(error) = pipeline.playbin.set_state(state) {
+                    tracing::warn!(%error, "video state change failed");
+                }
+            }
+            Command::Seek(position) => {
+                if let Err(error) = pipeline.seek(position, gst::SeekFlags::ACCURATE) {
+                    tracing::warn!(%error, "video seek failed");
+                }
+            }
+        }
+    }
+    if let Some(bus) = pipeline.playbin.bus() {
+        bus.unset_sync_handler();
+    }
+    pipeline.stop();
+}
+
+/// The UI's handle: commands go to the control thread and never block.
+/// Position and duration are queries, answered without waiting.
 struct GstPlayback {
-    pipeline: Pipeline,
+    playbin: gst::Element,
+    commands: mpsc::Sender<Command>,
 }
 
 impl VideoPlayback for GstPlayback {
     fn set_playing(&self, playing: bool) {
-        let state = if playing {
-            gst::State::Playing
-        } else {
-            gst::State::Paused
-        };
-        if let Err(error) = self.pipeline.playbin.set_state(state) {
-            tracing::warn!(%error, "video state change failed");
-        }
+        let _ = self.commands.send(Command::Play(playing));
     }
 
     fn seek(&self, position: Duration) {
-        if let Err(error) = self.pipeline.seek(position, gst::SeekFlags::ACCURATE) {
-            tracing::warn!(%error, "video seek failed");
-        }
+        let _ = self.commands.send(Command::Seek(position));
     }
 
     fn position(&self) -> Option<Duration> {
-        self.pipeline
-            .playbin
+        self.playbin
             .query_position::<gst::ClockTime>()
             .map(|time| Duration::from_nanos(time.nseconds()))
     }
 
     fn duration(&self) -> Option<Duration> {
-        self.pipeline.duration()
-    }
-}
-
-impl Drop for GstPlayback {
-    fn drop(&mut self) {
-        if let Some(bus) = self.pipeline.playbin.bus() {
-            bus.unset_sync_handler();
-        }
-        self.pipeline.stop();
+        self.playbin
+            .query_duration::<gst::ClockTime>()
+            .map(|time| Duration::from_nanos(time.nseconds()))
     }
 }
 
