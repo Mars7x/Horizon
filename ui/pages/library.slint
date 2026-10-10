@@ -27,7 +27,6 @@ export component LibraryPage inherits Rectangle {
     in property <string> filter-text: "All sources";
     in property <string> sort-text: "Alphabetical";
     in property <int> total-count: 0;
-    in property <string> count-text: "0 games";
     in property <int> collection-count: 0;
     in property <string> selected-title: "";
     in property <string> selected-source: "";
@@ -138,12 +137,11 @@ export component LibraryPage inherits Rectangle {
         // Non-focusable values; LB/RB cycle Source and Sort for controllers.
         HorizontalLayout {
             // Right-aligned so each value's text edge meets the page margin.
-            width: 130px + 160px + 180px + Metrics.spacing-sm * 2;
+            width: 160px + 180px + Metrics.spacing-sm;
             x: parent.width - Metrics.page-margin - self.width + Metrics.spacing-sm + 2px;
             y: Metrics.page-accessory-y;
             height: Metrics.page-accessory-height;
             spacing: Metrics.spacing-sm;
-            HeaderValue { width: 130px; label: "Collection"; value: root.count-text; }
             HeaderValue {
                 width: 160px; label: "Source"; value: root.filter-text;
                 interactive: true; button: "LB";

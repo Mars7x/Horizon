@@ -137,7 +137,6 @@ export component AlbumPage inherits Rectangle {
     // Captures before filtering; 0 shows the empty Album message.
     in property <int> collection-count: 0;
     in property <string> status: "";
-    in property <string> count-text: "0 captures";
     in property <string> game-text: "All games";
     in property <string> kind-text: "All";
     in property <int> selected-index: 0;
@@ -260,12 +259,11 @@ export component AlbumPage inherits Rectangle {
         width: parent.width;
         title: "Album";
         HorizontalLayout {
-            width: 130px + 190px + 130px + Metrics.spacing-sm * 2;
+            width: 190px + 130px + Metrics.spacing-sm;
             x: parent.width - Metrics.page-margin - self.width + Metrics.spacing-sm + 2px;
             y: Metrics.page-accessory-y;
             height: Metrics.page-accessory-height;
             spacing: Metrics.spacing-sm;
-            HeaderValue { width: 130px; label: "Captures"; value: root.count-text; }
             HeaderValue {
                 width: 190px; label: "Game"; value: root.game-text;
                 interactive: !root.viewing && root.collection-count > 0;
