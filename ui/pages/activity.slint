@@ -145,7 +145,7 @@ export component ActivityPage inherits Rectangle {
                     && (root.focus-visible || root.details-open);
                 private property <bool> pressed: self.selected && root.pressed-index == index;
                 // Home supplies the larger selected scale. Opening details
-                // briefly depresses the cover before the page crossfade.
+                // briefly depresses the cover before the details rise.
                 private property <float> card-scale: !self.selected ? 1.0
                     : self.pressed ? 1.025 : Metrics.game-selected-scale;
                 z: self.selected ? 2.0 : 1.0;

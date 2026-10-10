@@ -587,7 +587,7 @@ impl NavigationController {
 
     /// Share the same Home-like press-in for controller Accept and pointer
     /// activation. Wait just long enough for the selected cover to visibly
-    /// depress before the Settings-style details crossfade begins.
+    /// depress before the details rise begins.
     fn begin_activity_details_open(&self, ui: &AppWindow, index: usize) {
         if self.current_route() != AppRoute::Utility(UtilityPage::Activity)
             || ui.get_activity_details_visible()

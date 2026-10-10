@@ -4,9 +4,10 @@ import { AchievementGameData, AchievementEntryData } from "../models/achievement
 import { PageHeader, HeaderValue, Breadcrumb, ScrollEdgeShadow } from "../components/page-header.slint";
 import { ListRow, Surface, BadgeIcon } from "../components/list-row.slint";
 import { MarqueeText } from "../components/marquee-text.slint";
+import { TransitionDriver, TransitionLayer } from "../components/transition.slint";
 
 // One full-width games list, then one full-width, read-only achievement list.
-// Both views remain mounted during the Settings-style crossfade/12px settle.
+// Both views remain mounted; a game's achievements rise over the list (Rise).
 // Lists run between the shared page header and the bottom bar.
 export component AchievementsPage inherits Rectangle {
     in property <[AchievementGameData]> games;
@@ -117,11 +118,18 @@ export component AchievementsPage inherits Rectangle {
         }
     }
 
-    games-view := Rectangle {
-        x: -root.detail-reveal * Metrics.page-transition-offset;
+    // Shared Rise: a game's achievements rise over the games list; Back
+    // drops them. The header above stays still (layers are clear above it).
+    view-transition := TransitionDriver { key: root.viewing-entries ? 1 : 0; }
+
+    games-view := TransitionLayer {
         width: root.width; height: root.height;
-        background: transparent;
-        opacity: 1.0 - root.detail-reveal;
+        opaque: true;
+        cover-from: Metrics.page-header-height;
+        active: !root.viewing-entries;
+        outgoing: root.viewing-entries;
+        returning: !root.viewing-entries;
+        phase: view-transition.phase;
 
         game-viewport := Rectangle {
             x: root.margin; y: root.game-top;
@@ -204,10 +212,14 @@ export component AchievementsPage inherits Rectangle {
         }
     }
 
-    details-view := Rectangle {
-        x: (1.0 - root.detail-reveal) * Metrics.page-transition-offset;
+    details-view := TransitionLayer {
         width: root.width; height: root.height;
-        background: transparent; opacity: root.detail-reveal;
+        opaque: true;
+        cover-from: Metrics.page-header-height;
+        active: root.viewing-entries;
+        outgoing: !root.viewing-entries;
+        returning: !root.viewing-entries;
+        phase: view-transition.phase;
         Breadcrumb {
             x: root.margin; y: Metrics.page-header-height;
             width: root.width - root.margin * 2;

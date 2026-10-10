@@ -3,6 +3,7 @@ import { SelectionFocusSurface } from "../components/selection-focus-surface.sli
 import { ListRow } from "../components/list-row.slint";
 import { PageHeader, Breadcrumb } from "../components/page-header.slint";
 import { MarqueeText } from "../components/marquee-text.slint";
+import { TransitionDriver, TransitionLayer } from "../components/transition.slint";
 
 // Settings rows are the shared ListRow plus a trailing action label or a
 // switch. Selection and persistence remain Rust-owned so mouse and controller agree.
@@ -251,20 +252,31 @@ export component SettingsPage inherits Rectangle {
     // their breadcrumb, as every other page's sub-views do.
     PageHeader { width: parent.width; title: "Settings"; }
 
-    settings-home := Rectangle {
-        x: Metrics.page-margin + (root.view == 0 ? 0px : -12px);
-        y: Metrics.page-header-height;
+    // Sub-views use the shared Rise: deeper views rise over their parent,
+    // Back drops them. Depth: Settings 0, Appearance/Third-Party 1,
+    // Steam Account/SteamGridDB 2.
+    view-transition := TransitionDriver { key: root.view; }
+    private property <bool> view-back: root.view-depth(root.view) < root.view-depth(view-transition.from-key);
+    pure function view-depth(view: int) -> int {
+        return view == 0 ? 0 : (view <= 2 ? 1 : 2);
+    }
+
+    settings-home := TransitionLayer {
+        x: Metrics.page-margin;
+        rest-y: Metrics.page-header-height;
         width: root.content-width;
-        height: Metrics.list-row-height * 2 + Metrics.list-row-gap;
-        background: transparent;
-        opacity: root.view == 0 ? 1.0 : 0.0;
-        visible: self.opacity > 0.01;
-        animate x { duration: Motion.page-duration; easing: ease-in-out; }
-        animate opacity { duration: Motion.page-duration; }
+        height: root.height - Metrics.page-header-height;
+        travel: root.height;
+        opaque: true;
+        active: root.view == 0;
+        outgoing: view-transition.from-key == 0;
+        returning: root.view-back;
+        phase: view-transition.phase;
 
         VerticalLayout {
             width: parent.width;
             height: parent.height;
+            alignment: start;
             spacing: Metrics.list-row-gap;
             SettingsRow {
                 width: parent.width;
@@ -287,15 +299,17 @@ export component SettingsPage inherits Rectangle {
         }
     }
 
-    appearance := Rectangle {
-        x: Metrics.page-margin + (root.view == 1 ? 0px : 12px);
-        y: Metrics.page-header-height;
-        width: root.content-width; height: root.height - Metrics.page-header-height - Metrics.page-bottom-bar-height;
-        background: transparent;
-        opacity: root.view == 1 ? 1.0 : 0.0;
-        visible: self.opacity > 0.01;
-        animate x { duration: Motion.page-duration; easing: ease-in-out; }
-        animate opacity { duration: Motion.page-duration; }
+    appearance := TransitionLayer {
+        x: Metrics.page-margin;
+        rest-y: Metrics.page-header-height;
+        width: root.content-width;
+        height: root.height - Metrics.page-header-height;
+        travel: root.height;
+        opaque: true;
+        active: root.view == 1;
+        outgoing: view-transition.from-key == 1;
+        returning: root.view-back;
+        phase: view-transition.phase;
 
         Breadcrumb {
             x: 0px; y: 0px; width: parent.width;
@@ -483,15 +497,17 @@ export component SettingsPage inherits Rectangle {
 
     // Third-Party lists one row per service; each opens its own page, so
     // SteamGridDB and Steam are reached and laid out the same way.
-    third-party := Rectangle {
-        x: Metrics.page-margin + (root.view == 2 ? 0px : 12px);
-        y: Metrics.page-header-height;
-        width: root.content-width; height: root.height - Metrics.page-header-height - Metrics.page-bottom-bar-height;
-        background: transparent;
-        opacity: root.view == 2 ? 1.0 : 0.0;
-        visible: self.opacity > 0.01;
-        animate x { duration: Motion.page-duration; easing: ease-in-out; }
-        animate opacity { duration: Motion.page-duration; }
+    third-party := TransitionLayer {
+        x: Metrics.page-margin;
+        rest-y: Metrics.page-header-height;
+        width: root.content-width;
+        height: root.height - Metrics.page-header-height;
+        travel: root.height;
+        opaque: true;
+        active: root.view == 2;
+        outgoing: view-transition.from-key == 2;
+        returning: root.view-back;
+        phase: view-transition.phase;
 
         Breadcrumb {
             x: 0px; y: 0px; width: parent.width;
@@ -518,15 +534,17 @@ export component SettingsPage inherits Rectangle {
         }
     }
 
-    steamgriddb := Rectangle {
-        x: Metrics.page-margin + (root.view == 4 ? 0px : 12px);
-        y: Metrics.page-header-height;
-        width: root.content-width; height: root.height - Metrics.page-header-height - Metrics.page-bottom-bar-height;
-        background: transparent;
-        opacity: root.view == 4 ? 1.0 : 0.0;
-        visible: self.opacity > 0.01;
-        animate x { duration: Motion.page-duration; easing: ease-in-out; }
-        animate opacity { duration: Motion.page-duration; }
+    steamgriddb := TransitionLayer {
+        x: Metrics.page-margin;
+        rest-y: Metrics.page-header-height;
+        width: root.content-width;
+        height: root.height - Metrics.page-header-height;
+        travel: root.height;
+        opaque: true;
+        active: root.view == 4;
+        outgoing: view-transition.from-key == 4;
+        returning: root.view-back;
+        phase: view-transition.phase;
 
         Breadcrumb {
             x: 0px; y: 0px; width: parent.width;
@@ -598,15 +616,17 @@ export component SettingsPage inherits Rectangle {
         }
     }
 
-    steam-account := Rectangle {
-        x: Metrics.page-margin + (root.view == 3 ? 0px : 12px);
-        y: Metrics.page-header-height;
-        width: root.content-width; height: root.height - Metrics.page-header-height - Metrics.page-bottom-bar-height;
-        background: transparent;
-        opacity: root.view == 3 ? 1.0 : 0.0;
-        visible: self.opacity > 0.01;
-        animate x { duration: Motion.page-duration; easing: ease-in-out; }
-        animate opacity { duration: Motion.page-duration; }
+    steam-account := TransitionLayer {
+        x: Metrics.page-margin;
+        rest-y: Metrics.page-header-height;
+        width: root.content-width;
+        height: root.height - Metrics.page-header-height;
+        travel: root.height;
+        opaque: true;
+        active: root.view == 3;
+        outgoing: view-transition.from-key == 3;
+        returning: root.view-back;
+        phase: view-transition.phase;
 
         Breadcrumb {
             x: 0px; y: 0px; width: parent.width;

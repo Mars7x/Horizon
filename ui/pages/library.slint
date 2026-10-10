@@ -107,13 +107,16 @@ export component LibraryPage inherits Rectangle {
         + root.displayed-rows * root.row-stride - (root.row-stride - root.card-size);
     private property <int> total-rows: max(0,
         Math.floor((root.total-count + root.grid-columns - 1) / root.grid-columns));
-    // Mirror the gallery's continuation at BOTH ends. The cover preview is
-    // deliberately clean-cropped rather than fading into a muddy dark overlay.
-    // Keep the full-row calculation identical to LibraryController::visible_rows.
+    // The viewport fills everything between the header and the bottom bar,
+    // like every other page's content. Whole rows start right under the
+    // header (as lists do); the next row peeks into the remaining space and
+    // is cleanly cropped at the bar. Keep the full-row calculation identical
+    // to LibraryController::visible_rows.
     private property <length> available-grid-height:
         root.height - root.top-content-inset - root.bottom-content-reserve;
-    private property <length> peek-limit:
-        min(54px, max(0px, (root.available-grid-height - root.grid-height) / 2 - 8px));
+    // From the viewport top to the first whole row's window. The gallery's
+    // own grid-pad already leaves room for the enlarged selected cover.
+    private property <length> rows-top: 0px;
 
     // Compact top chrome: title/count stay legible, but the collection gets
     // the recovered vertical room. Elevation is drawn at the boundary BELOW,
@@ -163,12 +166,9 @@ export component LibraryPage inherits Rectangle {
         x: Metrics.page-margin - 16px;
         // Stable viewport geometry: scrolling never shifts the clipping edges.
         // At the beginning/end, the unused peek simply becomes empty space.
-        // Keep gallery slightly higher than dead-centre, especially in
-        // windows where only two full rows fit.
-        y: root.top-content-inset + max(0px,
-            (root.available-grid-height - root.grid-height) / 2 - 18px) - root.peek-limit;
+        y: root.top-content-inset;
         width: parent.width - (Metrics.page-margin - 16px) * 2;
-        height: root.grid-height + 2 * root.peek-limit;
+        height: root.available-grid-height;
         background: transparent;
         clip: true;
 
@@ -191,7 +191,7 @@ export component LibraryPage inherits Rectangle {
             width: root.previous-grid-columns * root.card-stride
                 - (root.card-stride - root.card-size) + 2 * root.grid-pad;
             x: max(0px, (parent.width - self.width) / 2);
-            y: root.peek-limit - root.previous-scroll-row * root.row-stride;
+            y: root.rows-top - root.previous-scroll-row * root.row-stride;
             height: parent.height;
             opacity: 1.0 - root.outgoing-progress;
             background: transparent;
@@ -250,7 +250,7 @@ export component LibraryPage inherits Rectangle {
         gallery := Rectangle {
             width: root.grid-columns * root.card-stride - (root.card-stride - root.card-size) + 2 * root.grid-pad;
             x: max(0px, (parent.width - self.width) / 2);
-            y: root.peek-limit - (root.scroll-row * root.row-stride);
+            y: root.rows-top - (root.scroll-row * root.row-stride);
             height: max(1, Math.floor((root.total-count + root.grid-columns - 1) / root.grid-columns))
                 * root.row-stride + 2 * root.grid-pad;
             background: transparent;
@@ -370,7 +370,7 @@ export component LibraryPage inherits Rectangle {
     if root.total-count > 0 : ScrollEdgeShadow {
         x: 0px; y: grid-viewport.y;
         width: parent.width;
-        strength: (root.peek-limit - gallery.y) / root.row-stride;
+        strength: (root.rows-top - gallery.y) / root.row-stride;
     }
     // Bottom-bar chrome (this shadow, the selected game) switches with the
     // route like the hint bar instead of crossfading into Home's footer.
@@ -378,7 +378,8 @@ export component LibraryPage inherits Rectangle {
         x: 0px; y: grid-viewport.y + grid-viewport.height - self.height;
         width: parent.width;
         bottom: true;
-        strength: (gallery.y + gallery.height - grid-viewport.height + root.peek-limit) / root.row-stride;
+        // Rows remaining below the whole-row window.
+        strength: (gallery.y + gallery.height - root.rows-top - root.grid-height) / root.row-stride;
     }
 
     // Bottom bar, left side: the selected game. The hint bar (app.slint)

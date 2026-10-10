@@ -3,16 +3,18 @@ import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { GameCardData } from "../models/game-card.slint";
 import { ActivityHistoryRowData } from "../models/activity.slint";
 import { FallbackCover } from "../components/fallback-cover.slint";
-import { PageHeader, Breadcrumb, ScrollEdgeShadow } from "../components/page-header.slint";
+import { Breadcrumb, ScrollEdgeShadow } from "../components/page-header.slint";
 import { MarqueeText } from "../components/marquee-text.slint";
+import { TransitionDriver, TransitionLayer } from "../components/transition.slint";
 import { Surface } from "../components/list-row.slint";
 
 // Nested Activity detail destination, not a new shell route. The history is
 // read-only and scrolls with Up/Down; no session row receives focus.
 // Game launch is deliberately not available.
 // Horizon-observed and source-reported playtime remain distinct measurements.
-export component ActivityGameDetailsPage inherits Rectangle {
-    in property <bool> active: false;
+// Shared Rise: details rise over the Activity overview and drop on Back.
+// Clear above the content so the overview's "Activity" header stays still.
+export component ActivityGameDetailsPage inherits TransitionLayer {
     in property <GameCardData> game;
     in property <string> source-name;
     in property <string> last-played;
@@ -29,14 +31,12 @@ export component ActivityGameDetailsPage inherits Rectangle {
     callback back();
     callback scroll-history(int);
 
-    background: Theme.background;
-    // Settings-style page handoff: crossfade + 12px settle. Keep the outgoing
-    // page mounted long enough for its reverse animation to complete.
-    opacity: root.active ? 1.0 : 0.0;
-    x: root.active ? 0px : 12px;
-    visible: self.opacity > 0.01;
-    animate opacity { duration: Motion.reduced-motion ? 0ms : Motion.page-duration; easing: ease-in-out; }
-    animate x { duration: Motion.reduced-motion ? 0ms : Motion.page-duration; easing: ease-in-out; }
+    opaque: true;
+    cover-from: Metrics.page-header-height;
+    outgoing: !root.active;
+    returning: !root.active;
+    phase: details-transition.phase;
+    details-transition := TransitionDriver { key: root.active ? 1 : 0; }
 
     private property <bool> split: root.width >= 1080px && root.height >= 620px;
     private property <length> inset: Metrics.page-margin;
@@ -61,9 +61,6 @@ export component ActivityGameDetailsPage inherits Rectangle {
     out property <int> visible-rows: max(1, Math.floor(
         root.list-height / root.row-height));
 
-    // Same header as the Activity overview, so the title holds still while
-    // the two views crossfade.
-    PageHeader { width: parent.width; title: "Activity"; }
     Breadcrumb {
         x: root.inset; y: Metrics.page-header-height;
         width: root.content-width;
