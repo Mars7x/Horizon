@@ -47,6 +47,8 @@ pub struct VideoFrame<'a> {
     /// Where this frame is in the video (its stream time). The timeline
     /// follows the frames on screen rather than polling the pipeline.
     pub position: Option<Duration>,
+    /// How long this frame stays on screen (from its timestamp), when known.
+    pub frame_duration: Option<Duration>,
     /// From running playback. False for the still frame shown while paused
     /// or before playback has started, so the timeline doesn't run on.
     pub live: bool,
@@ -81,6 +83,9 @@ pub struct VideoProbe {
 /// Frames are scaled by the decoder to fit `max`, so a 4K clip on a 1080p
 /// screen never moves 4K frames.
 pub trait VideoBackend: Send + Sync {
+    /// Load the decoders and audio output ahead of the first playback, off
+    /// the UI thread, so the first video starts as fast as later ones.
+    fn warm_up(&self) {}
     fn probe(&self, path: &Path, max: (u32, u32)) -> Result<VideoProbe, MediaError>;
     fn play(
         &self,
