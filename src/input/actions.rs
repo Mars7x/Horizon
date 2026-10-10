@@ -16,7 +16,6 @@ pub enum UiAction {
     RightBumper,
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UiActionEvent {
     pub action: UiAction,

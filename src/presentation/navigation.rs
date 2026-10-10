@@ -8,12 +8,15 @@ use crate::{
     audio::UiSoundCue,
     input::{UiAction, UiActionEvent},
     navigation::{
-        AppRoute, Navigator, RouteFocusMemory, ShellFocus, ShellFocusRegion,
-        TopUtility, UtilityPage, nearest_game_for_x, nearest_utility_for_x, utility_center_x,
+        AppRoute, Navigator, RouteFocusMemory, ShellFocus, ShellFocusRegion, TopUtility,
+        UtilityPage, nearest_game_for_x, nearest_utility_for_x, utility_center_x,
     },
 };
 
-use super::{CallbackSlot, achievements::AchievementsController, activity::ActivityDetailsActions, home::HomeController, library::LibraryController, settings::SettingsController};
+use super::{
+    CallbackSlot, achievements::AchievementsController, activity::ActivityDetailsActions,
+    home::HomeController, library::LibraryController, settings::SettingsController,
+};
 
 /// Bridges pure Rust navigation/focus state to Slint presentation state.
 ///
@@ -34,7 +37,12 @@ pub struct NavigationController {
 }
 
 impl NavigationController {
-    pub fn new(ui: &AppWindow, home: Rc<HomeController>, library: Rc<LibraryController>, settings: Rc<SettingsController>) -> Rc<Self> {
+    pub fn new(
+        ui: &AppWindow,
+        home: Rc<HomeController>,
+        library: Rc<LibraryController>,
+        settings: Rc<SettingsController>,
+    ) -> Rc<Self> {
         let controller = Rc::new(Self {
             navigator: RefCell::new(Navigator::default()),
             focus: RefCell::new(ShellFocus::default()),
@@ -71,17 +79,36 @@ impl NavigationController {
                 controller.choose_game(&ui, index);
             }
         });
-        let controller = self.achievements.borrow().as_ref().cloned().expect("Achievements controller is installed");
+        let controller = self
+            .achievements
+            .borrow()
+            .as_ref()
+            .cloned()
+            .expect("Achievements controller is installed");
         let weak = ui.as_weak();
         ui.on_achievements_back(move || {
-            if let Some(ui) = weak.upgrade() { controller.exit_entries(&ui); }
+            if let Some(ui) = weak.upgrade() {
+                controller.exit_entries(&ui);
+            }
         });
-        let controller = self.achievements.borrow().as_ref().cloned().expect("Achievements controller is installed");
+        let controller = self
+            .achievements
+            .borrow()
+            .as_ref()
+            .cloned()
+            .expect("Achievements controller is installed");
         let weak = ui.as_weak();
         ui.on_achievements_scroll_entries(move |delta| {
-            if let Some(ui) = weak.upgrade() { controller.move_entries(&ui, delta); }
+            if let Some(ui) = weak.upgrade() {
+                controller.move_entries(&ui, delta);
+            }
         });
-        let controller = self.achievements.borrow().as_ref().cloned().expect("Achievements controller is installed");
+        let controller = self
+            .achievements
+            .borrow()
+            .as_ref()
+            .cloned()
+            .expect("Achievements controller is installed");
         let weak = ui.as_weak();
         ui.on_achievements_cycle_source(move |direction| {
             if let Some(ui) = weak.upgrade() {
@@ -105,7 +132,8 @@ impl NavigationController {
         // Leaving Activity through Home/Menu can retain its nested details UI.
         // A new visit must show the overview, not that previous game's history.
         if ui.get_activity_details_visible()
-            && let Some(details) = self.activity_details.borrow().as_ref() {
+            && let Some(details) = self.activity_details.borrow().as_ref()
+        {
             details.close(ui);
         }
         ui.set_activity_pressed_index(-1);
@@ -119,7 +147,9 @@ impl NavigationController {
     }
 
     fn cue(&self, cue: UiSoundCue) {
-        if let Some(callback) = self.action_sound.borrow().as_ref() { callback(cue); }
+        if let Some(callback) = self.action_sound.borrow().as_ref() {
+            callback(cue);
+        }
     }
 
     pub fn current_route(&self) -> AppRoute {
@@ -137,11 +167,20 @@ impl NavigationController {
         self.remember_focus_for_route(from);
         if self.navigator.borrow_mut().navigate_to(route) {
             debug!(?from, to = ?route, "route changed");
-            if from == AppRoute::Utility(UtilityPage::Settings) { self.settings.on_leave(ui); }
-            if route == AppRoute::Utility(UtilityPage::Settings) { self.settings.on_enter(ui); }
-            if route == AppRoute::Library { self.library.on_enter(ui); }
+            if from == AppRoute::Utility(UtilityPage::Settings) {
+                self.settings.on_leave(ui);
+            }
+            if route == AppRoute::Utility(UtilityPage::Settings) {
+                self.settings.on_enter(ui);
+            }
+            if route == AppRoute::Library {
+                self.library.on_enter(ui);
+            }
             if route == AppRoute::Utility(UtilityPage::Achievements)
-                && let Some(controller) = self.achievements.borrow().as_ref() { controller.start_new_visit(ui); }
+                && let Some(controller) = self.achievements.borrow().as_ref()
+            {
+                controller.start_new_visit(ui);
+            }
             if route == AppRoute::Utility(UtilityPage::Activity) {
                 self.prepare_activity_visit(ui);
             }
@@ -157,7 +196,12 @@ impl NavigationController {
         }
         if self.current_route() == AppRoute::Utility(UtilityPage::Achievements)
             && event.action == UiAction::Back
-            && self.achievements.borrow().as_ref().is_some_and(|c| c.exit_entries(ui)) {
+            && self
+                .achievements
+                .borrow()
+                .as_ref()
+                .is_some_and(|c| c.exit_entries(ui))
+        {
             self.cue(UiSoundCue::Back);
             return;
         }
@@ -170,14 +214,17 @@ impl NavigationController {
             UiAction::Back => self.handle_back(ui),
             UiAction::Home => self.handle_home(ui),
             UiAction::Menu => self.handle_menu(ui),
-            UiAction::Accept if !event.repeated
-                && self.current_route() == AppRoute::Home
-                && self.focus.borrow().region() != ShellFocusRegion::TopUtilities
-                && self.home.library_tile_selected() => {
+            UiAction::Accept
+                if !event.repeated
+                    && self.current_route() == AppRoute::Home
+                    && self.focus.borrow().region() != ShellFocusRegion::TopUtilities
+                    && self.home.library_tile_selected() =>
+            {
                 self.open_library(ui);
             }
             _ if self.current_route().uses_shell_chrome()
-                && self.focus.borrow().region() == ShellFocusRegion::TopUtilities => {
+                && self.focus.borrow().region() == ShellFocusRegion::TopUtilities =>
+            {
                 self.handle_utility_action(ui, event)
             }
             UiAction::Up if self.current_route().uses_shell_chrome() => {
@@ -236,7 +283,10 @@ impl NavigationController {
         let controller = Rc::clone(self);
         ui.on_open_library(move || {
             if let Some(ui) = weak.upgrade()
-                && controller.current_route() == AppRoute::Home { controller.open_library(&ui); }
+                && controller.current_route() == AppRoute::Home
+            {
+                controller.open_library(&ui);
+            }
         });
 
         // Pointer activation is routed through the shell too, so it restores
@@ -245,7 +295,8 @@ impl NavigationController {
         let controller = Rc::clone(self);
         ui.on_library_select(move |index| {
             if let Some(ui) = weak.upgrade()
-                && controller.current_route() == AppRoute::Library {
+                && controller.current_route() == AppRoute::Library
+            {
                 controller.focus.borrow_mut().leave_utilities();
                 controller.publish_focus(&ui);
                 controller.library.select_on_page(&ui, index);
@@ -255,7 +306,8 @@ impl NavigationController {
         let controller = Rc::clone(self);
         ui.on_library_cycle_filter(move || {
             if let Some(ui) = weak.upgrade()
-                && controller.current_route() == AppRoute::Library {
+                && controller.current_route() == AppRoute::Library
+            {
                 controller.focus.borrow_mut().leave_utilities();
                 controller.publish_focus(&ui);
                 controller.cue(UiSoundCue::Ok);
@@ -266,7 +318,8 @@ impl NavigationController {
         let controller = Rc::clone(self);
         ui.on_library_cycle_sort(move || {
             if let Some(ui) = weak.upgrade()
-                && controller.current_route() == AppRoute::Library {
+                && controller.current_route() == AppRoute::Library
+            {
                 controller.focus.borrow_mut().leave_utilities();
                 controller.publish_focus(&ui);
                 controller.cue(UiSoundCue::Ok);
@@ -277,7 +330,8 @@ impl NavigationController {
         let controller = Rc::clone(self);
         ui.on_library_scroll_rows(move |direction| {
             if let Some(ui) = weak.upgrade()
-                && controller.current_route() == AppRoute::Library {
+                && controller.current_route() == AppRoute::Library
+            {
                 controller.library.scroll_by_row(&ui, direction);
             }
         });
@@ -285,7 +339,8 @@ impl NavigationController {
         let controller = Rc::clone(self);
         ui.on_library_back(move || {
             if let Some(ui) = weak.upgrade()
-                && controller.current_route() == AppRoute::Library {
+                && controller.current_route() == AppRoute::Library
+            {
                 controller.handle_back(&ui);
             }
         });
@@ -295,7 +350,8 @@ impl NavigationController {
         let controller = Rc::clone(self);
         ui.on_activity_choose(move |index| {
             if let Some(ui) = weak.upgrade()
-                && controller.current_route() == AppRoute::Utility(UtilityPage::Activity) {
+                && controller.current_route() == AppRoute::Utility(UtilityPage::Activity)
+            {
                 let len = ui.get_activity_covers().row_count() as i32;
                 if index >= 0 && index < len && !ui.get_activity_details_visible() {
                     ui.set_activity_selected_index(index);
@@ -308,7 +364,8 @@ impl NavigationController {
         ui.on_activity_detail_back(move || {
             if let Some(ui) = weak.upgrade()
                 && controller.current_route() == AppRoute::Utility(UtilityPage::Activity)
-                && ui.get_activity_details_visible() {
+                && ui.get_activity_details_visible()
+            {
                 controller.handle_back(&ui);
             }
         });
@@ -316,7 +373,8 @@ impl NavigationController {
         let controller = Rc::clone(self);
         ui.on_activity_detail_layout_changed(move || {
             if let Some(ui) = weak.upgrade()
-                && let Some(details) = controller.activity_details.borrow().as_ref() {
+                && let Some(details) = controller.activity_details.borrow().as_ref()
+            {
                 details.refresh_visible_rows(&ui);
             }
         });
@@ -326,7 +384,8 @@ impl NavigationController {
             if let Some(ui) = weak.upgrade()
                 && controller.current_route() == AppRoute::Utility(UtilityPage::Activity)
                 && ui.get_activity_details_visible()
-                && let Some(details) = controller.activity_details.borrow().as_ref() {
+                && let Some(details) = controller.activity_details.borrow().as_ref()
+            {
                 details.scroll_rows(&ui, direction);
             }
         });
@@ -335,7 +394,8 @@ impl NavigationController {
         let controller = Rc::clone(self);
         ui.on_library_layout_changed(move || {
             if let Some(ui) = weak.upgrade()
-                && controller.current_route() == AppRoute::Library {
+                && controller.current_route() == AppRoute::Library
+            {
                 controller.library.on_viewport_changed(&ui);
             }
         });
@@ -343,9 +403,14 @@ impl NavigationController {
 
     fn move_activity_selection(&self, ui: &AppWindow, delta: i32) {
         let len = ui.get_activity_covers().row_count();
-        if len == 0 { return; }
+        if len == 0 {
+            return;
+        }
         let last = len.saturating_sub(1).min(i32::MAX as usize) as i32;
-        let next = ui.get_activity_selected_index().saturating_add(delta).clamp(0, last);
+        let next = ui
+            .get_activity_selected_index()
+            .saturating_add(delta)
+            .clamp(0, last);
         if next != ui.get_activity_selected_index() {
             ui.set_activity_pressed_index(-1);
         }
@@ -353,14 +418,17 @@ impl NavigationController {
     }
 
     fn open_library(&self, ui: &AppWindow) {
-        if self.current_route() == AppRoute::Library { return; }
+        if self.current_route() == AppRoute::Library {
+            return;
+        }
         self.cue(UiSoundCue::Ok);
         self.navigate_to(ui, AppRoute::Library);
     }
 
     fn handle_back(&self, ui: &AppWindow) {
         if self.current_route() == AppRoute::Utility(UtilityPage::Activity)
-            && ui.get_activity_details_visible() {
+            && ui.get_activity_details_visible()
+        {
             if let Some(details) = self.activity_details.borrow().as_ref() {
                 details.close(ui);
                 self.cue(UiSoundCue::Back);
@@ -372,10 +440,17 @@ impl NavigationController {
         if self.navigator.borrow_mut().go_back() {
             let to = self.current_route();
             debug!(?from, ?to, "Back restored previous route and focus");
-            if from == AppRoute::Utility(UtilityPage::Settings) { self.settings.on_leave(ui); }
-            if to == AppRoute::Utility(UtilityPage::Settings) { self.settings.on_enter(ui); }
+            if from == AppRoute::Utility(UtilityPage::Settings) {
+                self.settings.on_leave(ui);
+            }
+            if to == AppRoute::Utility(UtilityPage::Settings) {
+                self.settings.on_enter(ui);
+            }
             if to == AppRoute::Utility(UtilityPage::Achievements)
-                && let Some(controller) = self.achievements.borrow().as_ref() { controller.start_new_visit(ui); }
+                && let Some(controller) = self.achievements.borrow().as_ref()
+            {
+                controller.start_new_visit(ui);
+            }
             if to == AppRoute::Utility(UtilityPage::Activity) {
                 self.prepare_activity_visit(ui);
             }
@@ -389,7 +464,6 @@ impl NavigationController {
     }
 
     fn handle_home(&self, ui: &AppWindow) {
-
         let from = self.current_route();
         self.remember_focus_for_route(from);
 
@@ -411,7 +485,9 @@ impl NavigationController {
                 to = ?AppRoute::Home,
                 "Home reset top-level navigation, content focus, and first-game selection"
             );
-            if from == AppRoute::Utility(UtilityPage::Settings) { self.settings.on_leave(ui); }
+            if from == AppRoute::Utility(UtilityPage::Settings) {
+                self.settings.on_leave(ui);
+            }
             self.publish_route_change(ui, from, AppRoute::Home);
         }
     }
@@ -424,7 +500,11 @@ impl NavigationController {
     fn handle_utility_action(&self, ui: &AppWindow, event: UiActionEvent) {
         match event.action {
             UiAction::Left | UiAction::Right => {
-                let delta = if event.action == UiAction::Left { -1 } else { 1 };
+                let delta = if event.action == UiAction::Left {
+                    -1
+                } else {
+                    1
+                };
                 if self.focus.borrow_mut().move_utility(delta, event.repeated) {
                     debug!(utility = ?self.focus.borrow().utility(), "top utility focus moved");
                     self.publish_focus(ui);
@@ -460,7 +540,9 @@ impl NavigationController {
                 };
 
                 if changed {
-                    debug!("focus returned to page content with reciprocal anchor or spatial transfer");
+                    debug!(
+                        "focus returned to page content with reciprocal anchor or spatial transfer"
+                    );
                     self.publish_focus(ui);
                 }
             }
@@ -468,10 +550,7 @@ impl NavigationController {
                 let utility = self.focus.borrow().utility();
                 self.activate_utility(ui, utility);
             }
-            UiAction::Up
-            | UiAction::Accept
-            | UiAction::LeftBumper
-            | UiAction::RightBumper => {
+            UiAction::Up | UiAction::Accept | UiAction::LeftBumper | UiAction::RightBumper => {
                 debug!(
                     action = ?event.action,
                     repeated = event.repeated,
@@ -487,7 +566,9 @@ impl NavigationController {
     fn activate_utility(&self, ui: &AppWindow, utility: TopUtility) {
         let route = utility.route();
         let from = self.current_route();
-        if route == from { return; }
+        if route == from {
+            return;
+        }
         // The destination is a known valid utility route. Dispatch OK before
         // synchronous on_enter() and route publishing, not after them.
         self.cue(UiSoundCue::Ok);
@@ -512,7 +593,8 @@ impl NavigationController {
         // Reduced Motion skips both the press timing and the visual transition.
         if ui.get_activity_reduced_motion() {
             if let Some(details) = self.activity_details.borrow().as_ref()
-                && details.open(ui, index) {
+                && details.open(ui, index)
+            {
                 self.cue(UiSoundCue::Ok);
             }
             return;
@@ -524,7 +606,9 @@ impl NavigationController {
         let cue = self.action_sound.borrow().as_ref().cloned();
         slint::Timer::single_shot(Duration::from_millis(125), move || {
             let Some(ui) = weak_ui.upgrade() else { return };
-            if ui.get_activity_pressed_index() != index as i32 { return; }
+            if ui.get_activity_pressed_index() != index as i32 {
+                return;
+            }
             ui.set_activity_pressed_index(-1);
             // An earlier Back/Home/route change cancels the pending press.
             if ui.get_current_route() != AppRouteView::Activity
@@ -552,16 +636,24 @@ impl NavigationController {
                         match event.action {
                             UiAction::Up => controller.move_entries(ui, -1),
                             UiAction::Down => controller.move_entries(ui, 1),
-                            UiAction::Left => { controller.exit_entries(ui); },
+                            UiAction::Left => {
+                                controller.exit_entries(ui);
+                            }
                             _ => {}
                         }
                     } else {
                         match event.action {
                             UiAction::Up => controller.move_game(ui, -1),
                             UiAction::Down => controller.move_game(ui, 1),
-                            UiAction::Right | UiAction::Accept if !event.repeated => controller.enter_entries(ui),
-                            UiAction::LeftBumper if !event.repeated => controller.cycle_source(ui, -1),
-                            UiAction::RightBumper if !event.repeated => controller.cycle_source(ui, 1),
+                            UiAction::Right | UiAction::Accept if !event.repeated => {
+                                controller.enter_entries(ui)
+                            }
+                            UiAction::LeftBumper if !event.repeated => {
+                                controller.cycle_source(ui, -1)
+                            }
+                            UiAction::RightBumper if !event.repeated => {
+                                controller.cycle_source(ui, 1)
+                            }
                             _ => {}
                         }
                     }
@@ -581,7 +673,10 @@ impl NavigationController {
                         UiAction::Left => self.move_activity_selection(ui, -1),
                         UiAction::Right => self.move_activity_selection(ui, 1),
                         UiAction::Accept if !event.repeated => {
-                            self.begin_activity_details_open(ui, ui.get_activity_selected_index().max(0) as usize);
+                            self.begin_activity_details_open(
+                                ui,
+                                ui.get_activity_selected_index().max(0) as usize,
+                            );
                         }
                         _ => {}
                     }
@@ -620,8 +715,10 @@ impl NavigationController {
     /// Older outgoing pages are dropped immediately when rapid navigation
     /// retargets the shell, preventing several half-faded pages from stacking.
     fn publish_route_change(&self, ui: &AppWindow, from: AppRoute, to: AppRoute) {
-        if from == AppRoute::Utility(UtilityPage::Activity) && from != to
-            && let Some(details) = self.activity_details.borrow().as_ref() {
+        if from == AppRoute::Utility(UtilityPage::Activity)
+            && from != to
+            && let Some(details) = self.activity_details.borrow().as_ref()
+        {
             details.close(ui);
         }
         ui.set_transition_from_route(route_view(from));
@@ -633,7 +730,6 @@ impl NavigationController {
         ui.set_top_utilities_focused(focus.region() == ShellFocusRegion::TopUtilities);
         ui.set_focused_utility_index(focus.utility().index());
     }
-
 }
 
 fn route_view(route: AppRoute) -> AppRouteView {
@@ -669,7 +765,9 @@ mod tests {
         assert!(route_view(AppRoute::Utility(UtilityPage::Friends)) == AppRouteView::Friends);
         assert!(route_view(AppRoute::Utility(UtilityPage::Album)) == AppRouteView::Album);
         assert!(route_view(AppRoute::Utility(UtilityPage::Activity)) == AppRouteView::Activity);
-        assert!(route_view(AppRoute::Utility(UtilityPage::Achievements)) == AppRouteView::Achievements);
+        assert!(
+            route_view(AppRoute::Utility(UtilityPage::Achievements)) == AppRouteView::Achievements
+        );
         assert!(route_view(AppRoute::Utility(UtilityPage::Web)) == AppRouteView::Web);
         assert!(route_view(AppRoute::Utility(UtilityPage::Settings)) == AppRouteView::Settings);
         assert!(route_view(AppRoute::Utility(UtilityPage::Shop)) == AppRouteView::Shop);

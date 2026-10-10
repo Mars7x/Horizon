@@ -508,8 +508,7 @@ mod tests {
     impl EmptySource {
         fn new(id: &str) -> Self {
             Self {
-                descriptor: SourceDescriptor::new(source_id(id), id, vec![])
-                    .expect("descriptor"),
+                descriptor: SourceDescriptor::new(source_id(id), id, vec![]).expect("descriptor"),
             }
         }
     }
@@ -605,7 +604,13 @@ mod tests {
             ],
         )
         .expect("broader membership");
-        assert_eq!(broader.authoritative_membership().expect("membership").len(), 2);
+        assert_eq!(
+            broader
+                .authoritative_membership()
+                .expect("membership")
+                .len(),
+            2
+        );
     }
 
     #[test]

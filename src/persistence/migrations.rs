@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection, TransactionBehavior};
+use rusqlite::{Connection, TransactionBehavior, params};
 
 use super::PersistenceError;
 
@@ -69,7 +69,10 @@ pub(crate) fn migrate(connection: &mut Connection) -> Result<(), PersistenceErro
     }
     validate_history(&applied)?;
 
-    for migration in MIGRATIONS.iter().filter(|migration| migration.version > current) {
+    for migration in MIGRATIONS
+        .iter()
+        .filter(|migration| migration.version > current)
+    {
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         transaction.execute_batch(migration.sql)?;
         transaction.execute(
@@ -203,7 +206,9 @@ mod tests {
             .expect("create migration ledger");
 
         for migration in MIGRATIONS.iter().filter(|migration| migration.version <= 4) {
-            connection.execute_batch(migration.sql).expect("apply old migration");
+            connection
+                .execute_batch(migration.sql)
+                .expect("apply old migration");
             connection
                 .execute(
                     "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?1, ?2, 0)",
@@ -261,9 +266,11 @@ mod tests {
         assert_eq!(historical_games, 1);
 
         let historical_sessions = connection
-            .query_row("SELECT COUNT(*) FROM play_sessions WHERE game_id = 2", [], |row| {
-                row.get::<_, i64>(0)
-            })
+            .query_row(
+                "SELECT COUNT(*) FROM play_sessions WHERE game_id = 2",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
             .expect("count historical session");
         assert_eq!(historical_sessions, 1);
 
@@ -285,7 +292,9 @@ mod tests {
             .expect("create migration ledger");
 
         for migration in MIGRATIONS.iter().filter(|migration| migration.version <= 5) {
-            connection.execute_batch(migration.sql).expect("apply old migration");
+            connection
+                .execute_batch(migration.sql)
+                .expect("apply old migration");
             connection
                 .execute(
                     "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?1, ?2, 0)",

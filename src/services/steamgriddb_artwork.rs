@@ -3,9 +3,15 @@
 //! Network + disk operations run on a worker; Slint/UI state is never sent to
 //! that worker. Local source art is owned by `ArtworkService` and untouched.
 use std::{
-    fs, io, path::{Path, PathBuf},
-    sync::{Arc, atomic::{AtomicU64, Ordering}, mpsc::Sender},
-    thread, time::{Duration, SystemTime},
+    fs, io,
+    path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+        mpsc::Sender,
+    },
+    thread,
+    time::{Duration, SystemTime},
 };
 
 use image::{ImageFormat, RgbaImage};
@@ -14,8 +20,10 @@ use tracing::{debug, info, warn};
 
 use super::{
     artwork::{SquareArtwork, normalize_remote_square, square_artwork_from_rgba},
-    steamgriddb::{MatchOutcome, SteamGridDbClient, SteamGridDbError, SteamGridDbLookup,
-        SteamGridDbMatchService, MatchMethod},
+    steamgriddb::{
+        MatchMethod, MatchOutcome, SteamGridDbClient, SteamGridDbError, SteamGridDbLookup,
+        SteamGridDbMatchService,
+    },
 };
 
 const CACHE_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
@@ -45,11 +53,19 @@ pub struct ArtworkReady {
 
 pub enum ArtworkWorkerEvent {
     Artwork(ArtworkReady),
-    Status { generation: u64, message: String },
+    Status {
+        generation: u64,
+        message: String,
+    },
     // Typed progress is separate from diagnostic text. A completed game can
     // succeed, fail validation, or be missing; all count toward the denominator.
-    RefreshProgress { generation: u64, completed: usize, total: usize,
-        finished: bool, error: Option<String> },
+    RefreshProgress {
+        generation: u64,
+        completed: usize,
+        total: usize,
+        finished: bool,
+        error: Option<String>,
+    },
 }
 
 // RAII ensures that network/authentication early returns always conclude the
@@ -65,18 +81,33 @@ struct RefreshProgress {
 }
 
 impl RefreshProgress {
-    fn new(sender: Sender<ArtworkWorkerEvent>, active_generation: Arc<AtomicU64>,
-        generation: u64, enabled: bool, total: usize) -> Self {
-        let progress = Self { sender, active_generation, generation, enabled,
-            completed: 0, total, failure: None };
+    fn new(
+        sender: Sender<ArtworkWorkerEvent>,
+        active_generation: Arc<AtomicU64>,
+        generation: u64,
+        enabled: bool,
+        total: usize,
+    ) -> Self {
+        let progress = Self {
+            sender,
+            active_generation,
+            generation,
+            enabled,
+            completed: 0,
+            total,
+            failure: None,
+        };
         progress.report(false);
         progress
     }
     fn report(&self, finished: bool) {
         if self.enabled && self.active_generation.load(Ordering::Acquire) == self.generation {
             let _ = self.sender.send(ArtworkWorkerEvent::RefreshProgress {
-                generation: self.generation, completed: self.completed,
-                total: self.total, finished, error: self.failure.clone(),
+                generation: self.generation,
+                completed: self.completed,
+                total: self.total,
+                finished,
+                error: self.failure.clone(),
             });
         }
     }
@@ -84,17 +115,25 @@ impl RefreshProgress {
         self.completed = completed;
         self.report(false);
     }
-    fn fail(&mut self, message: &str) { self.failure = Some(message.into()); }
+    fn fail(&mut self, message: &str) {
+        self.failure = Some(message.into());
+    }
 }
 impl Drop for RefreshProgress {
-    fn drop(&mut self) { self.report(true); }
+    fn drop(&mut self) {
+        self.report(true);
+    }
 }
 
 fn error_status(error: &SteamGridDbError) -> &'static str {
     match error {
         SteamGridDbError::Unauthorized => "SteamGridDB rejected the API key.",
-        SteamGridDbError::RateLimited => "SteamGridDB rate limit reached. Existing artwork retained.",
-        SteamGridDbError::Network(_) => "SteamGridDB unavailable or offline. Cached artwork retained.",
+        SteamGridDbError::RateLimited => {
+            "SteamGridDB rate limit reached. Existing artwork retained."
+        }
+        SteamGridDbError::Network(_) => {
+            "SteamGridDB unavailable or offline. Cached artwork retained."
+        }
         _ => "SteamGridDB could not load some artwork. Existing artwork retained.",
     }
 }
@@ -334,7 +373,10 @@ pub fn start_artwork_worker(
         warn!(%error, "SteamGridDB artwork worker could not start");
         if force_refresh {
             let _ = fallback_sender.send(ArtworkWorkerEvent::RefreshProgress {
-                generation, completed: 0, total: total_jobs, finished: true,
+                generation,
+                completed: 0,
+                total: total_jobs,
+                finished: true,
                 error: Some("Unable to start the artwork refresh worker".into()),
             });
         }
@@ -356,23 +398,36 @@ struct ArtworkProvenance {
 }
 
 fn read_cache(root: &Path) -> Option<(SquareArtwork, bool)> {
-    if fs::metadata(root.with_extension("json")).ok()?.len() > 16 * 1024 { return None; }
+    if fs::metadata(root.with_extension("json")).ok()?.len() > 16 * 1024 {
+        return None;
+    }
     let metadata = fs::read(root.with_extension("json")).ok()?;
     let provenance: ArtworkProvenance = serde_json::from_slice(&metadata).ok()?;
-    if provenance.schema != CACHE_SCHEMA || provenance.grid_id == 0 || provenance.game_id == 0
+    if provenance.schema != CACHE_SCHEMA
+        || provenance.grid_id == 0
+        || provenance.game_id == 0
         || !(provenance.image_url.starts_with("https://")
             && provenance.image_url.contains(".steamgriddb.com/"))
-    { return None; }
+    {
+        return None;
+    }
     let file = root.with_extension("png");
-    if fs::metadata(&file).ok()?.len() > 8 * 1024 * 1024 { return None; }
+    if fs::metadata(&file).ok()?.len() > 8 * 1024 * 1024 {
+        return None;
+    }
     let reader = image::ImageReader::open(&file).ok()?;
-    if reader.into_dimensions().ok()? != (512, 512) { return None; }
+    if reader.into_dimensions().ok()? != (512, 512) {
+        return None;
+    }
     let image = image::open(&file).ok()?.into_rgba8();
     if image.dimensions() != (512, 512) || hash_bytes(image.as_raw()) != provenance.rgba_hash {
         return None;
     }
-    let fresh = fs::metadata(root.with_extension("json")).ok()?
-        .modified().ok().and_then(|time| SystemTime::now().duration_since(time).ok())
+    let fresh = fs::metadata(root.with_extension("json"))
+        .ok()?
+        .modified()
+        .ok()
+        .and_then(|time| SystemTime::now().duration_since(time).ok())
         .is_some_and(|age| age <= CACHE_MAX_AGE);
     Some((square_artwork_from_rgba(image, provenance.pixelated), fresh))
 }
@@ -381,17 +436,27 @@ fn recent_miss(root: &Path) -> bool {
     // v6 retries misses after adopting highest-score-first grid selection.
     fs::metadata(root.with_extension("miss-v6"))
         .and_then(|m| m.modified())
-        .ok().and_then(|modified| SystemTime::now().duration_since(modified).ok())
+        .ok()
+        .and_then(|modified| SystemTime::now().duration_since(modified).ok())
         .is_some_and(|age| age <= NEGATIVE_CACHE_AGE)
 }
 
 fn write_miss(root: &Path) {
     if let Some(parent) = root.parent()
-        && fs::create_dir_all(parent).is_ok() { let _ = fs::write(root.with_extension("miss-v6"), b""); }
+        && fs::create_dir_all(parent).is_ok()
+    {
+        let _ = fs::write(root.with_extension("miss-v6"), b"");
+    }
 }
 
-fn write_cache(root: &Path, artwork: &SquareArtwork, provenance: &ArtworkProvenance) -> io::Result<()> {
-    let parent = root.parent().ok_or(io::Error::from(io::ErrorKind::InvalidInput))?;
+fn write_cache(
+    root: &Path,
+    artwork: &SquareArtwork,
+    provenance: &ArtworkProvenance,
+) -> io::Result<()> {
+    let parent = root
+        .parent()
+        .ok_or(io::Error::from(io::ErrorKind::InvalidInput))?;
     fs::create_dir_all(parent)?;
     let id = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
     let png = root.with_extension("png");
@@ -401,8 +466,12 @@ fn write_cache(root: &Path, artwork: &SquareArtwork, provenance: &ArtworkProvena
     let result = (|| {
         let rgba = RgbaImage::from_raw(artwork.size(), artwork.size(), artwork.rgba().to_vec())
             .ok_or(io::Error::from(io::ErrorKind::InvalidData))?;
-        rgba.save_with_format(&tmp_png, ImageFormat::Png).map_err(io::Error::other)?;
-        fs::write(&tmp_json, serde_json::to_vec_pretty(provenance).map_err(io::Error::other)?)?;
+        rgba.save_with_format(&tmp_png, ImageFormat::Png)
+            .map_err(io::Error::other)?;
+        fs::write(
+            &tmp_json,
+            serde_json::to_vec_pretty(provenance).map_err(io::Error::other)?,
+        )?;
         fs::rename(&tmp_png, &png)?;
         // Metadata is the final commit marker; a mismatch checksum rejects any
         // interrupted write that left mixed PNG/JSON versions.
@@ -410,7 +479,10 @@ fn write_cache(root: &Path, artwork: &SquareArtwork, provenance: &ArtworkProvena
         let _ = fs::remove_file(root.with_extension("miss-v6"));
         Ok(())
     })();
-    if result.is_err() { let _ = fs::remove_file(tmp_png); let _ = fs::remove_file(tmp_json); }
+    if result.is_err() {
+        let _ = fs::remove_file(tmp_png);
+        let _ = fs::remove_file(tmp_json);
+    }
     result
 }
 
@@ -424,11 +496,16 @@ fn hash_bytes(bytes: &[u8]) -> u64 {
 /// policy but lives in its own isolated subdirectory.
 pub fn cache_identity(game: &crate::domain::LibraryGame) -> String {
     let mut bytes = game.game().title().as_str().as_bytes().to_vec();
-    let mut ids = game.sources().iter().map(|s| {
-        format!("{}:{}", s.source_id().as_str(), s.external_id().as_str())
-    }).collect::<Vec<_>>();
+    let mut ids = game
+        .sources()
+        .iter()
+        .map(|s| format!("{}:{}", s.source_id().as_str(), s.external_id().as_str()))
+        .collect::<Vec<_>>();
     ids.sort();
-    for id in ids { bytes.extend_from_slice(b"\0"); bytes.extend_from_slice(id.as_bytes()); }
+    for id in ids {
+        bytes.extend_from_slice(b"\0");
+        bytes.extend_from_slice(id.as_bytes());
+    }
     format!("{}-{:016x}", game.game().id().get(), hash_bytes(&bytes))
 }
 
@@ -444,18 +521,45 @@ mod tests {
             progress.completed(2);
             progress.fail("Request interrupted");
         }
-        assert!(matches!(receiver.recv().unwrap(), ArtworkWorkerEvent::RefreshProgress {
-            completed: 0, total: 5, finished: false, .. }));
-        assert!(matches!(receiver.recv().unwrap(), ArtworkWorkerEvent::RefreshProgress {
-            completed: 2, total: 5, finished: false, .. }));
-        assert!(matches!(receiver.recv().unwrap(), ArtworkWorkerEvent::RefreshProgress {
-            completed: 2, total: 5, finished: true, error: Some(_), .. }));
+        assert!(matches!(
+            receiver.recv().unwrap(),
+            ArtworkWorkerEvent::RefreshProgress {
+                completed: 0,
+                total: 5,
+                finished: false,
+                ..
+            }
+        ));
+        assert!(matches!(
+            receiver.recv().unwrap(),
+            ArtworkWorkerEvent::RefreshProgress {
+                completed: 2,
+                total: 5,
+                finished: false,
+                ..
+            }
+        ));
+        assert!(matches!(
+            receiver.recv().unwrap(),
+            ArtworkWorkerEvent::RefreshProgress {
+                completed: 2,
+                total: 5,
+                finished: true,
+                error: Some(_),
+                ..
+            }
+        ));
     }
 
     #[test]
     fn previous_miss_markers_do_not_block_new_lookup_policy() {
-        let root = std::env::temp_dir().join(format!("horizon-sgdb-miss-{}-{}",
-            std::process::id(), NEXT_TEMP.fetch_add(1, Ordering::Relaxed))).join("game");
+        let root = std::env::temp_dir()
+            .join(format!(
+                "horizon-sgdb-miss-{}-{}",
+                std::process::id(),
+                NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+            ))
+            .join("game");
         fs::create_dir_all(root.parent().unwrap()).unwrap();
         fs::write(root.with_extension("miss-v2"), b"").unwrap();
         fs::write(root.with_extension("miss-v3"), b"").unwrap();
@@ -469,20 +573,37 @@ mod tests {
 
     #[test]
     fn cache_keeps_provenance_and_pixel_art_and_rejects_corruption() {
-        let root = std::env::temp_dir().join(format!("horizon-sgdb-{}-{}", std::process::id(), NEXT_TEMP.fetch_add(1, Ordering::Relaxed))).join("game");
-        let image = RgbaImage::from_pixel(512,512,image::Rgba([80,130,255,255]));
+        let root = std::env::temp_dir()
+            .join(format!(
+                "horizon-sgdb-{}-{}",
+                std::process::id(),
+                NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+            ))
+            .join("game");
+        let image = RgbaImage::from_pixel(512, 512, image::Rgba([80, 130, 255, 255]));
         let artwork = normalize_remote_square(image);
-        let meta = ArtworkProvenance { schema:CACHE_SCHEMA, game_id: 5, grid_id:9, score: Some(13),
-            match_method:"exact-platform-id".into(), author:Some("Creator".into()),
-            image_url:"https://cdn2.steamgriddb.com/grid/example.png".into(),
-            pixelated:artwork.pixelated(), rgba_hash:hash_bytes(artwork.rgba()) };
+        let meta = ArtworkProvenance {
+            schema: CACHE_SCHEMA,
+            game_id: 5,
+            grid_id: 9,
+            score: Some(13),
+            match_method: "exact-platform-id".into(),
+            author: Some("Creator".into()),
+            image_url: "https://cdn2.steamgriddb.com/grid/example.png".into(),
+            pixelated: artwork.pixelated(),
+            rgba_hash: hash_bytes(artwork.rgba()),
+        };
         write_cache(&root, &artwork, &meta).unwrap();
         assert_eq!(read_cache(&root).unwrap().0, artwork);
         let json_path = root.with_extension("json");
-        let mut legacy: serde_json::Value = serde_json::from_slice(&fs::read(&json_path).unwrap()).unwrap();
+        let mut legacy: serde_json::Value =
+            serde_json::from_slice(&fs::read(&json_path).unwrap()).unwrap();
         legacy["schema"] = serde_json::json!(1);
         fs::write(&json_path, serde_json::to_vec(&legacy).unwrap()).unwrap();
-        assert!(read_cache(&root).is_none(), "pre-score cache must be ranked again");
+        assert!(
+            read_cache(&root).is_none(),
+            "pre-score cache must be ranked again"
+        );
         fs::write(root.with_extension("png"), b"bad").unwrap();
         assert!(read_cache(&root).is_none());
         fs::remove_dir_all(root.parent().unwrap()).unwrap();

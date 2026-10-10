@@ -110,7 +110,9 @@ impl PlaySessionState {
             "open" => Ok(Self::Open),
             "completed" => Ok(Self::Completed),
             "interrupted" => Ok(Self::Interrupted),
-            other => Err(ActivityValidationError::UnknownSessionState(other.to_owned())),
+            other => Err(ActivityValidationError::UnknownSessionState(
+                other.to_owned(),
+            )),
         }
     }
 }
@@ -138,7 +140,8 @@ impl PlaySession {
     ) -> Result<Self, ActivityValidationError> {
         match state {
             PlaySessionState::Completed => {
-                let ended_at = ended_at.ok_or(ActivityValidationError::CompletedSessionMissingEnd)?;
+                let ended_at =
+                    ended_at.ok_or(ActivityValidationError::CompletedSessionMissingEnd)?;
                 if ended_at < started_at {
                     return Err(ActivityValidationError::EndBeforeStart {
                         started_at,

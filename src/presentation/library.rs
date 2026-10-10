@@ -3,6 +3,7 @@ use tracing::warn;
 
 use slint::{Model, ModelRc, VecModel};
 
+use super::home::HomeController;
 use crate::{
     AppWindow, LibraryCardData,
     domain::LibraryGame,
@@ -10,7 +11,6 @@ use crate::{
     persistence::SqliteLibraryRepository,
     services::activity::{ActivityService, LibrarySortMetrics},
 };
-use super::home::HomeController;
 
 // Keep all the viewport thresholds and dimensions in lockstep with
 // ui/pages/library.slint. Slint renders in logical pixels, not physical pixels.
@@ -31,12 +31,19 @@ impl GridLayout {
     fn for_width(width: f32) -> Self {
         // Fewer, substantially larger covers on Switch/1080p-class screens;
         // ultrawide may show more, but never by shrinking the actual artwork.
-        let (card_size, maximum_columns) = if width < 800.0 { (132.0, 4) }
-            else if width < 1100.0 { (156.0, 4) }
-            else if width < 1450.0 { (180.0, 5) }
-            else if width < 2200.0 { (206.0, 6) }
-            else if width < 3000.0 { (218.0, 8) }
-            else { (226.0, 10) };
+        let (card_size, maximum_columns) = if width < 800.0 {
+            (132.0, 4)
+        } else if width < 1100.0 {
+            (156.0, 4)
+        } else if width < 1450.0 {
+            (180.0, 5)
+        } else if width < 2200.0 {
+            (206.0, 6)
+        } else if width < 3000.0 {
+            (218.0, 8)
+        } else {
+            (226.0, 10)
+        };
         let stride = card_size + CARD_GAP;
         // Slint gallery width: columns * stride - gap + 2 * GRID_PAD;
         // viewport width: width - HORIZONTAL_GUTTER.
@@ -74,14 +81,23 @@ impl LibrarySort {
 }
 
 fn sorted_catalog_indices(
-    catalog: &[LibraryGame], source: Option<&str>, sort: LibrarySort,
+    catalog: &[LibraryGame],
+    source: Option<&str>,
+    sort: LibrarySort,
     metrics: &BTreeMap<i64, LibrarySortMetrics>,
 ) -> Vec<usize> {
-    let mut order: Vec<usize> = catalog.iter().enumerate()
-        .filter(|(_, game)| source.is_none_or(|filter| {
-            game.sources().iter().any(|entry| entry.source_id().as_str() == filter)
-        }))
-        .map(|(i, _)| i).collect();
+    let mut order: Vec<usize> = catalog
+        .iter()
+        .enumerate()
+        .filter(|(_, game)| {
+            source.is_none_or(|filter| {
+                game.sources()
+                    .iter()
+                    .any(|entry| entry.source_id().as_str() == filter)
+            })
+        })
+        .map(|(i, _)| i)
+        .collect();
     order.sort_by(|a, b| {
         let a_game = catalog[*a].game();
         let b_game = catalog[*b].game();
@@ -89,16 +105,25 @@ fn sorted_catalog_indices(
         let b_metric = metrics.get(&b_game.id().get());
         let rank = match sort {
             LibrarySort::Alphabetical => std::cmp::Ordering::Equal,
-            LibrarySort::RecentlyPlayed => b_metric.and_then(|s| s.last_played_at)
+            LibrarySort::RecentlyPlayed => b_metric
+                .and_then(|s| s.last_played_at)
                 .cmp(&a_metric.and_then(|s| s.last_played_at)),
-            LibrarySort::TimePlayed => b_metric.map(|s| s.time_played_seconds()).unwrap_or(0)
+            LibrarySort::TimePlayed => b_metric
+                .map(|s| s.time_played_seconds())
+                .unwrap_or(0)
                 .cmp(&a_metric.map(|s| s.time_played_seconds()).unwrap_or(0)),
-            LibrarySort::RecentlyAdded => b_metric.map(|s| s.added_at)
+            LibrarySort::RecentlyAdded => b_metric
+                .map(|s| s.added_at)
                 .cmp(&a_metric.map(|s| s.added_at)),
         };
-        rank.then_with(|| a_game.title().as_str().to_lowercase()
-            .cmp(&b_game.title().as_str().to_lowercase()))
-            .then_with(|| a_game.id().get().cmp(&b_game.id().get()))
+        rank.then_with(|| {
+            a_game
+                .title()
+                .as_str()
+                .to_lowercase()
+                .cmp(&b_game.title().as_str().to_lowercase())
+        })
+        .then_with(|| a_game.id().get().cmp(&b_game.id().get()))
     });
     order
 }
@@ -131,34 +156,59 @@ fn wheel_scroll_top(top: usize, count: usize, columns: usize, visible: usize, de
     (top as i64 + i64::from(delta)).clamp(0, max_top as i64) as usize
 }
 
-fn scroll_to_selection(selection: usize, columns: usize, visible: usize, previous_top: usize, count: usize) -> usize {
+fn scroll_to_selection(
+    selection: usize,
+    columns: usize,
+    visible: usize,
+    previous_top: usize,
+    count: usize,
+) -> usize {
     let row = selection / columns.max(1);
     let max_top = total_rows(count, columns).saturating_sub(visible);
-    let next = if row < previous_top { row }
-        else if row >= previous_top + visible { row + 1 - visible }
-        else { previous_top };
+    let next = if row < previous_top {
+        row
+    } else if row >= previous_top + visible {
+        row + 1 - visible
+    } else {
+        previous_top
+    };
     next.min(max_top)
 }
 
 /// Horizontal navigation follows reading order through row boundaries on
 /// both fresh presses and held repeat. Neither end wraps to the opposite end.
 fn horizontal_step(selected: usize, count: usize, delta: i32) -> usize {
-    if count == 0 { return 0; }
-    if delta > 0 { (selected + 1).min(count - 1) }
-    else if delta < 0 { selected.saturating_sub(1) }
-    else { selected }
+    if count == 0 {
+        return 0;
+    }
+    if delta > 0 {
+        (selected + 1).min(count - 1)
+    } else if delta < 0 {
+        selected.saturating_sub(1)
+    } else {
+        selected
+    }
 }
 
 /// Vertical navigation keeps the same column where possible and clamps at
 /// collection boundaries; there is no surprising jump to the opposite end.
 fn vertical_step(selected: usize, count: usize, columns: usize, down: bool) -> usize {
-    if count == 0 { return 0; }
+    if count == 0 {
+        return 0;
+    }
     if down {
-        if selected + columns < count { selected + columns }
-        else if selected < (total_rows(count, columns) - 1) * columns { count - 1 }
-        else { selected }
-    } else if selected >= columns { selected - columns }
-    else { selected }
+        if selected + columns < count {
+            selected + columns
+        } else if selected < (total_rows(count, columns) - 1) * columns {
+            count - 1
+        } else {
+            selected
+        }
+    } else if selected >= columns {
+        selected - columns
+    } else {
+        selected
+    }
 }
 
 struct State {
@@ -179,9 +229,17 @@ struct State {
 impl Default for State {
     fn default() -> Self {
         Self {
-            source_index: 0, sort: LibrarySort::Alphabetical, order: Vec::new(),
-            selection: 0, scroll_top: 0, wheel_scrolled: false, mounted_start: 0, mounted_len: 0,
-            window_dirty: true, metadata_game_id: None, metadata_sequence: 0,
+            source_index: 0,
+            sort: LibrarySort::Alphabetical,
+            order: Vec::new(),
+            selection: 0,
+            scroll_top: 0,
+            wheel_scrolled: false,
+            mounted_start: 0,
+            mounted_len: 0,
+            window_dirty: true,
+            metadata_game_id: None,
+            metadata_sequence: 0,
             browse_sequence: 0,
             browse_transition_kind: 0,
         }
@@ -202,18 +260,31 @@ pub struct LibraryController {
 
 impl LibraryController {
     pub fn new(
-        ui: &AppWindow, catalog: Vec<LibraryGame>, home: Rc<HomeController>,
+        ui: &AppWindow,
+        catalog: Vec<LibraryGame>,
+        home: Rc<HomeController>,
         activity: Rc<ActivityService<SqliteLibraryRepository>>,
     ) -> Rc<Self> {
         let rows = Rc::new(VecModel::from(Vec::<LibraryCardData>::new()));
         ui.set_library_cards(ModelRc::from(Rc::clone(&rows)));
-        let mut sources = catalog.iter().flat_map(|game| game.sources().iter()
-            .map(|source| source.source_id().as_str().to_owned())).collect::<Vec<_>>();
+        let mut sources = catalog
+            .iter()
+            .flat_map(|game| {
+                game.sources()
+                    .iter()
+                    .map(|source| source.source_id().as_str().to_owned())
+            })
+            .collect::<Vec<_>>();
         sources.sort();
         sources.dedup();
         let controller = Rc::new(Self {
-            catalog, sources, home, activity, metrics: RefCell::new(BTreeMap::new()),
-            rows, state: RefCell::new(State::default()),
+            catalog,
+            sources,
+            home,
+            activity,
+            metrics: RefCell::new(BTreeMap::new()),
+            rows,
+            state: RefCell::new(State::default()),
         });
         controller.refresh_metrics();
         controller.rebuild(ui, None);
@@ -229,17 +300,25 @@ impl LibraryController {
     fn refresh_metrics(&self) {
         match self.activity.library_sort_metrics() {
             Ok(rows) => {
-                *self.metrics.borrow_mut() = rows.into_iter()
-                    .map(|row| (row.game_id.get(), row)).collect();
+                *self.metrics.borrow_mut() = rows
+                    .into_iter()
+                    .map(|row| (row.game_id.get(), row))
+                    .collect();
             }
-            Err(error) => warn!(%error, "Library sort statistics unavailable; keeping cached order"),
+            Err(error) => {
+                warn!(%error, "Library sort statistics unavailable; keeping cached order")
+            }
         }
     }
-    pub fn on_viewport_changed(&self, ui: &AppWindow) { self.publish(ui); }
+    pub fn on_viewport_changed(&self, ui: &AppWindow) {
+        self.publish(ui);
+    }
 
     fn selection_game_id(&self) -> Option<i64> {
         let s = self.state.borrow();
-        s.order.get(s.selection).map(|index| self.catalog[*index].game().id().get())
+        s.order
+            .get(s.selection)
+            .map(|index| self.catalog[*index].game().id().get())
     }
 
     /// Freeze only the already-mounted overscan rows, not the entire library.
@@ -252,7 +331,9 @@ impl LibraryController {
         let has_previous = !previous.is_empty();
         let s = self.state.borrow();
         ui.set_library_previous_cards(ModelRc::from(Rc::new(VecModel::from(previous))));
-        ui.set_library_previous_grid_columns(grid_columns(ui.get_logical_viewport_width_px()) as i32);
+        ui.set_library_previous_grid_columns(
+            grid_columns(ui.get_logical_viewport_width_px()) as i32
+        );
         ui.set_library_previous_scroll_row(s.scroll_top as i32);
         ui.set_library_previous_selected_index(s.selection as i32);
         ui.set_library_has_previous_grid(has_previous);
@@ -260,16 +341,26 @@ impl LibraryController {
 
     fn rebuild(&self, ui: &AppWindow, preferred_id: Option<i64>) {
         let mut s = self.state.borrow_mut();
-        let source = s.source_index.checked_sub(1)
-            .and_then(|index| self.sources.get(index)).map(String::as_str);
+        let source = s
+            .source_index
+            .checked_sub(1)
+            .and_then(|index| self.sources.get(index))
+            .map(String::as_str);
         let order = sorted_catalog_indices(&self.catalog, source, s.sort, &self.metrics.borrow());
         let prior = s.selection;
-        s.selection = preferred_id.and_then(|id| order.iter().position(|i| self.catalog[*i].game().id().get() == id))
+        s.selection = preferred_id
+            .and_then(|id| {
+                order
+                    .iter()
+                    .position(|i| self.catalog[*i].game().id().get() == id)
+            })
             .unwrap_or(prior.min(order.len().saturating_sub(1)));
         s.order = order;
         s.wheel_scrolled = false;
         s.window_dirty = true;
-        if s.order.is_empty() { s.scroll_top = 0; }
+        if s.order.is_empty() {
+            s.scroll_top = 0;
+        }
         drop(s);
         self.publish(ui);
     }
@@ -286,7 +377,9 @@ impl LibraryController {
         // controller focus movement. Never auto-scroll to the selected game
         // just because the data model or viewport was republished.
         if s.wheel_scrolled {
-            s.scroll_top = s.scroll_top.min(total_rows(count, columns).saturating_sub(visible));
+            s.scroll_top = s
+                .scroll_top
+                .min(total_rows(count, columns).saturating_sub(visible));
         } else {
             s.scroll_top = scroll_to_selection(s.selection, columns, visible, s.scroll_top, count);
         }
@@ -296,7 +389,8 @@ impl LibraryController {
         let end = (end_row * columns).min(count);
         // Do not throw away the image model on every left/right focus step;
         // rebuild only when the overscan window or filtered order changes.
-        let refresh_window = s.window_dirty || s.mounted_start != start
+        let refresh_window = s.window_dirty
+            || s.mounted_start != start
             || s.mounted_len != end.saturating_sub(start);
         s.mounted_start = start;
         s.mounted_len = end.saturating_sub(start);
@@ -311,24 +405,45 @@ impl LibraryController {
         let browse_sequence = s.browse_sequence;
         let browse_transition_kind = s.browse_transition_kind;
         let cards: Vec<LibraryCardData> = if refresh_window {
-            s.order[start..end].iter().enumerate().filter_map(|(i, &original)| {
-                self.home.card_at(original).map(|card| LibraryCardData {
-                    game: card,
-                    source: self.catalog[original].sources().iter()
-                        .map(|source| source_title(source.source_id().as_str()))
-                        .collect::<Vec<_>>().join(" · ").into(),
-                    absolute_index: (start + i) as i32,
+            s.order[start..end]
+                .iter()
+                .enumerate()
+                .filter_map(|(i, &original)| {
+                    self.home.card_at(original).map(|card| LibraryCardData {
+                        game: card,
+                        source: self.catalog[original]
+                            .sources()
+                            .iter()
+                            .map(|source| source_title(source.source_id().as_str()))
+                            .collect::<Vec<_>>()
+                            .join(" · ")
+                            .into(),
+                        absolute_index: (start + i) as i32,
+                    })
                 })
-            }).collect()
-        } else { Vec::new() };
-        let (title, source) = selected.map(|index| {
-            (self.catalog[index].game().title().as_str().to_owned(),
-             self.catalog[index].sources().iter().map(|source| source_title(source.source_id().as_str()))
-                 .collect::<Vec<_>>().join(" · "))
-        }).unwrap_or_default();
-        let filter = s.source_index.checked_sub(1)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let (title, source) = selected
+            .map(|index| {
+                (
+                    self.catalog[index].game().title().as_str().to_owned(),
+                    self.catalog[index]
+                        .sources()
+                        .iter()
+                        .map(|source| source_title(source.source_id().as_str()))
+                        .collect::<Vec<_>>()
+                        .join(" · "),
+                )
+            })
+            .unwrap_or_default();
+        let filter = s
+            .source_index
+            .checked_sub(1)
             .and_then(|index| self.sources.get(index))
-            .map(|source| source_title(source)).unwrap_or_else(|| "All sources".to_owned());
+            .map(|source| source_title(source))
+            .unwrap_or_else(|| "All sources".to_owned());
         let sort = s.sort.label();
         let selection = s.selection;
         let top = s.scroll_top;
@@ -338,7 +453,9 @@ impl LibraryController {
         // stationary snapshots crossfade rather than also sliding the grid.
         ui.set_library_browse_transition_kind(browse_transition_kind);
         ui.set_library_browse_sequence(browse_sequence);
-        if refresh_window { self.rows.set_vec(cards); }
+        if refresh_window {
+            self.rows.set_vec(cards);
+        }
         ui.set_library_grid_columns(columns as i32);
         ui.set_library_scroll_row(top as i32);
         ui.set_library_selected_index(selection as i32);
@@ -349,40 +466,62 @@ impl LibraryController {
         ui.set_library_filter_text(filter.into());
         ui.set_library_sort_text(sort.into());
         ui.set_library_total_count(count as i32);
-        ui.set_library_count_text(format!("{} {}", count, if count == 1 { "game" } else { "games" }).into());
+        ui.set_library_count_text(
+            format!("{} {}", count, if count == 1 { "game" } else { "games" }).into(),
+        );
         ui.set_library_collection_count(self.catalog.len() as i32);
     }
 
     pub fn on_card_updated(&self, original: usize, card: crate::GameCardData) {
         let s = self.state.borrow();
-        if let Some(position) = s.order.iter().skip(s.mounted_start).take(s.mounted_len).position(|i| *i == original)
-            && let Some(mut row) = self.rows.row_data(position) {
+        if let Some(position) = s
+            .order
+            .iter()
+            .skip(s.mounted_start)
+            .take(s.mounted_len)
+            .position(|i| *i == original)
+            && let Some(mut row) = self.rows.row_data(position)
+        {
             row.game = card;
             self.rows.set_row_data(position, row);
         }
     }
 
     pub fn select_on_page(&self, ui: &AppWindow, index: i32) {
-        if index < 0 { return; }
+        if index < 0 {
+            return;
+        }
         let index = index as usize;
         let mut s = self.state.borrow_mut();
-        if index >= s.order.len() { return; }
+        if index >= s.order.len() {
+            return;
+        }
         let same = s.selection == index;
         s.selection = index;
         // Explicit pointer selection reanchors the camera to controller focus.
         // Merely turning the mouse wheel never changes that focus identity.
         s.wheel_scrolled = false;
-        let original = if same { s.order.get(index).copied() } else { None };
+        let original = if same {
+            s.order.get(index).copied()
+        } else {
+            None
+        };
         drop(s);
         self.publish(ui);
         // An already-selected cover behaves as the primary launch action.
-        if let Some(original) = original { self.home.launch_from_library(ui, original); }
+        if let Some(original) = original {
+            self.home.launch_from_library(ui, original);
+        }
     }
 
     fn move_selection(&self, ui: &AppWindow, target: usize) {
         let mut s = self.state.borrow_mut();
-        if s.order.is_empty() || target >= s.order.len() { return; }
-        if target == s.selection && !s.wheel_scrolled { return; }
+        if s.order.is_empty() || target >= s.order.len() {
+            return;
+        }
+        if target == s.selection && !s.wheel_scrolled {
+            return;
+        }
         s.selection = target;
         // First keyboard/controller movement after a wheel pan restores the
         // selected cover to view, even if navigation hit a list boundary.
@@ -408,12 +547,22 @@ impl LibraryController {
     }
 
     pub fn scroll_by_row(&self, ui: &AppWindow, direction: i32) {
-        if direction == 0 { return; }
+        if direction == 0 {
+            return;
+        }
         let layout = GridLayout::for_width(ui.get_logical_viewport_width_px());
         let visible = visible_rows(ui.get_logical_viewport_height_px(), layout);
         let mut s = self.state.borrow_mut();
-        let next = wheel_scroll_top(s.scroll_top, s.order.len(), layout.columns, visible, direction);
-        if next == s.scroll_top { return; }
+        let next = wheel_scroll_top(
+            s.scroll_top,
+            s.order.len(),
+            layout.columns,
+            visible,
+            direction,
+        );
+        if next == s.scroll_top {
+            return;
+        }
         s.scroll_top = next;
         s.wheel_scrolled = true;
         drop(s);
@@ -421,7 +570,9 @@ impl LibraryController {
     }
 
     pub fn cycle_filter(&self, ui: &AppWindow) {
-        if self.sources.is_empty() { return; }
+        if self.sources.is_empty() {
+            return;
+        }
         let selected_id = self.selection_game_id();
         self.capture_previous_grid(ui);
         {
@@ -458,7 +609,9 @@ impl LibraryController {
                     let s = self.state.borrow();
                     s.order.get(s.selection).copied()
                 };
-                if let Some(original) = original { self.home.launch_from_library(ui, original); }
+                if let Some(original) = original {
+                    self.home.launch_from_library(ui, original);
+                }
             }
             _ => {}
         }
@@ -467,15 +620,22 @@ impl LibraryController {
 
 #[cfg(test)]
 mod tests {
-    use super::{grid_columns, visible_rows, GridLayout, sorted_catalog_indices, source_title, LibrarySort,
-        horizontal_step, vertical_step, scroll_to_selection, wheel_scroll_top, total_rows, OVERSCAN_ROWS,
-        CARD_GAP, GRID_PAD};
-    use crate::domain::{Game, GameId, GameTitle, LibraryGame, SourceGameRef, SourceId, ExternalGameId};
+    use super::{
+        CARD_GAP, GRID_PAD, GridLayout, LibrarySort, OVERSCAN_ROWS, grid_columns, horizontal_step,
+        scroll_to_selection, sorted_catalog_indices, source_title, total_rows, vertical_step,
+        visible_rows, wheel_scroll_top,
+    };
+    use crate::domain::{
+        ExternalGameId, Game, GameId, GameTitle, LibraryGame, SourceGameRef, SourceId,
+    };
 
     fn game(id: i64, title: &str, source: &str) -> LibraryGame {
         LibraryGame::new(
             Game::new(GameId::new(id).unwrap(), GameTitle::new(title).unwrap()),
-            vec![SourceGameRef::new(SourceId::new(source).unwrap(), ExternalGameId::new(id.to_string()).unwrap())],
+            vec![SourceGameRef::new(
+                SourceId::new(source).unwrap(),
+                ExternalGameId::new(id.to_string()).unwrap(),
+            )],
         )
     }
 
@@ -490,32 +650,80 @@ mod tests {
 
     #[test]
     fn stable_title_order_and_source_membership() {
-        let catalog = vec![game(9, "zelda", "steam"), game(3, "Alpha", "heroic"), game(2, "alpha", "steam")];
+        let catalog = vec![
+            game(9, "zelda", "steam"),
+            game(3, "Alpha", "heroic"),
+            game(2, "alpha", "steam"),
+        ];
         let empty = std::collections::BTreeMap::new();
-        assert_eq!(sorted_catalog_indices(&catalog, None, LibrarySort::Alphabetical, &empty), vec![2,1,0]);
-        assert_eq!(sorted_catalog_indices(&catalog, Some("steam"), LibrarySort::Alphabetical, &empty), vec![2,0]);
-        assert_eq!(sorted_catalog_indices(&catalog, Some("heroic"), LibrarySort::Alphabetical, &empty), vec![1]);
+        assert_eq!(
+            sorted_catalog_indices(&catalog, None, LibrarySort::Alphabetical, &empty),
+            vec![2, 1, 0]
+        );
+        assert_eq!(
+            sorted_catalog_indices(&catalog, Some("steam"), LibrarySort::Alphabetical, &empty),
+            vec![2, 0]
+        );
+        assert_eq!(
+            sorted_catalog_indices(&catalog, Some("heroic"), LibrarySort::Alphabetical, &empty),
+            vec![1]
+        );
     }
-
 
     #[test]
     fn all_sort_modes_and_missing_playtime_are_deterministic() {
         use crate::services::activity::LibrarySortMetrics;
-        let games = vec![game(1, "Alpha", "steam"), game(2, "Beta", "steam"),
-                         game(3, "Gamma", "heroic")];
+        let games = vec![
+            game(1, "Alpha", "steam"),
+            game(2, "Beta", "steam"),
+            game(3, "Gamma", "heroic"),
+        ];
         let stats = [
-            LibrarySortMetrics { game_id: GameId::new(1).unwrap(), added_at: 10,
-                last_played_at: Some(50), observed_seconds: 300, reported_seconds: Some(100) },
-            LibrarySortMetrics { game_id: GameId::new(2).unwrap(), added_at: 30,
-                last_played_at: Some(90), observed_seconds: 200, reported_seconds: Some(2000) },
-            LibrarySortMetrics { game_id: GameId::new(3).unwrap(), added_at: 20,
-                last_played_at: None, observed_seconds: 900, reported_seconds: None },
-        ].into_iter().map(|row| (row.game_id.get(), row)).collect();
-        assert_eq!(sorted_catalog_indices(&games, None, LibrarySort::Alphabetical, &stats), vec![0,1,2]);
-        assert_eq!(sorted_catalog_indices(&games, None, LibrarySort::RecentlyPlayed, &stats), vec![1,0,2]);
-        assert_eq!(sorted_catalog_indices(&games, None, LibrarySort::TimePlayed, &stats), vec![1,2,0]);
-        assert_eq!(sorted_catalog_indices(&games, None, LibrarySort::RecentlyAdded, &stats), vec![1,2,0]);
-        assert_eq!(sorted_catalog_indices(&games, Some("steam"), LibrarySort::TimePlayed, &stats), vec![1,0]);
+            LibrarySortMetrics {
+                game_id: GameId::new(1).unwrap(),
+                added_at: 10,
+                last_played_at: Some(50),
+                observed_seconds: 300,
+                reported_seconds: Some(100),
+            },
+            LibrarySortMetrics {
+                game_id: GameId::new(2).unwrap(),
+                added_at: 30,
+                last_played_at: Some(90),
+                observed_seconds: 200,
+                reported_seconds: Some(2000),
+            },
+            LibrarySortMetrics {
+                game_id: GameId::new(3).unwrap(),
+                added_at: 20,
+                last_played_at: None,
+                observed_seconds: 900,
+                reported_seconds: None,
+            },
+        ]
+        .into_iter()
+        .map(|row| (row.game_id.get(), row))
+        .collect();
+        assert_eq!(
+            sorted_catalog_indices(&games, None, LibrarySort::Alphabetical, &stats),
+            vec![0, 1, 2]
+        );
+        assert_eq!(
+            sorted_catalog_indices(&games, None, LibrarySort::RecentlyPlayed, &stats),
+            vec![1, 0, 2]
+        );
+        assert_eq!(
+            sorted_catalog_indices(&games, None, LibrarySort::TimePlayed, &stats),
+            vec![1, 2, 0]
+        );
+        assert_eq!(
+            sorted_catalog_indices(&games, None, LibrarySort::RecentlyAdded, &stats),
+            vec![1, 2, 0]
+        );
+        assert_eq!(
+            sorted_catalog_indices(&games, Some("steam"), LibrarySort::TimePlayed, &stats),
+            vec![1, 0]
+        );
         assert_eq!(stats.get(&1).unwrap().time_played_seconds(), 100); // NOT 100 + 300
         assert_eq!(LibrarySort::RecentlyAdded.next(), LibrarySort::Alphabetical);
     }
@@ -539,7 +747,10 @@ mod tests {
         for width in [540.0, 760.0, 930.0, 1280.0, 1920.0, 2560.0, 3440.0] {
             let layout = GridLayout::for_width(width);
             let gallery = layout.columns as f32 * layout.stride - CARD_GAP + 2.0 * GRID_PAD;
-            assert!(gallery <= width - 48.0, "gallery exceeds viewport at {width}");
+            assert!(
+                gallery <= width - 48.0,
+                "gallery exceeds viewport at {width}"
+            );
             assert!(layout.stride - CARD_GAP >= 132.0);
         }
         assert_eq!(source_title("heroic"), "Heroic");

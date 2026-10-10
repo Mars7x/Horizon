@@ -5,9 +5,7 @@ use thiserror::Error;
 use crate::{
     domain::SourceId,
     services::library::{DiscoveredGame, LibraryRepository, LibraryService},
-    sources::{
-        SourceDiscovery, SourceError, SourceRegistry, SourceUnavailableReason,
-    },
+    sources::{SourceDiscovery, SourceError, SourceRegistry, SourceUnavailableReason},
 };
 
 #[derive(Debug)]
@@ -156,9 +154,7 @@ mod tests {
     use super::*;
     use crate::{
         domain::{ExternalGameId, GameId, GameTitle, LibraryGame},
-        sources::{
-            GameSource, SourceDescriptor, SourceGame, SourceSnapshot,
-        },
+        sources::{GameSource, SourceDescriptor, SourceGame, SourceSnapshot},
     };
 
     #[derive(Debug, Error)]
@@ -224,10 +220,7 @@ mod tests {
     impl LibraryRepository for RecordingRepository {
         type Error = FakeRepositoryError;
 
-        fn upsert_discovered_game(
-            &mut self,
-            game: &DiscoveredGame,
-        ) -> Result<GameId, Self::Error> {
+        fn upsert_discovered_game(&mut self, game: &DiscoveredGame) -> Result<GameId, Self::Error> {
             if self.fail_writes {
                 return Err(FakeRepositoryError);
             }
@@ -247,8 +240,7 @@ mod tests {
             self.discovered.extend_from_slice(games);
             (0..games.len())
                 .map(|offset| {
-                    GameId::new((start + offset + 1) as i64)
-                        .map_err(|_| FakeRepositoryError)
+                    GameId::new((start + offset + 1) as i64).map_err(|_| FakeRepositoryError)
                 })
                 .collect()
         }
@@ -265,15 +257,13 @@ mod tests {
 
             self.synchronized_sources.push(source_id.clone());
             self.discovered.retain(|game| {
-                game.source_id() != source_id
-                    || present_external_ids.contains(game.external_id())
+                game.source_id() != source_id || present_external_ids.contains(game.external_id())
             });
             let start = self.discovered.len();
             self.discovered.extend_from_slice(games);
             (0..games.len())
                 .map(|offset| {
-                    GameId::new((start + offset + 1) as i64)
-                        .map_err(|_| FakeRepositoryError)
+                    GameId::new((start + offset + 1) as i64).map_err(|_| FakeRepositoryError)
                 })
                 .collect()
         }
@@ -335,7 +325,10 @@ mod tests {
         SourceImportService::import_all(&registry, &mut library).expect("import");
 
         let repository = library.into_repository();
-        assert_eq!(repository.synchronized_sources, vec![SourceId::new("alpha").expect("id")]);
+        assert_eq!(
+            repository.synchronized_sources,
+            vec![SourceId::new("alpha").expect("id")]
+        );
         assert_eq!(repository.discovered.len(), 1);
         assert_eq!(repository.discovered[0].external_id().as_str(), "10");
     }

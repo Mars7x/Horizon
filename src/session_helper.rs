@@ -21,12 +21,10 @@ use crate::{
     platform::session_helper::{
         OBS_EXITED, OBS_FAILED, OBS_RUNNING, OBS_UNKNOWN, OBS_WAITING, SESSION_HELPER_BUS_NAME,
         SESSION_HELPER_INTERFACE, SESSION_HELPER_OBJECT_PATH, SESSION_HELPER_PROTOCOL_VERSION,
-        STARTED, START_FAILED, START_UNAVAILABLE, START_UNSUPPORTED, STATE_EXITED, STATE_FAILED,
+        START_FAILED, START_UNAVAILABLE, START_UNSUPPORTED, STARTED, STATE_EXITED, STATE_FAILED,
         STATE_RUNNING, STATE_UNKNOWN,
     },
-    sources::{
-        SourceCapability, SourceRegistry, SourceRuntimeState, production_source_registry,
-    },
+    sources::{SourceCapability, SourceRegistry, SourceRuntimeState, production_source_registry},
 };
 
 const RUNTIME_START_TIMEOUT: Duration = Duration::from_secs(300);
@@ -224,7 +222,10 @@ impl SessionBroker {
                 format!("source {source_id} is not registered in the host helper"),
             );
         };
-        if !source.descriptor().supports(SourceCapability::ManagedSession) {
+        if !source
+            .descriptor()
+            .supports(SourceCapability::ManagedSession)
+        {
             return (
                 START_UNSUPPORTED,
                 0,
@@ -464,7 +465,9 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     }
 
     let connection = Connection::session()?;
-    connection.object_server().at(SESSION_HELPER_OBJECT_PATH, broker)?;
+    connection
+        .object_server()
+        .at(SESSION_HELPER_OBJECT_PATH, broker)?;
     connection.request_name(SESSION_HELPER_BUS_NAME)?;
     info!(
         bus_name = SESSION_HELPER_BUS_NAME,

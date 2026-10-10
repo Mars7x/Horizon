@@ -389,7 +389,13 @@ impl ShellFocus {
             return false;
         }
 
-        let index = step_with_edge_wrap(self.utility.index(), 0, TopUtility::COUNT - 1, delta, repeated);
+        let index = step_with_edge_wrap(
+            self.utility.index(),
+            0,
+            TopUtility::COUNT - 1,
+            delta,
+            repeated,
+        );
         let Some(next) = TopUtility::from_index(index) else {
             return false;
         };
@@ -408,11 +414,7 @@ impl ShellFocus {
 /// All utility cells share the same vertical center, so minimizing horizontal
 /// center distance is equivalent to choosing the shortest center-to-center
 /// transfer path.
-pub fn nearest_utility_for_x(
-    x: f32,
-    viewport_width: f32,
-    utility_center_step: f32,
-) -> TopUtility {
+pub fn nearest_utility_for_x(x: f32, viewport_width: f32, utility_center_step: f32) -> TopUtility {
     if !x.is_finite()
         || !viewport_width.is_finite()
         || !utility_center_step.is_finite()
@@ -429,11 +431,7 @@ pub fn nearest_utility_for_x(
 }
 
 /// Return the rendered horizontal center of a utility icon.
-pub fn utility_center_x(
-    utility: TopUtility,
-    viewport_width: f32,
-    utility_center_step: f32,
-) -> f32 {
+pub fn utility_center_x(utility: TopUtility, viewport_width: f32, utility_center_step: f32) -> f32 {
     let middle_index = (TopUtility::COUNT - 1) as f32 / 2.0;
     viewport_width / 2.0 + (utility.index() as f32 - middle_index) * utility_center_step
 }
@@ -517,8 +515,7 @@ impl Navigator {
 mod tests {
     use super::{
         AppRoute, FocusSnapshot, Navigator, RouteFocusMemory, ShellFocus, ShellFocusRegion,
-        TopUtility, UtilityPage, nearest_game_for_x, nearest_utility_for_x,
-        utility_center_x,
+        TopUtility, UtilityPage, nearest_game_for_x, nearest_utility_for_x, utility_center_x,
     };
 
     #[test]
@@ -526,7 +523,12 @@ mod tests {
         assert!(AppRoute::Home.uses_shell_chrome());
         assert!(!AppRoute::Library.uses_shell_chrome());
         let library_focus = FocusSnapshot::for_route(AppRoute::Library);
-        assert_eq!(library_focus.normalized_for_route(AppRoute::Library).region(), ShellFocusRegion::Content);
+        assert_eq!(
+            library_focus
+                .normalized_for_route(AppRoute::Library)
+                .region(),
+            ShellFocusRegion::Content
+        );
 
         for page in [
             UtilityPage::Friends,
@@ -880,11 +882,7 @@ mod tests {
     #[test]
     fn spatial_helpers_stay_bounded_for_resize_extremes() {
         for viewport_width in [1.0_f32, 1280.0, 1720.0, 3440.0, 20_000.0] {
-            let utility = nearest_utility_for_x(
-                viewport_width * 0.9,
-                viewport_width,
-                64.0,
-            );
+            let utility = nearest_utility_for_x(viewport_width * 0.9, viewport_width, 64.0);
             assert!((0..TopUtility::COUNT).contains(&utility.index()));
         }
 
@@ -893,7 +891,10 @@ mod tests {
             assert!((0..8).contains(&game));
         }
 
-        assert_eq!(nearest_utility_for_x(f32::NAN, 1280.0, 64.0), TopUtility::Activity);
+        assert_eq!(
+            nearest_utility_for_x(f32::NAN, 1280.0, 64.0),
+            TopUtility::Activity
+        );
         assert_eq!(nearest_game_for_x(f32::INFINITY, 439.0, 250.0, 8), 0);
         assert_eq!(nearest_game_for_x(640.0, 439.0, 0.0, 8), 0);
         assert_eq!(nearest_game_for_x(640.0, 439.0, 250.0, 0), 0);

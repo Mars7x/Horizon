@@ -3,17 +3,13 @@
 //! This is an on-demand, blocking metadata/image client. Never call it from Slint's
 //! UI thread. CDN downloads use a separate unauthenticated HTTP request.
 use std::{
-    io::{Read, Cursor},
+    io::{Cursor, Read},
     thread,
     time::Duration,
 };
 
 use image::{ImageFormat, RgbaImage};
-use reqwest::{
-    Url,
-    blocking::Client,
-    redirect::Policy,
-};
+use reqwest::{Url, blocking::Client, redirect::Policy};
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -125,16 +121,21 @@ struct ApiAuthor {
 /// download. Missing scores are ranked after scored entries; ties keep the
 /// API's original order. A downloaded image's resolution never outranks score.
 fn sorted_eligible_artwork(grids: Vec<ApiGrid>) -> Vec<SteamGridDbSquareGrid> {
-    let mut eligible = grids.into_iter().filter_map(|grid| {
-        let image_url = Url::parse(&grid.url).ok()?;
-        if !is_steamgriddb_https(&image_url) { return None; }
-        Some(SteamGridDbSquareGrid {
-            id: grid.id,
-            image_url,
-            author: grid.author.map(|author| author.name),
-            score: grid.score,
+    let mut eligible = grids
+        .into_iter()
+        .filter_map(|grid| {
+            let image_url = Url::parse(&grid.url).ok()?;
+            if !is_steamgriddb_https(&image_url) {
+                return None;
+            }
+            Some(SteamGridDbSquareGrid {
+                id: grid.id,
+                image_url,
+                author: grid.author.map(|author| author.name),
+                score: grid.score,
+            })
         })
-    }).collect::<Vec<_>>();
+        .collect::<Vec<_>>();
     eligible.sort_by_key(|grid| std::cmp::Reverse(grid.score));
     eligible
 }
@@ -181,10 +182,14 @@ impl SteamGridDbClient {
     /// contain a unique exact title match; fuzzy guesses are never accepted.
     pub fn search_by_name(&self, name: &str) -> Result<Vec<SteamGridDbGame>, SteamGridDbError> {
         let url = self.api_url(&["search", "autocomplete", name]);
-        Ok(self.request_json::<Vec<ApiSearchHit>>(url)?.unwrap_or_default()
-            .into_iter().map(|hit| match hit {
+        Ok(self
+            .request_json::<Vec<ApiSearchHit>>(url)?
+            .unwrap_or_default()
+            .into_iter()
+            .map(|hit| match hit {
                 ApiSearchHit::Direct(game) | ApiSearchHit::Wrapped { data: game } => game,
-            }).collect())
+            })
+            .collect())
     }
 
     /// Retrieves only static native 1:1 grid candidates.
@@ -209,7 +214,10 @@ impl SteamGridDbClient {
 
     /// Icons are a last resort when a game has no native-square grid.
     /// Accept square PNG sources >=256px, preferring the largest decoded source.
-    pub fn square_icons(&self, game_id: u64) -> Result<Vec<SteamGridDbSquareGrid>, SteamGridDbError> {
+    pub fn square_icons(
+        &self,
+        game_id: u64,
+    ) -> Result<Vec<SteamGridDbSquareGrid>, SteamGridDbError> {
         let mut url = self.api_url(&["icons", "game", &game_id.to_string()]);
         url.query_pairs_mut()
             .append_pair("dimensions", "256,512,768,1024")
@@ -234,16 +242,24 @@ impl SteamGridDbClient {
         if !is_steamgriddb_https(&grid.image_url) {
             return Err(SteamGridDbError::InvalidImage);
         }
-        let response = self.http.get(grid.image_url.clone())
-            .send().map_err(SteamGridDbError::Network)?;
+        let response = self
+            .http
+            .get(grid.image_url.clone())
+            .send()
+            .map_err(SteamGridDbError::Network)?;
         if response.status().as_u16() != 200 {
             return Err(SteamGridDbError::ImageHttp(response.status().as_u16()));
         }
-        if response.content_length().is_some_and(|len| len > IMAGE_LIMIT) {
+        if response
+            .content_length()
+            .is_some_and(|len| len > IMAGE_LIMIT)
+        {
             return Err(SteamGridDbError::OversizedImage);
         }
         let mut bytes = Vec::new();
-        response.take(IMAGE_LIMIT + 1).read_to_end(&mut bytes)
+        response
+            .take(IMAGE_LIMIT + 1)
+            .read_to_end(&mut bytes)
             .map_err(|_| SteamGridDbError::InvalidImage)?;
         if bytes.len() as u64 > IMAGE_LIMIT {
             return Err(SteamGridDbError::OversizedImage);
@@ -269,7 +285,9 @@ impl SteamGridDbClient {
     ) -> Result<Option<T>, SteamGridDbError> {
         // Retry one transient server failure only, not 401, 404 or 429.
         for attempt in 0..2 {
-            let response = self.http.get(url.clone())
+            let response = self
+                .http
+                .get(url.clone())
                 .bearer_auth(&self.api_key)
                 .send()
                 .map_err(SteamGridDbError::Network)?;
@@ -287,14 +305,15 @@ impl SteamGridDbClient {
                 _ => return Err(SteamGridDbError::Http(status)),
             }
             let mut body = Vec::new();
-            response.take(RESPONSE_LIMIT + 1)
+            response
+                .take(RESPONSE_LIMIT + 1)
                 .read_to_end(&mut body)
                 .map_err(|_| SteamGridDbError::InvalidResponse)?;
             if body.len() as u64 > RESPONSE_LIMIT {
                 return Err(SteamGridDbError::OversizedResponse);
             }
-            let parsed: ApiResponse<T> = serde_json::from_slice(&body)
-                .map_err(|_| SteamGridDbError::InvalidResponse)?;
+            let parsed: ApiResponse<T> =
+                serde_json::from_slice(&body).map_err(|_| SteamGridDbError::InvalidResponse)?;
             if !parsed.success {
                 return Err(SteamGridDbError::InvalidResponse);
             }
@@ -310,7 +329,8 @@ fn decode_square_grid(bytes: &[u8]) -> Result<RgbaImage, SteamGridDbError> {
         return Err(SteamGridDbError::InvalidImage);
     }
     let (w, h) = image::ImageReader::with_format(Cursor::new(bytes), format)
-        .into_dimensions().map_err(|_| SteamGridDbError::InvalidImage)?;
+        .into_dimensions()
+        .map_err(|_| SteamGridDbError::InvalidImage)?;
     if w != h || !matches!(w, 256 | 512 | 768 | 1024) {
         return Err(SteamGridDbError::InvalidImage);
     }
@@ -320,10 +340,13 @@ fn decode_square_grid(bytes: &[u8]) -> Result<RgbaImage, SteamGridDbError> {
 }
 
 fn is_steamgriddb_https(url: &Url) -> bool {
-    url.scheme() == "https" && url.username().is_empty() && url.password().is_none()
-        && url.port().is_none() && url.host_str().is_some_and(|host| {
-        host == "steamgriddb.com" || host.ends_with(".steamgriddb.com")
-    })
+    url.scheme() == "https"
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.port().is_none()
+        && url
+            .host_str()
+            .is_some_and(|host| host == "steamgriddb.com" || host.ends_with(".steamgriddb.com"))
 }
 
 /// Gather source-authoritative IDs on the application thread before dispatching
@@ -337,10 +360,15 @@ pub struct SteamGridDbLookup {
 
 impl SteamGridDbLookup {
     pub fn for_game(game: &LibraryGame, sources: &SourceRegistry) -> Self {
-        let external_ids = game.sources().iter().filter_map(|source_ref| {
-            sources.get(source_ref.source_id())
-                .and_then(|source| source.external_artwork_id(source_ref.external_id()))
-        }).collect::<Vec<_>>();
+        let external_ids = game
+            .sources()
+            .iter()
+            .filter_map(|source_ref| {
+                sources
+                    .get(source_ref.source_id())
+                    .and_then(|source| source.external_artwork_id(source_ref.external_id()))
+            })
+            .collect::<Vec<_>>();
         Self {
             title: game.game().title().as_str().to_owned(),
             external_ids,
@@ -348,10 +376,14 @@ impl SteamGridDbLookup {
     }
 
     /// Public game metadata only; safe for diagnostics, never credentials.
-    pub fn title(&self) -> &str { &self.title }
+    pub fn title(&self) -> &str {
+        &self.title
+    }
 
     /// Whether a source adapter supplied a numeric platform ID to the worker.
-    pub fn has_platform_identity(&self) -> bool { !self.external_ids.is_empty() }
+    pub fn has_platform_identity(&self) -> bool {
+        !self.external_ids.is_empty()
+    }
 }
 
 /// Consumes an owned lookup plan on a worker thread. Only this part performs
@@ -370,14 +402,20 @@ impl SteamGridDbMatchService {
             let mut matches = Vec::new();
             for external in &lookup.external_ids {
                 if let Some(found) = self.client.game_by_external_id(external)?
-                    && !matches.iter().any(|prev: &SteamGridDbGame| prev.id == found.id) {
+                    && !matches
+                        .iter()
+                        .any(|prev: &SteamGridDbGame| prev.id == found.id)
+                {
                     matches.push(found);
                 }
             }
             match matches.len() {
-                1 => return Ok(MatchOutcome::Matched(SteamGridDbMatch {
-                    game: matches.remove(0), method: MatchMethod::ExactPlatformId,
-                })),
+                1 => {
+                    return Ok(MatchOutcome::Matched(SteamGridDbMatch {
+                        game: matches.remove(0),
+                        method: MatchMethod::ExactPlatformId,
+                    }));
+                }
                 // An actual conflict between platform IDs is not safe to guess.
                 n if n > 1 => return Ok(MatchOutcome::Ambiguous),
                 _ => {}
@@ -390,7 +428,8 @@ impl SteamGridDbMatchService {
         let candidates = self.client.search_by_name(&lookup.title)?;
         Ok(match unique_exact_title(&lookup.title, candidates) {
             TitleMatch::Unique(found) => MatchOutcome::Matched(SteamGridDbMatch {
-                game: found, method: MatchMethod::UniqueExactTitle,
+                game: found,
+                method: MatchMethod::UniqueExactTitle,
             }),
             TitleMatch::None => MatchOutcome::NotFound,
             TitleMatch::Ambiguous => MatchOutcome::Ambiguous,
@@ -404,13 +443,17 @@ impl SteamGridDbMatchService {
         self.client.square_grids(game.game.id)
     }
 
-    pub fn square_icons(&self, game: &SteamGridDbMatch)
-        -> Result<Vec<SteamGridDbSquareGrid>, SteamGridDbError> {
+    pub fn square_icons(
+        &self,
+        game: &SteamGridDbMatch,
+    ) -> Result<Vec<SteamGridDbSquareGrid>, SteamGridDbError> {
         self.client.square_icons(game.game.id)
     }
 
-    pub fn download_square_grid(&self, grid: &SteamGridDbSquareGrid)
-        -> Result<RgbaImage, SteamGridDbError> {
+    pub fn download_square_grid(
+        &self,
+        grid: &SteamGridDbSquareGrid,
+    ) -> Result<RgbaImage, SteamGridDbError> {
         self.client.download_square_grid(grid)
     }
 }
@@ -423,10 +466,12 @@ enum TitleMatch {
 
 fn unique_exact_title(title: &str, candidates: Vec<SteamGridDbGame>) -> TitleMatch {
     let expected = normalized_title(title);
-    let mut matches = candidates.into_iter().filter(|candidate| {
-        normalized_title(&candidate.name) == expected
-    });
-    let Some(first) = matches.next() else { return TitleMatch::None; };
+    let mut matches = candidates
+        .into_iter()
+        .filter(|candidate| normalized_title(&candidate.name) == expected);
+    let Some(first) = matches.next() else {
+        return TitleMatch::None;
+    };
     // Duplicate rows for the SAME SteamGridDB ID are not ambiguous.
     if matches.any(|match_| match_.id != first.id) {
         return TitleMatch::Ambiguous;
@@ -435,65 +480,108 @@ fn unique_exact_title(title: &str, candidates: Vec<SteamGridDbGame>) -> TitleMat
 }
 
 fn normalized_title(input: &str) -> String {
-    input.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+    input
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::{ExternalGameId, Game, GameId, GameTitle, SourceGameRef, SourceId};
-    use crate::sources::{GameSource, SourceDescriptor, SourceDiscovery, SourceError, SourceSnapshot};
+    use crate::sources::{
+        GameSource, SourceDescriptor, SourceDiscovery, SourceError, SourceSnapshot,
+    };
 
     struct MockSource(SourceDescriptor);
 
     impl GameSource for MockSource {
-        fn descriptor(&self) -> &SourceDescriptor { &self.0 }
+        fn descriptor(&self) -> &SourceDescriptor {
+            &self.0
+        }
         fn discover(&self) -> Result<SourceDiscovery, SourceError> {
-            Ok(SourceDiscovery::Available(SourceSnapshot::new(vec![]).unwrap()))
+            Ok(SourceDiscovery::Available(
+                SourceSnapshot::new(vec![]).unwrap(),
+            ))
         }
     }
 
     fn game(name: &str, source: &str, id: &str) -> LibraryGame {
         LibraryGame::new(
             Game::new(GameId::new(1).unwrap(), GameTitle::new(name).unwrap()),
-            vec![SourceGameRef::new(SourceId::new(source).unwrap(), ExternalGameId::new(id).unwrap())],
+            vec![SourceGameRef::new(
+                SourceId::new(source).unwrap(),
+                ExternalGameId::new(id).unwrap(),
+            )],
         )
     }
 
     #[test]
     fn square_artwork_ranks_highest_vote_score_first_even_if_uploaded_later() {
-        let items: Vec<ApiGrid> = serde_json::from_str(r#"[
+        let items: Vec<ApiGrid> = serde_json::from_str(
+            r#"[
             {"id": 11, "url":"https://cdn2.steamgriddb.com/grid/11.png", "score": 2},
             {"id": 10, "url":"https://cdn2.steamgriddb.com/grid/10.png", "score": 41},
             {"id": 12, "url":"https://cdn2.steamgriddb.com/grid/12.png", "score": -1},
             {"id": 15, "url":"https://cdn2.steamgriddb.com/grid/15.png"},
             {"id": 13, "url":"https://cdn2.steamgriddb.com/grid/13.png", "score": 41},
             {"id": 14, "url":"http://other.example/grid.png", "score": 999}
-        ]"#).unwrap();
+        ]"#,
+        )
+        .unwrap();
         let result = sorted_eligible_artwork(items);
-        assert_eq!(result.iter().map(|g| g.id).collect::<Vec<_>>(), [10, 13, 11, 12, 15]);
+        assert_eq!(
+            result.iter().map(|g| g.id).collect::<Vec<_>>(),
+            [10, 13, 11, 12, 15]
+        );
         assert_eq!(result[0].score, Some(41));
     }
 
     #[test]
     fn strict_name_matching_refuses_near_matches_and_collisions() {
-        let a = SteamGridDbGame { id: 3, name: "Game: Deluxe".into(), verified: true };
-        let b = SteamGridDbGame { id: 4, name: "GAME DELUXE".into(), verified: true };
-        assert!(matches!(unique_exact_title("Game: Deluxe", vec![a.clone(), b]), TitleMatch::Unique(_)));
-        assert!(matches!(unique_exact_title("Game Deluxe", vec![a.clone()]), TitleMatch::None));
-        assert!(matches!(unique_exact_title(" game:   deluxe ", vec![a.clone()]), TitleMatch::Unique(_)));
-        assert!(matches!(unique_exact_title("Game: Deluxe", vec![a.clone(), SteamGridDbGame { id: 9, ..a }]), TitleMatch::Ambiguous));
+        let a = SteamGridDbGame {
+            id: 3,
+            name: "Game: Deluxe".into(),
+            verified: true,
+        };
+        let b = SteamGridDbGame {
+            id: 4,
+            name: "GAME DELUXE".into(),
+            verified: true,
+        };
+        assert!(matches!(
+            unique_exact_title("Game: Deluxe", vec![a.clone(), b]),
+            TitleMatch::Unique(_)
+        ));
+        assert!(matches!(
+            unique_exact_title("Game Deluxe", vec![a.clone()]),
+            TitleMatch::None
+        ));
+        assert!(matches!(
+            unique_exact_title(" game:   deluxe ", vec![a.clone()]),
+            TitleMatch::Unique(_)
+        ));
+        assert!(matches!(
+            unique_exact_title(
+                "Game: Deluxe",
+                vec![a.clone(), SteamGridDbGame { id: 9, ..a }]
+            ),
+            TitleMatch::Ambiguous
+        ));
     }
 
     #[test]
     fn square_icon_256_decodes_but_non_square_images_are_rejected() {
-        let square = image::DynamicImage::ImageRgba8(
-            image::RgbaImage::new(256, 256));
+        let square = image::DynamicImage::ImageRgba8(image::RgbaImage::new(256, 256));
         let mut out = Cursor::new(Vec::new());
         square.write_to(&mut out, ImageFormat::Png).unwrap();
-        assert_eq!(decode_square_grid(&out.into_inner()).unwrap().dimensions(), (256, 256));
-        let portrait = image::DynamicImage::ImageRgba8(
-            image::RgbaImage::new(256, 384));
+        assert_eq!(
+            decode_square_grid(&out.into_inner()).unwrap().dimensions(),
+            (256, 256)
+        );
+        let portrait = image::DynamicImage::ImageRgba8(image::RgbaImage::new(256, 384));
         let mut out = Cursor::new(Vec::new());
         portrait.write_to(&mut out, ImageFormat::Png).unwrap();
         assert!(decode_square_grid(&out.into_inner()).is_err());
@@ -501,19 +589,32 @@ mod tests {
 
     #[test]
     fn url_allowlist_rejects_credentials_http_and_lookalike_domains() {
-        assert!(is_steamgriddb_https(&Url::parse("https://cdn2.steamgriddb.com/grid/example.png").unwrap()));
-        assert!(!is_steamgriddb_https(&Url::parse("http://cdn2.steamgriddb.com/grid/example.png").unwrap()));
-        assert!(!is_steamgriddb_https(&Url::parse("https://steamgriddb.com.evil.test/grid/example.png").unwrap()));
-        assert!(!is_steamgriddb_https(&Url::parse("https://someone@cdn2.steamgriddb.com/grid/example.png").unwrap()));
-        assert!(!is_steamgriddb_https(&Url::parse("https://cdn2.steamgriddb.com:4443/grid/example.png").unwrap()));
+        assert!(is_steamgriddb_https(
+            &Url::parse("https://cdn2.steamgriddb.com/grid/example.png").unwrap()
+        ));
+        assert!(!is_steamgriddb_https(
+            &Url::parse("http://cdn2.steamgriddb.com/grid/example.png").unwrap()
+        ));
+        assert!(!is_steamgriddb_https(
+            &Url::parse("https://steamgriddb.com.evil.test/grid/example.png").unwrap()
+        ));
+        assert!(!is_steamgriddb_https(
+            &Url::parse("https://someone@cdn2.steamgriddb.com/grid/example.png").unwrap()
+        ));
+        assert!(!is_steamgriddb_https(
+            &Url::parse("https://cdn2.steamgriddb.com:4443/grid/example.png").unwrap()
+        ));
     }
 
     #[test]
     fn nonsteam_sources_have_no_guessed_external_catalog_identity() {
         let mut registry = SourceRegistry::new();
-        registry.register(MockSource(SourceDescriptor::new(
-            SourceId::new("bottles").unwrap(), "Bottles", vec![],
-        ).unwrap())).unwrap();
+        registry
+            .register(MockSource(
+                SourceDescriptor::new(SourceId::new("bottles").unwrap(), "Bottles", vec![])
+                    .unwrap(),
+            ))
+            .unwrap();
         let reference = game("Example Game", "bottles", "native:my-bottle/123");
         let lookup = SteamGridDbLookup::for_game(&reference, &registry);
         assert!(lookup.external_ids.is_empty());
@@ -523,10 +624,15 @@ mod tests {
     #[test]
     fn steam_source_publishes_authoritative_id_for_lookup_plan() {
         let mut registry = SourceRegistry::new();
-        registry.register(crate::sources::steam::SteamSource::new().unwrap()).unwrap();
+        registry
+            .register(crate::sources::steam::SteamSource::new().unwrap())
+            .unwrap();
         let reference = game("Demo", "steam", "480");
         let lookup = SteamGridDbLookup::for_game(&reference, &registry);
-        assert_eq!(lookup.external_ids, vec![ExternalArtworkId::SteamAppId(480)]);
+        assert_eq!(
+            lookup.external_ids,
+            vec![ExternalArtworkId::SteamAppId(480)]
+        );
         // Steam's app ID is always attempted first; only a missing mapping
         // can fall back to a unique exact-title match.
         assert!(!lookup.external_ids.is_empty());
@@ -535,12 +641,17 @@ mod tests {
     /// Exercise request path, credential header, status classification and
     /// JSON deserialization without touching the real SteamGridDB service.
     fn serve_once(status: u16, body: &'static str) -> (Url, std::thread::JoinHandle<String>) {
-        use std::{io::{Read, Write}, net::TcpListener};
+        use std::{
+            io::{Read, Write},
+            net::TcpListener,
+        };
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let handle = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
-            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
             let mut bytes = [0u8; 4096];
             let n = stream.read(&mut bytes).unwrap();
             let request = String::from_utf8_lossy(&bytes[..n]).into_owned();
@@ -548,7 +659,10 @@ mod tests {
             stream.flush().unwrap();
             request
         });
-        (Url::parse(&format!("http://{address}/api/v2/")).unwrap(), handle)
+        (
+            Url::parse(&format!("http://{address}/api/v2/")).unwrap(),
+            handle,
+        )
     }
 
     fn test_client(url: Url) -> SteamGridDbClient {
@@ -559,40 +673,54 @@ mod tests {
 
     #[test]
     fn api_client_uses_bearer_header_and_parses_exact_game() {
-        let (url, handle) = serve_once(200, r#"{"success":true,"data":{"id":17,"name":"Example","verified":true}}"#);
+        let (url, handle) = serve_once(
+            200,
+            r#"{"success":true,"data":{"id":17,"name":"Example","verified":true}}"#,
+        );
         let game = test_client(url)
             .game_by_external_id(&ExternalArtworkId::SteamAppId(480))
-            .unwrap().unwrap();
+            .unwrap()
+            .unwrap();
         assert_eq!(game.id, 17);
         assert_eq!(game.name, "Example");
         let request = handle.join().unwrap();
         assert!(request.starts_with("GET /api/v2/games/steam/480 HTTP/1.1"));
-        assert!(request.to_lowercase().contains("authorization: bearer do_not_log_test_key"));
+        assert!(
+            request
+                .to_lowercase()
+                .contains("authorization: bearer do_not_log_test_key")
+        );
     }
 
     #[test]
     fn api_errors_and_missing_game_are_separate() {
         let (url, handle) = serve_once(404, "{}");
         let absent = test_client(url)
-            .game_by_external_id(&ExternalArtworkId::SteamAppId(480)).unwrap();
+            .game_by_external_id(&ExternalArtworkId::SteamAppId(480))
+            .unwrap();
         assert!(absent.is_none());
         handle.join().unwrap();
         let (url, handle) = serve_once(401, "{}");
         let error = test_client(url)
-            .game_by_external_id(&ExternalArtworkId::SteamAppId(480)).unwrap_err();
+            .game_by_external_id(&ExternalArtworkId::SteamAppId(480))
+            .unwrap_err();
         assert!(matches!(error, SteamGridDbError::Unauthorized));
         assert!(!error.to_string().contains("DO_NOT_LOG_TEST_KEY"));
         handle.join().unwrap();
         let (url, handle) = serve_once(429, "{}");
         let error = test_client(url)
-            .game_by_external_id(&ExternalArtworkId::SteamAppId(480)).unwrap_err();
+            .game_by_external_id(&ExternalArtworkId::SteamAppId(480))
+            .unwrap_err();
         assert!(matches!(error, SteamGridDbError::RateLimited));
         handle.join().unwrap();
     }
 
     #[test]
     fn grid_metadata_filters_off_domain_image_urls() {
-        let (url, handle) = serve_once(200, r#"{"success":true,"data":[{"id":1,"url":"https://cdn2.steamgriddb.com/grid/ok.png","author":{"name":"Contributor"}},{"id":2,"url":"https://elsewhere.invalid/bad.png"}]}"#);
+        let (url, handle) = serve_once(
+            200,
+            r#"{"success":true,"data":[{"id":1,"url":"https://cdn2.steamgriddb.com/grid/ok.png","author":{"name":"Contributor"}},{"id":2,"url":"https://elsewhere.invalid/bad.png"}]}"#,
+        );
         let grids = test_client(url).square_grids(17).unwrap();
         assert_eq!(grids.len(), 1);
         assert_eq!(grids[0].id, 1);
@@ -604,26 +732,38 @@ mod tests {
 
     #[test]
     fn search_handles_both_documented_response_shapes() {
-        let direct = r#"[{"id":17,"name":"Example"},{"success":true,"data":{"id":18,"name":"Example 2"}}]"#;
+        let direct =
+            r#"[{"id":17,"name":"Example"},{"success":true,"data":{"id":18,"name":"Example 2"}}]"#;
         let hits: Vec<ApiSearchHit> = serde_json::from_str(direct).unwrap();
-        let games = hits.into_iter().map(|h| match h {
-            ApiSearchHit::Direct(game) | ApiSearchHit::Wrapped { data: game } => game,
-        }).collect::<Vec<_>>();
-        assert_eq!(games.iter().map(|g|g.id).collect::<Vec<_>>(), vec![17,18]);
+        let games = hits
+            .into_iter()
+            .map(|h| match h {
+                ApiSearchHit::Direct(game) | ApiSearchHit::Wrapped { data: game } => game,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(games.iter().map(|g| g.id).collect::<Vec<_>>(), vec![17, 18]);
     }
 
     #[test]
     fn downloaded_art_must_actually_be_square_png_or_jpeg() {
-        let good = image::DynamicImage::ImageRgba8(
-            RgbaImage::from_pixel(512, 512, image::Rgba([10, 20, 30, 255])),
-        );
+        let good = image::DynamicImage::ImageRgba8(RgbaImage::from_pixel(
+            512,
+            512,
+            image::Rgba([10, 20, 30, 255]),
+        ));
         let mut encoded = Cursor::new(Vec::new());
         good.write_to(&mut encoded, ImageFormat::Png).unwrap();
-        assert_eq!(decode_square_grid(encoded.get_ref()).unwrap().dimensions(), (512, 512));
+        assert_eq!(
+            decode_square_grid(encoded.get_ref()).unwrap().dimensions(),
+            (512, 512)
+        );
         let bad = image::DynamicImage::ImageRgba8(RgbaImage::new(600, 900));
         let mut encoded = Cursor::new(Vec::new());
         bad.write_to(&mut encoded, ImageFormat::Png).unwrap();
-        assert!(matches!(decode_square_grid(encoded.get_ref()), Err(SteamGridDbError::InvalidImage)));
+        assert!(matches!(
+            decode_square_grid(encoded.get_ref()),
+            Err(SteamGridDbError::InvalidImage)
+        ));
     }
 
     #[test]
@@ -642,7 +782,9 @@ mod tests {
             "https://www.steamgriddb.com/api/v2/icons/game/2978157"
         );
         assert_eq!(
-            client.api_url(&["search", "autocomplete", "A Short Hike"]).as_str(),
+            client
+                .api_url(&["search", "autocomplete", "A Short Hike"])
+                .as_str(),
             "https://www.steamgriddb.com/api/v2/search/autocomplete/A%20Short%20Hike"
         );
     }

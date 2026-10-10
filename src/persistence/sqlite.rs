@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, path::Path, time::Duration};
 
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 use crate::{
     domain::{
@@ -10,14 +10,14 @@ use crate::{
     },
     services::{
         activity::{
-            ActivityOverview, ActivityRepository, GameActivitySummary, RecentActivitySession,
-            ReportedGameSummary, LibrarySortMetrics, GameActivityHistory,
+            ActivityOverview, ActivityRepository, GameActivityHistory, GameActivitySummary,
+            LibrarySortMetrics, RecentActivitySession, ReportedGameSummary,
         },
         library::{DiscoveredGame, LibraryRepository},
     },
 };
 
-use super::{migrations, PersistenceError};
+use super::{PersistenceError, migrations};
 
 pub struct SqliteLibraryRepository {
     connection: Connection,
@@ -26,10 +26,11 @@ pub struct SqliteLibraryRepository {
 impl SqliteLibraryRepository {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, PersistenceError> {
         let path = path.as_ref();
-        let connection = Connection::open(path).map_err(|source| PersistenceError::OpenDatabase {
-            path: path.to_owned(),
-            source,
-        })?;
+        let connection =
+            Connection::open(path).map_err(|source| PersistenceError::OpenDatabase {
+                path: path.to_owned(),
+                source,
+            })?;
         Self::from_connection(connection)
     }
 
@@ -162,9 +163,8 @@ impl LibraryRepository for SqliteLibraryRepository {
         }
 
         let existing_ids = {
-            let mut statement = transaction.prepare(
-                "SELECT external_id FROM game_sources WHERE source_id = ?1",
-            )?;
+            let mut statement =
+                transaction.prepare("SELECT external_id FROM game_sources WHERE source_id = ?1")?;
             let rows = statement.query_map([source_id.as_str()], |row| row.get::<_, String>(0))?;
             rows.collect::<Result<Vec<_>, _>>()?
         };
@@ -234,10 +234,7 @@ impl LibraryRepository for SqliteLibraryRepository {
                 continue;
             }
 
-            result.push(LibraryGame::new(
-                Game::new(game_id, title),
-                vec![source],
-            ));
+            result.push(LibraryGame::new(Game::new(game_id, title), vec![source]));
         }
 
         Ok(result)
@@ -254,11 +251,9 @@ impl LibraryRepository for SqliteLibraryRepository {
     }
 }
 
-
 impl ActivityRepository for SqliteLibraryRepository {
     fn recent_game_ids(&self, limit: usize) -> Result<Vec<GameId>, Self::Error> {
-        let limit = i64::try_from(limit)
-            .map_err(|_| PersistenceError::InvalidCount(i64::MAX))?;
+        let limit = i64::try_from(limit).map_err(|_| PersistenceError::InvalidCount(i64::MAX))?;
         // Restrict to installed/source-backed games and use the latest real
         // session start, never a source lifetime-total import timestamp.
         let mut statement = self.connection.prepare(
@@ -269,7 +264,10 @@ impl ActivityRepository for SqliteLibraryRepository {
         let rows = statement.query_map([limit], |row| row.get::<_, i64>(0))?;
         let mut ids = Vec::new();
         for row in rows {
-            ids.push(Self::domain_value("play_sessions.game_id", GameId::new(row?))?);
+            ids.push(Self::domain_value(
+                "play_sessions.game_id",
+                GameId::new(row?),
+            )?);
         }
         Ok(ids)
     }
@@ -339,10 +337,7 @@ impl ActivityRepository for SqliteLibraryRepository {
 
     // Interrupted sessions keep only time confirmed by a checkpoint. With no
     // checkpoint after the start, the duration is unknown (NULL), not zero.
-    fn interrupt_play_session(
-        &mut self,
-        session_id: PlaySessionId,
-    ) -> Result<(), Self::Error> {
+    fn interrupt_play_session(&mut self, session_id: PlaySessionId) -> Result<(), Self::Error> {
         let changed = self.connection.execute(
             "UPDATE play_sessions \
              SET ended_at = NULLIF(checkpoint_at, started_at), state = 'interrupted' \
@@ -384,23 +379,36 @@ impl ActivityRepository for SqliteLibraryRepository {
              ORDER BY started_at DESC, id DESC",
         )?;
         let result = stmt.query_map([game_id.get()], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?, row.get::<_, Option<i64>>(3)?,
-                row.get::<_, String>(4)?, row.get::<_, String>(5)?))
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, Option<i64>>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+            ))
         })?;
         let mut sessions = Vec::new();
         for row in result {
             let (id, source, start, end, method, state) = row?;
-            sessions.push(Self::activity_value("play_sessions", PlaySession::new(
-                Self::activity_value("play_sessions.id", PlaySessionId::new(id))?,
-                game_id,
-                Self::domain_value("play_sessions.source_id", SourceId::new(source))?,
-                start, end,
-                Self::activity_value("play_sessions.tracking_method",
-                    SessionTrackingMethod::from_storage_key(&method))?,
-                Self::activity_value("play_sessions.state",
-                    PlaySessionState::from_storage_key(&state))?,
-            ))?);
+            sessions.push(Self::activity_value(
+                "play_sessions",
+                PlaySession::new(
+                    Self::activity_value("play_sessions.id", PlaySessionId::new(id))?,
+                    game_id,
+                    Self::domain_value("play_sessions.source_id", SourceId::new(source))?,
+                    start,
+                    end,
+                    Self::activity_value(
+                        "play_sessions.tracking_method",
+                        SessionTrackingMethod::from_storage_key(&method),
+                    )?,
+                    Self::activity_value(
+                        "play_sessions.state",
+                        PlaySessionState::from_storage_key(&state),
+                    )?,
+                ),
+            )?);
         }
 
         let mut stmt = self.connection.prepare(
@@ -415,8 +423,10 @@ impl ActivityRepository for SqliteLibraryRepository {
             let (source, seconds) = row?;
             reported.push((
                 Self::domain_value("source_lifetime_playtime.source_id", SourceId::new(source))?,
-                Self::activity_value("source_lifetime_playtime.lifetime_seconds",
-                    PlaytimeSeconds::new(seconds))?,
+                Self::activity_value(
+                    "source_lifetime_playtime.lifetime_seconds",
+                    PlaytimeSeconds::new(seconds),
+                )?,
             ));
         }
         Ok(GameActivityHistory { sessions, reported })
@@ -438,19 +448,27 @@ impl ActivityRepository for SqliteLibraryRepository {
              (SELECT MAX(sl.lifetime_seconds) FROM source_lifetime_playtime AS sl \
                 WHERE sl.game_id = g.id) \
              FROM games AS g WHERE EXISTS \
-                (SELECT 1 FROM game_sources AS gs WHERE gs.game_id = g.id)"
+                (SELECT 1 FROM game_sources AS gs WHERE gs.game_id = g.id)",
         )?;
         let rows = statement.query_map([], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?,
-                row.get::<_, Option<i64>>(2)?, row.get::<_, i64>(3)?,
-                row.get::<_, Option<i64>>(4)?))
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, Option<i64>>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, Option<i64>>(4)?,
+            ))
         })?;
         let mut metrics = Vec::new();
         for row in rows {
             let (raw_game_id, added_at, last_played_at, observed_seconds, reported_seconds) = row?;
             let game_id = Self::domain_value("games.id", GameId::new(raw_game_id))?;
             metrics.push(LibrarySortMetrics {
-                game_id, added_at, last_played_at, observed_seconds, reported_seconds,
+                game_id,
+                added_at,
+                last_played_at,
+                observed_seconds,
+                reported_seconds,
             });
         }
         Ok(metrics)
@@ -467,7 +485,10 @@ impl ActivityRepository for SqliteLibraryRepository {
                 AND ended_at IS NOT NULL AND started_at < ?2 AND ended_at > ?1",
         )?;
         for &(start, end) in ranges {
-            if end <= start { totals.push(0); continue; }
+            if end <= start {
+                totals.push(0);
+                continue;
+            }
             let value: i64 = statement.query_row(params![start, end], |row| row.get(0))?;
             totals.push(value.max(0));
         }
@@ -505,8 +526,8 @@ impl ActivityRepository for SqliteLibraryRepository {
         let played_games =
             usize::try_from(raw_games).map_err(|_| PersistenceError::InvalidCount(raw_games))?;
 
-        let recent_limit = i64::try_from(recent_limit)
-            .map_err(|_| PersistenceError::InvalidCount(i64::MAX))?;
+        let recent_limit =
+            i64::try_from(recent_limit).map_err(|_| PersistenceError::InvalidCount(i64::MAX))?;
         let mut recent_statement = self.connection.prepare(
             "SELECT ps.id, ps.game_id, g.title, ps.source_id, ps.started_at, ps.ended_at, \
              ps.tracking_method, ps.state \
@@ -635,8 +656,8 @@ impl ActivityRepository for SqliteLibraryRepository {
         }
         drop(active_statement);
 
-        let top_limit = i64::try_from(top_games_limit)
-            .map_err(|_| PersistenceError::InvalidCount(i64::MAX))?;
+        let top_limit =
+            i64::try_from(top_games_limit).map_err(|_| PersistenceError::InvalidCount(i64::MAX))?;
         let mut top_statement = self.connection.prepare(
             "SELECT ps.game_id, g.title, SUM(ps.ended_at - ps.started_at), \
              SUM(CASE WHEN ps.state = 'completed' THEN 1 ELSE 0 END), MAX(ps.ended_at) \
@@ -663,10 +684,8 @@ impl ActivityRepository for SqliteLibraryRepository {
             let (raw_game_id, raw_title, raw_playtime, raw_sessions, last_played_at) = row?;
             let game_id = Self::domain_value("play_sessions.game_id", GameId::new(raw_game_id))?;
             let title = Self::domain_value("games.title", GameTitle::new(raw_title))?;
-            let observed_playtime = Self::activity_value(
-                "play_sessions.duration",
-                PlaytimeSeconds::new(raw_playtime),
-            )?;
+            let observed_playtime =
+                Self::activity_value("play_sessions.duration", PlaytimeSeconds::new(raw_playtime))?;
             let completed_sessions = usize::try_from(raw_sessions)
                 .map_err(|_| PersistenceError::InvalidCount(raw_sessions))?;
             top_games.push(GameActivitySummary::new(
@@ -683,7 +702,8 @@ impl ActivityRepository for SqliteLibraryRepository {
         // provider of lifetime playtime; each (game, provider) is one row.
         let raw_reported_total: i64 = self.connection.query_row(
             "SELECT COALESCE(SUM(lifetime_seconds), 0) FROM source_lifetime_playtime",
-            [], |row| row.get(0),
+            [],
+            |row| row.get(0),
         )?;
         let reported_total = Self::activity_value(
             "source_lifetime_playtime.lifetime_seconds",
@@ -696,15 +716,25 @@ impl ActivityRepository for SqliteLibraryRepository {
              ORDER BY sl.lifetime_seconds DESC, g.title ASC LIMIT ?1",
         )?;
         let reported_rows = reported_statement.query_map([top_limit], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
         })?;
         let mut reported_games = Vec::new();
         for row in reported_rows {
             let (title, source_id, lifetime) = row?;
             reported_games.push(ReportedGameSummary::new(
                 Self::domain_value("games.title", GameTitle::new(title))?,
-                Self::domain_value("source_lifetime_playtime.source_id", SourceId::new(source_id))?,
-                Self::activity_value("source_lifetime_playtime.lifetime_seconds", PlaytimeSeconds::new(lifetime))?,
+                Self::domain_value(
+                    "source_lifetime_playtime.source_id",
+                    SourceId::new(source_id),
+                )?,
+                Self::activity_value(
+                    "source_lifetime_playtime.lifetime_seconds",
+                    PlaytimeSeconds::new(lifetime),
+                )?,
             ));
         }
         Ok(ActivityOverview::new(
@@ -926,11 +956,7 @@ mod tests {
             .expect("seed");
 
         repository
-            .synchronize_source_snapshot(
-                &SourceId::new("steam").expect("source"),
-                &[],
-                &[],
-            )
+            .synchronize_source_snapshot(&SourceId::new("steam").expect("source"), &[], &[])
             .expect("synchronize");
 
         assert_eq!(repository.game_count().expect("count"), 0);
@@ -962,16 +988,33 @@ mod tests {
         let third = seed_game(&mut repository, "Unplayed", "steam", "103");
         let source = SourceId::new("steam").expect("source");
         for (id, time) in [(first, 100), (second, 200), (first, 300)] {
-            let session = repository.begin_play_session(
-                id, &source, time, SessionTrackingMethod::SourceRuntime,
-            ).expect("begin");
-            repository.complete_play_session(session, time + 10).expect("complete");
+            let session = repository
+                .begin_play_session(id, &source, time, SessionTrackingMethod::SourceRuntime)
+                .expect("begin");
+            repository
+                .complete_play_session(session, time + 10)
+                .expect("complete");
         }
-        assert_eq!(repository.recent_game_ids(15).expect("recents"), vec![first, second]);
+        assert_eq!(
+            repository.recent_game_ids(15).expect("recents"),
+            vec![first, second]
+        );
         assert_eq!(repository.recent_game_ids(1).expect("limit"), vec![first]);
-        assert!(!repository.recent_game_ids(15).expect("recents").contains(&third));
-        repository.synchronize_source_snapshot(&source, &[], &[]).expect("uninstall");
-        assert!(repository.recent_game_ids(15).expect("installed only").is_empty());
+        assert!(
+            !repository
+                .recent_game_ids(15)
+                .expect("recents")
+                .contains(&third)
+        );
+        repository
+            .synchronize_source_snapshot(&source, &[], &[])
+            .expect("uninstall");
+        assert!(
+            repository
+                .recent_game_ids(15)
+                .expect("installed only")
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1003,18 +1046,32 @@ mod tests {
         let mut repository = SqliteLibraryRepository::open_in_memory().expect("repository");
         let game_id = seed_game(&mut repository, "Crosses midnight", "steam", "88");
         let source_id = SourceId::new("steam").expect("source");
-        let session = repository.begin_play_session(
-            game_id, &source_id, 100, SessionTrackingMethod::SourceRuntime,
-        ).expect("start");
-        repository.complete_play_session(session, 200).expect("complete");
-        let unfinished = repository.begin_play_session(
-            game_id, &source_id, 210, SessionTrackingMethod::SourceRuntime,
-        ).expect("start open");
-        let totals = repository.observed_seconds_in_ranges(&[
-            (0, 130), (130, 160), (160, 250), (250, 300), (140, 140),
-        ]).expect("daily observations");
+        let session = repository
+            .begin_play_session(
+                game_id,
+                &source_id,
+                100,
+                SessionTrackingMethod::SourceRuntime,
+            )
+            .expect("start");
+        repository
+            .complete_play_session(session, 200)
+            .expect("complete");
+        let unfinished = repository
+            .begin_play_session(
+                game_id,
+                &source_id,
+                210,
+                SessionTrackingMethod::SourceRuntime,
+            )
+            .expect("start open");
+        let totals = repository
+            .observed_seconds_in_ranges(&[(0, 130), (130, 160), (160, 250), (250, 300), (140, 140)])
+            .expect("daily observations");
         assert_eq!(totals, vec![30, 30, 40, 0, 0]);
-        repository.interrupt_play_session(unfinished).expect("interrupt open");
+        repository
+            .interrupt_play_session(unfinished)
+            .expect("interrupt open");
     }
 
     #[test]
@@ -1079,7 +1136,12 @@ mod tests {
             1
         );
 
-        assert_eq!(repository.interrupt_open_play_sessions().expect("interrupt"), 1);
+        assert_eq!(
+            repository
+                .interrupt_open_play_sessions()
+                .expect("interrupt"),
+            1
+        );
         let overview = repository.activity_overview(8, 4).expect("overview");
         assert_eq!(overview.observed_playtime().get(), 45);
         assert_eq!(overview.completed_sessions(), 0);
@@ -1113,7 +1175,9 @@ mod tests {
                 SessionTrackingMethod::SourceRuntime,
             )
             .expect("session");
-        repository.interrupt_play_session(session).expect("interrupt");
+        repository
+            .interrupt_play_session(session)
+            .expect("interrupt");
         // Shown in game history as unknown; never counted as played time.
         let history = repository.game_activity_history(game_id).expect("history");
         assert_eq!(history.sessions.len(), 1);
@@ -1128,28 +1192,52 @@ mod tests {
     #[test]
     fn per_game_history_is_complete_ordered_and_source_totals_remain_separate() {
         let mut repository = SqliteLibraryRepository::open_in_memory().expect("repository");
-        let game = repository.upsert_discovered_game(
-            &discovered("steam", "10", "History game"),
-        ).expect("game");
-        let other = repository.upsert_discovered_game(
-            &discovered("steam", "20", "Other game"),
-        ).expect("other");
+        let game = repository
+            .upsert_discovered_game(&discovered("steam", "10", "History game"))
+            .expect("game");
+        let other = repository
+            .upsert_discovered_game(&discovered("steam", "20", "Other game"))
+            .expect("other");
         let steam = SourceId::new("steam").expect("source");
-        for (game_id, start, end) in [(game, 100, 160), (game, 200, 380),
-                                      (other, 250, 255), (game, 400, 445)] {
-            let session = repository.begin_play_session(game_id, &steam, start,
-                SessionTrackingMethod::SourceRuntime).expect("begin");
-            repository.complete_play_session(session, end).expect("complete");
+        for (game_id, start, end) in [
+            (game, 100, 160),
+            (game, 200, 380),
+            (other, 250, 255),
+            (game, 400, 445),
+        ] {
+            let session = repository
+                .begin_play_session(game_id, &steam, start, SessionTrackingMethod::SourceRuntime)
+                .expect("begin");
+            repository
+                .complete_play_session(session, end)
+                .expect("complete");
         }
-        repository.upsert_source_lifetime_playtime(&SourceLifetimePlaytime::new(
-            game, steam.clone(), PlaytimeSeconds::new(30_000).unwrap(), 500,
-        )).expect("report");
+        repository
+            .upsert_source_lifetime_playtime(&SourceLifetimePlaytime::new(
+                game,
+                steam.clone(),
+                PlaytimeSeconds::new(30_000).unwrap(),
+                500,
+            ))
+            .expect("report");
         let history = repository.game_activity_history(game).expect("history");
         assert_eq!(history.sessions.len(), 3);
-        assert_eq!(history.sessions.iter().map(|row| row.started_at()).collect::<Vec<_>>(),
-                   [400, 200, 100]);
-        assert_eq!(history.sessions.iter().map(|row| row.duration().unwrap().get())
-                       .sum::<i64>(), 285);
+        assert_eq!(
+            history
+                .sessions
+                .iter()
+                .map(|row| row.started_at())
+                .collect::<Vec<_>>(),
+            [400, 200, 100]
+        );
+        assert_eq!(
+            history
+                .sessions
+                .iter()
+                .map(|row| row.duration().unwrap().get())
+                .sum::<i64>(),
+            285
+        );
         assert_eq!(history.reported.len(), 1);
         assert_eq!(history.reported[0].0, steam);
         assert_eq!(history.reported[0].1.get(), 30_000);
@@ -1171,10 +1259,17 @@ mod tests {
             .expect("report");
 
         let source_id = SourceId::new("steam").expect("source");
-        let session = repository.begin_play_session(
-            game_id, &source_id, 100, SessionTrackingMethod::SourceRuntime,
-        ).expect("observed session");
-        repository.complete_play_session(session, 160).expect("completed");
+        let session = repository
+            .begin_play_session(
+                game_id,
+                &source_id,
+                100,
+                SessionTrackingMethod::SourceRuntime,
+            )
+            .expect("observed session");
+        repository
+            .complete_play_session(session, 160)
+            .expect("completed");
         let overview = repository.activity_overview(8, 4).expect("overview");
         assert_eq!(overview.observed_playtime().get(), 60);
         assert_eq!(overview.completed_sessions(), 1);
@@ -1198,35 +1293,62 @@ mod tests {
             [game_id.get()],
         ).expect("additional source");
         for (source, seconds) in [("steam", 7200), ("heroic", 1800)] {
-            repository.upsert_source_lifetime_playtime(&SourceLifetimePlaytime::new(
-                game_id, SourceId::new(source).unwrap(),
-                PlaytimeSeconds::new(seconds).unwrap(), 123,
-            )).expect("provider report");
+            repository
+                .upsert_source_lifetime_playtime(&SourceLifetimePlaytime::new(
+                    game_id,
+                    SourceId::new(source).unwrap(),
+                    PlaytimeSeconds::new(seconds).unwrap(),
+                    123,
+                ))
+                .expect("provider report");
         }
-        let first = repository.begin_play_session(
-            game_id, &SourceId::new("steam").unwrap(), 100,
-            SessionTrackingMethod::SourceRuntime,
-        ).expect("session");
-        repository.complete_play_session(first, 160).expect("complete session");
+        let first = repository
+            .begin_play_session(
+                game_id,
+                &SourceId::new("steam").unwrap(),
+                100,
+                SessionTrackingMethod::SourceRuntime,
+            )
+            .expect("session");
+        repository
+            .complete_play_session(first, 160)
+            .expect("complete session");
         let rows = repository.library_sort_metrics().expect("sort metrics");
-        assert_eq!(rows.len(), 1, "multiple providers must not duplicate a game");
+        assert_eq!(
+            rows.len(),
+            1,
+            "multiple providers must not duplicate a game"
+        );
         let item = rows[0];
         assert_eq!(item.game_id, game_id);
         assert_eq!(item.last_played_at, Some(100));
         assert_eq!(item.observed_seconds, 60);
         assert_eq!(item.reported_seconds, Some(7200));
-        assert_eq!(item.time_played_seconds(), 7200, "never sum source and observed time");
+        assert_eq!(
+            item.time_played_seconds(),
+            7200,
+            "never sum source and observed time"
+        );
 
-        let no_report_id = repository.upsert_discovered_game(
-            &discovered("heroic", "20", "Without provider report")
-        ).expect("other game");
-        let fallback = repository.begin_play_session(
-            no_report_id, &SourceId::new("heroic").unwrap(), 200,
-            SessionTrackingMethod::SourceRuntime,
-        ).expect("fallback session");
-        repository.complete_play_session(fallback, 260).expect("complete fallback");
+        let no_report_id = repository
+            .upsert_discovered_game(&discovered("heroic", "20", "Without provider report"))
+            .expect("other game");
+        let fallback = repository
+            .begin_play_session(
+                no_report_id,
+                &SourceId::new("heroic").unwrap(),
+                200,
+                SessionTrackingMethod::SourceRuntime,
+            )
+            .expect("fallback session");
+        repository
+            .complete_play_session(fallback, 260)
+            .expect("complete fallback");
         let rows = repository.library_sort_metrics().expect("sort metrics");
-        let fallback = rows.iter().find(|item| item.game_id == no_report_id).unwrap();
+        let fallback = rows
+            .iter()
+            .find(|item| item.game_id == no_report_id)
+            .unwrap();
         assert_eq!(fallback.reported_seconds, None);
         assert_eq!(fallback.time_played_seconds(), 60);
     }
@@ -1259,7 +1381,10 @@ mod tests {
         let overview = repository.activity_overview(8, 4).expect("overview");
         assert_eq!(overview.recent_sessions()[0].title().as_str(), "Historical");
         assert_eq!(overview.observed_playtime().get(), 100);
-        assert!(overview.top_games().is_empty(), "uninstalled games are not Activity cover choices");
+        assert!(
+            overview.top_games().is_empty(),
+            "uninstalled games are not Activity cover choices"
+        );
     }
 
     #[test]
@@ -1272,20 +1397,29 @@ mod tests {
             (installed, "heroic", 1_100, 1_110),
         ] {
             let source = SourceId::new(source).expect("source");
-            let session = repository.begin_play_session(
-                game_id, &source, start, SessionTrackingMethod::SourceRuntime,
-            ).expect("begin session");
-            repository.complete_play_session(session, end).expect("end session");
+            let session = repository
+                .begin_play_session(
+                    game_id,
+                    &source,
+                    start,
+                    SessionTrackingMethod::SourceRuntime,
+                )
+                .expect("begin session");
+            repository
+                .complete_play_session(session, end)
+                .expect("end session");
         }
-        repository.synchronize_source_snapshot(
-            &SourceId::new("steam").expect("source"), &[], &[],
-        ).expect("uninstall retired game");
+        repository
+            .synchronize_source_snapshot(&SourceId::new("steam").expect("source"), &[], &[])
+            .expect("uninstall retired game");
 
         let overview = repository.activity_overview(6, 1).expect("overview");
         assert_eq!(overview.top_games().len(), 1);
         assert_eq!(overview.top_games()[0].game_id(), installed);
-        assert_eq!(overview.observed_playtime().get(), 910,
-            "the global observed total retains the retired game's history");
+        assert_eq!(
+            overview.observed_playtime().get(),
+            910,
+            "the global observed total retains the retired game's history"
+        );
     }
-
 }
