@@ -131,6 +131,8 @@ export component AchievementsPage inherits Rectangle {
             HeaderValue {
                 width: 190px; label: "Source"; value: root.source-label;
                 interactive: root.has-source-choice && !root.viewing-entries;
+                button: root.has-source-choice ? "LB" : "";
+                button2: root.has-source-choice ? "RB" : "";
                 opacity: 1.0 - root.detail-reveal;
                 clicked => { root.cycle-source(1); }
             }

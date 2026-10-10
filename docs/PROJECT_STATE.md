@@ -11,7 +11,8 @@ This page describes the **prepared source** assembled from the cleaned repositor
 - **Activity:** Horizon-observed totals, most-played imported games, recent playtime chart, and a per-game read-only session history; per-game screen Up/Down scrolls without focusing rows. The **Milestones** preview shows up to three recent *real Steam achievements*, not synthetic playtime goals.
 - **Achievements:** seventh Home utility after Activity; read-only Steam Web API achievement unlock states for eligible imported Steam games; list browsing and recent-unlocks preview. Now has source-aware game/achievement models, optional bounded Steam badge thumbnails, and a source selector; no other achievement provider, full offline cache, or comprehensive account sign-in flow yet.
 - **Settings:** appearance and third-party service configuration, including SteamGridDB and **Steam Account** under Third-Party. SteamID64 + personal Web API key can be stored in an app-private file with owner-only permissions; not encrypted or OAuth.
-- **Friends, Album, Web, Shop:** retained utility routes; do **not** infer production social, gallery, browser, or commerce integrations from their presence. Steam Friends is a **future intention**, not implemented.
+- **Album:** Horizon's own captures (`data/album/`, written by the future screenshot/recording features) and the active Steam account's screenshots, newest first, in a grid with Game and Type filters. A full-screen viewer slides between captures and plays videos through GStreamer. See [Album](ALBUM.md).
+- **Friends, Web, Shop:** retained utility routes; do **not** infer production social, browser, or commerce integrations from their presence. Steam Friends is a **future intention**, not implemented.
 
 ## Production source and data boundaries
 

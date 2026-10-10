@@ -5,6 +5,7 @@
 //! movement policy are owned by Rust.
 
 mod edge_step;
+pub mod grid;
 pub use edge_step::step_with_edge_wrap;
 
 /// Full-shell submenu pages opened from the seven top utility icons.

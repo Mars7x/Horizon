@@ -24,7 +24,7 @@ SDL3 / keyboard / pointer intent
 
 - **Home** owns the persistent utility row and shell chrome. Its established cover, focus and marquee geometry must not be redesigned when updating another route.
 - **Library** is a full-shell page with local Source/Sort controls and grid focus; it is *not* a second Home-header page.
-- **All seven utilities** occupy the full-shell destination, hiding Home's chrome. Achievements has its own route and view; Friends/Album/Web/Shop are retained as their existing placeholder destinations until explicitly implemented.
+- **All seven utilities** occupy the full-shell destination, hiding Home's chrome. Achievements and Album have their own views; Friends/Web/Shop are retained as their existing placeholder destinations until explicitly implemented. Album's viewer is page-local state: B closes it before route Back applies, as with Achievements' game view.
 - **Menu/Start opens Library**, using the same route as the Home Library tile (`NavigationController::handle_menu`). It is not currently a global modal overlay; older Phase 4 documentation describes a superseded menu design.
 
 The current `AppRoute::uses_shell_chrome()` returns true for **Home only**. Do not copy older docs asserting that Library also displays Home chrome.

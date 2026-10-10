@@ -4,6 +4,7 @@
 //! launcher-specific formats, or other infrastructure concerns.
 
 pub mod activity;
+pub mod album;
 pub mod library;
 
 pub use activity::{

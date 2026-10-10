@@ -20,10 +20,22 @@ utilities, footer) and is not changed by these rules. See
 ## Controller hints
 
 `page-hints` in `ui/app.slint` is the single mapping from page state to hints.
-It is display-only: it must mirror what the Rust handlers actually do
+It is display-only: it must not show anything the Rust handlers don't do
 (`NavigationController::handle_action`, `LibraryController::handle_action`,
-`SettingsController::handle_action`). Change both together. Buttons: A (Accept),
-B (Back), LB/RB (bumpers). A shared action can show two glyphs (`button2`). While a dialog is open the bar fades out with the page behind the backdrop; dialogs show their own focusable buttons.
+`SettingsController::handle_action`); change both together. The bar lists
+the page's actions (A, X, B), not D-pad movement, and not fullscreen
+shortcuts (Album's Left/Right browse and LB/RB skip).
+
+**Bumper pickers are not hints.** A value that LB/RB change (Library Source
+and Sort, Achievements Source, Album Game and Type) shows a compact glyph
+before its header label (`HeaderValue.button`, and `button2` for a value
+stepped both ways), so the button sits next to what it changes. Hints are also buttons: clicking one sends that
+button through the same Rust input path as a controller press (`hint-activated`
+→ `UiAction::from_hint`), so it does exactly what the controller would, for
+whatever is focused (Home's footer "A OK" included). A pair activates the
+glyph clicked and its label the first. A faded-out bar takes no clicks.
+Buttons: A (Accept), B (Back), X (`Secondary`; Album: Delete), LB/RB (only
+in headers). A shared action can show two glyphs (`button2`). While a dialog is open the bar fades out with the page behind the backdrop; dialogs show their own focusable buttons.
 
 ## Lists and surfaces
 
@@ -35,8 +47,8 @@ B (Back), LB/RB (bumpers). A shared action can show two glyphs (`button2`). Whil
   as children.
 - **Panels and read-only rows** (Activity panels, session history, achievement
   entries) are `Surface`: same colour, radius and border, never focusable.
-- **Game covers** get the Home corner-bracket `FocusFrame`; rows and buttons
-  get the outline. Never mix them.
+- **Game covers and media tiles** (Album captures) get the Home corner-bracket
+  `FocusFrame`; rows and buttons get the outline. Never mix them.
 
 ## Text
 
@@ -73,6 +85,24 @@ Every page and sub-page change uses one transition, built from
 - Offscreen review renders use Slint's software renderer, which ignores
   `transform-scale`: they show the fade but not the zoom. Check scaling in the
   real app.
+
+## Slide (between items of the same kind)
+
+Stepping between siblings shown one at a time (Album's viewer) slides
+instead of zooming. The next item enters from the side of the button
+pressed, and the current one leaves the other way, a gap apart. It is driven
+by `TransitionDriver` with the step count as its `key`, over
+`Motion.page-duration`. Reduced Motion makes it instant. Opening and closing
+such a viewer is not: Album's fullscreen viewer grows out of the selected
+tile and shrinks back into it (a shared-element transition).
+
+## Fullscreen media
+
+Album's viewer is the one exception to the page frame: the capture fills the
+window on black, with no header or bottom bar. Its title, details, timeline
+and hints sit on top/bottom gradients that fade three seconds after the last
+input (`overlay-revision`, bumped by Rust on every viewer action). The hint
+bar draws in its `on-dark` style there.
 
 ## Motion
 

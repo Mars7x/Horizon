@@ -14,6 +14,9 @@ pub enum UiAction {
     Home,
     LeftBumper,
     RightBumper,
+    /// The X (west) face button, or Delete on a keyboard. Pages give it a
+    /// meaning; the Album uses it to delete.
+    Secondary,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +50,19 @@ impl UiAction {
         matches!(self, Self::Back | Self::Menu | Self::Home)
     }
 
+    /// The button a clicked on-screen hint stands for (`HintBar` glyph names).
+    /// Clicking a hint is that controller press, nothing more.
+    pub fn from_hint(button: &str) -> Option<Self> {
+        Some(match button {
+            "A" => Self::Accept,
+            "B" => Self::Back,
+            "LB" => Self::LeftBumper,
+            "RB" => Self::RightBumper,
+            "X" => Self::Secondary,
+            _ => return None,
+        })
+    }
+
     /// Only directional navigation is repeated when a keyboard key is held.
     /// Actions that activate or leave a screen require a fresh press.
     pub const fn repeatable(self) -> bool {
@@ -74,6 +90,16 @@ mod tests {
         assert!(!UiAction::Back.repeatable());
         assert!(!UiAction::Menu.repeatable());
         assert!(!UiAction::Home.repeatable());
+    }
+
+    #[test]
+    fn hints_map_to_the_buttons_they_show() {
+        assert_eq!(UiAction::from_hint("A"), Some(UiAction::Accept));
+        assert_eq!(UiAction::from_hint("B"), Some(UiAction::Back));
+        assert_eq!(UiAction::from_hint("LB"), Some(UiAction::LeftBumper));
+        assert_eq!(UiAction::from_hint("RB"), Some(UiAction::RightBumper));
+        assert_eq!(UiAction::from_hint("X"), Some(UiAction::Secondary));
+        assert_eq!(UiAction::from_hint("Y"), None);
     }
 
     #[test]

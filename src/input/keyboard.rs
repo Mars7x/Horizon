@@ -22,6 +22,8 @@ pub fn action_for_key(text: &str, repeated: bool) -> Option<UiAction> {
         UiAction::Menu
     } else if key_matches(text, Key::Home) {
         UiAction::Home
+    } else if key_matches(text, Key::Delete) {
+        UiAction::Secondary
     } else {
         return None;
     };
@@ -79,6 +81,15 @@ mod tests {
             action_for_key(encoded(Key::Home).as_str(), false),
             Some(UiAction::Home)
         );
+    }
+
+    #[test]
+    fn delete_is_the_secondary_button() {
+        assert_eq!(
+            action_for_key(encoded(Key::Delete).as_str(), false),
+            Some(UiAction::Secondary)
+        );
+        assert_eq!(action_for_key(encoded(Key::Delete).as_str(), true), None);
     }
 
     #[test]

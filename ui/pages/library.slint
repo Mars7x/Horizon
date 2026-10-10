@@ -136,12 +136,12 @@ export component LibraryPage inherits Rectangle {
             HeaderValue { width: 130px; label: "Collection"; value: root.count-text; }
             HeaderValue {
                 width: 160px; label: "Source"; value: root.filter-text;
-                interactive: true;
+                interactive: true; button: "LB";
                 clicked => { root.cycle-filter(); }
             }
             HeaderValue {
                 width: 180px; label: "Sort"; value: root.sort-text;
-                interactive: true;
+                interactive: true; button: "RB";
                 clicked => { root.cycle-sort(); }
             }
         }

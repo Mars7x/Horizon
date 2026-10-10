@@ -9,6 +9,8 @@ import { ActivityCoverData, ActivityDayData, ActivityHistoryRowData } from "mode
 import { AchievementGameData, AchievementEntryData } from "models/achievements.slint";
 export { AchievementGameData, AchievementEntryData }
 export { ActivityCoverData, ActivityDayData, ActivityHistoryRowData }
+import { AlbumTileData } from "models/album.slint";
+export { AlbumTileData }
 
 import { AppRouteView } from "models/navigation.slint";
 export { AppRouteView }
@@ -23,6 +25,7 @@ import { HomePage } from "pages/home.slint";
 import { LibraryPage } from "pages/library.slint";
 import { ActivityPage } from "pages/activity.slint";
 import { AchievementsPage } from "pages/achievements.slint";
+import { AlbumPage } from "pages/album.slint";
 import { ActivityGameDetailsPage } from "pages/activity-game-details.slint";
 import { SettingsPage } from "pages/settings.slint";
 import { UtilitySubmenuPage } from "pages/utility.slint";
@@ -87,18 +90,37 @@ export component AppWindow inherits Window {
         && root.transition-from-route != AppRouteView.home;
     // Controller hints per page state. Keep in step with the Rust handlers.
     private property <[HintData]> page-hints:
+        // Bumper pickers are shown beside their header values, not here.
         root.current-route == AppRouteView.library ? (root.library-total-count > 0
-            ? [{ button: "A", label: "Play" }, { button: "LB", label: "Source" },
-               { button: "RB", label: "Sort" }, { button: "B", label: "Back" }]
-            : [{ button: "LB", label: "Source" }, { button: "RB", label: "Sort" },
-               { button: "B", label: "Back" }])
+            ? [{ button: "A", label: "Play" }, { button: "B", label: "Back" }]
+            : [{ button: "B", label: "Back" }])
         : root.current-route == AppRouteView.activity ? (root.activity-details-visible
             ? [{ button: "B", label: "Back" }]
             : [{ button: "A", label: "Details" }, { button: "B", label: "Back" }])
         : root.current-route == AppRouteView.achievements ? (root.achievements-viewing-entries
             ? [{ button: "B", label: "Back" }]
-            : [{ button: "A", label: "Open" }, { button: "LB", button2: "RB", label: "Source" },
-               { button: "B", label: "Back" }])
+            : [{ button: "A", label: "Open" }, { button: "B", label: "Back" }])
+        // Fullscreen: Left/Right browse and LB/RB skip 10 s are not listed.
+        : root.current-route == AppRouteView.album ? (root.album-viewing
+            ? (root.album-viewer-is-video
+                ? (root.album-can-delete
+                    ? [{ button: "A", label: root.album-viewer-playing ? "Pause" : "Play" },
+                       { button: "X", label: "Delete" }, { button: "B", label: "Back" }]
+                    : [{ button: "A", label: root.album-viewer-playing ? "Pause" : "Play" },
+                       { button: "B", label: "Back" }])
+                : (root.album-can-delete
+                    ? [{ button: "X", label: "Delete" }, { button: "B", label: "Back" }]
+                    : [{ button: "B", label: "Back" }]))
+            : root.album-selecting
+            ? (root.album-selected-count > 0
+                ? [{ button: "A", label: "Select" }, { button: "X", label: "Delete" },
+                   { button: "B", label: "Done" }]
+                : [{ button: "A", label: "Select" }, { button: "B", label: "Done" }])
+            : root.album-total-count == 0 ? [{ button: "B", label: "Back" }]
+            : root.album-has-deletable
+            ? [{ button: "A", label: "View" }, { button: "X", label: "Delete" },
+               { button: "B", label: "Back" }]
+            : [{ button: "A", label: "View" }, { button: "B", label: "Back" }])
         : root.current-route == AppRouteView.settings
             ? [{ button: "A", label: "Select" }, { button: "B", label: "Back" }]
         : [{ button: "B", label: "Back" }];
@@ -194,6 +216,63 @@ export component AppWindow inherits Window {
     callback achievements-select(int);
     callback achievements-scroll-entries(int);
     callback achievements-back();
+    // Album: Rust owns the captures, order, selection and decoding; the page
+    // reports its grid shape back.
+    in property <[AlbumTileData]> album-tiles;
+    in property <int> album-total-count: 0;
+    in property <int> album-collection-count: 0;
+    in property <string> album-status: "";
+    in property <string> album-count-text: "0 captures";
+    in property <string> album-game-text: "All games";
+    in property <string> album-kind-text: "All";
+    in property <int> album-selected-index: 0;
+    in property <int> album-scroll-row: 0;
+    in property <int> album-visit-revision: 0;
+    in property <string> album-selected-text: "";
+    in property <bool> album-viewing: false;
+    in property <string> album-viewer-text: "";
+    in property <image> album-viewer-image;
+    in property <bool> album-viewer-has-image: false;
+    in property <image> album-viewer-previous-image;
+    in property <bool> album-viewer-previous-has-image: false;
+    in property <image> album-viewer-landing-image;
+    in property <bool> album-viewer-landing-has-image: false;
+    in property <int> album-slide-key: 0;
+    in property <int> album-slide-direction: 1;
+    in property <bool> album-viewer-is-video: false;
+    in property <bool> album-viewer-playing: false;
+    in property <string> album-viewer-problem: "";
+    // Deleting (Horizon's own captures only). `selecting` is the grid's
+    // multi-select; the dialog confirms. Focus is Rust-owned.
+    in property <bool> album-selecting: false;
+    in property <int> album-selected-count: 0;
+    in property <bool> album-can-delete: false;
+    in property <bool> album-has-deletable: false;
+    in property <bool> album-dialog-open: false;
+    in property <string> album-dialog-title: "";
+    in property <string> album-dialog-text: "";
+    in property <int> album-dialog-focus: 0;
+    callback album-dialog-choose(int);
+    // Video clock: position at the last anchor; Slint advances it per frame.
+    in property <int> album-video-position-ms: 0;
+    in property <int> album-video-duration-ms: 0;
+    in property <int> album-video-anchor: 0;
+    in property <bool> album-video-clock-running: false;
+    // Bumped by Rust on every viewer input: shows the fullscreen overlay.
+    in property <int> album-overlay-revision: 0;
+    out property <int> album-grid-columns: album-page.grid-columns;
+    out property <int> album-visible-rows: album-page.visible-rows;
+    callback album-choose(int);
+    callback album-cycle-game();
+    callback album-cycle-kind();
+    callback album-scroll-rows(int);
+    callback album-step(int);
+    callback album-toggle-play();
+    callback album-seek(float);
+    callback album-close-viewer();
+    callback album-layout-changed();
+    // Invoked by Rust (from the event loop) when decoded media is waiting.
+    callback album-media-ready();
     in-out property <int> activity-pressed-index: -1;
     out property <bool> activity-reduced-motion: Motion.reduced-motion;
     in property <bool> activity-details-visible: false;
@@ -284,6 +363,9 @@ export component AppWindow inherits Window {
     // Internal programmatic/pointer focus changes must not change SDL ownership.
     callback application-active-changed(bool);
     callback raw-key-input(string, bool) -> bool;
+    // A clicked hint ("A", "B", "LB", "RB", "Left", "Right"): Rust runs it
+    // as that controller button.
+    callback hint-activated(string);
     callback raw-key-released(string) -> bool;
 
     changed settings-editing-key => {
@@ -447,11 +529,55 @@ export component AppWindow inherits Window {
                 outgoing: root.current-route != AppRouteView.album
                     && root.transition-from-route == AppRouteView.album;
 
-                UtilitySubmenuPage {
+                album-page := AlbumPage {
                     width: parent.width;
                     height: parent.height;
-                    title: "Album";
-                    description: "Screenshots and captured media will appear here.";
+                    active: root.current-route == AppRouteView.album;
+                    tiles: root.album-tiles;
+                    total-count: root.album-total-count;
+                    collection-count: root.album-collection-count;
+                    status: root.album-status;
+                    count-text: root.album-count-text;
+                    game-text: root.album-game-text;
+                    kind-text: root.album-kind-text;
+                    selected-index: root.album-selected-index;
+                    scroll-row: root.album-scroll-row;
+                    visit-revision: root.album-visit-revision;
+                    selected-text: root.album-selected-text;
+                    viewing: root.album-viewing;
+                    viewer-text: root.album-viewer-text;
+                    viewer-image: root.album-viewer-image;
+                    viewer-has-image: root.album-viewer-has-image;
+                    viewer-previous-image: root.album-viewer-previous-image;
+                    viewer-previous-has-image: root.album-viewer-previous-has-image;
+                    viewer-landing-image: root.album-viewer-landing-image;
+                    viewer-landing-has-image: root.album-viewer-landing-has-image;
+                    slide-key: root.album-slide-key;
+                    slide-direction: root.album-slide-direction;
+                    viewer-is-video: root.album-viewer-is-video;
+                    viewer-playing: root.album-viewer-playing;
+                    viewer-problem: root.album-viewer-problem;
+                    overlay-revision: root.album-overlay-revision;
+                    selecting: root.album-selecting;
+                    can-delete: root.album-can-delete;
+                    dialog-open: root.album-dialog-open;
+                    dialog-title: root.album-dialog-title;
+                    dialog-text: root.album-dialog-text;
+                    dialog-focus: root.album-dialog-focus;
+                    dialog-choose(choice) => { if (root.current-route == AppRouteView.album) { root.album-dialog-choose(choice); } }
+                    video-position-ms: root.album-video-position-ms;
+                    video-duration-ms: root.album-video-duration-ms;
+                    video-anchor: root.album-video-anchor;
+                    video-clock-running: root.album-video-clock-running;
+                    choose(index) => { if (root.current-route == AppRouteView.album) { root.album-choose(index); } }
+                    cycle-game => { if (root.current-route == AppRouteView.album) { root.album-cycle-game(); } }
+                    cycle-kind => { if (root.current-route == AppRouteView.album) { root.album-cycle-kind(); } }
+                    scroll-rows(rows) => { if (root.current-route == AppRouteView.album) { root.album-scroll-rows(rows); } }
+                    step(direction) => { if (root.current-route == AppRouteView.album) { root.album-step(direction); } }
+                    toggle-play => { if (root.current-route == AppRouteView.album) { root.album-toggle-play(); } }
+                    seek(fraction) => { if (root.current-route == AppRouteView.album) { root.album-seek(fraction); } }
+                    close-viewer => { if (root.current-route == AppRouteView.album) { root.album-close-viewer(); } }
+                    layout-changed => { root.album-layout-changed(); }
                 }
             }
 
@@ -653,9 +779,15 @@ export component AppWindow inherits Window {
                 // out with the page behind the dialog's dimmed backdrop.
                 opacity: root.current-route == AppRouteView.home || root.route-phase < 3
                     || (root.current-route == AppRouteView.settings
-                        && (root.settings-refresh-open || root.settings-editing-key)) ? 0.0 : 1.0;
+                        && (root.settings-refresh-open || root.settings-editing-key))
+                    || (root.current-route == AppRouteView.album && (root.album-dialog-open
+                        || (root.album-viewing && !album-page.overlay-shown))) ? 0.0 : 1.0;
                 animate opacity { duration: Motion.page-duration; easing: ease-in-out; }
                 hints: root.page-hints;
+                interactive: self.opacity > 0.5;
+                activated(button) => { root.hint-activated(button); }
+                // Album's fullscreen viewer: hints sit on its dark overlay.
+                on-dark: root.current-route == AppRouteView.album && root.album-viewing;
             }
 
             // Persistent top chrome lives outside every page. Later Phase 4
@@ -714,6 +846,7 @@ export component AppWindow inherits Window {
                 connected-controller-count: root.connected-controller-count;
                 clock-time: root.clock-time;
                 clock-suffix: root.clock-suffix;
+                hint-activated(button) => { root.hint-activated(button); }
             }
 
         }

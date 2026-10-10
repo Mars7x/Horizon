@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc, time::Duration};
+use std::{cell::RefCell, rc::Rc, sync::Arc, time::Duration};
 
 use slint::{ComponentHandle, Timer, TimerMode};
 use tracing::{info, warn};
@@ -17,6 +17,7 @@ use crate::{
         session_helper::DbusManagedSessionExecutor,
         slint_backend,
         system_status::{StatusMonitor, SystemStatus},
+        video::GstVideo,
     },
     presentation::{
         achievements::AchievementsController,
@@ -24,6 +25,7 @@ use crate::{
             ActivityController, ActivityDetailsActions, ActivityDetailsController,
             ActivityShowcaseController,
         },
+        album::AlbumController,
         appearance::AppearanceController,
         clock::ClockController,
         home::HomeController,
@@ -34,6 +36,7 @@ use crate::{
     services::{
         achievements::ACHIEVEMENTS_CACHE_VERSION,
         activity::{ActivityService, ActivitySessionTransition, LaunchActivitySink},
+        album::{ALBUM_CACHE_VERSION, NoVideo, VideoBackend},
         artwork::{self, ArtworkService},
         import::{SourceImportOutcome, SourceImportService},
         launch::GameLaunchService,
@@ -44,7 +47,7 @@ use crate::{
         source_playtime::SourcePlaytimeSync,
         steam_account::SteamAccountService,
     },
-    sources::production_source_registry,
+    sources::{production_capture_sources, production_source_registry},
 };
 
 const APP_ID: &str = "io.github.Mars7x.Horizon";
@@ -225,6 +228,7 @@ pub fn run() -> Result<(), AppError> {
     let launch_activity: Rc<dyn LaunchActivitySink> = activity_service.clone();
     let library_catalog = library_games.clone();
     let achievements_catalog = library_games.clone();
+    let album_catalog = library_games.clone();
     let recent_ids = activity_service.recent_game_ids(HOME_RECENT_LIMIT)?;
     let home = HomeController::new(
         &ui,
@@ -380,6 +384,29 @@ pub fn run() -> Result<(), AppError> {
         settings,
     );
     navigation.set_achievements(achievements, &ui);
+    let video: Arc<dyn VideoBackend> = match GstVideo::new() {
+        Ok(video) => Arc::new(video),
+        Err(error) => {
+            warn!(%error, "video playback unavailable; Album lists videos without playing them");
+            Arc::new(NoVideo(error))
+        }
+    };
+    let capture_sources = production_capture_sources().unwrap_or_else(|error| {
+        warn!(%error, "capture sources unavailable; Album shows Horizon's own captures only");
+        Vec::new()
+    });
+    let album_dir = data_paths::album_dir()
+        .inspect_err(|error| warn!(%error, "Horizon capture folder unavailable"))
+        .ok();
+    let album = AlbumController::new(
+        &ui,
+        &album_catalog,
+        album_dir,
+        capture_sources,
+        data_paths::album_cache_dir(ALBUM_CACHE_VERSION),
+        video,
+    );
+    navigation.set_album(Rc::clone(&album), &ui);
     navigation.set_activity_details(Rc::clone(&activity_details));
     // Prepare Activity synchronously on navigation, before PageTransitionLayer
     // exposes it. Do not depend on the 3-second recents refresh after entry.
@@ -418,8 +445,8 @@ pub fn run() -> Result<(), AppError> {
         // Snapshot semantic focus, not raw key presses: blocked directions and
         // unchanged focus should never make a navigation cue. OK/Back are
         // emitted by the semantic menu handlers; game launching stays silent.
-        // Keep each snapshot half below Rust's 12-element PartialEq tuple limit.
-        // Comparing both halves still detects changes in every focus field.
+        // Keep each snapshot part below Rust's 12-element PartialEq tuple limit.
+        // Comparing every part still detects changes in every focus field.
         let before = (
             (
                 ui.get_current_route(),
@@ -438,6 +465,12 @@ pub fn run() -> Result<(), AppError> {
                 ui.get_achievements_selected_index(),
                 ui.get_achievements_first_entry(),
                 ui.get_achievements_viewing_entries(),
+            ),
+            (
+                ui.get_album_selected_index(),
+                ui.get_album_slide_key(),
+                ui.get_album_viewing(),
+                ui.get_album_dialog_focus(),
             ),
         );
         action_navigation.handle_action(&ui, event);
@@ -459,6 +492,12 @@ pub fn run() -> Result<(), AppError> {
                 ui.get_achievements_selected_index(),
                 ui.get_achievements_first_entry(),
                 ui.get_achievements_viewing_entries(),
+            ),
+            (
+                ui.get_album_selected_index(),
+                ui.get_album_slide_key(),
+                ui.get_album_viewing(),
+                ui.get_album_dialog_focus(),
             ),
         );
         if matches!(
@@ -482,6 +521,15 @@ pub fn run() -> Result<(), AppError> {
         *status_controller.borrow_mut() = status;
         if let Some(ui) = status_ui.upgrade() {
             StatusController::publish(&ui, *status_host.borrow(), status);
+        }
+    });
+
+    // Clicking an on-screen hint is exactly that controller press: same
+    // handlers, focus rules and sounds.
+    let hint_sink = Rc::clone(&action_sink);
+    ui.on_hint_activated(move |button| {
+        if let Some(action) = UiAction::from_hint(button.as_str()) {
+            hint_sink(UiActionEvent::fresh(action));
         }
     });
 
@@ -511,6 +559,7 @@ pub fn run() -> Result<(), AppError> {
     let activation_input = Rc::clone(&input);
     let activation_home = Rc::clone(&home);
     let activation_activity = Rc::clone(&activity_service);
+    let activation_album = Rc::clone(&album);
     let activation_ui = ui.as_weak();
     ui.on_application_active_changed(move |active| {
         activation_input.set_ui_input_enabled(active);
@@ -530,6 +579,7 @@ pub fn run() -> Result<(), AppError> {
 
         if let Some(ui) = activation_ui.upgrade() {
             activation_home.handle_application_active_changed(&ui, active);
+            activation_album.handle_application_active_changed(&ui, active);
 
             if matches!(activity_transition, ActivitySessionTransition::Completed(_)) {
                 match activation_activity.overview(
@@ -711,6 +761,7 @@ pub fn run() -> Result<(), AppError> {
     let _source_registry = registry;
     let _clock = clock;
     let _achievements_poll = achievements_poll;
+    let _album = album;
     let _artwork_timer = artwork_timer;
     let _navigation = navigation;
     let _library_controller = library_controller;

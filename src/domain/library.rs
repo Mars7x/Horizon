@@ -118,7 +118,7 @@ impl Game {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SourceGameRef {
     source_id: SourceId,
     external_id: ExternalGameId,
