@@ -1,0 +1,53 @@
+import { Theme, Metrics, Typography } from "../theme/theme.slint";
+import { HintData } from "../models/hints.slint";
+
+// Button glyph in the same style as Home's footer "A": filled foreground
+// shape, letter in the background colour. Face buttons are circles,
+// shoulder buttons are pills.
+component ButtonGlyph inherits Rectangle {
+    in property <string> button;
+    private property <bool> shoulder: root.button.character-count > 1;
+    width: root.shoulder ? 34px : 22px;
+    height: 22px;
+    border-radius: 11px;
+    background: Theme.foreground;
+    Text {
+        text: root.button;
+        color: Theme.background;
+        font-size: root.shoulder ? 11px : 12px;
+        font-weight: Typography.emphasis-weight;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+// Right-aligned controller hints shown in every full-screen page's bottom bar.
+// Hints are display-only labels for what Rust's input handlers do; the
+// mapping from page state to hints lives in one place (app.slint).
+export component HintBar inherits Rectangle {
+    in property <[HintData]> hints;
+    background: transparent;
+    HorizontalLayout {
+        alignment: end;
+        spacing: Metrics.spacing-lg;
+        for hint in root.hints : HorizontalLayout {
+            spacing: Metrics.spacing-sm;
+            alignment: start;
+            VerticalLayout {
+                alignment: center;
+                ButtonGlyph { button: hint.button; }
+            }
+            if hint.button2 != "" : VerticalLayout {
+                alignment: center;
+                ButtonGlyph { button: hint.button2; }
+            }
+            Text {
+                text: hint.label;
+                color: Theme.secondary-foreground;
+                font-size: Typography.caption-size;
+                font-weight: Typography.emphasis-weight;
+                vertical-alignment: center;
+            }
+        }
+    }
+}

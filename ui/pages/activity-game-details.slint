@@ -3,6 +3,9 @@ import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { GameCardData } from "../models/game-card.slint";
 import { ActivityHistoryRowData } from "../models/activity.slint";
 import { FallbackCover } from "../components/fallback-cover.slint";
+import { PageHeader, Breadcrumb, ScrollEdgeShadow } from "../components/page-header.slint";
+import { MarqueeText } from "../components/marquee-text.slint";
+import { Surface } from "../components/list-row.slint";
 
 // Nested Activity detail destination, not a new shell route. The history is
 // read-only and scrolls with Up/Down; no session row receives focus.
@@ -21,6 +24,8 @@ export component ActivityGameDetailsPage inherits Rectangle {
     in property <string> average-session;
     in property <[ActivityHistoryRowData]> rows;
     in property <int> session-count: 0;
+    // First history row currently in view (the window is Rust-owned).
+    in property <int> first-row: 0;
     callback back();
     callback scroll-history(int);
 
@@ -36,8 +41,11 @@ export component ActivityGameDetailsPage inherits Rectangle {
     private property <bool> split: root.width >= 1080px && root.height >= 620px;
     private property <length> inset: Metrics.page-margin;
     private property <length> content-width: max(1px, root.width - 2 * root.inset);
-    private property <length> cover-size: root.split ? 140px : 90px;
-    private property <length> hero-y: root.split ? 78px : 55px;
+    private property <length> cover-size: root.split ? 120px : 90px;
+    // Shared frame: page header, breadcrumb, then the game's hero.
+    private property <length> hero-y: Metrics.page-header-height + Metrics.breadcrumb-height + Metrics.spacing-sm;
+    // Everything below the hero is laid out from its bottom edge.
+    private property <length> below-hero: root.hero-y + root.cover-size;
     private property <length> gap: 24px;
     private property <length> summary-width: root.split
         ? min(510px, root.content-width * 0.43) : root.content-width;
@@ -46,26 +54,22 @@ export component ActivityGameDetailsPage inherits Rectangle {
     private property <length> history-width: root.split
         ? max(1px, root.content-width - root.summary-width - root.gap)
         : root.content-width;
-    private property <length> history-heading-y: root.split ? 265px : 270px;
-    private property <length> list-top: root.split ? 303px : 307px;
+    private property <length> history-heading-y: root.below-hero + (root.split ? 24px : 125px);
+    private property <length> list-top: root.history-heading-y + 38px;
     private property <length> row-height: root.split ? 70px : 56px;
-    private property <length> list-height: max(0px, root.height - root.list-top - 22px);
+    private property <length> list-height: max(0px, root.height - root.list-top - Metrics.page-bottom-bar-height);
     out property <int> visible-rows: max(1, Math.floor(
         root.list-height / root.row-height));
 
-    Text {
-        x: root.inset; y: root.split ? 17px : 8px;
-        width: min(230px, root.content-width); height: 31px;
-        text: "‹  Activity";
-        color: Theme.secondary-foreground;
-        font-size: Typography.body-size;
-        vertical-alignment: center;
-    }
-    TouchArea {
-        x: root.inset; y: root.split ? 10px : 2px;
-        width: 230px; height: 40px;
-        enabled: root.active;
-        clicked => { root.back(); }
+    // Same header as the Activity overview, so the title holds still while
+    // the two views crossfade.
+    PageHeader { width: parent.width; title: "Activity"; }
+    Breadcrumb {
+        x: root.inset; y: Metrics.page-header-height;
+        width: root.content-width;
+        section: "Activity";
+        page: root.game.title;
+        back => { if (root.active) { root.back(); } }
     }
 
     // A restrained hero with the exact same rounded cover shell as Library.
@@ -102,108 +106,98 @@ export component ActivityGameDetailsPage inherits Rectangle {
         width: max(1px, root.content-width - root.cover-size - 24px);
         height: root.cover-size;
         background: transparent;
-        Text {
+        MarqueeText {
             x: 0px; y: 0px;
             width: parent.width; height: root.split ? 47px : 35px;
-            text: root.game.title; overflow: elide;
-            color: Theme.foreground;
-            font-size: root.split ? Typography.title-size : Typography.heading-size;
-            font-weight: Typography.title-weight;
+            text: root.game.title;
+            active: root.active;
+            font-size: Typography.heading-size;
+            font-weight: Typography.heading-weight;
         }
-        Text {
+        MarqueeText {
             x: 0px; y: root.split ? 52px : 36px;
             width: parent.width; height: 24px;
             text: root.source-name;
-            color: Theme.secondary-foreground;
+            text-color: Theme.secondary-foreground;
             font-size: Typography.body-size;
-            overflow: elide;
         }
-        Text {
+        MarqueeText {
             x: 0px; y: root.split ? 92px : 66px;
             width: parent.width; height: 22px;
             text: "Last played  " + root.last-played;
-            color: Theme.secondary-foreground;
+            text-color: Theme.secondary-foreground;
             font-size: Typography.caption-size;
-            overflow: elide;
         }
     }
 
     // On wider windows two quiet stat sections balance the tall history list.
     // Compact windows use one compressed read-only summary above the list.
     Text {
-        x: root.inset; y: root.split ? 265px : 155px;
+        x: root.inset; y: root.below-hero + (root.split ? 24px : 10px);
         width: root.summary-width; height: 29px;
         text: "Playtime";
         color: Theme.foreground;
         font-size: Typography.heading-size;
         font-weight: Typography.heading-weight;
     }
-    Rectangle {
-        x: root.inset; y: root.split ? 303px : 188px;
+    Surface {
+        x: root.inset; y: root.below-hero + (root.split ? 62px : 43px);
         width: root.summary-width; height: root.split ? 124px : 69px;
-        background: Theme.surface;
-        border-radius: Metrics.radius-lg;
-        border-width: Theme.high-contrast ? 2px : 1px;
-        border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.40);
         Rectangle {
             x: 18px; y: 0px; width: (parent.width - 48px) / 2; height: parent.height;
             background: transparent;
-            Text {
+            MarqueeText {
+                edge-color: Theme.surface;
                 x: 0px; y: root.split ? 21px : 9px;
                 width: parent.width; height: 23px;
                 text: "Tracked by Horizon";
-                color: Theme.secondary-foreground;
+                text-color: Theme.secondary-foreground;
                 font-size: Typography.caption-size;
-                overflow: elide;
             }
-            Text {
+            MarqueeText {
+                edge-color: Theme.surface;
                 x: 0px; y: root.split ? 58px : 32px;
                 width: parent.width; height: 32px;
                 text: root.observed-time;
-                color: Theme.foreground;
+                text-color: Theme.foreground;
                 font-size: Typography.heading-size;
                 font-weight: Typography.heading-weight;
-                overflow: elide;
             }
         }
         Rectangle {
             x: parent.width / 2 + 8px;
             width: max(1px, parent.width / 2 - 26px);
             height: parent.height; background: transparent;
-            Text {
+            MarqueeText {
+                edge-color: Theme.surface;
                 x: 0px; y: root.split ? 21px : 9px;
                 width: parent.width; height: 23px;
                 text: root.provider-label;
-                color: Theme.secondary-foreground;
+                text-color: Theme.secondary-foreground;
                 font-size: Typography.caption-size;
-                overflow: elide;
             }
-            Text {
+            MarqueeText {
+                edge-color: Theme.surface;
                 x: 0px; y: root.split ? 58px : 32px;
                 width: parent.width; height: 32px;
                 text: root.provider-time;
-                color: Theme.foreground;
+                text-color: Theme.foreground;
                 font-size: Typography.heading-size;
                 font-weight: Typography.heading-weight;
-                overflow: elide;
             }
         }
     }
     if root.split : Text {
-        x: root.inset; y: 452px;
+        x: root.inset; y: root.below-hero + 211px;
         width: root.summary-width; height: 29px;
         text: "Session summary";
         color: Theme.foreground;
         font-size: Typography.heading-size;
         font-weight: Typography.heading-weight;
     }
-    if root.split : Rectangle {
-        x: root.inset; y: 489px;
+    if root.split : Surface {
+        x: root.inset; y: root.below-hero + 248px;
         width: root.summary-width; height: 105px;
-        background: Theme.surface;
-        border-radius: Metrics.radius-lg;
-        border-width: Theme.high-contrast ? 2px : 1px;
-        border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.40);
         Rectangle {
             x: 0px; width: parent.width / 3; height: parent.height;
             background: transparent;
@@ -212,10 +206,11 @@ export component ActivityGameDetailsPage inherits Rectangle {
                 text: "Recorded"; color: Theme.secondary-foreground;
                 font-size: Typography.caption-size;
             }
-            Text {
+            MarqueeText {
+                edge-color: Theme.surface;
                 x: 14px; y: 50px; width: parent.width - 28px; height: 32px;
-                text: root.sessions-summary; overflow: elide;
-                color: Theme.foreground; font-size: Typography.heading-size;
+                text: root.sessions-summary;
+                text-color: Theme.foreground; font-size: Typography.heading-size;
                 font-weight: Typography.heading-weight;
             }
         }
@@ -227,10 +222,11 @@ export component ActivityGameDetailsPage inherits Rectangle {
                 text: "Longest"; color: Theme.secondary-foreground;
                 font-size: Typography.caption-size;
             }
-            Text {
+            MarqueeText {
+                edge-color: Theme.surface;
                 x: 14px; y: 50px; width: parent.width - 28px; height: 32px;
-                text: root.longest-session; overflow: elide;
-                color: Theme.foreground; font-size: Typography.heading-size;
+                text: root.longest-session;
+                text-color: Theme.foreground; font-size: Typography.heading-size;
                 font-weight: Typography.heading-weight;
             }
         }
@@ -242,10 +238,11 @@ export component ActivityGameDetailsPage inherits Rectangle {
                 text: "Average"; color: Theme.secondary-foreground;
                 font-size: Typography.caption-size;
             }
-            Text {
+            MarqueeText {
+                edge-color: Theme.surface;
                 x: 14px; y: 50px; width: parent.width - 28px; height: 32px;
-                text: root.average-session; overflow: elide;
-                color: Theme.foreground; font-size: Typography.heading-size;
+                text: root.average-session;
+                text-color: Theme.foreground; font-size: Typography.heading-size;
                 font-weight: Typography.heading-weight;
             }
         }
@@ -261,15 +258,14 @@ export component ActivityGameDetailsPage inherits Rectangle {
         font-size: Typography.heading-size;
         font-weight: Typography.heading-weight;
     }
-    Text {
+    MarqueeText {
         x: root.history-x + root.history-width * 0.64;
         y: root.history-heading-y + 4px;
         width: root.history-width * 0.36; height: 23px;
         text: root.sessions-summary;
-        color: Theme.secondary-foreground;
+        text-color: Theme.secondary-foreground;
         font-size: Typography.caption-size;
         horizontal-alignment: right;
-        overflow: elide;
     }
     Rectangle {
         x: root.history-x; y: root.list-top;
@@ -294,51 +290,60 @@ export component ActivityGameDetailsPage inherits Rectangle {
             color: Theme.secondary-foreground;
             font-size: Typography.body-size;
         }
-        for record[index] in root.rows : Rectangle {
+        // Read-only and unfocusable: the shared surface, no focus ring.
+        for record[index] in root.rows : Surface {
             y: index * root.row-height;
             width: parent.width;
-            height: root.row-height - 8px;
-            border-radius: Metrics.radius-lg;
-            background: Theme.surface;
-            border-width: Theme.high-contrast ? 2px : 1px;
-            border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.45);
-            Text {
+            height: root.row-height - Metrics.list-row-gap;
+            MarqueeText {
+                edge-color: Theme.surface;
                 x: 16px; y: root.split ? 9px : 4px;
                 width: parent.width * 0.61 - 16px; height: 24px;
                 text: record.date;
-                color: Theme.foreground;
+                text-color: Theme.foreground;
                 font-size: Typography.body-size;
-                overflow: elide;
             }
-            Text {
+            MarqueeText {
+                edge-color: Theme.surface;
                 x: 16px; y: root.split ? 34px : 27px;
                 width: parent.width * 0.61 - 16px; height: 22px;
                 text: record.times;
-                color: Theme.secondary-foreground;
+                text-color: Theme.secondary-foreground;
                 font-size: Typography.caption-size;
-                overflow: elide;
             }
-            Text {
+            MarqueeText {
+                edge-color: Theme.surface;
                 x: parent.width * 0.63;
                 y: root.split ? 10px : 5px;
                 width: parent.width * 0.33; height: 24px;
                 text: record.duration;
-                color: Theme.foreground;
+                text-color: Theme.foreground;
                 font-size: Typography.body-size;
                 font-weight: Typography.emphasis-weight;
                 horizontal-alignment: right;
-                overflow: elide;
             }
-            Text {
+            MarqueeText {
+                edge-color: Theme.surface;
                 x: parent.width * 0.63;
                 y: root.split ? 34px : 27px;
                 width: parent.width * 0.33; height: 22px;
                 text: record.status;
-                color: Theme.secondary-foreground;
+                text-color: Theme.secondary-foreground;
                 font-size: Typography.caption-size;
                 horizontal-alignment: right;
-                overflow: elide;
             }
         }
+    }
+    // Elevation only while sessions are hidden above or below the window.
+    if root.session-count > 0 : ScrollEdgeShadow {
+        x: root.history-x; y: root.list-top;
+        width: root.history-width;
+        strength: root.first-row > 0 ? 1.0 : 0.0;
+    }
+    if root.session-count > 0 : ScrollEdgeShadow {
+        x: root.history-x; y: root.list-top + root.list-height - self.height;
+        width: root.history-width;
+        bottom: true;
+        strength: root.first-row + root.visible-rows < root.session-count ? 1.0 : 0.0;
     }
 }

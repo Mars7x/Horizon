@@ -17,6 +17,8 @@ import { TopNavigation } from "components/top-navigation.slint";
 
 import { PageTransitionLayer } from "components/page-transition-layer.slint";
 import { Footer } from "components/footer.slint";
+import { HintBar } from "components/hint-bar.slint";
+import { HintData } from "models/hints.slint";
 import { HomePage } from "pages/home.slint";
 import { LibraryPage } from "pages/library.slint";
 import { ActivityPage } from "pages/activity.slint";
@@ -68,6 +70,23 @@ export component AppWindow inherits Window {
     // changes keep a single outgoing crossfade instead of accumulating several
     // half-visible retained pages.
     in property <AppRouteView> transition-from-route: AppRouteView.home;
+    // Controller hints per page state. Keep in step with the Rust handlers.
+    private property <[HintData]> page-hints:
+        root.current-route == AppRouteView.library ? (root.library-total-count > 0
+            ? [{ button: "A", label: "Play" }, { button: "LB", label: "Source" },
+               { button: "RB", label: "Sort" }, { button: "B", label: "Back" }]
+            : [{ button: "LB", label: "Source" }, { button: "RB", label: "Sort" },
+               { button: "B", label: "Back" }])
+        : root.current-route == AppRouteView.activity ? (root.activity-details-visible
+            ? [{ button: "B", label: "Back" }]
+            : [{ button: "A", label: "Details" }, { button: "B", label: "Back" }])
+        : root.current-route == AppRouteView.achievements ? (root.achievements-viewing-entries
+            ? [{ button: "B", label: "Back" }]
+            : [{ button: "A", label: "Open" }, { button: "LB", button2: "RB", label: "Source" },
+               { button: "B", label: "Back" }])
+        : root.current-route == AppRouteView.settings
+            ? [{ button: "A", label: "Select" }, { button: "B", label: "Back" }]
+        : [{ button: "B", label: "Back" }];
     in property <bool> top-utilities-focused: false;
     in property <int> focused-utility-index: 2;
 
@@ -442,6 +461,7 @@ export component AppWindow inherits Window {
                     width: parent.width;
                     height: parent.height;
                     active: root.activity-details-visible;
+                    first-row: root.activity-detail-first-row;
                     game: root.activity-detail-game;
                     source-name: root.activity-detail-source;
                     last-played: root.activity-detail-last-played;
@@ -578,6 +598,25 @@ export component AppWindow inherits Window {
                     title: "Shop";
                     description: "The Horizon shop will appear here in a later phase.";
                 }
+            }
+
+            // One hint bar for every full-screen page, at the same position.
+            // Display-only: these labels mirror what Rust's input handlers do
+            // for the current page state (see NavigationController and the
+            // page controllers). Update both together.
+            HintBar {
+                x: Metrics.page-margin;
+                y: parent.height - Metrics.page-bottom-bar-height;
+                width: parent.width - Metrics.page-margin * 2;
+                height: Metrics.page-bottom-bar-height;
+                visible: root.current-route != AppRouteView.home;
+                z: 2;
+                // Dialogs carry their own focusable buttons; the bar fades
+                // out with the page behind the dialog's dimmed backdrop.
+                opacity: root.current-route == AppRouteView.settings
+                    && (root.settings-refresh-open || root.settings-editing-key) ? 0.0 : 1.0;
+                animate opacity { duration: Motion.page-duration; easing: ease-in-out; }
+                hints: root.page-hints;
             }
 
             // Persistent top chrome lives outside every page. Later Phase 4

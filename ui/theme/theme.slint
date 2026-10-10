@@ -46,6 +46,23 @@ export global Metrics {
     out property <length> design-height: 720px;
     out property <length> top-edge-inset: 28px;
 
+    // Shared full-screen page frame (every page except Home). One title-only
+    // header at a fixed position, content from page-header-height down, and a
+    // bottom bar: page context on the left, controller hints on the right.
+    out property <length> page-title-y: 20px;
+    out property <length> page-title-height: 48px;
+    out property <length> page-header-height: 88px;
+    out property <length> page-bottom-bar-height: 64px;
+    // Header accessories (Source/Sort pickers) sit on the title row, right side.
+    out property <length> page-accessory-height: 52px;
+    out property <length> page-accessory-y: page-title-y + (page-title-height - page-accessory-height) / 2;
+    // Sub-pages open with a "Section  /  Page" breadcrumb at the content top.
+    out property <length> breadcrumb-height: 26px;
+    // Every focusable list row (Settings, Achievements) shares one height.
+    out property <length> list-row-height: 84px;
+    out property <length> list-row-gap: 8px;
+    out property <length> scroll-edge-shadow-height: 11px;
+
     // Persistent top-utility geometry. Navigation uses these same values when
     // comparing rendered center-to-center distances across focus regions.
     out property <length> utility-cell-size: 40px;
@@ -107,6 +124,8 @@ export global Typography {
     out property <length> heading-size: 22px;
     out property <length> body-size: 16px;
     out property <length> caption-size: 13px;
+    // Small label above a header value ("Source", "Sort", "Last 7 days").
+    out property <length> label-size: 11px;
     out property <length> clock-size: 49px;
     out property <length> clock-suffix-size: 12px;
     out property <length> cover-mark-size: 36px;
@@ -157,4 +176,10 @@ export global Motion {
     out property <duration> carousel-duration: reduced-motion ? 0ms : 190ms;
     out property <duration> page-duration: reduced-motion ? 0ms : 220ms;
     out property <duration> hover-duration: reduced-motion ? 0ms : 100ms;
+    // Changing values (picker labels, counts, the selected game's name) slide
+    // and crossfade over this one duration on every page.
+    out property <duration> value-swap-duration: reduced-motion ? 0ms : 180ms;
+    // Held-direction list cameras: linear and slightly under the 115ms input
+    // repeat, so consecutive steps join into one continuous movement.
+    out property <duration> list-camera-duration: reduced-motion ? 0ms : 110ms;
 }

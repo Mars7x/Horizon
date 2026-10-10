@@ -3,145 +3,9 @@ import { FallbackCover } from "../components/fallback-cover.slint";
 import { FocusFrame } from "../components/focus-frame.slint";
 import { ActivityCoverData, ActivityDayData } from "../models/activity.slint";
 import { AchievementEntryData } from "../models/achievements.slint";
-
-// Matches Home's selected title pacing: 2s hold, distance-sensitive linear
-// travel, 2.4s end hold, then an invisible reset. Short titles never move.
-// Long titles remain clipped without an ellipsis for all tiles, selected or
-// not. Only the selected title runs the Home-paced marquee; static titles
-// use the same right-edge fade as the beginning of the selected marquee.
-component ActivityCoverTitle inherits Rectangle {
-    in property <string> title;
-    in property <bool> selected: false;
-    background: transparent;
-    private property <length> natural-width: text-measure.preferred-width;
-    private property <bool> overflows: root.natural-width > root.width;
-    private property <length> distance: root.overflows
-        ? root.natural-width - root.width + 4px : 0px;
-    private property <duration> travel-duration:
-        root.distance <= 16px ? 650ms :
-        root.distance <= 32px ? 850ms :
-        root.distance <= 56px ? 1100ms :
-        root.distance <= 90px ? 1450ms :
-        root.distance <= 140px ? 1900ms :
-        root.distance <= 200px ? 2500ms : 3100ms;
-    private property <length> offset: 0px;
-    private property <bool> animate-travel: false;
-    private property <bool> animate-fade: false;
-    private property <float> text-opacity: 1.0;
-    private property <bool> fade-left: root.offset > 3px;
-    private property <bool> fade-right: root.offset < root.distance - 3px;
-    clip: true;
-
-    function restart() {
-        delay.stop(); travel.stop(); end-pause.stop(); fade-out.stop(); fade-in.stop();
-        root.animate-travel = false;
-        root.animate-fade = false;
-        root.offset = 0px;
-        root.text-opacity = 1.0;
-        if root.selected && root.overflows && !Motion.reduced-motion { delay.start(); }
-    }
-    init => { root.restart(); }
-    changed selected => { root.restart(); }
-    changed title => { root.restart(); }
-    changed width => { root.restart(); }
-    changed overflows => { root.restart(); }
-    text-measure := Text {
-        text: root.title;
-        font-family: Typography.family;
-        font-size: Typography.body-size;
-        font-weight: Typography.emphasis-weight;
-        opacity: 0.0;
-    }
-    Rectangle {
-        width: parent.width; height: parent.height;
-        background: transparent;
-        clip: true;
-        Text {
-            x: -root.offset;
-            y: 0px;
-            width: root.overflows ? root.natural-width : parent.width;
-            height: parent.height;
-            text: root.title;
-            overflow: clip;
-            color: Theme.foreground;
-            font-family: Typography.family;
-            font-size: Typography.body-size;
-            font-weight: Typography.emphasis-weight;
-            opacity: root.text-opacity;
-            animate opacity {
-                enabled: root.animate-fade && !Motion.reduced-motion;
-                duration: root.text-opacity < 0.5 ? 140ms : 180ms;
-                easing: ease-in-out;
-            }
-        }
-        // Same stationary edge treatment as the established Home marquee.
-        // This avoids segmented glyph slices (which previously produced seams).
-        if root.overflows && root.selected && root.fade-left : Rectangle {
-            x: 0px; width: min(19px, parent.width / 6); height: parent.height;
-            background: @linear-gradient(90deg,
-                Theme.background 0%, Theme.background.with-alpha(0.72) 35%,
-                transparent 100%);
-        }
-        if root.overflows && root.fade-right : Rectangle {
-            x: parent.width - self.width;
-            width: min(19px, parent.width / 6); height: parent.height;
-            background: @linear-gradient(90deg,
-                transparent 0%, Theme.background.with-alpha(0.72) 65%,
-                Theme.background 100%);
-        }
-    }
-    animate offset {
-        enabled: root.animate-travel && !Motion.reduced-motion;
-        duration: root.travel-duration;
-        easing: linear;
-    }
-    delay := Timer {
-        interval: 2s;
-        running: false;
-        triggered => {
-            self.stop();
-            if root.selected && root.overflows && !Motion.reduced-motion {
-                root.animate-travel = true;
-                root.offset = root.distance;
-                travel.start();
-            }
-        }
-    }
-    travel := Timer {
-        interval: root.travel-duration;
-        running: false;
-        triggered => { self.stop(); end-pause.start(); }
-    }
-    end-pause := Timer {
-        interval: 2.4s;
-        running: false;
-        triggered => {
-            self.stop();
-            if root.selected && root.overflows && !Motion.reduced-motion {
-                root.animate-fade = true; root.text-opacity = 0.0;
-                fade-out.start();
-            }
-        }
-    }
-    fade-out := Timer {
-        interval: 140ms;
-        running: false;
-        triggered => {
-            self.stop(); root.animate-travel = false;
-            root.offset = 0px;
-            root.text-opacity = 1.0;
-            fade-in.start();
-        }
-    }
-    fade-in := Timer {
-        interval: 180ms;
-        running: false;
-        triggered => {
-            self.stop(); root.animate-fade = false;
-            if root.selected && root.overflows && !Motion.reduced-motion { delay.start(); }
-        }
-    }
-}
+import { PageHeader, HeaderValue } from "../components/page-header.slint";
+import { MarqueeText } from "../components/marquee-text.slint";
+import { Surface } from "../components/list-row.slint";
 
 // Phase 10.3.0: one controller focus region, shared cover/focus design from
 // Home, and two quiet informational panels. Recent unlocks are Steam-derived.
@@ -198,56 +62,27 @@ export component ActivityPage inherits Rectangle {
     private property <length> camera-offset: min(
         root.first-visible * root.card-stride,
         max(0px, root.strip-width - root.covers-width));
-    private property <length> covers-top: root.height < 630px ? 157px : 175px;
+    private property <length> covers-top: Metrics.page-header-height + (root.height < 630px ? 69px : 87px);
     // The lower sections always begin after BOTH caption lines, with a
     // comfortable 28px separation, even when focus enlarges the cover.
     private property <length> panels-top: root.covers-top + root.cover-label-top
         + 36px + 20px + 28px;
     private property <length> panels-gap: 18px;
     private property <length> panel-width: (root.width - Metrics.page-margin * 2 - root.panels-gap) / 2;
-    private property <length> panels-height: max(150px, root.height - root.panels-top - 25px);
+    private property <length> panels-height: max(150px, root.height - root.panels-top - Metrics.page-bottom-bar-height);
 
-    Text {
-        x: Metrics.page-margin; y: 12px;
-        text: "Activity";
-        color: Theme.foreground;
-        font-size: Typography.title-size;
-        font-weight: Typography.title-weight;
-    }
-    Text {
-        x: Metrics.page-margin; y: 61px;
-        text: "Your play history";
-        color: Theme.secondary-foreground;
-        font-size: Typography.caption-size;
-    }
-
-    // Read-only period totals. No focusable statistic cards or giant counters.
-    Rectangle {
-        x: root.width - Metrics.page-margin - 346px;
-        y: 22px; width: 164px; height: 55px;
-        background: transparent;
-        Text {
-            text: "Last 7 days"; y: 0px; width: parent.width;
-            color: Theme.secondary-foreground; font-size: Typography.caption-size;
-        }
-        Text {
-            text: root.week-total; y: 23px; width: parent.width; height: 28px;
-            color: Theme.foreground; font-size: Typography.body-size;
-            font-weight: Typography.emphasis-weight; overflow: elide;
-        }
-    }
-    Rectangle {
-        x: root.width - Metrics.page-margin - 166px;
-        y: 22px; width: 166px; height: 55px;
-        background: transparent;
-        Text {
-            text: "This month"; y: 0px; width: parent.width;
-            color: Theme.secondary-foreground; font-size: Typography.caption-size;
-        }
-        Text {
-            text: root.month-total; y: 23px; width: parent.width; height: 28px;
-            color: Theme.foreground; font-size: Typography.body-size;
-            font-weight: Typography.emphasis-weight; overflow: elide;
+    // Read-only period totals on the header row; never focus targets.
+    PageHeader {
+        width: parent.width;
+        title: "Activity";
+        HorizontalLayout {
+            width: 170px * 2 + Metrics.spacing-sm;
+            x: parent.width - Metrics.page-margin - self.width + Metrics.spacing-sm + 2px;
+            y: Metrics.page-accessory-y;
+            height: Metrics.page-accessory-height;
+            spacing: Metrics.spacing-sm;
+            HeaderValue { width: 170px; label: "Last 7 days"; value: root.week-total; }
+            HeaderValue { width: 170px; label: "This month"; value: root.month-total; }
         }
     }
 
@@ -361,11 +196,12 @@ export component ActivityPage inherits Rectangle {
                     opacity: parent.selected ? 1.0 : 0.0;
                     animate opacity { duration: Motion.focus-duration; easing: ease-in-out; }
                 }
-                ActivityCoverTitle {
+                MarqueeText {
                     x: 1px; y: root.cover-label-top;
                     width: parent.width - 2px; height: 25px;
-                    title: cover.game.title;
-                    selected: parent.selected && root.focus-visible;
+                    text: cover.game.title;
+                    active: parent.selected && root.focus-visible;
+                    font-weight: Typography.emphasis-weight;
                 }
                 Text {
                     x: 1px; y: root.cover-label-top + 36px;
@@ -385,13 +221,9 @@ export component ActivityPage inherits Rectangle {
     }
 
     // One restrained chart and a source-neutral preview of verified recent unlocks.
-    Rectangle {
+    Surface {
         x: Metrics.page-margin; y: root.panels-top;
         width: root.panel-width; height: root.panels-height;
-        background: Theme.surface;
-        border-radius: Metrics.radius-lg;
-        border-width: Theme.high-contrast ? 2px : 1px;
-        border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.48);
         clip: true;
         Text {
             x: 19px; y: 13px; text: "Playtime";
@@ -434,13 +266,9 @@ export component ActivityPage inherits Rectangle {
         }
     }
 
-    Rectangle {
+    Surface {
         x: Metrics.page-margin + root.panel-width + root.panels-gap;
         y: root.panels-top; width: root.panel-width; height: root.panels-height;
-        background: Theme.surface;
-        border-radius: Metrics.radius-lg;
-        border-width: Theme.high-contrast ? 2px : 1px;
-        border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.48);
         clip: true;
         Text {
             x: 19px; y: 13px; text: "Milestones";
@@ -455,10 +283,11 @@ export component ActivityPage inherits Rectangle {
             font-size: Typography.body-size;
             wrap: word-wrap;
         }
+        // As many whole unlocks as fit below the panel heading (max three).
         for achievement[i] in root.recent-achievements : Rectangle {
-            x: 18px; y: 54px + i * 72px;
-            width: parent.width - 36px; height: 66px;
-            visible: i < (root.panels-height < 200px ? 1 : root.panels-height < 279px ? 2 : 3);
+            x: 18px; y: 52px + i * 66px;
+            width: parent.width - 36px; height: 64px;
+            visible: i < 3 && 52px + (i + 1) * 66px <= root.panels-height - 4px;
             background: transparent;
             Rectangle {
                 x: 0px; y: 5px; width: 54px; height: 54px;
@@ -473,30 +302,32 @@ export component ActivityPage inherits Rectangle {
                 if !achievement.has-badge : Text {
                     x: 0px; y: 0px;
                     width: parent.width; height: parent.height;
-                    text: "★";
+                    // Same placeholder as Achievements: never a fake badge.
+                    text: "◇";
                     color: Theme.accent;
                     font-size: 27px;
                     vertical-alignment: center;
                     horizontal-alignment: center;
                 }
             }
-            Text {
+            MarqueeText {
                 x: 67px; y: 5px; width: parent.width - 70px; height: 24px;
                 text: achievement.title;
-                overflow: elide; color: Theme.foreground;
-                font-size: Typography.body-size;
+                edge-color: Theme.surface;
                 font-weight: Typography.emphasis-weight;
             }
-            Text {
+            MarqueeText {
                 x: 67px; y: 29px; width: parent.width - 70px; height: 19px;
                 text: achievement.game + " · " + achievement.provider;
-                overflow: elide; color: Theme.secondary-foreground;
+                edge-color: Theme.surface;
+                text-color: Theme.secondary-foreground;
                 font-size: Typography.caption-size;
             }
-            Text {
+            MarqueeText {
                 x: 67px; y: 48px; width: parent.width - 70px; height: 16px;
                 text: achievement.when;
-                overflow: elide; color: Theme.secondary-foreground;
+                edge-color: Theme.surface;
+                text-color: Theme.secondary-foreground;
                 font-size: Typography.caption-size;
             }
         }
