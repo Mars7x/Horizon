@@ -22,7 +22,7 @@ If the exact asset license cannot be established, it must be marked as a release
 
 ## SVG artwork
 
-The six top-utility icons (Friends, Album, Activity, Web, Settings, and Shop) are Horizon-owned artwork supplied by the project owner. They are stored as SVG files in `ui/assets/` and rendered directly by Slint. Their authored paths, fills, strokes, filters, and colors are not transcribed or recolored at runtime.
+The original six top-utility icons (Friends, Album, Activity, Web, Settings, and Shop) are Horizon-owned artwork supplied by the project owner. The seventh Achievements utility uses the project-owner-supplied `gold-milestones.svg` trophy artwork, stored unchanged as `ui/assets/gold-achievements.svg`. It is not third-party artwork. They are stored as SVG files in `ui/assets/` and rendered directly by Slint. Their authored paths, fills, strokes, filters, and colors are not transcribed or recolored at runtime.
 
 The application icon at `data/io.github.Mars7x.Horizon.svg` is also Horizon-owned artwork supplied by the project owner and is covered by the project-owned REUSE annotation.
 

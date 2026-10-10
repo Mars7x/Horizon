@@ -1,5 +1,8 @@
 # Activity and playtime
 
+> **Current-state guide:** The sections below include chronological implementation notes beginning in Phase 8. The present Activity overview shows Horizon-observed totals, most-played imported games, a weekly chart, and an unfocusable read-only per-game session history. Its **Milestones** area now previews up to three recent **real provider-attributed achievement unlocks**, currently from Steam, with Steam badge artwork when available and a neutral fallback, not artificial Horizon playtime challenges; see [ACHIEVEMENTS.md](ACHIEVEMENTS.md). Steam lifetime and Horizon-observed session time must never be added.
+
+
 Phase 8 adds Horizon's first durable play-history model and replaces the Activity placeholder with persisted data.
 
 ## Two different kinds of playtime
@@ -252,6 +255,13 @@ playtime after Horizon's last proof of life. With a five-second cadence the
 normal loss window is less than one interval, subject to filesystem/storage
 durability. SQLite synchronous mode is explicitly `FULL` for these commits.
 
+If a session is interrupted before any checkpoint after its start (for example
+the game or launcher is lost within the first interval), its duration is
+**unknown** (`ended_at` stays NULL), not zero. Game history shows it as
+*Unknown duration*; it adds nothing to Observed playtime, Most played, played
+game counts or Recent sessions. Earlier builds recorded such rows as 0 seconds;
+those existing rows are left as they are (no migration).
+
 
 ## Phase 9.5.44.46 — Heroic source lifetime
 
@@ -412,3 +422,25 @@ SQLite test helpers and regression coverage are kept runnable under `cargo test`
 
 No changes to Activity's UI, visual animation, session tracking, milestone
 placeholder, Home, or Library behavior are introduced by this hardening pass.
+
+## Phase 10.4.0 — Real Steam achievement preview
+
+The `Milestones` heading remains part of Activity's existing non-focusable
+information panel, but it no longer contains the inert `Coming later` text or
+Horizon-generated playtime challenges. Instead it lists up to **three most
+recent unlocked Steam achievements**, sorted by actual unlock timestamps from
+the read-only Steam achievements importer. An unconfigured or inaccessible
+Steam profile produces a truthful message instead of fake zero progress.
+
+The detailed achievements collection lives in the seventh top-level Home
+utility, **Achievements**, not inside per-game Activity session details.
+Horizon-observed session history, provider lifetime totals, charts, cover
+focus, and controllers are unchanged. See `docs/ACHIEVEMENTS.md`.
+
+## Phase 10.4.2 — Achievement badge preview
+
+The Milestones panel shows up to three recent real achievement unlocks. Each row reserves a 54 px badge slot and displays achievement name, game/source, and unlock date. Steam's official achievement schema provides artwork URLs where available; images are bounded/allowlisted and loaded asynchronously after the unlock records, so a missing/slow icon never prevents actual activity from appearing. Activity session history, observed playtime, provider lifetime values, and controller focus remain unchanged.
+
+## Phase 10.4.3.3 — Read-only session history mouse wheel (pending build verification)
+
+The individual-game Session history viewport now accepts mouse-wheel scrolling as well as controller/keyboard Up/Down. Neither path focuses or activates a session row. Bounds and virtualization remain managed by the existing Rust Activity details controller. The main Activity overview and Home are unchanged.

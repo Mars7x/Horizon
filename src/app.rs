@@ -19,6 +19,7 @@ use crate::{
         slint_backend,
     },
     presentation::{
+        achievements::AchievementsController,
         activity::{ActivityController, ActivityShowcaseController, ActivityDetailsController, ActivityDetailsActions}, appearance::AppearanceController, clock::ClockController,
         home::HomeController, navigation::NavigationController, settings::SettingsController,
         status::StatusController,
@@ -33,6 +34,7 @@ use crate::{
         source_playtime::SourcePlaytimeSync,
         session::{ManagedSessionExecutor, ManagedSessionTerminalState},
         settings::SettingsService,
+        steam_account::SteamAccountService,
     },
     sources::production_source_registry,
 };
@@ -210,6 +212,7 @@ pub fn run() -> Result<(), AppError> {
     let launch_service = Rc::new(launch_service);
     let launch_activity: Rc<dyn LaunchActivitySink> = activity_service.clone();
     let library_catalog = library_games.clone();
+    let achievements_catalog = library_games.clone();
     let recent_ids = activity_service.recent_game_ids(HOME_RECENT_LIMIT)?;
     let home = HomeController::new(
         &ui,
@@ -277,7 +280,11 @@ pub fn run() -> Result<(), AppError> {
 
     let settings_path = data_paths::third_party_settings_path()?;
     let settings_service = SettingsService::load(SettingsStore::new(settings_path))?;
-    let settings = SettingsController::new(&ui, settings_service, appearance.clone());
+    let steam_account = Rc::new(RefCell::new(
+        SteamAccountService::load(data_paths::steam_account_settings_path()?)
+            .map_err(|message| AppError::SteamAccount(message.to_owned()))?,
+    ));
+    let settings = SettingsController::new(&ui, settings_service, appearance.clone(), Rc::clone(&steam_account));
     let navigation_sound = Rc::new(RefCell::new(UiSounds::new(
         appearance.preferences().ui_sounds_enabled,
     )));
@@ -318,7 +325,20 @@ pub fn run() -> Result<(), AppError> {
             artwork_home.collect_steamgriddb_results(&ui);
         }
     });
+    let achievements = AchievementsController::new(&ui, &achievements_catalog, Rc::clone(&steam_account));
+    let achievement_updates = Rc::clone(&achievements);
+    let achievement_ui = ui.as_weak();
+    settings.set_steam_account_changed(Rc::new(move || {
+        if let Some(ui) = achievement_ui.upgrade() { achievement_updates.account_changed(&ui); }
+    }));
+    let achievements_poll = Timer::default();
+    let achievements_ui = ui.as_weak();
+    let achievements_worker = Rc::clone(&achievements);
+    achievements_poll.start(TimerMode::Repeated, Duration::from_millis(120), move || {
+        if let Some(ui) = achievements_ui.upgrade() { achievements_worker.poll(&ui); }
+    });
     let navigation = NavigationController::new(&ui, Rc::clone(&home), Rc::clone(&library_controller), settings);
+    navigation.set_achievements(achievements, &ui);
     navigation.set_activity_details(Rc::clone(&activity_details));
     // Prepare Activity synchronously on navigation, before PageTransitionLayer
     // exposes it. Do not depend on the 3-second recents refresh after entry.
@@ -355,22 +375,38 @@ pub fn run() -> Result<(), AppError> {
         // Snapshot semantic focus, not raw key presses: blocked directions and
         // unchanged focus should never make a navigation cue. OK/Back are
         // emitted by the semantic menu handlers; game launching stays silent.
+        // Keep each snapshot half below Rust's 12-element PartialEq tuple limit.
+        // Comparing both halves still detects changes in every focus field.
         let before = (
-            ui.get_current_route(), ui.get_selected_index(),
-            ui.get_top_utilities_focused(), ui.get_focused_utility_index(),
-            ui.get_settings_view(), ui.get_settings_selection(),
-            ui.get_settings_editor_target(), ui.get_library_selected_index(),
-            ui.get_library_filter_text(), ui.get_library_sort_text(),
-            ui.get_activity_selected_index(),
+            (
+                ui.get_current_route(), ui.get_selected_index(),
+                ui.get_top_utilities_focused(), ui.get_focused_utility_index(),
+                ui.get_settings_view(), ui.get_settings_selection(),
+                ui.get_settings_editor_target(),
+            ),
+            (
+                ui.get_library_selected_index(),
+                ui.get_library_filter_text(), ui.get_library_sort_text(),
+                ui.get_activity_selected_index(),
+                ui.get_achievements_selected_index(), ui.get_achievements_first_entry(),
+                ui.get_achievements_viewing_entries(),
+            ),
         );
         action_navigation.handle_action(&ui, event);
         let after = (
-            ui.get_current_route(), ui.get_selected_index(),
-            ui.get_top_utilities_focused(), ui.get_focused_utility_index(),
-            ui.get_settings_view(), ui.get_settings_selection(),
-            ui.get_settings_editor_target(), ui.get_library_selected_index(),
-            ui.get_library_filter_text(), ui.get_library_sort_text(),
-            ui.get_activity_selected_index(),
+            (
+                ui.get_current_route(), ui.get_selected_index(),
+                ui.get_top_utilities_focused(), ui.get_focused_utility_index(),
+                ui.get_settings_view(), ui.get_settings_selection(),
+                ui.get_settings_editor_target(),
+            ),
+            (
+                ui.get_library_selected_index(),
+                ui.get_library_filter_text(), ui.get_library_sort_text(),
+                ui.get_activity_selected_index(),
+                ui.get_achievements_selected_index(), ui.get_achievements_first_entry(),
+                ui.get_achievements_viewing_entries(),
+            ),
         );
         if matches!(event.action, UiAction::Up | UiAction::Down | UiAction::Left | UiAction::Right)
             && before != after {
@@ -617,12 +653,15 @@ pub fn run() -> Result<(), AppError> {
     ui.on_raw_key_input(move |text, repeated| {
         keyboard_input.handle_keyboard(text.as_str(), repeated)
     });
+    let keyboard_release = Rc::clone(&input);
+    ui.on_raw_key_released(move |text| keyboard_release.handle_keyboard_released(text.as_str()));
 
     // Keep services/timers/input managers alive for the full UI event loop.
     let _runtime_repository = runtime_repository;
     let _activity_service = activity_service;
     let _source_registry = registry;
     let _clock = clock;
+    let _achievements_poll = achievements_poll;
     let _artwork_timer = artwork_timer;
     let _navigation = navigation;
     let _library_controller = library_controller;

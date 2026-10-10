@@ -29,8 +29,8 @@ const ANALOG_ENTER_THRESHOLD: i32 = 18_000;
 const ANALOG_EXIT_THRESHOLD: i32 = 12_000;
 const ANALOG_INITIAL_REPEAT_DELAY: Duration = Duration::from_millis(300);
 const ANALOG_REPEAT_INTERVAL: Duration = Duration::from_millis(115);
-const DIGITAL_INITIAL_REPEAT_DELAY: Duration = Duration::from_millis(300);
-const DIGITAL_REPEAT_INTERVAL: Duration = Duration::from_millis(115);
+pub(super) const DIGITAL_INITIAL_REPEAT_DELAY: Duration = Duration::from_millis(300);
+pub(super) const DIGITAL_REPEAT_INTERVAL: Duration = Duration::from_millis(115);
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ControllerStatus {
@@ -482,11 +482,11 @@ fn poll_gamepad_events(
 
 
 pub const fn direction_for_button(button: &Button) -> Option<UiAction> {
-    match button {
-        &Button::DPadUp => Some(UiAction::Up),
-        &Button::DPadDown => Some(UiAction::Down),
-        &Button::DPadLeft => Some(UiAction::Left),
-        &Button::DPadRight => Some(UiAction::Right),
+    match *button {
+        Button::DPadUp => Some(UiAction::Up),
+        Button::DPadDown => Some(UiAction::Down),
+        Button::DPadLeft => Some(UiAction::Left),
+        Button::DPadRight => Some(UiAction::Right),
         _ => None,
     }
 }

@@ -1,138 +1,52 @@
-# Phase 4 navigation shell
+# Navigation — current route and focus policy
 
-Phase 4 turns Horizon's single-screen prototype into a controller-first application shell. Navigation policy stays in Rust; Slint renders the published route/focus state and animations.
+Navigation decisions are Rust-owned. The original Phase 4 routing architecture has since been expanded; treat the earlier Phase 4 ADRs as historical rationale, not a limit on today's features.
 
-## Ownership
+## Route ownership
 
 ```text
-keyboard / SDL3
-      │
-      ▼
- UiActionEvent
-      │
-      ▼
-NavigationController ──────────────► active page controller
-      │                                  │
-      ▼                                  ▼
-  Navigator                          HomeController
-      │                                  │
-      └────────────► Slint presentation state
-                         │
-                         ▼
-                   retained route layers
+SDL3 / keyboard / pointer intent
+              |
+         semantic UiAction
+              |
+ src/presentation/navigation.rs
+              |
+     src/navigation/mod.rs  -> route history / focus model
+              |
+    page-specific Rust controllers
+              |
+         ui/app.slint      -> visible retained route layers
 ```
 
-`src/navigation/` is UI-framework agnostic. It owns route identity, history, shell focus, and the six utility submenu identities. `src/presentation/navigation.rs` receives semantic actions, applies global Back/Home/Menu behavior, activates routes, restores route-local focus, and maps `AppRoute` to Slint's presentation-only `AppRouteView`.
+`src/navigation/mod.rs` defines `AppRoute::Home`, `AppRoute::Library` and `AppRoute::Utility(UtilityPage)`; the **seven** utility pages are, in order, **Friends, Album, Activity, Achievements, Web, Settings, Shop**. `TopUtility` and Slint must agree on these positions. The Rust controller alone decides route push/pop, focus restoration and global action handling.
 
-Slint never pushes/pops history or decides whether a header utility is a route.
+## Shell vs full-shell surfaces
 
-## Route model
+- **Home** owns the persistent utility row and shell chrome. Its established cover, focus and marquee geometry must not be redesigned when updating another route.
+- **Library** is a full-shell page with local Source/Sort controls and grid focus; it is *not* a second Home-header page.
+- **All seven utilities** occupy the full-shell destination, hiding Home's chrome. Achievements has its own route and view; Friends/Album/Web/Shop are retained as their existing placeholder destinations until explicitly implemented.
+- **Menu/Start opens Library**, using the same route as the Home Library tile (`NavigationController::handle_menu`). It is not currently a global modal overlay; older Phase 4 documentation describes a superseded menu design.
 
-`AppRoute` deliberately separates the persistent shell from the utility submenu family:
+The current `AppRoute::uses_shell_chrome()` returns true for **Home only**. Do not copy older docs asserting that Library also displays Home chrome.
 
-- `Home`
-- `Library`
-- `Utility(UtilityPage)`
+## Back, Home and route visits
 
-`UtilityPage` contains:
+- Back applies page-local Back behavior where supported (e.g. game Activity details to its overview, Achievements entries to game list, Settings subpage to parent), otherwise pops route history. At the root, Back does nothing.
+- Global Home clears navigation history and brings focus to the first Home game.
+- The navigation controller snapshots eligible route-local focus before changing routes and restores valid focus on Back. Full-shell routes cannot retain a hidden utility-row focus.
+- A **fresh** Activity visit starts on the first Most Played cover, but returning from an individual-game Activity details screen restores the same cover. Direct re-entry and route-history re-entry should agree; see Phase 10.3.3.
+- Input ownership is tied to Horizon window activation; SDL topology changes clear held repeat latches. Held directional navigation should respect edge-repeat behavior rather than wrapping continuously.
 
-- `Friends`
-- `Album`
-- `Activity`
-- `Web`
-- `Settings`
-- `Shop`
+## Motion and interaction
 
-This is a real navigation model, not a presentation workaround. Every top utility opens `AppRoute::Utility(...)`, participates in normal Back history, uses the same full-shell page treatment, and can later receive its own page controller without changing input adapters or inventing a second overlay path.
+- `ui/components/page-transition-layer.slint` owns the route crossfade/settle. Motion tokens in `ui/theme/theme.slint` control speed and Reduced Motion; source/outgoing route policy remains in Rust.
+- Retained outgoing layers are for visual interpolation, never alternate application-state stores. Pointer input must be gated so an inactive retained page cannot activate controls or leak a focus frame.
+- Pointer, keyboard and controller activation should share the page's semantic Rust behavior. Disabled placeholders must not become focusable merely because they are drawn.
+- Home focus brackets and cover scale are deliberate design references. For Library and Activity, the bracket gap must track the actual animated cover shell, not a static grid slot.
+- Do not make read-only Activity session-history rows or achievement entries selectable just to support scrolling; Up/Down can scroll their viewports without focus on each row.
 
-## History semantics
+## References
 
-`Navigator::navigate_to(route)` pushes the previous route before activating a new one. Navigating to the already-active route is a no-op.
-
-`Navigator::go_back()` restores the previous route. Back at the root is a no-op.
-
-`Navigator::go_home()` is stronger than normal navigation: it makes Home the root and clears all prior history. Global Home also restores Home content focus and selects the first game.
-
-## Shell composition
-
-`AppWindow` keeps every route layer instantiated so crossfades can overlap and presentation-only state can survive navigation.
-
-- Home and Library render inside the central bounds between the top navigation and footer.
-- Friends, Album, Activity, Web, Settings, and Shop render across the full logical surface.
-- Any utility submenu route hides both top navigation and footer immediately.
-- All six utility routes use the same reusable `UtilitySubmenuPage` presentation component during Phase 4.
-- The global shell Menu remains a separate modal surface above routes.
-
-Header status, clock, controller state, and footer controls remain shell-owned; utility pages do not duplicate them.
-
-### Home geometry preservation
-
-Home still subtracts `Metrics.top-chrome-height` from its internal scene origin because its routed host begins below the persistent header. This preserves the established title/carousel/focus geometry from the single-screen prototype.
-
-## Input invariants
-
-- SDL and keyboard adapters know only semantic `UiActionEvent` values.
-- Back, Home, and Menu are global actions handled before page-local dispatch.
-- Home carousel behavior remains owned by `HomeController`.
-- Utility submenu placeholders intentionally have no page-local actions yet.
-- Repeated global actions are ignored defensively even if an adapter misbehaves.
-
-## Utility-row focus
-
-The persistent shell has two Rust-owned focus regions: page content and the top utility row. This region switch is available only on routes that display shell chrome: Home and Library.
-
-On Home/Library:
-
-- Up enters the utility row.
-- Down returns to content.
-- Left/Right move across Friends, Album, Activity, Web, Settings, and Shop and clamp at the ends.
-- Accept opens the selected utility submenu route.
-
-On Home, vertical transfer uses rendered center geometry and reciprocal anchors. Moving from a game to a utility and immediately reversing direction returns to the exact originating game; horizontal movement invalidates that temporary pair.
-
-Only one focus region renders selection chrome at a time. While the utility row owns focus, Home keeps its selected game logically but hides game scale, focus brackets, title/connector, z-raise, and selected shadow.
-
-## Route-local focus restoration
-
-Each route has a durable `FocusSnapshot`. Home/Library may remember content or top-utility focus. Every `Utility(...)` route is full-shell and therefore always saves/restores as content focus while preserving the corresponding utility identity.
-
-Before navigation, `NavigationController` saves the source route snapshot. After navigation or Back, it restores the destination snapshot. Temporary Home game↔utility transfer anchors never cross a route boundary.
-
-Example: opening Web from Home saves Home's utility-row focus, opens `Utility(Web)` with content focus, and Back restores the previous Home focus state.
-
-## Global Back / Home / Menu
-
-Back priority is now simple:
-
-1. close the global shell Menu if open;
-2. otherwise pop route history;
-3. otherwise no-op at the root.
-
-There is no separate utility-overlay modal path. Friends, Album, Activity, Web, Settings, and Shop all use the same routed submenu semantics.
-
-Menu toggles the global shell Menu without changing route history or route-local focus. Home closes the Menu, clears route history, activates Home, forces Home content focus, and selects the first Home game.
-
-## Reduced-motion-aware page transitions
-
-Each route is hosted by a reusable `PageTransitionLayer`. Route changes use the centralized 220 ms crossfade plus `Metrics.page-transition-offset` vertical settle. Home/Library use central bounds; all six utility submenu routes use the full logical surface.
-
-Top/footer chrome does not animate with routes. It disappears immediately when a utility route becomes active and returns immediately when Home/Library becomes active. The global shell Menu remains above route layers.
-
-Retained inactive pages cannot receive pointer input. Route-specific selection visuals must also be gated by route activity, so an outgoing Home page cannot flash focus chrome while fading.
-
-Reduced Motion uses the same navigation path: `Motion.page-duration` becomes `0ms`, making the route presentation update immediately.
-
-## Phase 4.7 shell hardening
-
-Phase 4.7 keeps the route model unchanged and hardens its failure/stress cases:
-
-- Rust publishes the immediate transition source route alongside the active route, so rapid navigation permits exactly one outgoing crossfade. Older outgoing retained pages are hidden immediately instead of stacking several partially visible surfaces.
-- `RouteFocusMemory` normalizes snapshots at its own boundary. Full-shell utility routes can never persist hidden top-row focus even if a future caller passes an invalid snapshot.
-- deep and rapidly changing route histories are covered by pure Rust stress tests; Back must unwind exactly in reverse order and global Home must clear the entire history.
-- responsive geometry guards transient zero-sized compositor surfaces and never produces a negative central content height.
-
-The current utility-route decision is documented by ADR 0035, which supersedes the transient-overlay portion of ADR 0030. Phase 4.7 hardening is documented by ADR 0036 and `SHELL_HARDENING.md`.
-
-## Next phase
-
-Phase 5 introduces the domain model and SQLite persistence. Shell behavior established through Phase 4.7 should remain stable while real library data is introduced.
+- `src/navigation/mod.rs`, `src/presentation/navigation.rs`, `ui/app.slint`
+- [INPUT.md](INPUT.md), [HOME_UI.md](HOME_UI.md), [LIBRARY.md](LIBRARY.md), [ACTIVITY.md](ACTIVITY.md), [ACHIEVEMENTS.md](ACHIEVEMENTS.md)
+- Historical route/focus ADRs 0028–0036 and later Phase 9.5/10 refinements under [adr/](adr/)

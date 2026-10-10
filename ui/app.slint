@@ -6,6 +6,8 @@ export { GameCardData }
 import { LibraryCardData } from "models/library.slint";
 export { LibraryCardData }
 import { ActivityCoverData, ActivityDayData, ActivityHistoryRowData } from "models/activity.slint";
+import { AchievementGameData, AchievementEntryData } from "models/achievements.slint";
+export { AchievementGameData, AchievementEntryData }
 export { ActivityCoverData, ActivityDayData, ActivityHistoryRowData }
 
 import { AppRouteView } from "models/navigation.slint";
@@ -18,6 +20,7 @@ import { Footer } from "components/footer.slint";
 import { HomePage } from "pages/home.slint";
 import { LibraryPage } from "pages/library.slint";
 import { ActivityPage } from "pages/activity.slint";
+import { AchievementsPage } from "pages/achievements.slint";
 import { ActivityGameDetailsPage } from "pages/activity-game-details.slint";
 import { SettingsPage } from "pages/settings.slint";
 import { UtilitySubmenuPage } from "pages/utility.slint";
@@ -120,6 +123,30 @@ export component AppWindow inherits Window {
     in property <string> activity-week-total: "0 min";
     in property <string> activity-month-total: "0 min";
     in property <int> activity-selected-index: 0;
+    in property <[AchievementEntryData]> activity-recent-achievements;
+    in property <string> activity-achievement-status: "Connect Steam achievements in the Achievements utility";
+    in property <string> achievements-game-count: "0 games";
+    in property <string> achievements-source-label: "All sources";
+    in property <bool> achievements-has-source-choice: false;
+    in property <string> achievements-selected-game-title: "Select a game";
+    in property <string> achievements-selected-game-provider: "";
+    in property <string> achievements-selected-game-progress: "";
+    in property <float> achievements-selected-game-fraction: 0;
+    callback achievements-cycle-source(int);
+    in property <[AchievementGameData]> achievement-games;
+    in property <[AchievementEntryData]> achievement-entries;
+    in property <string> achievements-status: "Connect Steam to display achievements.";
+    in property <bool> achievements-loading: false;
+    in property <bool> achievements-saved-data: false;
+    in property <int> achievements-selected-index: 0;
+    in property <int> achievements-visit-revision: 0;
+    in property <int> achievements-catalog-revision: 0;
+    in property <int> achievements-first-entry: 0;
+    in property <bool> achievements-viewing-entries: false;
+    out property <int> achievements-visible-entries: achievements-page.visible-entries;
+    callback achievements-select(int);
+    callback achievements-scroll-entries(int);
+    callback achievements-back();
     in-out property <int> activity-pressed-index: -1;
     out property <bool> activity-reduced-motion: Motion.reduced-motion;
     in property <bool> activity-details-visible: false;
@@ -137,6 +164,7 @@ export component AppWindow inherits Window {
     in property <int> activity-detail-first-row: 0;
     out property <int> activity-detail-visible-rows: activity-details-page.visible-rows;
     callback activity-detail-layout-changed();
+    callback activity-detail-scroll(int);
 
 
 
@@ -148,6 +176,10 @@ export component AppWindow inherits Window {
     in property <bool> settings-ui-sounds-enabled: true;
 
     in property <bool> settings-key-present: false;
+    in property <string> settings-steam-identity: "Not configured";
+    in property <bool> settings-steam-connected: false;
+    in property <bool> settings-steam-saved: false;
+    in property <int> settings-editor-kind: 0;
     in property <bool> settings-prefer-artwork: false;
     in property <bool> settings-editing-key: false;
     in property <int> settings-editor-target: 0;
@@ -205,6 +237,7 @@ export component AppWindow inherits Window {
     // Internal programmatic/pointer focus changes must not change SDL ownership.
     callback application-active-changed(bool);
     callback raw-key-input(string, bool) -> bool;
+    callback raw-key-released(string) -> bool;
 
     changed settings-editing-key => {
         if (!root.settings-editing-key) { input-scope.focus(); }
@@ -247,6 +280,10 @@ export component AppWindow inherits Window {
                 } else {
                     reject
                 }
+            }
+
+            key-released(event) => {
+                if (root.raw-key-released(event.text)) { accept } else { reject }
             }
 
             // Only Home occupies the centre between its persistent chrome.
@@ -329,7 +366,7 @@ export component AppWindow inherits Window {
                 }
             }
 
-            // All six top utilities are real full-shell submenu routes. They
+            // All seven top utilities are durable full-shell submenu routes. They
             // share one page component and normal Navigator history semantics.
             PageTransitionLayer {
                 x: 0px;
@@ -380,6 +417,8 @@ export component AppWindow inherits Window {
                     days: root.activity-days;
                     week-total: root.activity-week-total;
                     month-total: root.activity-month-total;
+                    recent-achievements: root.activity-recent-achievements;
+                    achievement-status: root.activity-achievement-status;
                     selected-index: root.activity-selected-index;
                     pressed-index: root.activity-pressed-index;
                     details-open: root.activity-details-visible;
@@ -414,7 +453,55 @@ export component AppWindow inherits Window {
                     average-session: root.activity-detail-average;
                     rows: root.activity-detail-rows;
                     session-count: root.activity-detail-session-count;
+                    scroll-history(direction) => {
+                        if (root.current-route == AppRouteView.activity && root.activity-details-visible) {
+                            root.activity-detail-scroll(direction);
+                        }
+                    }
                     back => { root.activity-detail-back(); }
+                }
+            }
+
+            PageTransitionLayer {
+                x: 0px;
+                width: parent.width;
+                height: parent.height;
+                active: root.current-route == AppRouteView.achievements;
+                outgoing: root.current-route != AppRouteView.achievements
+                    && root.transition-from-route == AppRouteView.achievements;
+
+                achievements-page := AchievementsPage {
+                    width: parent.width;
+                    height: parent.height;
+                    game-count: root.achievements-game-count;
+                    source-label: root.achievements-source-label;
+                    has-source-choice: root.achievements-has-source-choice;
+                    selected-game-title: root.achievements-selected-game-title;
+                    selected-game-provider: root.achievements-selected-game-provider;
+                    selected-game-progress: root.achievements-selected-game-progress;
+                    selected-game-fraction: root.achievements-selected-game-fraction;
+                    games: root.achievement-games;
+                    entries: root.achievement-entries;
+                    selected-index: root.achievements-selected-index;
+                    visit-revision: root.achievements-visit-revision;
+                    catalog-revision: root.achievements-catalog-revision;
+                    first-entry: root.achievements-first-entry;
+                    viewing-entries: root.achievements-viewing-entries;
+                    status: root.achievements-status;
+                    loading: root.achievements-loading;
+                    showing-saved-data: root.achievements-saved-data;
+                    choose-game(index) => {
+                        if (root.current-route == AppRouteView.achievements) { root.achievements-select(index); }
+                    }
+                    scroll-entries(delta) => {
+                        if (root.current-route == AppRouteView.achievements) { root.achievements-scroll-entries(delta); }
+                    }
+                    cycle-source(direction) => {
+                        if (root.current-route == AppRouteView.achievements) { root.achievements-cycle-source(direction); }
+                    }
+                    close-details() => {
+                        if (root.current-route == AppRouteView.achievements) { root.achievements-back(); }
+                    }
                 }
             }
 
@@ -452,6 +539,10 @@ export component AppWindow inherits Window {
                     ui-sounds-enabled: root.settings-ui-sounds-enabled;
                     appearance-feedback: root.settings-appearance-feedback;
                     key-present: root.settings-key-present;
+                    steam-identity: root.settings-steam-identity;
+                    steam-connected: root.settings-steam-connected;
+                    steam-saved: root.settings-steam-saved;
+                    editor-kind: root.settings-editor-kind;
                     prefer-artwork: root.settings-prefer-artwork;
                     editing-key: root.settings-editing-key;
                     editor-target: root.settings-editor-target;

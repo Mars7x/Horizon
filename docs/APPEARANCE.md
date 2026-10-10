@@ -80,7 +80,7 @@ Generated UI chrome must use `Theme` properties rather than literal colors. Auth
 - `accent-foreground`
 - `focus`
 
-The six top-utility SVGs are authored artwork, not theme glyph masks. Slint renders those source files directly with no `colorize` property and no semantic tint token; their orange/blue/teal/gray/red colors and white outline/shadow are part of the assets themselves. The shared authored-icon renderer is scale-aware: at UI scales at or below 1× it renders directly at the logical 40×40 size, while enlarged layouts supersample by the actual app UI scale (capped at 4×). This avoids the old 4×→40px→downscaled-window resampling path at small sizes while preserving crisp fullscreen rendering. The policy never changes SVG bytes or the visible 40×40 layout size.
+The seven top-utility SVGs are authored artwork, not theme glyph masks. Slint renders those source files directly with no `colorize` property and no semantic tint token; their orange/blue/teal/gray/red colors and white outline/shadow are part of the assets themselves. The shared authored-icon renderer is scale-aware: at UI scales at or below 1× it renders directly at the logical 40×40 size, while enlarged layouts supersample by the actual app UI scale (capped at 4×). This avoids the old 4×→40px→downscaled-window resampling path at small sizes while preserving crisp fullscreen rendering. The policy never changes SVG bytes or the visible 40×40 layout size.
 
 The Rust resolver derives hover, pressed, subtle, and readable accent-foreground values from the effective accent.
 

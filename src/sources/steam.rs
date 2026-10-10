@@ -363,7 +363,7 @@ impl GameSource for SteamSource {
         let snapshot = if all_roots_succeeded {
             SourceSnapshot::authoritative_with_membership(
                 games,
-                present_game_ids.into_iter(),
+                present_game_ids,
             )
         } else {
             SourceSnapshot::new(games)
@@ -524,21 +524,19 @@ impl GameSource for SteamSource {
         for root in self.roots.iter().filter(|root| looks_like_steam_root(root)) {
             if let Some(hash) = &hashes.linux_client_icon {
                 let archive_path = root.join("steam/games").join(format!("{hash}.zip"));
-                if archive_path.is_file() && seen.insert(archive_path.clone()) {
-                    if let Some(candidate) =
+                if archive_path.is_file() && seen.insert(archive_path.clone())
+                    && let Some(candidate) =
                         steam_linux_icon_archive_candidate(&archive_path)
                     {
                         candidates.push(candidate);
                     }
-                }
             }
 
             if let Some(hash) = &hashes.client_icon {
                 let ico_path = root.join("steam/games").join(format!("{hash}.ico"));
-                if ico_path.is_file() && seen.insert(ico_path.clone()) {
-                    if let Some(candidate) = steam_client_icon_candidate(&ico_path) {
-                        candidates.push(candidate);
-                    }
+                if ico_path.is_file() && seen.insert(ico_path.clone())
+                    && let Some(candidate) = steam_client_icon_candidate(&ico_path) {
+                    candidates.push(candidate);
                 }
             }
 

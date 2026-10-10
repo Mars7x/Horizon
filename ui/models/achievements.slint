@@ -1,0 +1,23 @@
+// Source-neutral presentation models. Steam is the first implemented adapter;
+// additional providers must map their records here without UI rewrites.
+export struct AchievementGameData {
+    title: string,
+    provider-id: string,
+    provider: string,
+    progress: string,
+    compact-progress: string,
+    unlocked: int,
+    total: int,
+    fraction: float,
+}
+
+export struct AchievementEntryData {
+    title: string,
+    game: string,
+    provider: string,
+    description: string,
+    when: string,
+    unlocked: bool,
+    badge: image,
+    has-badge: bool,
+}

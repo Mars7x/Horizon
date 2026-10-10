@@ -140,7 +140,7 @@ fn decode_pcm16_mono_48k(wav: &[u8]) -> Option<Vec<i16>> {
     }
     let bytes = data?;
     if !format_ok || bytes.is_empty() || bytes.len() % 2 != 0 { return None; }
-    Some(bytes.chunks_exact(2).map(|pair| i16::from_le_bytes([pair[0], pair[1]])).collect())
+    Some(bytes.as_chunks::<2>().0.iter().map(|pair| i16::from_le_bytes(*pair)).collect())
 }
 
 #[cfg(test)]

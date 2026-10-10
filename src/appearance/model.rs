@@ -73,23 +73,12 @@ impl Default for AppearancePreferences {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SystemAppearance {
     pub preferred_theme: Option<EffectiveTheme>,
     pub accent: Option<Rgb>,
     pub high_contrast: bool,
     pub reduced_motion: bool,
-}
-
-impl Default for SystemAppearance {
-    fn default() -> Self {
-        Self {
-            preferred_theme: None,
-            accent: None,
-            high_contrast: false,
-            reduced_motion: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

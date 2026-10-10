@@ -337,13 +337,15 @@ impl ActivityRepository for SqliteLibraryRepository {
         Ok(())
     }
 
+    // Interrupted sessions keep only time confirmed by a checkpoint. With no
+    // checkpoint after the start, the duration is unknown (NULL), not zero.
     fn interrupt_play_session(
         &mut self,
         session_id: PlaySessionId,
     ) -> Result<(), Self::Error> {
         let changed = self.connection.execute(
             "UPDATE play_sessions \
-             SET ended_at = checkpoint_at, state = 'interrupted' \
+             SET ended_at = NULLIF(checkpoint_at, started_at), state = 'interrupted' \
              WHERE id = ?1 AND state = 'open'",
             [session_id.get()],
         )?;
@@ -368,7 +370,7 @@ impl ActivityRepository for SqliteLibraryRepository {
         self.connection
             .execute(
                 "UPDATE play_sessions \
-                 SET ended_at = checkpoint_at, state = 'interrupted' \
+                 SET ended_at = NULLIF(checkpoint_at, started_at), state = 'interrupted' \
                  WHERE state = 'open'",
                 [],
             )
@@ -1095,6 +1097,32 @@ mod tests {
                 .get(),
             45
         );
+    }
+
+    #[test]
+    fn interrupted_session_without_checkpoint_has_unknown_duration() {
+        let mut repository = SqliteLibraryRepository::open_in_memory().expect("repository");
+        let game_id = repository
+            .upsert_discovered_game(&discovered("steam", "10", "Lost"))
+            .expect("game");
+        let session = repository
+            .begin_play_session(
+                game_id,
+                &SourceId::new("steam").expect("source"),
+                100,
+                SessionTrackingMethod::SourceRuntime,
+            )
+            .expect("session");
+        repository.interrupt_play_session(session).expect("interrupt");
+        // Shown in game history as unknown; never counted as played time.
+        let history = repository.game_activity_history(game_id).expect("history");
+        assert_eq!(history.sessions.len(), 1);
+        assert_eq!(history.sessions[0].ended_at(), None);
+        assert_eq!(history.sessions[0].duration(), None);
+        let overview = repository.activity_overview(8, 4).expect("overview");
+        assert_eq!(overview.observed_playtime().get(), 0);
+        assert_eq!(overview.played_games(), 0);
+        assert!(overview.recent_sessions().is_empty());
     }
 
     #[test]
