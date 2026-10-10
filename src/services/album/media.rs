@@ -12,7 +12,10 @@ use image::{DynamicImage, RgbaImage, codecs::jpeg::JpegEncoder};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::domain::album::{Capture, MediaKind};
+use crate::{
+    domain::album::{Capture, MediaKind},
+    services::image::{self as decoding, fit},
+};
 
 /// Bump when the thumbnail format or size changes; the folder is cleared.
 pub const ALBUM_CACHE_VERSION: &str = "1";
@@ -116,19 +119,11 @@ impl VideoBackend for NoVideo {
 
 /// Decode a photo for display, scaled down (never up) to fit `max`.
 pub fn decode_photo(path: &Path, max: (u32, u32)) -> Result<RgbaImage, MediaError> {
-    let image = image::open(path).map_err(|error| MediaError::Decode {
+    let image = decoding::decode_file(path).map_err(|error| MediaError::Decode {
         path: path.to_owned(),
         message: error.to_string(),
     })?;
     Ok(fit(image, max))
-}
-
-fn fit(image: DynamicImage, (width, height): (u32, u32)) -> RgbaImage {
-    if image.width() > width || image.height() > height {
-        image.thumbnail(width, height).into_rgba8()
-    } else {
-        image.into_rgba8()
-    }
 }
 
 pub struct Thumbnail {
@@ -206,7 +201,7 @@ fn make_thumbnail(capture: &Capture, video: &dyn VideoBackend) -> Result<Thumbna
         MediaKind::Photo => {
             // The source's own small copy, when it is big enough.
             if let Some(preview) = capture.preview()
-                && let Ok(image) = image::open(preview)
+                && let Ok(image) = decoding::decode_file(preview)
                 && image.width() >= THUMBNAIL_SIZE.0
             {
                 return Ok(Thumbnail {
@@ -230,7 +225,7 @@ fn make_thumbnail(capture: &Capture, video: &dyn VideoBackend) -> Result<Thumbna
 }
 
 fn read_cached(dir: &Path, key: &str, kind: MediaKind) -> Option<Thumbnail> {
-    let image = image::open(dir.join(format!("{key}.jpg")))
+    let image = decoding::decode_file(&dir.join(format!("{key}.jpg")))
         .ok()?
         .into_rgba8();
     let duration = match kind {

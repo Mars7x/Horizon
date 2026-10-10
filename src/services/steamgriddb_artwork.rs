@@ -8,7 +8,6 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
-        mpsc::Sender,
     },
     thread,
     time::{Duration, SystemTime},
@@ -24,6 +23,7 @@ use super::{
         MatchMethod, MatchOutcome, SteamGridDbClient, SteamGridDbError, SteamGridDbLookup,
         SteamGridDbMatchService,
     },
+    worker::WorkerSender,
 };
 
 const CACHE_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
@@ -71,7 +71,7 @@ pub enum ArtworkWorkerEvent {
 // RAII ensures that network/authentication early returns always conclude the
 // modal. Generation checks prevent stale/cancelled workers from touching UI.
 struct RefreshProgress {
-    sender: Sender<ArtworkWorkerEvent>,
+    sender: WorkerSender<ArtworkWorkerEvent>,
     active_generation: Arc<AtomicU64>,
     generation: u64,
     enabled: bool,
@@ -82,7 +82,7 @@ struct RefreshProgress {
 
 impl RefreshProgress {
     fn new(
-        sender: Sender<ArtworkWorkerEvent>,
+        sender: WorkerSender<ArtworkWorkerEvent>,
         active_generation: Arc<AtomicU64>,
         generation: u64,
         enabled: bool,
@@ -143,7 +143,7 @@ fn error_status(error: &SteamGridDbError) -> &'static str {
 pub fn start_artwork_worker(
     generation: u64,
     active_generation: Arc<AtomicU64>,
-    sender: Sender<ArtworkWorkerEvent>,
+    sender: WorkerSender<ArtworkWorkerEvent>,
     api_key: String,
     cache_root: Option<PathBuf>,
     jobs: Vec<ArtworkLookupJob>,
@@ -415,11 +415,10 @@ fn read_cache(root: &Path) -> Option<(SquareArtwork, bool)> {
     if fs::metadata(&file).ok()?.len() > 8 * 1024 * 1024 {
         return None;
     }
-    let reader = image::ImageReader::open(&file).ok()?;
-    if reader.into_dimensions().ok()? != (512, 512) {
+    if super::image::file_dimensions(&file).ok()? != (512, 512) {
         return None;
     }
-    let image = image::open(&file).ok()?.into_rgba8();
+    let image = super::image::decode_file(&file).ok()?.into_rgba8();
     if image.dimensions() != (512, 512) || hash_bytes(image.as_raw()) != provenance.rgba_hash {
         return None;
     }
@@ -514,7 +513,8 @@ mod tests {
     use super::*;
     #[test]
     fn manual_refresh_reports_progress_and_always_finishes() {
-        let (sender, receiver) = std::sync::mpsc::channel();
+        let (sender, receiver) =
+            crate::services::worker::worker_channel(crate::services::worker::no_notify());
         let epoch = Arc::new(AtomicU64::new(3));
         {
             let mut progress = RefreshProgress::new(sender, epoch, 3, true, 5);

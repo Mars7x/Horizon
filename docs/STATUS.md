@@ -135,8 +135,9 @@ independent status worker to re-query the current active network immediately.
 A five-second periodic query remains only for missed notifications and bus
 reconnections; it is **not** the normal UI update cadence. Confirmed link-loss
 is rechecked after 150 ms before displaying offline to avoid handoff flicker.
-The 50 ms lightweight Slint status-timer drains already-computed updates and
-never performs blocking system-bus operations. Actual system D-Bus/renderer
+Each update wakes the UI thread through a `services::worker` channel, which
+drains already-computed updates (no polling timer) and never performs
+blocking system-bus operations. Actual system D-Bus/renderer
 latency can still vary. Power polling stays independent at two seconds.
 
 GNOME's eight original 16×16 SVG assets are retained unmodified under

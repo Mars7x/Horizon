@@ -2,7 +2,7 @@
 //!
 //! Everything slow happens elsewhere: scans on a thread per visit, decoding
 //! on `MediaLoader` workers, video on GStreamer's threads. Results come back
-//! through one channel and a single `album-media-ready` wake-up, so an idle
+//! through one worker channel that wakes the UI thread once per burst, so an idle
 //! Album costs nothing (no polling timer). Only rows near the camera are
 //! mounted, only their thumbnails are requested, and memory is bounded by
 //! small caches of decoded images.
@@ -14,7 +14,7 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
-        mpsc::{self, Receiver, Sender},
+        mpsc::Receiver,
     },
     time::Duration,
 };
@@ -36,10 +36,12 @@ use crate::{
     navigation::grid::{
         horizontal_step, scroll_to_selection, total_rows, vertical_step, wheel_scroll_top,
     },
+    presentation::wake::drain_notify,
     services::album::{
         HorizonAlbum, MediaLoader, MediaResult, ThumbnailCache, VideoBackend, VideoFrame,
         VideoPlayback, VideoSink, scan_all,
     },
+    services::worker::{WorkerSender, spawn, worker_channel},
     sources::CaptureSource,
 };
 
@@ -234,9 +236,8 @@ pub struct AlbumController {
     video: Arc<dyn VideoBackend>,
     loader: MediaLoader,
     titles: HashMap<SourceGameRef, String>,
-    sender: Sender<AlbumEvent>,
+    sender: WorkerSender<AlbumEvent>,
     receiver: Receiver<AlbumEvent>,
-    wake: Arc<dyn Fn() + Send + Sync>,
     scan_running: Cell<bool>,
     warmed_up: Cell<bool>,
     state: RefCell<State>,
@@ -267,18 +268,18 @@ impl AlbumController {
         cache_dir: Option<PathBuf>,
         video: Arc<dyn VideoBackend>,
     ) -> Rc<Self> {
-        let (sender, receiver) = mpsc::channel();
-        let wake = wake_handle(ui);
+        // Scans, decoded media and video events all land in one channel,
+        // drained on the UI thread once per burst.
+        let (notify, drain) = drain_notify(Self::drain);
+        let (sender, receiver) = worker_channel(notify);
         let cache = ThumbnailCache::new(cache_dir);
         let media_sender = sender.clone();
-        let media_wake = Arc::clone(&wake);
         let loader = MediaLoader::start(
             MEDIA_WORKERS,
             cache.clone(),
             Arc::clone(&video),
             Arc::new(move |result| {
                 let _ = media_sender.send(AlbumEvent::Media(result));
-                media_wake();
             }),
         );
         let titles = library
@@ -302,7 +303,6 @@ impl AlbumController {
             titles,
             sender,
             receiver,
-            wake,
             scan_running: Cell::new(false),
             warmed_up: Cell::new(false),
             state: RefCell::new(State::default()),
@@ -318,12 +318,7 @@ impl AlbumController {
             ui: ui.as_weak(),
             this: this.clone(),
         });
-        let weak = Rc::downgrade(&controller);
-        ui.on_album_media_ready(move || {
-            if let Some(controller) = weak.upgrade() {
-                controller.drain();
-            }
-        });
+        drain.bind(&controller);
         controller.publish(ui);
         controller
     }
@@ -390,17 +385,11 @@ impl AlbumController {
         let sources = self.sources.clone();
         let cache = self.cache.clone();
         let sender = self.sender.clone();
-        let wake = Arc::clone(&self.wake);
-        let spawned = std::thread::Builder::new()
-            .name("album-scan".into())
-            .spawn(move || {
-                let captures = scan_all(horizon.as_ref(), &sources);
-                cache.prune(&captures);
-                let _ = sender.send(AlbumEvent::Scanned(captures));
-                wake();
-            });
-        if let Err(error) = spawned {
-            warn!(%error, "Album scan could not start");
+        if !spawn("album-scan", move || {
+            let captures = scan_all(horizon.as_ref(), &sources);
+            cache.prune(&captures);
+            let _ = sender.send(AlbumEvent::Scanned(captures));
+        }) {
             self.scan_running.set(false);
         }
     }
@@ -1035,7 +1024,6 @@ impl AlbumController {
             seek_epoch: Arc::clone(&self.seek_epoch),
             ui: self.ui.clone(),
             sender: self.sender.clone(),
-            wake: Arc::clone(&self.wake),
         });
         // The timeline starts still at 0 and runs once live frames arrive.
         set_clock(ui, Duration::ZERO, false);
@@ -1412,22 +1400,6 @@ fn display_size(ui: &AppWindow) -> (u32, u32) {
     (size.width.max(1), size.height.max(1))
 }
 
-fn wake_handle(ui: &AppWindow) -> Arc<dyn Fn() + Send + Sync> {
-    let weak = ui.as_weak();
-    // Coalesce: many results finishing together cause one drain.
-    let scheduled = Arc::new(AtomicBool::new(false));
-    Arc::new(move || {
-        if scheduled.swap(true, Ordering::SeqCst) {
-            return;
-        }
-        let scheduled = Arc::clone(&scheduled);
-        let _ = weak.upgrade_in_event_loop(move |ui| {
-            scheduled.store(false, Ordering::SeqCst);
-            ui.invoke_album_media_ready();
-        });
-    })
-}
-
 fn rgba_image(image: RgbaImage) -> Image {
     let (width, height) = image.dimensions();
     Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
@@ -1495,8 +1467,7 @@ struct UiVideoSink {
     pending: Arc<AtomicBool>,
     seek_epoch: Arc<AtomicU64>,
     ui: slint::Weak<AppWindow>,
-    sender: Sender<AlbumEvent>,
-    wake: Arc<dyn Fn() + Send + Sync>,
+    sender: WorkerSender<AlbumEvent>,
 }
 
 impl UiVideoSink {
@@ -1543,14 +1514,12 @@ impl VideoSink for UiVideoSink {
 
     fn ended(&self) {
         let _ = self.sender.send(AlbumEvent::VideoEnded(self.generation));
-        (self.wake)();
     }
 
     fn failed(&self, message: String) {
         let _ = self
             .sender
             .send(AlbumEvent::VideoFailed(self.generation, message));
-        (self.wake)();
     }
 }
 

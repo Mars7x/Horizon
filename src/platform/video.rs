@@ -7,9 +7,16 @@
 //! a frame before it is copied, so a busy UI thread costs skipped frames,
 //! never a growing queue. Hardware decoders are used when GStreamer ranks
 //! them first.
+//!
+//! Sound goes straight to PipeWire when Horizon can reach it. PipeWire's
+//! sink clocks playback from the first frame. Through the PulseAudio
+//! socket, the stream's clock barely moves for the first few hundred
+//! milliseconds while the stream starts, which held the picture still at
+//! the start of every video. Without PipeWire, playback runs on the system
+//! clock instead and the PulseAudio sink keeps sound in step with it.
 use std::{
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, OnceLock},
     time::Duration,
 };
 
@@ -21,12 +28,27 @@ use image::RgbaImage;
 use crate::services::album::{
     MediaError, VideoBackend, VideoFrame, VideoPlayback, VideoSink, media::VideoProbe,
 };
+use crate::services::worker::spawn;
 
 const PREROLL_TIMEOUT: Duration = Duration::from_secs(5);
 /// The poster frame: a second in, or a tenth of a short clip, past fades.
 const POSTER_OFFSET: Duration = Duration::from_secs(1);
 
-pub struct GstVideo;
+pub struct GstVideo {
+    // Decided once, by actually connecting (the socket can be visible in the
+    // sandbox without being usable). The Album's warm-up decides it ahead
+    // of the first video.
+    audio: Arc<OnceLock<AudioOutput>>,
+}
+
+/// Where a playing video's sound goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AudioOutput {
+    /// PipeWire's own sink, which also clocks the pipeline.
+    PipeWire,
+    /// GStreamer's default sink (PulseAudio), with the system clock.
+    Default,
+}
 
 impl GstVideo {
     /// Fails when GStreamer or its playback plugins are missing; the Album
@@ -38,7 +60,33 @@ impl GstVideo {
                 return Err(format!("GStreamer element {element} is missing"));
             }
         }
-        Ok(Self)
+        Ok(Self {
+            audio: Arc::new(OnceLock::new()),
+        })
+    }
+
+    fn audio(&self) -> AudioOutput {
+        *self.audio.get_or_init(AudioOutput::detect)
+    }
+}
+
+impl AudioOutput {
+    /// PipeWire when its sink can connect, otherwise the default.
+    fn detect() -> Self {
+        let connects = gst::ElementFactory::make("pipewiresink")
+            .build()
+            .is_ok_and(|sink| {
+                let ready = sink.set_state(gst::State::Ready).is_ok();
+                let _ = sink.set_state(gst::State::Null);
+                ready
+            });
+        let output = if connects {
+            Self::PipeWire
+        } else {
+            Self::Default
+        };
+        tracing::debug!(?output, "video sound output");
+        output
     }
 }
 
@@ -61,25 +109,23 @@ const WARM_UP_ELEMENTS: &[&str] = &[
     "videoconvertscale",
     "audioconvert",
     "audioresample",
+    "pipewiresink",
     "pulsesink",
     "autoaudiosink",
 ];
 
 impl VideoBackend for GstVideo {
     fn warm_up(&self) {
-        let spawned = std::thread::Builder::new()
-            .name("video-warm-up".into())
-            .spawn(|| {
-                for name in WARM_UP_ELEMENTS {
-                    if let Some(factory) = gst::ElementFactory::find(name) {
-                        // Missing optional plugins are fine; playback picks others.
-                        let _ = factory.load();
-                    }
+        let audio = Arc::clone(&self.audio);
+        spawn("video-warm-up", move || {
+            audio.get_or_init(AudioOutput::detect);
+            for name in WARM_UP_ELEMENTS {
+                if let Some(factory) = gst::ElementFactory::find(name) {
+                    // Missing optional plugins are fine; playback picks others.
+                    let _ = factory.load();
                 }
-            });
-        if let Err(error) = spawned {
-            tracing::debug!(%error, "video warm-up did not start");
-        }
+            }
+        });
     }
 
     fn probe(&self, path: &Path, max: (u32, u32)) -> Result<VideoProbe, MediaError> {
@@ -87,7 +133,7 @@ impl VideoBackend for GstVideo {
             path: path.to_owned(),
             message,
         };
-        let pipeline = Pipeline::new(path, max, false).map_err(failed)?;
+        let pipeline = Pipeline::new(path, max, None).map_err(failed)?;
         let result = (|| {
             pipeline.preroll()?;
             let duration = pipeline.duration();
@@ -115,10 +161,11 @@ impl VideoBackend for GstVideo {
         max: (u32, u32),
         sink: Arc<dyn VideoSink>,
     ) -> Result<Box<dyn VideoPlayback>, MediaError> {
-        let pipeline = Pipeline::new(path, max, true).map_err(|message| MediaError::Video {
-            path: path.to_owned(),
-            message,
-        })?;
+        let pipeline =
+            Pipeline::new(path, max, Some(self.audio())).map_err(|message| MediaError::Video {
+                path: path.to_owned(),
+                message,
+            })?;
         let frames = Arc::clone(&sink);
         let deliver = move |appsink: &gst_app::AppSink, preroll: bool| {
             let sample = if preroll {
@@ -171,7 +218,12 @@ struct Pipeline {
 }
 
 impl Pipeline {
-    fn new(path: &Path, (width, height): (u32, u32), audio: bool) -> Result<Self, String> {
+    /// `audio`: `None` for a silent pipeline (posters), or where sound goes.
+    fn new(
+        path: &Path,
+        (width, height): (u32, u32),
+        audio: Option<AudioOutput>,
+    ) -> Result<Self, String> {
         let uri = gst::glib::filename_to_uri(path, None).map_err(|error| error.to_string())?;
         let caps = gst_video::VideoCapsBuilder::new()
             .format(gst_video::VideoFormat::Rgba)
@@ -208,12 +260,26 @@ impl Pipeline {
         // subtitles.
         playbin.set_property_from_str(
             "flags",
-            if audio {
+            if audio.is_some() {
                 "video+audio+soft-volume"
             } else {
                 "video"
             },
         );
+        match audio {
+            Some(AudioOutput::PipeWire) => {
+                let sink = gst::ElementFactory::make("pipewiresink")
+                    .build()
+                    .map_err(|error| error.to_string())?;
+                playbin.set_property("audio-sink", &sink);
+            }
+            Some(AudioOutput::Default) => {
+                if let Some(pipeline) = playbin.downcast_ref::<gst::Pipeline>() {
+                    pipeline.use_clock(Some(&gst::SystemClock::obtain()));
+                }
+            }
+            None => {}
+        }
         Ok(Self {
             playbin,
             appsink,
@@ -478,5 +544,74 @@ mod tests {
         assert!(positions.last().unwrap().as_millis() > 2800);
         drop(playback);
         let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+/// Start-up timing with real sound output (run by hand: it needs an audio
+/// server). `CLIP=<file>` times a real capture instead of a generated one.
+/// Each frame's arrival should track its position from the first frame.
+#[cfg(test)]
+mod startup_timing {
+    use super::*;
+    use std::sync::Mutex;
+    use std::time::Instant;
+
+    struct Log(Mutex<Vec<(Instant, bool, Option<Duration>)>>);
+    impl VideoSink for Log {
+        fn wants_frame(&self) -> bool {
+            true
+        }
+        fn frame(&self, frame: VideoFrame<'_>) {
+            self.0
+                .lock()
+                .unwrap()
+                .push((Instant::now(), frame.live, frame.position));
+        }
+        fn ended(&self) {}
+        fn failed(&self, message: String) {
+            eprintln!("failed: {message}");
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn video_startup_timing() {
+        gst::init().unwrap();
+        let dir = std::env::temp_dir().join("horizon-timing");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = std::env::var("CLIP").map(PathBuf::from).unwrap_or_else(|_| {
+            let path = dir.join("av.webm");
+            let d = format!("webmmux name=m ! filesink location={} \
+                videotestsrc num-buffers=150 ! video/x-raw,width=1920,height=1080,framerate=30/1 ! vp8enc deadline=1 ! m. \
+                audiotestsrc num-buffers=250 ! audioconvert ! vorbisenc ! m.", path.display());
+            let p = gst::parse::launch(&d).unwrap();
+            p.set_state(gst::State::Playing).unwrap();
+            p.bus().unwrap().timed_pop_filtered(gst::ClockTime::from_seconds(60), &[gst::MessageType::Eos, gst::MessageType::Error]);
+            p.set_state(gst::State::Null).unwrap();
+            path
+        });
+        let video = GstVideo::new().unwrap();
+        for round in 0..3 {
+            let log = Arc::new(Log(Mutex::new(Vec::new())));
+            let t0 = Instant::now();
+            let playback = video.play(&path, (1280, 720), log.clone()).unwrap();
+            let t_play = t0.elapsed();
+            playback.set_playing(true);
+            let t_set = t0.elapsed();
+            std::thread::sleep(Duration::from_millis(1500));
+            drop(playback);
+            let frames = log.0.lock().unwrap();
+            eprintln!(
+                "round {round}: play() {t_play:?}, set_playing {t_set:?}, frames {}",
+                frames.len()
+            );
+            for (i, (at, live, pos)) in frames.iter().take(14).enumerate() {
+                eprintln!(
+                    "  #{i:02} t={:>7.1}ms live={live} pos={:?}",
+                    at.duration_since(t0).as_secs_f64() * 1000.0,
+                    pos.map(|p| p.as_millis())
+                );
+            }
+        }
     }
 }

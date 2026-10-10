@@ -92,7 +92,30 @@ impl ArtworkService {
     }
 
     pub fn square_artwork(&self, game: &LibraryGame) -> Option<SquareArtwork> {
-        let cached = self.load_cached_artwork(game);
+        let cached = self
+            .cache_path(game)
+            .and_then(|path| read_cached_artwork(&path));
+        self.square_artwork_from(game, cached)
+    }
+
+    /// Every game's artwork, in order. Decoding the cache is most of the
+    /// work at start-up and each file is independent, so the cache is read
+    /// on all cores; only misses resolve from their sources, one by one.
+    pub fn square_artworks(&self, games: &[LibraryGame]) -> Vec<Option<SquareArtwork>> {
+        let paths: Vec<Option<PathBuf>> = games.iter().map(|game| self.cache_path(game)).collect();
+        let cached = parallel_map(&paths, |path| path.as_deref().and_then(read_cached_artwork));
+        games
+            .iter()
+            .zip(cached)
+            .map(|(game, cached)| self.square_artwork_from(game, cached))
+            .collect()
+    }
+
+    fn square_artwork_from(
+        &self,
+        game: &LibraryGame,
+        cached: Option<CachedArtwork>,
+    ) -> Option<SquareArtwork> {
         if cached.as_ref().is_some_and(|entry| entry.fresh) {
             return cached.map(|entry| entry.artwork);
         }
@@ -185,46 +208,6 @@ impl ArtworkService {
         })
     }
 
-    fn load_cached_artwork(&self, game: &LibraryGame) -> Option<CachedArtwork> {
-        let path = self.cache_path(game)?;
-        let metadata = fs::metadata(&path).ok()?;
-        let image = match decode_artwork_file(&path) {
-            Ok(image)
-                if image.width() == NORMALIZED_SQUARE_ARTWORK_PX
-                    && image.height() == NORMALIZED_SQUARE_ARTWORK_PX =>
-            {
-                image
-            }
-            Ok(_) => {
-                debug!(path = %path.display(), "ignoring artwork cache entry with obsolete dimensions");
-                return None;
-            }
-            Err(error) => {
-                debug!(path = %path.display(), %error, "artwork cache entry could not be decoded");
-                return None;
-            }
-        };
-
-        let fresh = metadata
-            .modified()
-            .ok()
-            .map(cache_timestamp_is_fresh)
-            .unwrap_or(false);
-
-        // Detection must run on the source image, not the 512px cached copy:
-        // upscaling changes its edge statistics. Reuse the recorded decision
-        // and only re-detect for entries cached before it was recorded.
-        let pixelated = match fs::read(filter_marker_path(&path)).as_deref() {
-            Ok(b"nearest") => true,
-            Ok(b"smooth") => false,
-            _ => looks_like_pixel_art(&image),
-        };
-        Some(CachedArtwork {
-            artwork: square_artwork_from_rgba(image, pixelated),
-            fresh,
-        })
-    }
-
     fn store_cached_artwork(&self, game: &LibraryGame, artwork: &SquareArtwork) {
         let Some(path) = self.cache_path(game) else {
             return;
@@ -314,6 +297,69 @@ fn artwork_cache_identity(game: &LibraryGame) -> u64 {
     hash
 }
 
+/// `f` over `items` on every core, keeping order.
+fn parallel_map<T: Sync, U: Send>(items: &[T], f: impl Fn(&T) -> U + Sync) -> Vec<U> {
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+    if threads < 2 || items.len() < 2 {
+        return items.iter().map(&f).collect();
+    }
+    let chunk = items.len().div_ceil(threads);
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = items
+            .chunks(chunk)
+            .map(|chunk| scope.spawn(|| chunk.iter().map(&f).collect::<Vec<_>>()))
+            .collect();
+        workers
+            .into_iter()
+            .flat_map(|worker| {
+                worker
+                    .join()
+                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+            })
+            .collect()
+    })
+}
+
+/// A cache entry, if it is readable and the current size.
+fn read_cached_artwork(path: &Path) -> Option<CachedArtwork> {
+    let metadata = fs::metadata(path).ok()?;
+    let image = match decode_artwork_file(path) {
+        Ok(image)
+            if image.width() == NORMALIZED_SQUARE_ARTWORK_PX
+                && image.height() == NORMALIZED_SQUARE_ARTWORK_PX =>
+        {
+            image
+        }
+        Ok(_) => {
+            debug!(path = %path.display(), "ignoring artwork cache entry with obsolete dimensions");
+            return None;
+        }
+        Err(error) => {
+            debug!(path = %path.display(), %error, "artwork cache entry could not be decoded");
+            return None;
+        }
+    };
+
+    let fresh = metadata
+        .modified()
+        .ok()
+        .map(cache_timestamp_is_fresh)
+        .unwrap_or(false);
+
+    // Detection must run on the source image, not the 512px cached copy:
+    // upscaling changes its edge statistics. Reuse the recorded decision
+    // and only re-detect for entries cached before it was recorded.
+    let pixelated = match fs::read(filter_marker_path(path)).as_deref() {
+        Ok(b"nearest") => true,
+        Ok(b"smooth") => false,
+        _ => looks_like_pixel_art(&image),
+    };
+    Some(CachedArtwork {
+        artwork: square_artwork_from_rgba(image, pixelated),
+        fresh,
+    })
+}
+
 fn cache_timestamp_is_fresh(modified: SystemTime) -> bool {
     SystemTime::now()
         .duration_since(modified)
@@ -321,11 +367,11 @@ fn cache_timestamp_is_fresh(modified: SystemTime) -> bool {
 }
 
 fn decode_artwork_file(path: &Path) -> Result<RgbaImage, image::ImageError> {
-    image::open(path).map(image::DynamicImage::into_rgba8)
+    super::image::decode_file(path).map(image::DynamicImage::into_rgba8)
 }
 
 fn decode_artwork_bytes(bytes: &[u8]) -> Result<RgbaImage, image::ImageError> {
-    image::load_from_memory(bytes).map(image::DynamicImage::into_rgba8)
+    super::image::decode(bytes, None).map(image::DynamicImage::into_rgba8)
 }
 
 fn select_best_candidate(candidates: Vec<DecodedCandidate>) -> Option<DecodedCandidate> {
@@ -579,9 +625,12 @@ mod tests {
         assert!(artwork.pixelated());
         service.store_cached_artwork(&game, &artwork);
 
-        let cached = service
-            .load_cached_artwork(&game)
+        let cached = read_cached_artwork(&service.cache_path(&game).expect("cache path"))
             .expect("cached artwork should load");
+        assert_eq!(
+            service.square_artworks(std::slice::from_ref(&game)),
+            [Some(artwork.clone())]
+        );
         assert!(cached.fresh);
         assert_eq!(cached.artwork, artwork);
 

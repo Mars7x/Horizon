@@ -2,11 +2,7 @@
 //!
 //! This is an on-demand, blocking metadata/image client. Never call it from Slint's
 //! UI thread. CDN downloads use a separate unauthenticated HTTP request.
-use std::{
-    io::{Cursor, Read},
-    thread,
-    time::Duration,
-};
+use std::{io::Read, thread, time::Duration};
 
 use image::{ImageFormat, RgbaImage};
 use reqwest::{Url, blocking::Client, redirect::Policy};
@@ -328,13 +324,12 @@ fn decode_square_grid(bytes: &[u8]) -> Result<RgbaImage, SteamGridDbError> {
     if !matches!(format, ImageFormat::Png | ImageFormat::Jpeg) {
         return Err(SteamGridDbError::InvalidImage);
     }
-    let (w, h) = image::ImageReader::with_format(Cursor::new(bytes), format)
-        .into_dimensions()
+    let (w, h) = super::image::dimensions(bytes, Some(format))
         .map_err(|_| SteamGridDbError::InvalidImage)?;
     if w != h || !matches!(w, 256 | 512 | 768 | 1024) {
         return Err(SteamGridDbError::InvalidImage);
     }
-    image::load_from_memory_with_format(bytes, format)
+    super::image::decode(bytes, Some(format))
         .map(image::DynamicImage::into_rgba8)
         .map_err(|_| SteamGridDbError::InvalidImage)
 }
@@ -494,6 +489,7 @@ mod tests {
     use crate::sources::{
         GameSource, SourceDescriptor, SourceDiscovery, SourceError, SourceSnapshot,
     };
+    use std::io::Cursor;
 
     struct MockSource(SourceDescriptor);
 

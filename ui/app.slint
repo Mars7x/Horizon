@@ -278,8 +278,6 @@ export component AppWindow inherits Window {
     callback album-seek(float);
     callback album-close-viewer();
     callback album-layout-changed();
-    // Invoked by Rust (from the event loop) when decoded media is waiting.
-    callback album-media-ready();
     in-out property <int> activity-pressed-index: -1;
     out property <bool> activity-reduced-motion: Motion.reduced-motion;
     in property <bool> activity-details-visible: false;

@@ -10,9 +10,10 @@ use std::{
     io::Write,
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
-    sync::mpsc::Sender,
     time::{SystemTime, UNIX_EPOCH},
 };
+
+use super::worker::WorkerSender;
 
 use serde::{Deserialize, Serialize};
 
@@ -304,7 +305,7 @@ pub fn import_steam_achievements(
     credentials: SteamAccountCredentials,
     games: Vec<SteamGame>,
     cache_root: Option<PathBuf>,
-    sender: Sender<AchievementImportEvent>,
+    sender: WorkerSender<AchievementImportEvent>,
 ) {
     let steam_id = credentials.steam_id64().to_owned();
     let directory = cache_directory(cache_root.as_deref(), &steam_id);
@@ -419,7 +420,7 @@ fn download_badges<'a>(
     directory: Option<&Path>,
     app_id: u32,
     wanted: impl Iterator<Item = &'a SteamAchievement>,
-    sender: &Sender<AchievementImportEvent>,
+    sender: &WorkerSender<AchievementImportEvent>,
 ) -> bool {
     let urls = badge_urls(schema);
     for achievement in wanted {
@@ -465,7 +466,7 @@ pub fn hydrate_game_badges(
     credentials: SteamAccountCredentials,
     mut game: SteamGameAchievements,
     cache_root: Option<PathBuf>,
-    sender: Sender<AchievementImportEvent>,
+    sender: WorkerSender<AchievementImportEvent>,
 ) {
     let directory = cache_directory(cache_root.as_deref(), credentials.steam_id64());
     let missing = game

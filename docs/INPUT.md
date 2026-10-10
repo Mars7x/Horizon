@@ -59,7 +59,7 @@ Directional keyboard actions may auto-repeat. Activation/navigation actions such
 
 ## SDL3 integration
 
-SDL3 is initialized on the same thread that runs Slint. A lightweight Slint `Timer` polls SDL's event pump every 8 ms. This is deliberate: SDL's event pump is main-thread-bound, so moving it to a background thread would violate SDL's threading contract.
+SDL3 is initialized on the same thread that runs Slint. A lightweight Slint `Timer` polls SDL's event pump: every 8 ms while a controller can navigate Horizon, every 100 ms while none is connected (only hotplug matters), and every 250 ms while another app (a game) has the foreground, so Horizon stays out of the game's way. This is deliberate: SDL's event pump is main-thread-bound, so moving it to a background thread would violate SDL's threading contract.
 
 The SDL adapter:
 
