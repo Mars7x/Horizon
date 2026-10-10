@@ -42,7 +42,46 @@ impl GstVideo {
     }
 }
 
+/// Plugins a typical playback loads: containers, common decoders, the
+/// converter and the audio output. Loading is a one-off dlopen.
+const WARM_UP_ELEMENTS: &[&str] = &[
+    "playbin",
+    "decodebin3",
+    "uridecodebin3",
+    "qtdemux",
+    "matroskademux",
+    "avdec_h264",
+    "avdec_h265",
+    "vp9dec",
+    "vp8dec",
+    "dav1ddec",
+    "avdec_aac",
+    "opusdec",
+    "vorbisdec",
+    "videoconvertscale",
+    "audioconvert",
+    "audioresample",
+    "pulsesink",
+    "autoaudiosink",
+];
+
 impl VideoBackend for GstVideo {
+    fn warm_up(&self) {
+        let spawned = std::thread::Builder::new()
+            .name("video-warm-up".into())
+            .spawn(|| {
+                for name in WARM_UP_ELEMENTS {
+                    if let Some(factory) = gst::ElementFactory::find(name) {
+                        // Missing optional plugins are fine; playback picks others.
+                        let _ = factory.load();
+                    }
+                }
+            });
+        if let Err(error) = spawned {
+            tracing::debug!(%error, "video warm-up did not start");
+        }
+    }
+
     fn probe(&self, path: &Path, max: (u32, u32)) -> Result<VideoProbe, MediaError> {
         let failed = |message: String| MediaError::Video {
             path: path.to_owned(),
@@ -284,6 +323,10 @@ fn deliver_sample(sample: &gst::Sample, sink: &dyn VideoSink, live: bool) {
         stride: usize::try_from(*stride).unwrap_or(0),
         data,
         position: stream_time(sample),
+        frame_duration: sample
+            .buffer()
+            .and_then(|buffer| buffer.duration())
+            .map(|duration| Duration::from_nanos(duration.nseconds())),
         live,
     });
 }

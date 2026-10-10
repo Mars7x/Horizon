@@ -260,6 +260,7 @@ export component AppWindow inherits Window {
     in property <int> album-video-anchor: 0;
     in property <bool> album-video-clock-running: false;
     in property <bool> album-video-frame-live: false;
+    in property <int> album-video-frame-ms: 33;
     // Bumped by Rust on every viewer input: shows the fullscreen overlay.
     in property <int> album-overlay-revision: 0;
     out property <int> album-grid-columns: album-page.grid-columns;
@@ -572,6 +573,7 @@ export component AppWindow inherits Window {
                     video-anchor: root.album-video-anchor;
                     video-clock-running: root.album-video-clock-running;
                     video-frame-live: root.album-video-frame-live;
+                    video-frame-ms: root.album-video-frame-ms;
                     choose(index) => { if (root.current-route == AppRouteView.album) { root.album-choose(index); } }
                     cycle-game => { if (root.current-route == AppRouteView.album) { root.album-cycle-game(); } }
                     cycle-kind => { if (root.current-route == AppRouteView.album) { root.album-cycle-kind(); } }

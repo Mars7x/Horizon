@@ -238,6 +238,7 @@ pub struct AlbumController {
     receiver: Receiver<AlbumEvent>,
     wake: Arc<dyn Fn() + Send + Sync>,
     scan_running: Cell<bool>,
+    warmed_up: Cell<bool>,
     state: RefCell<State>,
     tiles: Rc<VecModel<AlbumTileData>>,
     thumbnails: RefCell<ImageMemory<PathBuf>>,
@@ -299,6 +300,7 @@ impl AlbumController {
             receiver,
             wake,
             scan_running: Cell::new(false),
+            warmed_up: Cell::new(false),
             state: RefCell::new(State::default()),
             tiles,
             thumbnails: RefCell::new(ImageMemory::new(THUMBNAIL_MEMORY)),
@@ -325,6 +327,9 @@ impl AlbumController {
     /// The Game and Type filters are view choices and are kept. The folder
     /// is rescanned so new captures appear.
     pub fn start_new_visit(&self, ui: &AppWindow) {
+        if !self.warmed_up.replace(true) {
+            self.video.warm_up();
+        }
         self.stop_video(ui);
         {
             let mut s = self.state.borrow_mut();
@@ -1490,6 +1495,7 @@ impl VideoSink for UiVideoSink {
         let seek_epoch = Arc::clone(&self.seek_epoch);
         let generation = self.generation;
         let (position, live) = (frame.position, frame.live);
+        let frame_ms = frame.frame_duration.map(millis);
         let _ = self.ui.upgrade_in_event_loop(move |ui| {
             pending.store(false, Ordering::SeqCst);
             if current.load(Ordering::SeqCst) != generation {
@@ -1498,6 +1504,9 @@ impl VideoSink for UiVideoSink {
             ui.set_album_viewer_image(Image::from_rgba8(buffer));
             ui.set_album_viewer_has_image(true);
             // A frame decoded before a seek must not move the timeline back.
+            if let Some(frame_ms) = frame_ms.filter(|ms| *ms > 0) {
+                ui.set_album_video_frame_ms(frame_ms);
+            }
             if let Some(position) = position
                 && seek_epoch.load(Ordering::SeqCst) == epoch
             {
