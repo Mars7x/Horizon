@@ -1,3 +1,4 @@
+import { Wheel } from "../components/wheel.slint";
 import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { GameCardData } from "../models/game-card.slint";
 import { ActivityHistoryRowData } from "../models/activity.slint";
@@ -281,7 +282,7 @@ export component ActivityGameDetailsPage inherits Rectangle {
             enabled: root.active;
             scroll-event(event) => {
                 if event.delta-y != 0px {
-                    root.scroll-history(event.delta-y > 0px ? 1 : -1);
+                    root.scroll-history(Wheel.rows(event.delta-y));
                     return accept;
                 }
                 reject
