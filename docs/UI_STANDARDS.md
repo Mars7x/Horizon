@@ -106,12 +106,43 @@ bar draws in its `on-dark` style there.
 
 ## Motion
 
-Use `Motion` tokens, not literal durations: `focus-duration` (focus reveal),
-`hover-duration`, `page-duration` (Zoom), `value-swap-duration` (changing
-values), `scroll-duration` (every list and grid camera, linear), and
-`carousel-duration`. Page-specific choreography (Library's re-sort animation,
-the text caret) may keep local timings with a comment. Everything respects
-Reduced Motion.
+Every animation uses a `Motion` token (`ui/theme/theme.slint`), never a
+literal duration. Pick the token by **what happened**, and the easing by
+**what changes**:
+
+| What happened | Token | Examples |
+| --- | --- | --- |
+| Pointer hover | `hover-duration` (100 ms) | Row and button hover fills, hint hover, viewer edge arrows |
+| Selection moved | `focus-duration` (140 ms) | Tile lift, focus ring in and out, tick boxes, dimming while selecting |
+| A value changed | `value-swap-duration` (180 ms) | Header values, toggles, swatches, progress bars, chart bars, list rows arriving |
+| A grid's contents changed | `GridRefresh` (`components/grid-refresh.slint`) | Library Source and Sort, Album Game and Type: the old grid fades out (85 ms), then covers rise in column by column (145 ms each, 7 ms apart) |
+| Carousel moved | `carousel-duration` (190 ms) | Home and Activity carousels |
+| Page or view changed | `page-duration` (220 ms) | Zoom, Album slide and grow, hint bar and viewer overlay fades |
+| Dialog opened or closed | `dialog-duration` (180 ms), `dialog-rise` | Every modal (`ModalDialog`) |
+| Camera moved | `scroll-duration` (110 ms) | Every list and grid camera, the key field's text scroll |
+| Status appeared or left | `status-enter/exit-duration` | Battery, controller |
+
+Easing: **moves and resizes ease-out** (they answer input, so they start fast);
+**fades and colour changes ease-in-out**; **cameras and timelines are
+linear**. Home's launch release (`ease-out-back`) is the one spring. Loops
+(`caret-blink-cycle`, `spinner-cycle`, focus breathing) and the marquee
+rhythm (`marquee-*`) are tokens too.
+
+Every token is 0 under Reduced Motion; loops and marquees stop.
+
+**Dialogs** use `ModalDialog` (`components/modal-dialog.slint`): the
+component is the card (children lay out against it), over a backdrop that
+takes every click.
+
+**Choreography** that one `animate` can't express (the grid refresh,
+Library's title swap, Achievements' arriving rows) runs on a `Stopwatch`
+(`components/stopwatch.slint`). Never read `animation-tick()` in a binding
+that stays evaluated at rest: the window then redraws every frame forever.
+`Stopwatch` reads it only while running. The deliberate continuous loops are
+the focus breathing, the caret, the spinner and a playing video's clock.
+
+Slint's `Timer.restart()` does nothing on a stopped timer: use `stop()` then
+`start()`.
 
 An element hidden with `visible: false` must also hold its hidden value for any
 animated property (for example `opacity: 0`). Otherwise it animates from a stale

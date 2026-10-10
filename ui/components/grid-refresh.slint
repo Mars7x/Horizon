@@ -1,0 +1,30 @@
+import { Motion } from "../theme/theme.slint";
+
+// The one animation for a grid whose contents change in place (Library's
+// Source and Sort, Album's Game and Type). The old grid fades out quickly,
+// then the new covers rise and fade in, one column after another, left to
+// right. The two grids never overlap. Run it on a `Stopwatch` whose length
+// is `GridRefresh.length(columns)`; Reduced Motion makes it instant.
+export global GridRefresh {
+    out property <duration> clear: 85ms;
+    out property <duration> reveal: 145ms;
+    out property <duration> stagger: 7ms;
+    out property <length> rise: 6px;
+    out property <float> start-scale: 0.97;
+
+    // The whole refresh for a grid this many columns wide.
+    public pure function length(columns: int) -> duration {
+        Motion.reduced-motion ? 0ms
+            : GridRefresh.clear + GridRefresh.reveal + GridRefresh.stagger * max(0, columns - 1)
+    }
+    // The old grid's opacity at `elapsed`.
+    public pure function outgoing(elapsed: duration) -> float {
+        max(0.0, 1.0 - elapsed / GridRefresh.clear)
+    }
+    // A new cover's arrival at `elapsed` (0 hidden, 1 in place), eased out.
+    public pure function arrival(elapsed: duration, column: int) -> float {
+        let t = max(0.0, min(1.0,
+            (elapsed - GridRefresh.clear - GridRefresh.stagger * column) / GridRefresh.reveal));
+        1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t)
+    }
+}

@@ -8,7 +8,6 @@ import { Theme, Metrics, Motion } from "../theme/theme.slint";
 export component SelectionFocusSurface inherits Rectangle {
     in property <bool> focused: false;
     in property <length> corner-radius: Metrics.radius-md;
-    in property <duration> reveal-duration: Motion.focus-duration;
     in property <bool> filled: false;
     in property <bool> soft-shadow: false;
 
@@ -20,5 +19,5 @@ export component SelectionFocusSurface inherits Rectangle {
     border-width: Theme.high-contrast ? 3px : 2px;
     border-color: root.focused ? Motion.menu-focus-color : Theme.focus;
     opacity: root.focused ? 1.0 : 0.0;
-    animate opacity { duration: Motion.reduced-motion ? 0ms : root.reveal-duration; easing: ease-in-out; }
+    animate opacity { duration: Motion.focus-duration; easing: ease-in-out; }
 }

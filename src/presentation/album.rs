@@ -241,6 +241,8 @@ pub struct AlbumController {
     warmed_up: Cell<bool>,
     state: RefCell<State>,
     tiles: Rc<VecModel<AlbumTileData>>,
+    /// The grid as it was before a Game or Type change, fading out.
+    previous_tiles: Rc<VecModel<AlbumTileData>>,
     thumbnails: RefCell<ImageMemory<PathBuf>>,
     durations: RefCell<HashMap<PathBuf, Duration>>,
     failed: RefCell<HashSet<PathBuf>>,
@@ -289,6 +291,8 @@ impl AlbumController {
             .collect();
         let tiles = Rc::new(VecModel::from(Vec::<AlbumTileData>::new()));
         ui.set_album_tiles(ModelRc::from(Rc::clone(&tiles)));
+        let previous_tiles = Rc::new(VecModel::from(Vec::<AlbumTileData>::new()));
+        ui.set_album_previous_tiles(ModelRc::from(Rc::clone(&previous_tiles)));
         let controller = Rc::new_cyclic(|this| Self {
             horizon: horizon_dir.map(HorizonAlbum::new),
             sources,
@@ -303,6 +307,7 @@ impl AlbumController {
             warmed_up: Cell::new(false),
             state: RefCell::new(State::default()),
             tiles,
+            previous_tiles,
             thumbnails: RefCell::new(ImageMemory::new(THUMBNAIL_MEMORY)),
             durations: RefCell::new(HashMap::new()),
             failed: RefCell::new(HashSet::new()),
@@ -364,6 +369,7 @@ impl AlbumController {
     fn release_memory(&self) {
         self.thumbnails.borrow_mut().clear();
         self.tiles.set_vec(Vec::new());
+        self.previous_tiles.set_vec(Vec::new());
         let mut s = self.state.borrow_mut();
         s.mounted.clear();
         s.mounted_start = 0;
@@ -839,12 +845,28 @@ impl AlbumController {
         self.publish(ui);
     }
 
+    /// Freeze the grid as shown and start the shared grid refresh: the old
+    /// grid fades while the next publish's tiles arrive column by column.
+    fn freeze_grid(&self, ui: &AppWindow) {
+        let s = self.state.borrow();
+        self.previous_tiles
+            .set_vec(self.tiles.iter().collect::<Vec<_>>());
+        ui.set_album_previous_scroll_row(s.scroll_top as i32);
+        ui.set_album_previous_total_count(s.order.len() as i32);
+        ui.set_album_previous_selected_index(s.selection as i32);
+        ui.set_album_refresh_sequence(ui.get_album_refresh_sequence().wrapping_add(1));
+    }
+
     pub fn cycle_game(&self, ui: &AppWindow) {
         {
-            let mut s = self.state.borrow_mut();
+            let s = self.state.borrow();
             if s.viewing || s.captures.is_empty() {
                 return;
             }
+        }
+        self.freeze_grid(ui);
+        {
+            let mut s = self.state.borrow_mut();
             s.game_index = (s.game_index + 1) % (s.games.len() + 1);
             s.selection = 0;
             s.scroll_top = 0;
@@ -856,10 +878,14 @@ impl AlbumController {
 
     pub fn cycle_kind(&self, ui: &AppWindow) {
         {
-            let mut s = self.state.borrow_mut();
+            let s = self.state.borrow();
             if s.viewing || s.captures.is_empty() {
                 return;
             }
+        }
+        self.freeze_grid(ui);
+        {
+            let mut s = self.state.borrow_mut();
             s.kind = s.kind.next();
             s.selection = 0;
             s.scroll_top = 0;

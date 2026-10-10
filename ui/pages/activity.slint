@@ -253,7 +253,7 @@ export component ActivityPage inherits Rectangle {
                     background: index == root.days.length - 1
                         ? Theme.accent : Theme.secondary-foreground.with-alpha(0.32);
                     border-radius: Metrics.radius-sm;
-                    animate height { duration: Motion.carousel-duration; easing: ease-out; }
+                    animate height { duration: Motion.value-swap-duration; easing: ease-out; }
                 }
                 Text {
                     y: parent.height - 30px; height: 19px; width: parent.width;

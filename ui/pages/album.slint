@@ -6,6 +6,9 @@ import { MarqueeText } from "../components/marquee-text.slint";
 import { FocusFrame } from "../components/focus-frame.slint";
 import { TransitionDriver } from "../components/transition.slint";
 import { ActionButton } from "../components/action-button.slint";
+import { ModalDialog } from "../components/modal-dialog.slint";
+import { Stopwatch } from "../components/stopwatch.slint";
+import { GridRefresh } from "../components/grid-refresh.slint";
 import { Scroll, CameraSettle } from "../components/scroll.slint";
 
 // A white tick (fonts may lack ✓).
@@ -44,12 +47,17 @@ component AlbumTile inherits Rectangle {
     in property <float> selected-scale: 1.06;
     private property <float> lift: root.selected ? root.selected-scale : 1.0;
     animate lift { duration: Motion.focus-duration; easing: ease-out; }
+    // The grid refresh: 0 while waiting to arrive, 1 in place.
+    in property <float> arrival: 1.0;
+    private property <float> arrival-scale: GridRefresh.start-scale
+        + (1.0 - GridRefresh.start-scale) * root.arrival;
+    opacity: root.arrival;
 
     shell := Rectangle {
-        width: root.tile-width * root.lift;
-        height: root.tile-height * root.lift;
+        width: root.tile-width * root.lift * root.arrival-scale;
+        height: root.tile-height * root.lift * root.arrival-scale;
+        y: (parent.height - self.height) / 2 + GridRefresh.rise * (1.0 - root.arrival);
         x: (parent.width - self.width) / 2;
-        y: (parent.height - self.height) / 2;
         border-radius: Metrics.radius-md;
         background: Theme.surface;
         border-width: Theme.high-contrast ? 2px : 1px;
@@ -64,7 +72,7 @@ component AlbumTile inherits Rectangle {
             image-fit: cover;
             // Captures that can't be deleted step back while selecting.
             opacity: root.selecting && !root.tile.deletable ? 0.35 : 1.0;
-            animate opacity { duration: Motion.hover-duration; easing: ease-in-out; }
+            animate opacity { duration: Motion.focus-duration; easing: ease-in-out; }
         }
         if root.selecting && root.tile.deletable : Rectangle {
             x: 10px; y: 10px; width: 26px; height: 26px;
@@ -72,7 +80,7 @@ component AlbumTile inherits Rectangle {
             background: root.tile.checked ? Theme.accent : #00000066;
             border-width: 2px;
             border-color: root.tile.checked ? Theme.accent : white;
-            animate background, border-color { duration: Motion.hover-duration; easing: ease-in-out; }
+            animate background, border-color { duration: Motion.focus-duration; easing: ease-in-out; }
             if root.tile.checked : TickGlyph { x: 6px; y: 7px; width: 14px; height: 12px; }
         }
         if root.tile.failed : Text {
@@ -134,6 +142,13 @@ component AlbumTile inherits Rectangle {
 export component AlbumPage inherits Rectangle {
     in property <[AlbumTileData]> tiles;
     in property <int> total-count: 0;
+    // A Game or Type change: the grid as it was, frozen, and a counter Rust
+    // bumps to run the shared grid refresh (components/grid-refresh.slint).
+    in property <[AlbumTileData]> previous-tiles;
+    in property <int> previous-scroll-row: 0;
+    in property <int> previous-total-count: 0;
+    in property <int> previous-selected-index: -1;
+    in property <int> refresh-sequence: 0;
     // Captures before filtering; 0 shows the empty Album message.
     in property <int> collection-count: 0;
     in property <string> status: "";
@@ -255,16 +270,28 @@ export component AlbumPage inherits Rectangle {
     // The shared scroll standard (components/scroll.slint). A fresh visit
     // jumps to the top instead of scrolling there.
     camera-settle := CameraSettle { key: root.visit-revision; }
-    private property <length> content-height: root.total-rows * root.row-stride - root.gap
-        + root.grid-pad * 2;
+    pure function content-height-for(count: int) -> length {
+        Math.floor((count + root.grid-columns - 1) / root.grid-columns) * root.row-stride
+            - root.gap + root.grid-pad * 2
+    }
+    private property <length> content-height: root.content-height-for(root.total-count);
     // Where the camera is going (the viewer lands on the tile there).
     private property <length> target-camera: Scroll.camera(root.scroll-row * root.row-stride,
         root.content-height, root.viewport-height);
     private property <length> camera: root.target-camera;
     animate camera {
-        duration: camera-settle.settled ? Motion.scroll-duration : 0ms;
+        // A grid refresh jumps: the new grid arrives in place.
+        duration: camera-settle.settled && !root.refreshing ? Motion.scroll-duration : 0ms;
         easing: linear;
     }
+
+    refresh-clock := Stopwatch {
+        key: root.refresh-sequence;
+        length: root.active && root.refresh-sequence != 0 ? GridRefresh.length(root.grid-columns) : 0ms;
+    }
+    private property <bool> refreshing: refresh-clock.running;
+    private property <float> outgoing-opacity: root.refreshing
+        ? GridRefresh.outgoing(refresh-clock.elapsed) : 0.0;
 
     // The viewer grows out of the selected tile and shrinks back into it.
     private property <float> reveal: root.viewing ? 1.0 : 0.0;
@@ -322,7 +349,28 @@ export component AlbumPage inherits Rectangle {
                 reject
             }
         }
+        // The grid before a refresh, at its old camera; it never takes input.
+        if root.outgoing-opacity > 0.0 : Rectangle {
+            y: -Scroll.camera(root.previous-scroll-row * root.row-stride,
+                root.content-height-for(root.previous-total-count), root.viewport-height);
+            width: parent.width;
+            height: root.content-height-for(root.previous-total-count);
+            opacity: root.outgoing-opacity;
+            for tile in root.previous-tiles : AlbumTile {
+                x: root.grid-pad + Math.mod(tile.absolute-index, root.grid-columns)
+                    * (root.tile-width + root.gap);
+                y: root.grid-pad + Math.floor(tile.absolute-index / root.grid-columns) * root.row-stride;
+                tile: tile;
+                tile-width: root.tile-width;
+                tile-height: root.tile-height;
+                selected-scale: root.tile-lift;
+                selected: root.active && root.previous-selected-index == tile.absolute-index;
+            }
+            TouchArea { width: parent.width; height: parent.height; }
+        }
         for tile in root.tiles : AlbumTile {
+            arrival: !root.refreshing ? 1.0
+                : GridRefresh.arrival(refresh-clock.elapsed, Math.mod(tile.absolute-index, root.grid-columns));
             x: root.grid-pad + Math.mod(tile.absolute-index, root.grid-columns)
                 * (root.tile-width + root.gap);
             y: root.grid-pad + Math.floor(tile.absolute-index / root.grid-columns)
@@ -397,7 +445,7 @@ export component AlbumPage inherits Rectangle {
     out property <bool> overlay-shown: root.viewing && (root.overlay-awake
         || (root.viewer-is-video && !root.viewer-playing) || root.viewer-problem != "");
     private property <float> overlay-opacity: root.overlay-shown ? 1.0 : 0.0;
-    animate overlay-opacity { duration: Motion.value-swap-duration; easing: ease-in-out; }
+    animate overlay-opacity { duration: Motion.page-duration; easing: ease-in-out; }
 
     viewer := Rectangle {
         x: 0px; y: 0px;
@@ -497,7 +545,7 @@ export component AlbumPage inherits Rectangle {
             y: (parent.height - self.height) / 2;
             background: #00000099;
             opacity: root.viewer-playing ? 0.0 : root.reveal;
-            animate opacity { duration: Motion.hover-duration; easing: ease-in-out; }
+            animate opacity { duration: Motion.focus-duration; easing: ease-in-out; }
             PlayGlyph { x: 31px; y: 27px; width: 24px; height: 26px; }
         }
 
@@ -571,59 +619,44 @@ export component AlbumPage inherits Rectangle {
 
     // Delete confirmation, over the grid or the fullscreen viewer. Modal:
     // the backdrop takes every click. Cancel is focused first.
-    Rectangle {
-        x: 0px; y: 0px;
-        width: root.width; height: root.height;
-        background: #00000099;
-        opacity: root.dialog-open ? 1.0 : 0.0;
-        visible: root.dialog-open || self.opacity > 0.01;
-        animate opacity { duration: Motion.reduced-motion ? 0ms : 170ms; easing: ease-in-out; }
-        TouchArea { width: parent.width; height: parent.height; }
-
-        Rectangle {
-            width: min(456px, parent.width - 64px);
-            height: 196px;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2 + (root.dialog-open ? 0px : 12px);
-            animate y { duration: Motion.reduced-motion ? 0ms : 180ms; easing: ease-out; }
-            background: Theme.surface-raised;
-            border-radius: Metrics.radius-lg;
-            border-width: Theme.high-contrast ? 2px : 1px;
-            border-color: Theme.divider;
-            Text {
-                x: 29px; y: 27px;
-                width: parent.width - 58px; height: 34px;
-                text: root.dialog-title;
-                color: Theme.foreground;
-                font-size: Typography.heading-size;
-                font-weight: Typography.heading-weight;
-                vertical-alignment: center;
-            }
-            Text {
-                x: 29px; y: 66px;
-                width: parent.width - 58px; height: 44px;
-                text: root.dialog-text;
-                color: Theme.secondary-foreground;
-                font-size: Typography.body-size;
-                wrap: word-wrap;
-            }
-            ActionButton {
-                x: parent.width - 29px - 2 * 107px - 12px; y: 132px;
-                width: 107px; height: 40px;
-                label: "Cancel";
-                focused: root.dialog-open && root.dialog-focus == 0;
-                enabled: root.dialog-open;
-                activated => { root.dialog-choose(0); }
-            }
-            ActionButton {
-                x: parent.width - 29px - 107px; y: 132px;
-                width: 107px; height: 40px;
-                label: "Delete";
-                primary: true;
-                focused: root.dialog-open && root.dialog-focus == 1;
-                enabled: root.dialog-open;
-                activated => { root.dialog-choose(1); }
-            }
+    ModalDialog {
+        area-width: root.width; area-height: root.height;
+        open: root.dialog-open;
+        card-width: 456px;
+        card-height: 196px;
+        Text {
+            x: 29px; y: 27px;
+            width: parent.width - 58px; height: 34px;
+            text: root.dialog-title;
+            color: Theme.foreground;
+            font-size: Typography.heading-size;
+            font-weight: Typography.heading-weight;
+            vertical-alignment: center;
+        }
+        Text {
+            x: 29px; y: 66px;
+            width: parent.width - 58px; height: 44px;
+            text: root.dialog-text;
+            color: Theme.secondary-foreground;
+            font-size: Typography.body-size;
+            wrap: word-wrap;
+        }
+        ActionButton {
+            x: parent.width - 29px - 2 * 107px - 12px; y: 132px;
+            width: 107px; height: 40px;
+            label: "Cancel";
+            focused: root.dialog-open && root.dialog-focus == 0;
+            enabled: root.dialog-open;
+            activated => { root.dialog-choose(0); }
+        }
+        ActionButton {
+            x: parent.width - 29px - 107px; y: 132px;
+            width: 107px; height: 40px;
+            label: "Delete";
+            primary: true;
+            focused: root.dialog-open && root.dialog-focus == 1;
+            enabled: root.dialog-open;
+            activated => { root.dialog-choose(1); }
         }
     }
 }

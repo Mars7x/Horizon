@@ -15,7 +15,10 @@ export component GameTile inherits Rectangle {
     changed launching => {
         if (!root.launching) {
             root.releasing-press = true;
-            release-timer.restart();
+            // restart() does nothing on a stopped timer, which left the
+            // spring on every later carousel move.
+            release-timer.stop();
+            release-timer.start();
         } else {
             release-timer.stop();
             root.releasing-press = false;

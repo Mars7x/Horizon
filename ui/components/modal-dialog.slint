@@ -1,0 +1,42 @@
+import { Theme, Metrics, Motion } from "../theme/theme.slint";
+
+// Horizon's one modal: a raised card centred in an area (usually the page),
+// over a dim backdrop that takes every click. Opening fades both in and lifts
+// the card into place by Motion.dialog-rise; closing reverses both over the
+// same Motion.dialog-duration. It stays drawn (and keeps blocking input)
+// until it has fully faded out.
+//
+// The component is the card, so children lay out against the card
+// (`parent.width` is the card's width). The backdrop is its first child,
+// pinned to the area however the card moves.
+export component ModalDialog inherits Rectangle {
+    in property <bool> open: false;
+    in property <length> area-width;
+    in property <length> area-height;
+    in property <length> card-width: 456px;
+    in property <length> card-height: 196px;
+    width: min(root.card-width, root.area-width - 64px);
+    height: root.card-height;
+    x: (root.area-width - self.width) / 2;
+    y: (root.area-height - self.height) / 2 + (root.open ? 0px : Motion.dialog-rise);
+    animate y { duration: Motion.dialog-duration; easing: ease-out; }
+    opacity: root.open ? 1.0 : 0.0;
+    animate opacity { duration: Motion.dialog-duration; easing: ease-in-out; }
+    visible: root.open || self.opacity > 0.01;
+    background: transparent;
+
+    Rectangle {
+        x: -root.x; y: -root.y;
+        width: root.area-width; height: root.area-height;
+        background: #00000099;
+        TouchArea { width: parent.width; height: parent.height; }
+    }
+    Rectangle {
+        width: parent.width; height: parent.height;
+        background: Theme.surface-raised;
+        border-radius: Metrics.radius-lg;
+        border-width: Theme.high-contrast ? 2px : 1px;
+        border-color: Theme.divider;
+    }
+    @children
+}

@@ -161,7 +161,6 @@ struct State {
     metadata_game_id: Option<i64>,
     metadata_sequence: i32,
     browse_sequence: i32,
-    browse_transition_kind: i32, // 0 none, 1 Source, 2 Sort
 }
 impl State {
     fn start_fresh_visit(&mut self) {
@@ -186,7 +185,6 @@ impl Default for State {
             metadata_game_id: None,
             metadata_sequence: 0,
             browse_sequence: 0,
-            browse_transition_kind: 0,
         }
     }
 }
@@ -351,7 +349,6 @@ impl LibraryController {
         }
         let metadata_sequence = s.metadata_sequence;
         let browse_sequence = s.browse_sequence;
-        let browse_transition_kind = s.browse_transition_kind;
         let cards: Vec<LibraryCardData> = if refresh_window {
             s.order[start..end]
                 .iter()
@@ -399,7 +396,6 @@ impl LibraryController {
         // Signal the new arrangement before mutating the model/scroll offsets.
         // This lets Slint choose an instant camera reposition while the two
         // stationary snapshots crossfade rather than also sliding the grid.
-        ui.set_library_browse_transition_kind(browse_transition_kind);
         ui.set_library_browse_sequence(browse_sequence);
         if refresh_window {
             self.rows.set_vec(cards);
@@ -523,7 +519,6 @@ impl LibraryController {
         {
             let mut s = self.state.borrow_mut();
             s.source_index = (s.source_index + 1) % (self.sources.len() + 1);
-            s.browse_transition_kind = 1;
             s.browse_sequence = s.browse_sequence.wrapping_add(1);
         }
         self.rebuild(ui, selected_id);
@@ -535,7 +530,6 @@ impl LibraryController {
         {
             let mut s = self.state.borrow_mut();
             s.sort = s.sort.next();
-            s.browse_transition_kind = 2;
             s.browse_sequence = s.browse_sequence.wrapping_add(1);
         }
         self.rebuild(ui, selected_id);

@@ -147,6 +147,11 @@ export global Typography {
     out property <int> game-title-weight: 700;
 }
 
+// Every animation in Horizon uses these tokens; see docs/UI_STANDARDS.md,
+// "Motion". Easing follows what changes: moves and resizes ease-out (they
+// answer input, so they start fast), fades and colour changes ease-in-out,
+// cameras and timelines are linear. Home's launch release (ease-out-back) is
+// the one spring.
 export global Motion {
     in-out property <bool> reduced-motion: false;
 
@@ -188,4 +193,34 @@ export global Motion {
     // slightly under the 115ms input repeat, so held steps join into one
     // continuous movement.
     out property <duration> scroll-duration: reduced-motion ? 0ms : 110ms;
+    // Modal dialogs (components/modal-dialog.slint): the backdrop fades and
+    // the card lifts into place together.
+    out property <duration> dialog-duration: reduced-motion ? 0ms : 180ms;
+    out property <length> dialog-rise: reduced-motion ? 0px : 12px;
+    // How long a focus frame takes to start or stop its idle breathing.
+    out property <duration> focus-idle-fade: reduced-motion ? 0ms : 220ms;
+
+    // Loops. These run only while something is visibly busy, and stop with
+    // Reduced Motion (the caret then stays solid, the spinner still).
+    out property <duration> caret-blink-cycle: 1100ms;
+    out property <duration> spinner-cycle: 1050ms;
+
+    // Marquee rhythm for every overflowing title (MarqueeText and Home's
+    // SelectedGameLabel): wait, travel at reading speed, rest at the end,
+    // then fade back to the start. Reduced Motion turns marquees off.
+    out property <duration> marquee-start-delay: 2s;
+    out property <duration> marquee-end-pause: 2.4s;
+    out property <duration> marquee-fade-out: 140ms;
+    out property <duration> marquee-fade-in: 180ms;
+    // The soft edges follow the text while it moves.
+    out property <duration> marquee-edge-fade: 120ms;
+    // Reading speed: longer overflows take longer, but not proportionally.
+    public pure function marquee-travel(distance: length) -> duration {
+        distance <= 16px ? 650ms :
+        distance <= 32px ? 850ms :
+        distance <= 56px ? 1100ms :
+        distance <= 90px ? 1450ms :
+        distance <= 140px ? 1900ms :
+        distance <= 200px ? 2500ms : 3100ms
+    }
 }

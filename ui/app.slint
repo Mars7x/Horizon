@@ -169,7 +169,6 @@ export component AppWindow inherits Window {
     in property <bool> library-has-previous-grid: false;
     in property <int> library-selected-index: 0;
     in property <int> library-browse-sequence: 0;
-    in property <int> library-browse-transition-kind: 0;
     in property <string> library-filter-text: "All sources";
     in property <string> library-sort-text: "Alphabetical";
     in property <int> library-total-count: 0;
@@ -221,6 +220,11 @@ export component AppWindow inherits Window {
     // Album: Rust owns the captures, order, selection and decoding; the page
     // reports its grid shape back.
     in property <[AlbumTileData]> album-tiles;
+    in property <[AlbumTileData]> album-previous-tiles;
+    in property <int> album-previous-scroll-row: 0;
+    in property <int> album-previous-total-count: 0;
+    in property <int> album-previous-selected-index: -1;
+    in property <int> album-refresh-sequence: 0;
     in property <int> album-total-count: 0;
     in property <int> album-collection-count: 0;
     in property <string> album-status: "";
@@ -479,7 +483,6 @@ export component AppWindow inherits Window {
                     total-count: root.library-total-count;
                     collection-count: root.library-collection-count;
                     browse-sequence: root.library-browse-sequence;
-                    browse-transition-kind: root.library-browse-transition-kind;
                     filter-text: root.library-filter-text;
                     sort-text: root.library-sort-text;
                     selected-title: root.library-selected-title;
@@ -538,6 +541,11 @@ export component AppWindow inherits Window {
                     height: parent.height;
                     active: root.current-route == AppRouteView.album;
                     tiles: root.album-tiles;
+                    previous-tiles: root.album-previous-tiles;
+                    previous-scroll-row: root.album-previous-scroll-row;
+                    previous-total-count: root.album-previous-total-count;
+                    previous-selected-index: root.album-previous-selected-index;
+                    refresh-sequence: root.album-refresh-sequence;
                     total-count: root.album-total-count;
                     collection-count: root.album-collection-count;
                     status: root.album-status;
