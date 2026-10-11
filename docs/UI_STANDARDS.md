@@ -25,7 +25,7 @@ depend on its viewer, selection and each capture's owner. Hints are
 display-only: they must not show anything the Rust handlers don't do
 (`NavigationController::handle_action`, `LibraryController::handle_action`,
 `SettingsController::handle_action`, `AlbumController`); change both
-together. The bar lists the page's actions, left to right **Y, X, B, A** (A
+together. The bar lists the page's actions, left to right **X, B, A** (A
 always rightmost, B beside it), not D-pad movement, and not fullscreen
 shortcuts (Album's Left/Right browse and LB/RB skip).
 

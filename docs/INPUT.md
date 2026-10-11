@@ -53,7 +53,6 @@ Home
 LeftBumper
 RightBumper
 Secondary   (gamepad X / west, keyboard Delete; Album: delete)
-Tertiary    (gamepad Y / north, keyboard Insert; Album: save to Pictures)
 ```
 
 Directional keyboard actions may auto-repeat. Activation/navigation actions such as Accept and Back require a fresh press.

@@ -15,9 +15,16 @@ Horizon includes or derives small portions of artwork and other resources from t
 - Changes: the original file is not modified; only the runtime colour and render
   resolution are adapted. The earlier native-Path transcription is retired.
 
-### Network status — GNOME Symbolic / Adwaita icons (Phase 9.5.44.72)
+### Network status — retired
 
-Only eight supplied status glyphs are bundled, corresponding to observable
+The network status glyphs are now Horizon's own native drawings
+(`ui/components/status-glyphs.slint`, ADR 0171), in the style of its battery
+indicator; no GNOME status artwork is bundled any more. The record below is
+kept as history.
+
+#### Formerly: GNOME Symbolic / Adwaita icons (Phase 9.5.44.72)
+
+Only eight supplied status glyphs were bundled, corresponding to observable
 network states; no unused acquiring or wired-disconnected symbols are copied.
 
 - **Wi-Fi:** `ui/assets/status/radiowaves-1-symbolic.svg`,

@@ -6,14 +6,6 @@ notice="$root/THIRD_PARTY_NOTICES.md"
 
 required_assets=(
   "applications-games-symbolic.svg"
-  "status/radiowaves-1-symbolic.svg"
-  "status/radiowaves-2-symbolic.svg"
-  "status/radiowaves-3-symbolic.svg"
-  "status/radiowaves-4-symbolic.svg"
-  "status/radiowaves-x-symbolic.svg"
-  "status/radiowaves-question-symbolic.svg"
-  "status/network-wired-symbolic.svg"
-  "status/network-wired-no-route-symbolic.svg"
 )
 
 required_licenses=(

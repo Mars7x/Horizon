@@ -10,15 +10,13 @@ screenshots). See [ADR 0166](adr/0166-album-captures-and-media-pipeline.md).
 | --- | --- | --- |
 | Grid | D-pad / stick | Move between captures (reading order; no wrap) |
 | Grid | A, or click the selected tile | Open the capture full-screen |
-| Grid | Y | Saves the selected capture to Pictures/Horizon (while selecting: the ticked ones) |
-| Grid | X | Start selecting: A (or a click) ticks captures, X asks to delete the ticked ones, Y saves them, B finishes |
+| Grid | X | Start selecting: A (or a click) ticks captures, X asks to delete the ticked ones, B finishes |
 | Grid | LB / click "Game" | Next game filter: All games, then each game with captures, most recent first |
 | Grid | RB / click "Type" | All → Screenshots → Videos |
 | Grid | Mouse wheel | Moves the camera only, never the selection |
 | Viewer | Left / Right, or click the screen edges | Previous / next capture, sliding in from that side; stops at either end |
 | Viewer (video) | A, or click the video | Play / pause; at the end, A plays it again |
 | Viewer (video) | LB / RB | Back / forward 10 seconds |
-| Viewer | Y | Saves this capture to Pictures/Horizon |
 | Viewer | X | Asks to delete this capture (Cancel is focused first) |
 | Viewer (video) | Click the timeline | Seek |
 | Viewer | B | Back to the grid, on the capture that was open |
@@ -66,18 +64,6 @@ game starts). Leaving the Album stops playback.
 
 Supported formats are decided by extension: PNG and JPEG photos; MP4, M4V,
 MKV, WebM and MOV videos (whatever the runtime's FFmpeg can decode).
-
-## Saving to Pictures
-
-Y copies the capture to `Pictures/Horizon` (the user's Pictures folder, from
-their desktop's folder names; `data_paths::pictures_export_dir`) under a
-readable name, `<Game> 2026-10-11 14.30.12.png` (`Horizon …` without a game).
-An existing file is never replaced: ` (2)`, ` (3)`… are added. The copy is
-written to `.part` first and renamed, on a worker thread (videos can be
-large); the bottom bar, or the viewer's top line, says "Saved to
-Pictures/Horizon". The Flatpak grants only that folder
-(`xdg-pictures/Horizon:create`) and reads `user-dirs.dirs` to find Pictures.
-See `services::album::export`.
 
 ## Deleting
 
@@ -181,6 +167,4 @@ media extension, so a half-written file never appears. Pass the game's
 ## Not yet
 
 - Taking screenshots and recordings: that comes with the gamescope work.
-- Deleting or exporting captures (Horizon's own only; never a source's), for
-  example exporting to Pictures through the portal.
 - Steam game recordings, HDR/AVIF captures, and captions.

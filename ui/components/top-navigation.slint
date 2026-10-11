@@ -1,6 +1,6 @@
 import { Theme, Metrics, Motion } from "../theme/theme.slint";
 import { SelectionFocusSurface } from "selection-focus-surface.slint";
-import { NetworkStatusGlyph } from "network-status-glyph.slint";
+import { BatteryIndicator, NetworkIndicator } from "status-glyphs.slint";
 import { FriendsIcon, AlbumIcon, ActivityIcon, AchievementsIcon, WebIcon, SettingsIcon, ShopIcon } from "utility-icons.slint";
 
 component Separator inherits Rectangle {
@@ -9,102 +9,8 @@ component Separator inherits Rectangle {
     background: Theme.divider.with-alpha(0.78);
 }
 
-// Standard GNOME network-wired 16-unit geometry, optically fitted to the
-// existing 22px wired slot. Integer-aligned bars and stems are drawn directly
-// at the target size; repeatedly resampling the original 16px SVG produced
-// softened edges. The upstream SVG is retained unchanged for provenance.
-// This pixel-snapped adaptation follows GNOME Adwaita CC BY-SA 3.0 US.
-component PixelAlignedWiredSymbol inherits Rectangle {
-    width: 22px;
-    height: 22px;
-    background: transparent;
-    // Primary socket, central stem, and T junction.
-    Rectangle {
-        x: 7px; y: 0px; width: 8px; height: 7px;
-        border-radius: 2px; background: Theme.foreground;
-    }
-    Rectangle { x: 10px; y: 6px; width: 2px; height: 5px; background: Theme.foreground; }
-    Rectangle { x: 0px; y: 10px; width: 22px; height: 3px; background: Theme.foreground; }
-    // Downlinks overlap the rounded terminal nodes, leaving no one-pixel seams.
-    Rectangle { x: 3px; y: 12px; width: 3px; height: 5px; background: Theme.foreground; }
-    Rectangle { x: 16px; y: 12px; width: 3px; height: 5px; background: Theme.foreground; }
-    Rectangle {
-        x: 0px; y: 16px; width: 8px; height: 6px;
-        border-radius: 2px; background: Theme.foreground;
-    }
-    Rectangle {
-        x: 14px; y: 16px; width: 8px; height: 6px;
-        border-radius: 2px; background: Theme.foreground;
-    }
-}
-
-// GNOME's wired artwork visually fills more of its SVG viewbox than Wi-Fi.
-// Keep both wired variants in their 22px optical slot, and paint the normal
-// wired icon directly at whole-pixel positions. Other states use the same
-// scale-aware original SVGs as before.
-component NetworkSymbol inherits Rectangle {
-    in property <int> glyph-id: 0;
-    in property <float> render-scale: 1.0;
-    private property <length> glyph-size: root.glyph-id == 1 || root.glyph-id == 2 ? 22px : 26px;
-    width: 30px;
-    height: 28px;
-    background: transparent;
-    // Direct scene geometry avoids a 16->22px SVG raster step plus a second
-    // fullscreen scale transform on the normal Ethernet icon.
-    if root.glyph-id == 1 : PixelAlignedWiredSymbol {
-        x: (parent.width - self.width) / 2;
-        y: (parent.height - self.height) / 2;
-    }
-    // The limited/no-route GNOME mark has curved question geometry and uses
-    // the original SVG renderer; all Wi-Fi glyphs remain exactly as before.
-    if root.glyph-id != 1 : NetworkStatusGlyph {
-        x: (parent.width - self.width) / 2;
-        y: (parent.height - self.height) / 2;
-        width: root.glyph-size;
-        height: root.glyph-size;
-        glyph-id: root.glyph-id;
-        render-scale: root.render-scale;
-    }
-}
-
-component BatteryIndicator inherits Rectangle {
-    in property <int> percent: 0;
-    in property <bool> charging: false;
-    // Actual battery level, not the theme accent, determines the warning.
-    // Both variants remain distinct from their Light/Dark backgrounds.
-    private property <color> indicator-ink: root.percent <= 20
-        ? (Theme.is-dark ? #ff6875 : #b42318) : Theme.foreground;
-    width: 35px; height: 24px; background: transparent;
-    Path {
-        x: 0px; y: 1px; width: 34px; height: 22px;
-        viewbox-width: 30; viewbox-height: 20;
-        commands: "M 3 4 H 23 Q 26 4 26 7 V 13 Q 26 16 23 16 H 3 Q 1 16 1 13 V 7 Q 1 4 3 4 M 28 8 V 12";
-        fill: transparent; stroke: root.indicator-ink;
-        stroke-width: 1.8px; stroke-line-cap: round; stroke-line-join: round;
-    }
-    // Discrete fill avoids a blurry fractional-pixel right edge.
-    Rectangle {
-        x: 5px; y: 8px;
-        width: root.percent >= 95 ? 18px : root.percent >= 75 ? 14px
-            : root.percent >= 50 ? 10px : root.percent >= 25 ? 6px
-            : root.percent > 0 ? 2px : 0px;
-        height: 8px; border-radius: 1px;
-        background: root.indicator-ink;
-    }
-    if root.charging : Path {
-        x: 8px; y: 1px; width: 17px; height: 21px;
-        viewbox-width: 16; viewbox-height: 20;
-        commands: "M 10 0 L 3 10 H 8 L 6 20 L 14 8 H 9 Z";
-        // Solid bolt with a surface-coloured clearance stroke. The previous
-        // hollow/background-filled bolt was difficult to see at small sizes.
-        fill: root.indicator-ink; stroke: Theme.background;
-        stroke-width: 1.8px; stroke-line-join: round;
-    }
-}
-
 component StatusCluster inherits Rectangle {
-    in property <float> render-scale: 1.0;
-    in property <int> network-kind: 0; // 0=offline, 1=Ethernet, 2=Wi-Fi
+    in property <int> network-kind: 0; // 0 offline, 1 Ethernet, 2 Wi-Fi, 3 other
     in property <int> wifi-strength: 0;
     in property <bool> network-limited: false;
     in property <bool> battery-visible: false;
@@ -116,32 +22,14 @@ component StatusCluster inherits Rectangle {
     background: transparent;
 
     Separator { x: 0px; y: (parent.height - self.height) / 2; }
-    // No active physical connection: never claim a wired disconnection, since
-    // NetworkManager has not identified which interface would be disconnected.
-    if root.network-kind == 0 : NetworkSymbol {
+    // Offline never claims a wired disconnection (NetworkManager hasn't said
+    // which interface would be disconnected), and another kind of
+    // connection is never assumed to be Ethernet.
+    NetworkIndicator {
         x: 28px; y: (parent.height - self.height) / 2;
-        render-scale: root.render-scale;
-        glyph-id: 0;
-    }
-    if root.network-kind == 1 : NetworkSymbol {
-        x: 28px; y: (parent.height - self.height) / 2;
-        render-scale: root.render-scale;
-        glyph-id: root.network-limited ? 2 : 1;
-    }
-    if root.network-kind == 2 : NetworkSymbol {
-        x: 28px; y: (parent.height - self.height) / 2;
-        // GNOME's radiowaves numbering is strong (1) to weakest (4).
-        render-scale: root.render-scale;
-        glyph-id: root.network-limited ? 7
-            : root.wifi-strength >= 75 ? 3
-            : root.wifi-strength >= 50 ? 4
-            : root.wifi-strength >= 25 ? 5 : 6;
-    }
-    // Other/unknown networks are not assumed to be Ethernet.
-    if root.network-kind == 3 : NetworkSymbol {
-        x: 28px; y: (parent.height - self.height) / 2;
-        render-scale: root.render-scale;
-        glyph-id: 7;
+        kind: root.network-kind;
+        strength: root.wifi-strength;
+        limited: root.network-limited;
     }
     // Keep the indicator mounted so *both* appear and disappear animate.
     // Its right edge stays anchored to the cluster during width changes,
@@ -343,7 +231,6 @@ export component TopNavigation inherits Rectangle {
     }
 
     StatusCluster {
-        render-scale: root.icon-render-scale;
         x: parent.width - Metrics.top-edge-inset - self.width;
         y: root.content-center-y - self.height / 2;
         network-kind: root.network-kind;

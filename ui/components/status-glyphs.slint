@@ -1,0 +1,139 @@
+import { Theme } from "../theme/theme.slint";
+
+// The top bar's status glyphs (battery, network), drawn natively in one
+// style: a `stroke` outline with round caps in the foreground ink, solid
+// parts for what is filled, and a faint ink for the parts that aren't (the
+// empty part of the battery, Wi-Fi arcs above the signal). Levels are
+// discrete steps, never fractional, so edges stay crisp. All glyphs share a
+// 24x20 grid drawn at 1.13x (the battery's 30x20 at 34px wide).
+global StatusStyle {
+    out property <length> stroke: 1.8px;
+    out property <color> ink: Theme.foreground;
+    out property <color> faint: Theme.foreground.with-alpha(0.28);
+    // Battery warning: from the level, not the accent; readable on both
+    // backgrounds.
+    out property <color> warning: Theme.is-dark ? #ff6875 : #b42318;
+}
+
+export component BatteryIndicator inherits Rectangle {
+    in property <int> percent: 0;
+    in property <bool> charging: false;
+    private property <color> ink: root.percent <= 20 ? StatusStyle.warning : StatusStyle.ink;
+    width: 35px; height: 24px; background: transparent;
+    Path {
+        x: 0px; y: 1px; width: 34px; height: 22px;
+        viewbox-width: 30; viewbox-height: 20;
+        commands: "M 3 4 H 23 Q 26 4 26 7 V 13 Q 26 16 23 16 H 3 Q 1 16 1 13 V 7 Q 1 4 3 4 M 28 8 V 12";
+        fill: transparent; stroke: root.ink;
+        stroke-width: StatusStyle.stroke; stroke-line-cap: round; stroke-line-join: round;
+    }
+    // Discrete fill avoids a blurry fractional-pixel right edge.
+    Rectangle {
+        x: 5px; y: 8px;
+        width: root.percent >= 95 ? 18px : root.percent >= 75 ? 14px
+            : root.percent >= 50 ? 10px : root.percent >= 25 ? 6px
+            : root.percent > 0 ? 2px : 0px;
+        height: 8px; border-radius: 1px;
+        background: root.ink;
+    }
+    if root.charging : Path {
+        x: 8px; y: 1px; width: 17px; height: 21px;
+        viewbox-width: 16; viewbox-height: 20;
+        commands: "M 10 0 L 3 10 H 8 L 6 20 L 14 8 H 9 Z";
+        // A solid bolt with a background-coloured clearance stroke, so it
+        // reads against the fill at small sizes.
+        fill: root.ink; stroke: Theme.background;
+        stroke-width: StatusStyle.stroke; stroke-line-join: round;
+    }
+}
+
+// One stroked part of a status glyph on the shared 24x20 grid.
+component Stroke inherits Path {
+    in property <color> ink: StatusStyle.ink;
+    x: 0px; y: 0px; width: 27px; height: 22.5px;
+    viewbox-width: 24; viewbox-height: 20;
+    fill: transparent; stroke: root.ink;
+    stroke-width: StatusStyle.stroke; stroke-line-cap: round; stroke-line-join: round;
+}
+
+// One filled part (dots).
+component Fill inherits Path {
+    in property <color> ink: StatusStyle.ink;
+    x: 0px; y: 0px; width: 27px; height: 22.5px;
+    viewbox-width: 24; viewbox-height: 20;
+    fill: root.ink; stroke-width: 0px;
+}
+
+// "!" for a link without internet: a short bar and a dot, at (`cx`, `top`).
+component Exclamation inherits Rectangle {
+    in property <float> cx: 21.5;
+    in property <float> top: 12;
+    width: 27px; height: 22.5px; background: transparent;
+    Stroke { commands: "M \{root.cx} \{root.top} V \{root.top + 3.5}"; }
+    Fill {
+        commands: "M \{root.cx - 1.05} \{root.top + 6.6} A 1.05 1.05 0 1 0 \{root.cx + 1.05} \{root.top + 6.6} A 1.05 1.05 0 1 0 \{root.cx - 1.05} \{root.top + 6.6} Z";
+    }
+}
+
+// Network: 0 offline, 1 Ethernet, 2 Wi-Fi (with `strength` 0-100), 3 another
+// kind (not assumed to be either). `limited`: connected without internet.
+export component NetworkIndicator inherits Rectangle {
+    in property <int> kind: 0;
+    in property <int> strength: 0;
+    in property <bool> limited: false;
+    width: 30px; height: 28px; background: transparent;
+
+    private property <int> bars: root.kind != 2 || root.limited ? 0
+        : root.strength >= 75 ? 3 : root.strength >= 50 ? 2 : root.strength >= 25 ? 1 : 0;
+
+    glyph := Rectangle {
+        x: (parent.width - 27px) / 2; y: (parent.height - 22.5px) / 2;
+        width: 27px; height: 22.5px; background: transparent;
+
+        // Wi-Fi (and offline, drawn as an empty Wi-Fi): a dot and three arcs
+        // around it; arcs above the signal are faint.
+        if root.kind == 2 || root.kind == 0 : Rectangle {
+            width: parent.width; height: parent.height; background: transparent;
+            Fill {
+                ink: root.kind == 0 ? StatusStyle.faint : StatusStyle.ink;
+                commands: "M 10.3 18 A 1.7 1.7 0 1 0 13.7 18 A 1.7 1.7 0 1 0 10.3 18 Z";
+            }
+            Stroke {
+                ink: root.bars >= 1 ? StatusStyle.ink : StatusStyle.faint;
+                commands: "M 8.46 14.46 A 5 5 0 0 1 15.54 14.46";
+            }
+            Stroke {
+                ink: root.bars >= 2 ? StatusStyle.ink : StatusStyle.faint;
+                commands: "M 4.93 10.93 A 10 10 0 0 1 19.07 10.93";
+            }
+            Stroke {
+                ink: root.bars >= 3 ? StatusStyle.ink : StatusStyle.faint;
+                commands: "M 1.39 7.39 A 15 15 0 0 1 22.61 7.39";
+            }
+            if root.kind == 2 && root.limited : Exclamation { }
+            // Offline: struck through, with a background-coloured clearance.
+            if root.kind == 0 : Rectangle {
+                width: parent.width; height: parent.height; background: transparent;
+                Stroke { ink: Theme.background; stroke-width: StatusStyle.stroke * 2.6; commands: "M 4 2.5 L 20 18.5"; }
+                Stroke { commands: "M 4 2.5 L 20 18.5"; }
+            }
+        }
+        // Ethernet: a network port; "!" in place of its pins when limited.
+        if root.kind == 1 : Rectangle {
+            width: parent.width; height: parent.height; background: transparent;
+            Stroke {
+                commands: "M 4 2 H 20 Q 22 2 22 4 V 14 Q 22 16 20 16 H 16 V 18.5 H 8 V 16 H 4 Q 2 16 2 14 V 4 Q 2 2 4 2 Z";
+            }
+            if !root.limited : Stroke { commands: "M 8 5.5 V 9 M 12 5.5 V 9 M 16 5.5 V 9"; }
+            if root.limited : Exclamation { cx: 12; top: 4.5; }
+        }
+        // Another kind of connection: a globe.
+        if root.kind == 3 : Rectangle {
+            width: parent.width; height: parent.height; background: transparent;
+            Stroke {
+                commands: "M 4 10 A 8 8 0 1 1 20 10 A 8 8 0 1 1 4 10 Z M 4 10 H 20 M 12 2 Q 7.5 10 12 18 Q 16.5 10 12 2";
+            }
+            if root.limited : Exclamation { cx: 22; top: 13; }
+        }
+    }
+}

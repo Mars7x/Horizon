@@ -41,10 +41,7 @@ use crate::{
         HorizonAlbum, MediaLoader, MediaResult, ThumbnailCache, VideoBackend, VideoFrame,
         VideoPlayback, VideoSink, scan_all,
     },
-    services::{
-        album::export::export,
-        worker::{WorkerSender, spawn, worker_channel},
-    },
+    services::worker::{WorkerSender, spawn, worker_channel},
     sources::CaptureSource,
 };
 
@@ -64,7 +61,6 @@ enum AlbumEvent {
     Scanned(Vec<Capture>),
     Media(MediaResult),
     VideoDuration(u64),
-    Exported { saved: usize, failed: usize },
     VideoEnded(u64),
     VideoFailed(u64, String),
 }
@@ -241,8 +237,6 @@ pub struct AlbumController {
     video: Arc<dyn VideoBackend>,
     loader: MediaLoader,
     titles: HashMap<SourceGameRef, String>,
-    /// Pictures/Horizon, where Save copies captures; `None` without a home.
-    export_dir: Option<PathBuf>,
     /// The hints last published, so the bar only changes when they do.
     hints: RefCell<Vec<(&'static str, String)>>,
     sender: WorkerSender<AlbumEvent>,
@@ -275,8 +269,6 @@ impl AlbumController {
         horizon_dir: Option<PathBuf>,
         sources: Vec<Arc<dyn CaptureSource>>,
         cache_dir: Option<PathBuf>,
-        // Where Save copies captures (`data_paths::pictures_export_dir`).
-        export_dir: Option<PathBuf>,
         video: Arc<dyn VideoBackend>,
     ) -> Rc<Self> {
         // Scans, decoded media and video events all land in one channel,
@@ -312,7 +304,6 @@ impl AlbumController {
             video,
             loader,
             titles,
-            export_dir,
             hints: RefCell::new(Vec::new()),
             sender,
             receiver,
@@ -467,31 +458,6 @@ impl AlbumController {
                     }
                     self.publish_video(&ui);
                 }
-                AlbumEvent::Exported { saved, failed } => {
-                    let folder = self.export_dir.as_deref().map_or_else(
-                        || "Pictures".to_owned(),
-                        |dir| {
-                            let parent = dir.parent().and_then(Path::file_name);
-                            let name = dir.file_name();
-                            match (parent, name) {
-                                (Some(parent), Some(name)) => format!(
-                                    "{}/{}",
-                                    parent.to_string_lossy(),
-                                    name.to_string_lossy()
-                                ),
-                                _ => dir.display().to_string(),
-                            }
-                        },
-                    );
-                    self.state.borrow_mut().notice = Some(match (saved, failed) {
-                        (_, 0) if saved == 1 => format!("Saved to {folder}"),
-                        (_, 0) => format!("Saved {saved} captures to {folder}"),
-                        (0, _) => format!("Couldn't save to {folder}"),
-                        _ => format!("Saved {saved}, couldn't save {failed}"),
-                    });
-                    wake_overlay(&ui);
-                    republish = true;
-                }
                 AlbumEvent::VideoDuration(generation) => {
                     if self.video_generation.load(Ordering::SeqCst) == generation {
                         self.publish_video(&ui);
@@ -588,7 +554,6 @@ impl AlbumController {
                 return self.confirm_delete_checked(ui);
             }
             UiAction::Secondary if !event.repeated => return self.start_selecting(ui),
-            UiAction::Tertiary if !event.repeated => return self.save(ui),
             _ => {}
         }
         AlbumFeedback::None
@@ -606,64 +571,6 @@ impl AlbumController {
             return true;
         }
         self.close_viewer(ui)
-    }
-
-    // ----- saving -----------------------------------------------------
-
-    /// Y: copies the capture on screen (or, while selecting, the ticked
-    /// ones) to Pictures/Horizon, off the UI thread. The bottom bar (or the
-    /// viewer's top line) says how it went.
-    fn save(&self, ui: &AppWindow) -> AlbumFeedback {
-        let Some(folder) = self.export_dir.clone() else {
-            return AlbumFeedback::None;
-        };
-        let (captures, selecting): (Vec<(Capture, Option<String>)>, bool) = {
-            let s = self.state.borrow();
-            let picked: Vec<&Capture> = if s.selecting && !s.viewing {
-                s.order
-                    .iter()
-                    .map(|index| &s.captures[*index])
-                    .filter(|capture| s.checked.contains(capture.path()))
-                    .collect()
-            } else {
-                s.current().into_iter().collect()
-            };
-            let titled = picked
-                .into_iter()
-                .map(|capture| {
-                    let title = capture
-                        .game()
-                        .and_then(|game| self.titles.get(game))
-                        .cloned();
-                    (capture.clone(), title)
-                })
-                .collect();
-            (titled, s.selecting && !s.viewing)
-        };
-        if captures.is_empty() {
-            return AlbumFeedback::None;
-        }
-        let sender = self.sender.clone();
-        let started = spawn("album-export", move || {
-            let (mut saved, mut failed) = (0, 0);
-            for (capture, title) in &captures {
-                match export(capture, title.as_deref(), &folder) {
-                    Ok(_) => saved += 1,
-                    Err(error) => {
-                        warn!(path = %capture.path().display(), %error, "capture could not be saved");
-                        failed += 1;
-                    }
-                }
-            }
-            let _ = sender.send(AlbumEvent::Exported { saved, failed });
-        });
-        if !started {
-            return AlbumFeedback::None;
-        }
-        if selecting {
-            self.stop_selecting(ui);
-        }
-        AlbumFeedback::Ok
     }
 
     // ----- deleting ---------------------------------------------------
@@ -1034,7 +941,6 @@ impl AlbumController {
                     .map(|c| c.path().to_owned());
                 return target.map_or(AlbumFeedback::None, |path| self.open_dialog(ui, vec![path]));
             }
-            UiAction::Tertiary if !event.repeated => return self.save(ui),
             _ => {}
         }
         AlbumFeedback::None
@@ -1278,18 +1184,14 @@ impl AlbumController {
         self.publish_hints(ui);
     }
 
-    /// The hint bar: Y, X, B, A from left to right (A rightmost), each only
+    /// The hint bar: X, B, A from left to right (A rightmost), each only
     /// when it does something here.
     fn publish_hints(&self, ui: &AppWindow) {
         let hints: Vec<(&'static str, String)> = {
             let s = self.state.borrow();
-            let can_save = self.export_dir.is_some();
             let mut hints = Vec::new();
             if s.viewing {
                 if let Some(capture) = s.current() {
-                    if can_save {
-                        hints.push(("Y", "Save".to_owned()));
-                    }
                     if capture.deletable() {
                         hints.push(("X", "Delete".to_owned()));
                     }
@@ -1307,9 +1209,6 @@ impl AlbumController {
                 }
             } else if s.selecting {
                 if !s.checked.is_empty() {
-                    if can_save {
-                        hints.push(("Y", "Save".to_owned()));
-                    }
                     hints.push(("X", "Delete".to_owned()));
                 }
                 hints.push(("B", "Done".to_owned()));
@@ -1317,9 +1216,6 @@ impl AlbumController {
             } else if s.order.is_empty() {
                 hints.push(("B", "Back".to_owned()));
             } else {
-                if can_save {
-                    hints.push(("Y", "Save".to_owned()));
-                }
                 if s.order.iter().any(|index| s.captures[*index].deletable()) {
                     hints.push(("X", "Delete".to_owned()));
                 }
@@ -1413,7 +1309,7 @@ impl AlbumController {
         ui.set_album_selected_text(selected_text.into());
         ui.set_album_visit_revision(s.visit_revision);
         if let Some(capture) = s.current().filter(|_| s.viewing) {
-            // A notice (Saved to Pictures…) takes the date's place a moment.
+            // A notice (a failed delete) takes the date's place a moment.
             let text = s
                 .notice
                 .clone()

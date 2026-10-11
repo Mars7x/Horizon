@@ -58,11 +58,6 @@ finish-args:
   - --filesystem=xdg-data/Steam/userdata
   - --filesystem=xdg-data/steam/userdata
   - --filesystem=~/.var/app/com.valvesoftware.Steam/.local/share/Steam/userdata
-  # Album "Save" copies captures to Pictures/Horizon: that one folder,
-  # created if missing. The desktop's folder names (read-only) say where
-  # Pictures is, since it may be localized.
-  - --filesystem=xdg-pictures/Horizon:create
-  - --filesystem=xdg-config/user-dirs.dirs:ro
   # Additional provider metadata is read-only and scoped to each launcher's
   # own native XDG tree or Flatpak app-data tree. Do not replace these with
   # broad home/host access.
