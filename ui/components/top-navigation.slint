@@ -1,5 +1,6 @@
 import { Theme, Metrics, Motion } from "../theme/theme.slint";
 import { SelectionFocusSurface } from "selection-focus-surface.slint";
+import { ProfileAvatar } from "profile-avatar.slint";
 import { BatteryIndicator, NetworkIndicator } from "status-glyphs.slint";
 import { FriendsIcon, AlbumIcon, ActivityIcon, AchievementsIcon, SettingsIcon, ShopIcon } from "utility-icons.slint";
 
@@ -76,6 +77,11 @@ component UtilityFocusSurface inherits Rectangle {
 
 export component TopNavigation inherits Rectangle {
     in property <float> icon-render-scale: 1.0;
+    in property <image> profile-picture;
+    in property <bool> profile-has-picture: false;
+    in property <bool> profile-square: false;
+    in property <image> profile-frame;
+    in property <bool> profile-has-frame: false;
     in property <int> network-kind: 0;
     in property <int> wifi-strength: 0;
     in property <bool> network-limited: false;
@@ -89,42 +95,18 @@ export component TopNavigation inherits Rectangle {
     background: transparent;
     private property <length> content-center-y: root.height / 2;
 
-    Rectangle {
+    avatar := ProfileAvatar {
+        picture: root.profile-picture;
+        has-picture: root.profile-has-picture;
+        square: root.profile-square;
+        frame: root.profile-frame;
+        has-frame: root.profile-has-frame;
         x: Metrics.top-edge-inset;
         y: root.content-center-y - self.height / 2;
-        width: 50px;
-        height: 50px;
-        border-radius: 25px;
-        background: @linear-gradient(145deg, Theme.accent 0%, Theme.accent-hover 100%);
-        border-width: 3px;
-        border-color: Theme.surface-raised;
-        drop-shadow-offset-y: 3px;
-        drop-shadow-blur: 10px;
-        drop-shadow-color: Theme.shadow;
-
-        Text {
-            text: "H";
-            color: Theme.accent-foreground;
-            font-size: 23px;
-            font-weight: 700;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
-
-        Rectangle {
-            x: parent.width - 7px;
-            y: 1px;
-            width: 10px;
-            height: 10px;
-            border-radius: 5px;
-            background: Theme.accent;
-            border-width: 2px;
-            border-color: Theme.surface-raised;
-        }
     }
 
     Separator {
-        x: Metrics.top-edge-inset + 74px;
+        x: Metrics.top-edge-inset + avatar.width + 24px;
         y: root.content-center-y - self.height / 2;
     }
 

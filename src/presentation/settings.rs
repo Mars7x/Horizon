@@ -16,6 +16,7 @@ use crate::{
     input::{UiAction, UiActionEvent},
     navigation::step_with_edge_wrap,
     platform::wayland_clipboard::WaylandClipboard,
+    presentation::profile::ProfileController,
     presentation::{CallbackSlot, appearance::AppearanceController},
     services::{
         settings::{ArtworkPreferences, SettingsService},
@@ -27,6 +28,8 @@ use crate::{
 enum SettingsView {
     #[default]
     Root,
+    // The profile picture shown in Home's top bar.
+    Profile,
     Appearance,
     // Third-Party lists one "Open" row per service; each service has its
     // own sub-page so SteamGridDB and Steam work the same way.
@@ -69,6 +72,7 @@ pub struct SettingsController {
     action_sound: CallbackSlot<dyn Fn(UiSoundCue)>,
     wayland_clipboard: RefCell<Option<Arc<WaylandClipboard>>>,
     paste_generation: Arc<AtomicU64>,
+    profile: Rc<ProfileController>,
 }
 
 impl SettingsController {
@@ -77,6 +81,7 @@ impl SettingsController {
         service: SettingsService,
         appearance: AppearanceController,
         steam_account: Rc<RefCell<SteamAccountService>>,
+        profile: Rc<ProfileController>,
     ) -> Rc<Self> {
         let controller = Rc::new(Self {
             page: RefCell::new(PageState::default()),
@@ -90,6 +95,7 @@ impl SettingsController {
             action_sound: RefCell::new(None),
             wayland_clipboard: RefCell::new(None),
             paste_generation: Arc::new(AtomicU64::new(0)),
+            profile,
         });
         controller.publish(ui);
         controller.bind_callbacks(ui);
@@ -245,6 +251,7 @@ impl SettingsController {
                     page.view,
                     self.service.borrow().has_steamgriddb_key(),
                     self.steam_account.borrow().saved(),
+                    self.profile.has_chosen_picture(),
                 );
                 let delta = if action == UiAction::Up { -1 } else { 1 };
                 page.selected = if page.view == SettingsView::Appearance {
@@ -356,7 +363,7 @@ impl SettingsController {
         let view = self.page.borrow().view;
         match view {
             SettingsView::Root => {
-                if !(0..=1).contains(&selected) {
+                if !(0..=2).contains(&selected) {
                     return;
                 }
                 let mut page = self.page.borrow_mut();
@@ -422,6 +429,23 @@ impl SettingsController {
                 page.feedback.clear();
                 drop(page);
                 self.cue(UiSoundCue::Ok);
+                self.publish(ui);
+                return;
+            }
+            SettingsView::Profile => {
+                self.page.borrow_mut().selected = selected;
+                let done = match selected {
+                    0 => self.profile.choose(ui),
+                    1 => self.profile.set_use_steam(ui, !self.profile.uses_steam()),
+                    2 => self
+                        .profile
+                        .set_steam_square(ui, !self.profile.steam_square()),
+                    3 => self.profile.remove(ui),
+                    _ => return,
+                };
+                if done {
+                    self.cue(UiSoundCue::Ok);
+                }
                 self.publish(ui);
                 return;
             }
@@ -731,6 +755,7 @@ impl SettingsController {
             SettingsView::ThirdParty => 2,
             SettingsView::SteamAccount => 3,
             SettingsView::SteamGridDb => 4,
+            SettingsView::Profile => 5,
         });
         let prefs = self.appearance.preferences();
         ui.set_settings_theme_index(prefs.theme_index());
@@ -760,21 +785,35 @@ impl SettingsController {
 }
 
 /// Intra-Settings Back restores the row that opened the child page.
-/// A brand-new visit uses PageState::default() and starts at Appearance.
+/// A brand-new visit uses PageState::default() and starts at Profile.
 fn settings_parent(view: SettingsView) -> Option<(SettingsView, i32)> {
     match view {
         SettingsView::Root => None,
-        SettingsView::Appearance => Some((SettingsView::Root, 0)),
-        SettingsView::ThirdParty => Some((SettingsView::Root, 1)),
+        SettingsView::Profile => Some((SettingsView::Root, 0)),
+        SettingsView::Appearance => Some((SettingsView::Root, 1)),
+        SettingsView::ThirdParty => Some((SettingsView::Root, 2)),
         SettingsView::SteamGridDb => Some((SettingsView::ThirdParty, 0)),
         SettingsView::SteamAccount => Some((SettingsView::ThirdParty, 1)),
     }
 }
 
-/// Keep controller focus within visible/enabled Third-Party actions.
-fn selection_count(view: SettingsView, _has_key: bool, steam_saved: bool) -> i32 {
+/// Keep controller focus within visible/enabled actions: Remove picture only
+/// while a chosen picture exists (Choose, the two Steam switches, then Remove).
+fn selection_count(
+    view: SettingsView,
+    _has_key: bool,
+    steam_saved: bool,
+    has_picture: bool,
+) -> i32 {
     match view {
-        SettingsView::Root => 2,
+        SettingsView::Root => 3,
+        SettingsView::Profile => {
+            if has_picture {
+                4
+            } else {
+                3
+            }
+        }
         SettingsView::Appearance => 14,
         SettingsView::ThirdParty => 2,
         SettingsView::SteamGridDb => 4,
@@ -815,8 +854,9 @@ fn steamgriddb_step_without_key(selected: i32, delta: i32, repeated: bool) -> i3
 /// their row index directly, while controller Accept uses the Rust focus index.
 fn root_destination(index: i32) -> Option<SettingsView> {
     match index {
-        0 => Some(SettingsView::Appearance),
-        1 => Some(SettingsView::ThirdParty),
+        0 => Some(SettingsView::Profile),
+        1 => Some(SettingsView::Appearance),
+        2 => Some(SettingsView::ThirdParty),
         _ => None,
     }
 }
@@ -936,28 +976,39 @@ mod editor_navigation_tests {
 
     #[test]
     fn refresh_row_is_included_only_with_saved_key() {
-        assert_eq!(super::selection_count(SettingsView::Root, false, false), 2);
         assert_eq!(
-            super::selection_count(SettingsView::Appearance, false, false),
+            super::selection_count(SettingsView::Root, false, false, false),
+            3
+        );
+        assert_eq!(
+            super::selection_count(SettingsView::Profile, false, false, false),
+            3
+        );
+        assert_eq!(
+            super::selection_count(SettingsView::Profile, false, false, true),
+            4
+        );
+        assert_eq!(
+            super::selection_count(SettingsView::Appearance, false, false, false),
             14
         );
         assert_eq!(
-            super::selection_count(SettingsView::ThirdParty, false, false),
+            super::selection_count(SettingsView::ThirdParty, false, false, false),
             2
         );
         assert_eq!(
-            super::selection_count(SettingsView::SteamGridDb, true, false),
+            super::selection_count(SettingsView::SteamGridDb, true, false, false),
             4
         );
         // Without a key, focus moves only between API key and the preference.
         assert_eq!(super::steamgriddb_step_without_key(1, 1, false), 0);
         assert_eq!(super::steamgriddb_step_without_key(0, 1, false), 1);
         assert_eq!(
-            super::selection_count(SettingsView::SteamAccount, true, true),
+            super::selection_count(SettingsView::SteamAccount, true, true, false),
             3
         );
         assert_eq!(
-            super::selection_count(SettingsView::SteamAccount, true, false),
+            super::selection_count(SettingsView::SteamAccount, true, false, false),
             2
         );
     }
@@ -1035,12 +1086,16 @@ mod root_activation_regressions {
     fn back_inside_settings_restores_the_parent_row() {
         assert_eq!(settings_parent(SettingsView::Root), None);
         assert_eq!(
-            settings_parent(SettingsView::Appearance),
+            settings_parent(SettingsView::Profile),
             Some((SettingsView::Root, 0))
         );
         assert_eq!(
-            settings_parent(SettingsView::ThirdParty),
+            settings_parent(SettingsView::Appearance),
             Some((SettingsView::Root, 1))
+        );
+        assert_eq!(
+            settings_parent(SettingsView::ThirdParty),
+            Some((SettingsView::Root, 2))
         );
         assert_eq!(
             settings_parent(SettingsView::SteamGridDb),
@@ -1057,9 +1112,10 @@ mod root_activation_regressions {
 
     #[test]
     fn root_category_clicks_open_the_corresponding_page() {
-        assert_eq!(root_destination(0), Some(SettingsView::Appearance));
-        assert_eq!(root_destination(1), Some(SettingsView::ThirdParty));
+        assert_eq!(root_destination(0), Some(SettingsView::Profile));
+        assert_eq!(root_destination(1), Some(SettingsView::Appearance));
+        assert_eq!(root_destination(2), Some(SettingsView::ThirdParty));
         assert_eq!(root_destination(-1), None);
-        assert_eq!(root_destination(2), None);
+        assert_eq!(root_destination(3), None);
     }
 }

@@ -9,7 +9,7 @@ default-run = "horizon"
 license = "GPL-3.0-or-later"
 
 [dependencies]
-ashpd = { version = "0.13", default-features = false, features = ["open_uri", "settings", "tokio"] }
+ashpd = { version = "0.13", default-features = false, features = ["file_chooser", "open_uri", "settings", "tokio"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 futures-util = "0.3"
 image = { version = "0.25", default-features = false, features = ["gif", "ico", "jpeg", "png"] }

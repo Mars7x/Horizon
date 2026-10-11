@@ -33,6 +33,7 @@ use crate::{
         clock::ClockController,
         home::HomeController,
         navigation::NavigationController,
+        profile::ProfileController,
         settings::SettingsController,
         status::StatusController,
         wake::drain_notify,
@@ -297,11 +298,13 @@ pub fn run() -> Result<(), AppError> {
         SteamAccountService::load(data_paths::steam_account_settings_path()?)
             .map_err(|message| AppError::SteamAccount(message.to_owned()))?,
     ));
+    let profile = ProfileController::new(&ui, Rc::clone(&steam_account));
     let settings = SettingsController::new(
         &ui,
         settings_service,
         appearance.clone(),
         Rc::clone(&steam_account),
+        Rc::clone(&profile),
     );
     let navigation_sound = Rc::new(RefCell::new(UiSounds::new(
         appearance.preferences().ui_sounds_enabled,
@@ -350,6 +353,7 @@ pub fn run() -> Result<(), AppError> {
     settings.set_steam_account_changed(Rc::new(move || {
         if let Some(ui) = achievement_ui.upgrade() {
             achievement_updates.account_changed(&ui);
+            profile.steam_account_changed(&ui);
         }
     }));
     let navigation = NavigationController::new(

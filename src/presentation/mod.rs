@@ -6,6 +6,7 @@ pub mod clock;
 pub mod home;
 pub mod library;
 pub mod navigation;
+pub mod profile;
 
 pub mod settings;
 pub mod status;
