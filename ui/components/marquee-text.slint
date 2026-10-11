@@ -27,12 +27,14 @@ export component MarqueeText inherits Rectangle {
     private property <bool> animate-travel: false;
     private property <bool> animate-fade: false;
     private property <float> text-opacity: 1.0;
-    // Each edge fade is exactly as strong as the text hidden behind it,
-    // following the (animated) offset, so no glyph is caught at a clipping
-    // edge while its fade is still appearing.
+    // Each edge fade switches on with the (animated) offset, reaching full
+    // strength within the first few pixels of travel (or the whole travel,
+    // if shorter), so a glyph crossing a clipping edge is always under a
+    // solid fade.
     private property <length> fade-width: min(22px, root.width / 6);
-    private property <float> fade-left: max(0.0, min(1.0, root.offset / root.fade-width));
-    private property <float> fade-right: max(0.0, min(1.0, (root.distance - root.offset) / root.fade-width));
+    private property <length> fade-ramp: max(1px, min(6px, root.distance));
+    private property <float> fade-left: max(0.0, min(1.0, root.offset / root.fade-ramp));
+    private property <float> fade-right: max(0.0, min(1.0, (root.distance - root.offset) / root.fade-ramp));
     private property <bool> running: root.active && root.overflows && !Motion.reduced-motion;
 
     function restart() {
