@@ -191,8 +191,15 @@ export component ScrollCamera {
             release.stop();
             release.start();
         } else {
+            // A wheel notch glides. Spun fast, notches would run the
+            // destination (which the owner mounts rows around, with three
+            // spare rows each side) far ahead of the camera still gliding
+            // behind it, showing rows already let go. Keep it within a row of
+            // where the camera is drawn.
             root.pull = 0px;
-            root.position = max(0px, min(root.limit, root.position + Wheel.distance(delta-y)));
+            let lead = root.stride;
+            let next = max(root.base - lead, min(root.base + lead, root.position + Wheel.distance(delta-y)));
+            root.position = max(0px, min(root.limit, next));
         }
         root.report();
     }
