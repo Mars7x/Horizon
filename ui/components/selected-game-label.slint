@@ -22,8 +22,17 @@ export component SelectedGameLabel inherits Rectangle {
     private property <bool> marquee-animate: false;
     private property <float> marquee-text-opacity: 1.0;
     private property <bool> marquee-opacity-animate: false;
-    private property <length> right-fade-width: 22px;
-    private property <length> left-fade-width: 22px;
+    private property <length> right-fade-width: 30px;
+    private property <length> left-fade-width: 30px;
+    // Each edge fade is exactly as strong as the text hidden behind it: it
+    // grows with the travelled distance (and shrinks as the end comes into
+    // view) in step with the moving title, so no glyph is ever caught at a
+    // clipping edge while its fade is still catching up.
+    private property <length> travelled: max(0px, -title-text.x);
+    private property <float> left-fade-strength: root.title-overflows
+        ? max(0.0, min(1.0, root.travelled / root.left-fade-width)) : 0.0;
+    private property <float> right-fade-strength: root.title-overflows
+        ? max(0.0, min(1.0, (root.marquee-distance - root.travelled) / root.right-fade-width)) : 0.0;
     private property <length> fade-y-inset: root.has-status ? 1px : 3px;
     private property <length> fade-height: root.has-status ? title-viewport.height - 2px : title-viewport.height - 6px;
 
@@ -110,10 +119,9 @@ export component SelectedGameLabel inherits Rectangle {
             }
         }
 
-        // Fully hide the physical right clipping boundary, then taper the
-        // surface overlay inward with a nonlinear falloff. This prevents the
-        // last visible glyph from looking chopped both at rest and while the
-        // title is travelling, without making the whole edge look foggy.
+        // Fully hide the physical right clipping boundary across a solid band,
+        // then taper the surface overlay inward with a nonlinear falloff, so
+        // a glyph cut by the clip is never visible, at rest or travelling.
         right-overflow-fade := Rectangle {
             x: parent.width - self.width;
             y: root.fade-y-inset;
@@ -122,25 +130,13 @@ export component SelectedGameLabel inherits Rectangle {
             background: @linear-gradient(
                 90deg,
                 Theme.surface-raised.with-alpha(0) 0%,
-                Theme.surface-raised.with-alpha(0.26) 24%,
-                Theme.surface-raised.with-alpha(0.58) 45%,
-                Theme.surface-raised.with-alpha(0.86) 68%,
-                Theme.surface-raised 86%,
+                Theme.surface-raised.with-alpha(0.12) 10%,
+                Theme.surface-raised.with-alpha(0.42) 26%,
+                Theme.surface-raised.with-alpha(0.78) 44%,
+                Theme.surface-raised 60%,
                 Theme.surface-raised 100%
             );
-            opacity: root.title-overflows && title-text.x > -root.marquee-distance + 3px
-                ? 1.0
-                : 0.0;
-
-            animate opacity {
-                // Selection/reset must publish the continuation cue immediately.
-                // Only animate fade changes while the marquee itself is moving;
-                // otherwise a newly selected overflowing title visibly flashes
-                // unmasked for the first ~120 ms.
-                enabled: root.marquee-animate && !root.reduced-motion;
-                duration: Motion.marquee-edge-fade;
-                easing: ease-in-out;
-            }
+            opacity: root.right-fade-strength;
         }
 
         // Once the marquee has moved, fully hide the physical clipping edge,
@@ -160,19 +156,13 @@ export component SelectedGameLabel inherits Rectangle {
             background: @linear-gradient(
                 90deg,
                 Theme.surface-raised 0%,
-                Theme.surface-raised 14%,
-                Theme.surface-raised.with-alpha(0.86) 32%,
-                Theme.surface-raised.with-alpha(0.58) 55%,
-                Theme.surface-raised.with-alpha(0.26) 76%,
+                Theme.surface-raised 40%,
+                Theme.surface-raised.with-alpha(0.78) 56%,
+                Theme.surface-raised.with-alpha(0.42) 74%,
+                Theme.surface-raised.with-alpha(0.12) 90%,
                 Theme.surface-raised.with-alpha(0) 100%
             );
-            opacity: root.title-overflows && title-text.x < -3px ? 1.0 : 0.0;
-
-            animate opacity {
-                enabled: root.marquee-animate && !root.reduced-motion;
-                duration: Motion.marquee-edge-fade;
-                easing: ease-in-out;
-            }
+            opacity: root.left-fade-strength;
         }
     }
 
