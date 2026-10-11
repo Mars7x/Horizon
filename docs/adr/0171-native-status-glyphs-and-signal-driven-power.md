@@ -38,3 +38,5 @@ The GNOME status SVGs, their component and their attribution checks are removed.
 - An idle Horizon makes no power D-Bus calls between changes, down from about 10 calls every 2 s.
 - A charge or level change shows as soon as UPower signals it.
 - No third-party artwork remains in the status bar.
+
+**Glyph size (follow-up).** The network glyphs were drawn at the battery's scale, which made the Wi-Fi fan about 20px tall beside a 14px battery and look larger. The 24x20 grid is now drawn 22px wide (16px tall), still centred on the battery.

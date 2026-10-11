@@ -5,9 +5,13 @@ import { Theme } from "../theme/theme.slint";
 // parts for what is filled, and a faint ink for the parts that aren't (the
 // empty part of the battery, Wi-Fi arcs above the signal). Levels are
 // discrete steps, never fractional, so edges stay crisp. All glyphs share a
-// 24x20 grid drawn at 1.13x (the battery's 30x20 at 34px wide).
+// 24x20 grid drawn at 0.92x (`glyph-width` by `glyph-height`), so the
+// network glyphs stand about as tall as the battery rather than towering
+// over it.
 global StatusStyle {
     out property <length> stroke: 1.8px;
+    out property <length> glyph-width: 22px;
+    out property <length> glyph-height: 22px * 20 / 24;
     out property <color> ink: Theme.foreground;
     out property <color> faint: Theme.foreground.with-alpha(0.28);
     // The battery's casing: grey in every state, so only the charge is coloured.
@@ -65,7 +69,7 @@ export component BatteryIndicator inherits Rectangle {
 // One stroked part of a status glyph on the shared 24x20 grid.
 component Stroke inherits Path {
     in property <color> ink: StatusStyle.ink;
-    x: 0px; y: 0px; width: 27px; height: 22.5px;
+    x: 0px; y: 0px; width: StatusStyle.glyph-width; height: StatusStyle.glyph-height;
     viewbox-width: 24; viewbox-height: 20;
     fill: transparent; stroke: root.ink;
     stroke-width: StatusStyle.stroke; stroke-line-cap: round; stroke-line-join: round;
@@ -74,7 +78,7 @@ component Stroke inherits Path {
 // One filled part (dots).
 component Fill inherits Path {
     in property <color> ink: StatusStyle.ink;
-    x: 0px; y: 0px; width: 27px; height: 22.5px;
+    x: 0px; y: 0px; width: StatusStyle.glyph-width; height: StatusStyle.glyph-height;
     viewbox-width: 24; viewbox-height: 20;
     fill: root.ink; stroke-width: 0px;
 }
@@ -83,7 +87,7 @@ component Fill inherits Path {
 component Exclamation inherits Rectangle {
     in property <float> cx: 21.5;
     in property <float> top: 12;
-    width: 27px; height: 22.5px; background: transparent;
+    width: StatusStyle.glyph-width; height: StatusStyle.glyph-height; background: transparent;
     Stroke { commands: "M \{root.cx} \{root.top} V \{root.top + 3.5}"; }
     Fill {
         commands: "M \{root.cx - 1.05} \{root.top + 6.6} A 1.05 1.05 0 1 0 \{root.cx + 1.05} \{root.top + 6.6} A 1.05 1.05 0 1 0 \{root.cx - 1.05} \{root.top + 6.6} Z";
@@ -105,9 +109,9 @@ export component NetworkIndicator inherits Rectangle {
     // The Wi-Fi fan's ink sits low in its cell (the dot hangs below the
     // arcs), so it rises 1px to share the battery's centre line.
     glyph := Rectangle {
-        x: (parent.width - 27px) / 2;
-        y: (parent.height - 22.5px) / 2 - (root.kind == 2 || root.kind == 0 ? 1px : 0px);
-        width: 27px; height: 22.5px; background: transparent;
+        x: (parent.width - StatusStyle.glyph-width) / 2;
+        y: (parent.height - StatusStyle.glyph-height) / 2 - (root.kind == 2 || root.kind == 0 ? 1px : 0px);
+        width: StatusStyle.glyph-width; height: StatusStyle.glyph-height; background: transparent;
 
         // Wi-Fi (and offline, drawn as an empty Wi-Fi): a dot and three arcs
         // around it; arcs above the signal are faint.
