@@ -45,15 +45,15 @@ export component BatteryIndicator inherits Rectangle {
         fill: transparent; stroke: StatusStyle.casing;
         stroke-width: StatusStyle.stroke; stroke-line-cap: round; stroke-line-join: round;
     }
-    // The charge fills the outline's inside with an even ~1.7px gap all
-    // round (the outline is 1.8px, drawn at 34/30 of its viewbox), so a full
-    // battery reads as full. Five whole-pixel steps, in proportion, avoid a
-    // blurry fractional right edge.
-    private property <length> level: root.percent >= 95 ? 23px : root.percent >= 75 ? 18px
-        : root.percent >= 50 ? 14px : root.percent >= 25 ? 9px
-        : root.percent > 0 ? 5px : 0px;
+    // The charge sits inside the outline (1.8px, drawn at 34/30 of its
+    // viewbox) with about 1.7px of room above and below and 2.6-3px at the
+    // ends, so a full battery reads as full without crowding the outline.
+    // Five whole-pixel steps, in proportion, avoid a blurry fractional edge.
+    private property <length> level: root.percent >= 95 ? 21px : root.percent >= 75 ? 17px
+        : root.percent >= 50 ? 13px : root.percent >= 25 ? 8px
+        : root.percent > 0 ? 4px : 0px;
     Rectangle {
-        x: 4px; y: 8px; width: root.level; height: 8px; border-radius: 1px;
+        x: 5px; y: 8px; width: root.level; height: 8px; border-radius: 1px;
         background: root.charge;
     }
     // Charging: a bolt centred in the outline in the foreground ink (white in
@@ -62,8 +62,8 @@ export component BatteryIndicator inherits Rectangle {
     if root.charging : Rectangle {
         width: parent.width; height: parent.height; background: transparent;
         Rectangle {
-            x: 4px; y: 8px; width: root.level; height: 8px; clip: true;
-            Bolt { x: -4px; y: -8px; fill: Theme.background; stroke: Theme.background; stroke-width: 2.4px; }
+            x: 5px; y: 8px; width: root.level; height: 8px; clip: true;
+            Bolt { x: -5px; y: -8px; fill: Theme.background; stroke: Theme.background; stroke-width: 2.4px; }
         }
         Bolt { fill: StatusStyle.ink; }
     }
