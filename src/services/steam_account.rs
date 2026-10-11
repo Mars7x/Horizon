@@ -377,9 +377,10 @@ struct ItemPaths {
 }
 
 /// The equipped avatar frame's and animated avatar's image paths
-/// (`items/<appid>/<file>`) in a GetProfileItemsEquipped answer: each the
-/// large image, else the small. Only a plain relative path is accepted, since
-/// it is joined onto Steam's address.
+/// (`items/<appid>/<file>`) in a GetProfileItemsEquipped answer. Each prefers
+/// `image_small`: for these items it is the animated file (a GIF, an animated
+/// PNG), while `image_large` is a still preview (often a JPEG). Only a plain
+/// relative path is accepted, since it is joined onto Steam's address.
 fn item_paths(body: &str) -> ItemPaths {
     #[derive(Deserialize)]
     struct Answer {
@@ -397,7 +398,7 @@ fn item_paths(body: &str) -> ItemPaths {
     }
     let plain = |item: Option<Item>| {
         let item = item?;
-        [item.image_large, item.image_small]
+        [item.image_small, item.image_large]
             .into_iter()
             .flatten()
             .find(|path| {
@@ -426,18 +427,29 @@ mod tests {
         let body = r#"{"response":{"avatar_frame":{"communityitemid":"1",
             "image_small":"items/2861690/small.png","image_large":"items/2861690/large.png"},
             "animated_avatar":{"image_small":"items/2873080/a.gif","image_large":"items/2873080/b.gif"}}}"#;
+        // The small image is the animated one; the large is a still preview.
         assert_eq!(
             item_paths(body),
             ItemPaths {
-                frame: Some("items/2861690/large.png".into()),
-                animated_avatar: Some("items/2873080/b.gif".into()),
+                frame: Some("items/2861690/small.png".into()),
+                animated_avatar: Some("items/2873080/a.gif".into()),
             }
+        );
+        let large_only = r#"{"response":{"avatar_frame":{"image_large":"items/1/l.png"}}}"#;
+        assert_eq!(
+            item_paths(large_only).frame.as_deref(),
+            Some("items/1/l.png")
         );
         let small = r#"{"response":{"avatar_frame":{"image_small":"items/1/s.png"}}}"#;
         assert_eq!(item_paths(small).frame.as_deref(), Some("items/1/s.png"));
         assert_eq!(item_paths(small).animated_avatar, None);
         assert_eq!(item_paths(r#"{"response":{}}"#), ItemPaths::default());
         assert_eq!(item_paths("not json"), ItemPaths::default());
+        let bad_small = r#"{"response":{"avatar_frame":{"image_small":"../x.png","image_large":"items/1/l.png"}}}"#;
+        assert_eq!(
+            item_paths(bad_small).frame.as_deref(),
+            Some("items/1/l.png")
+        );
         for bad in [
             "../x.png",
             "items/../../x",
