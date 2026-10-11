@@ -47,7 +47,10 @@ use crate::{
 
 /// Rows mounted above and below the visible ones, so a camera step never
 /// shows an empty row.
-const OVERSCAN_ROWS: usize = 2;
+// Three: the partly visible row at an edge takes one, and a wheel spun fast
+// leaves the gliding camera up to a row behind its destination
+// (`ScrollCamera`), which is what these rows are mounted around.
+const OVERSCAN_ROWS: usize = 3;
 /// Decoded thumbnails kept in memory (about 0.5 MiB each).
 const THUMBNAIL_MEMORY: usize = 96;
 /// Decoded full-screen photos kept: the open one and its neighbours.

@@ -26,7 +26,10 @@ const CONTENT_BOTTOM: f32 = 92.0; // Metrics.page-bottom-bar-height (= footer-he
 const GRID_PAD: f32 = 22.0;
 const HORIZONTAL_GUTTER: f32 = 48.0; // gallery viewport x = page-margin - 16px
 const CARD_GAP: f32 = 28.0;
-const OVERSCAN_ROWS: usize = 2;
+// Three: the partly visible row at an edge takes one, and a wheel spun fast
+// leaves the gliding camera up to a row behind its destination
+// (`ScrollCamera`), which is what these rows are mounted around.
+const OVERSCAN_ROWS: usize = 3;
 
 #[derive(Debug, Clone, Copy)]
 struct GridLayout {
@@ -758,7 +761,7 @@ mod tests {
         assert_eq!(visible_rows(560.0, GridLayout::for_width(1280.0)), 1);
         assert_eq!(total_rows(36, 5), 8);
         assert_eq!(scroll_to_selection(22, 5, 2, 0, 36), 3);
-        assert_eq!(OVERSCAN_ROWS, 2);
+        assert_eq!(OVERSCAN_ROWS, 3);
         // Selected ring and glow remain within the viewport at each width.
         for width in [540.0, 760.0, 930.0, 1280.0, 1920.0, 2560.0, 3440.0] {
             let layout = GridLayout::for_width(width);

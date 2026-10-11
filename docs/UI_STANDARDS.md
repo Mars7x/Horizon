@@ -180,8 +180,8 @@ Activity's session history) scrolls the same way, through one
   a sub-view) makes the reset instant instead of scrolling back.
 - **Peeking rows** are part of the content: clicking one selects it and
   scrolls it into view.
-- **Long content** mounts only rows near the camera, plus a couple of
-  overscan rows each side, so a glide never reveals unmounted space.
+- **Long content** mounts only rows near the camera, plus three overscan
+  rows each side (Album, Library), so a glide never reveals unmounted space.
 
 Horizontal carousels (Home, Activity covers) are not lists and keep their
 own camera.
@@ -197,7 +197,10 @@ so follows the desktop's natural/traditional scrolling setting:
 - **Touchpad:** the camera follows the fingers directly, 2.5 px per pixel of
   travel, with no glide.
 - **Wheel notch** (a whole multiple of 60px): 180 px with the standard
-  110 ms linear glide.
+  110 ms linear glide. Spun fast, notches never put the destination more
+  than a row ahead of where the gliding camera is drawn, since the owner
+  mounts rows around the destination; otherwise rows on screen would
+  already be let go (blank rows near the bottom bar when scrolling up).
 - The camera stays where it was scrolled, between rows if need be, clamped
   to the content. Whenever its top edge crosses into another row it tells
   the owner (`scrolled(rows)`), so Rust can keep the mounted rows around it.
