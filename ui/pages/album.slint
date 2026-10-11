@@ -539,12 +539,14 @@ export component AlbumPage inherits Rectangle {
         }
 
         if root.viewer-is-video && root.viewer-problem == "" : Rectangle {
-            // Paused: a play button over the frame.
+            // Paused: a play button over the frame. Only while viewing:
+            // closing stops the video, and the button must not appear in
+            // the closing fade.
             width: 80px; height: 80px; border-radius: 40px;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             background: #00000099;
-            opacity: root.viewer-playing ? 0.0 : root.reveal;
+            opacity: root.viewing && !root.viewer-playing ? 1.0 : 0.0;
             animate opacity { duration: Motion.focus-duration; easing: ease-in-out; }
             PlayGlyph { x: 31px; y: 27px; width: 24px; height: 26px; }
         }

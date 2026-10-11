@@ -130,9 +130,12 @@ A newer cue replaces the one playing instead of layering. **Current playback
 (ADR 0169):** a native PipeWire stream (`platform::pipewire`), 48 kHz mono, asking
 the graph for 256-frame (about 5 ms) cycles. Playing a cue is one atomic store
 that PipeWire's next cycle picks up; nothing queues between the press and the
-sound. A small `ui-sounds` thread opens the stream shortly after start-up,
-pauses it after 10 quiet seconds (so the device can sleep) and while a game has
-the foreground, and resumes it on the next cue. The UI thread never waits on
+sound. A small `ui-sounds` thread opens the stream shortly after start-up and
+keeps it running whenever Horizon is in front: an output left idle falls
+asleep (after about 5 s), and a waking output, Bluetooth especially, drops the
+first cue. It pauses only while a game has the foreground and restarts the
+moment Horizon is back; after any restart, a cue waits until the output has
+run for 300 ms, so it is delayed rather than lost. The UI thread never waits on
 PipeWire, so a stalled audio server silences the clicks but cannot freeze
 Horizon (SDL audio did: its PipeWire backend waits for the server with no
 timeout, on the main thread).
