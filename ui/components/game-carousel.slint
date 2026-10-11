@@ -4,6 +4,7 @@ import { GameTile } from "game-tile.slint";
 import { LibraryTile } from "library-tile.slint";
 import { SelectedGameLabel } from "selected-game-label.slint";
 import { Wheel } from "wheel.slint";
+import { Scroll } from "scroll.slint";
 
 // The home carousel is modeled as a camera looking onto one larger scene.
 // The rounded shelf, title/connector, game row, and focus frame all share the
@@ -50,8 +51,11 @@ export component GameCarousel inherits Rectangle {
         // The Library destination is present even when no recent games exist.
 
         let selected-screen-x = root.selected-center-world-x - root.camera-offset;
-        let left-bound = Metrics.carousel-camera-edge-zone;
-        let right-bound = root.width - Metrics.carousel-camera-edge-zone;
+        // After a swipe, focus moves the camera only to bring a game that
+        // isn't fully on screen into view; otherwise the usual camera zone.
+        let zone = root.panned ? Metrics.game-stride / 2 : Metrics.carousel-camera-edge-zone;
+        let left-bound = zone;
+        let right-bound = root.width - zone;
 
         if selected-screen-x < left-bound {
             root.camera-offset -= left-bound - selected-screen-x;
@@ -83,11 +87,39 @@ export component GameCarousel inherits Rectangle {
     // A swipe or tilt-wheel step pans the camera by pixels (a touchpad
     // directly, a notch with the usual glide) and never moves the selection,
     // even off screen; the next selection change brings the camera back to it.
+    // A touchpad pulling past either end stretches the shelf (`Scroll.rubber`)
+    // and it springs back once the fingers stop.
     private property <bool> following-pointer: false;
+    private property <bool> springing: false;
+    private property <length> pull: 0px;
+    // The camera has been swiped since the games were last published.
+    private property <bool> panned: false;
     public function pan(delta-x: length) {
+        root.panned = true;
         root.following-pointer = !Wheel.is-notch(delta-x);
-        root.camera-offset += Wheel.distance(delta-x);
-        root.clamp-camera();
+        root.springing = false;
+        if root.following-pointer {
+            let raw = root.camera-offset + root.pull + Wheel.distance(delta-x);
+            root.camera-offset = raw;
+            root.clamp-camera();
+            root.pull = raw - root.camera-offset;
+            release.stop();
+            release.start();
+        } else {
+            root.pull = 0px;
+            root.camera-offset += Wheel.distance(delta-x);
+            root.clamp-camera();
+        }
+    }
+    release := Timer {
+        interval: 90ms;
+        running: false;
+        triggered => {
+            self.stop();
+            root.following-pointer = false;
+            root.springing = true;
+            root.pull = 0px;
+        }
     }
 
     init => {
@@ -96,6 +128,7 @@ export component GameCarousel inherits Rectangle {
     }
     changed selected-index => {
         root.following-pointer = false;
+        root.pull = 0px;
         root.ensure-selection-in-camera-zone();
         root.geometry-changed(root.first-game-center-x-px);
     }
@@ -104,13 +137,14 @@ export component GameCarousel inherits Rectangle {
         root.geometry-changed(root.first-game-center-x-px);
     }
     changed games => {
+        root.panned = false;
         root.ensure-selection-in-camera-zone();
         root.geometry-changed(root.first-game-center-x-px);
     }
     changed camera-offset => { root.geometry-changed(root.first-game-center-x-px); }
 
     scene := Rectangle {
-        x: -root.camera-offset;
+        x: -root.camera-offset - Scroll.rubber(root.pull);
         y: 0px;
         width: Metrics.carousel-shelf-left
             + root.shelf-width
@@ -119,7 +153,8 @@ export component GameCarousel inherits Rectangle {
         background: transparent;
 
         animate x {
-            duration: root.following-pointer ? 0ms : Motion.carousel-duration;
+            duration: root.following-pointer ? 0ms
+                : root.springing ? Motion.overscroll-return-duration : Motion.carousel-duration;
             easing: ease-out;
         }
 

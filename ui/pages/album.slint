@@ -276,6 +276,9 @@ export component AlbumPage inherits Rectangle {
         viewport: root.viewport-height;
         settle-key: root.visit-revision;
         focus-key: root.selected-index;
+        // A tile, with the grid's padding around it.
+        focus-row: Math.floor(root.selected-index / root.grid-columns);
+        focus-span: root.tile-height + 2 * root.grid-pad;
         instant: root.refreshing;
         scrolled(rows) => { root.scroll-rows(rows); }
     }
