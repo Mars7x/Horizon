@@ -31,6 +31,8 @@ The GNOME status SVGs, their component and their attribution checks are removed.
 - Reads use uncached proxies (`proxy()`), for network reads too.
 - Only a changed reading is sent to the UI.
 
+**Battery colour (follow-up).** The casing is always grey; only the charge is coloured: red at 20 % and below (charging or not), green while charging, the foreground ink otherwise. While charging, a bolt in the foreground ink (white in dark) is centred on the casing and cut out of the charge by a thin background-coloured clearance, so it reads at every level.
+
 ## Consequences
 
 - An idle Horizon makes no power D-Bus calls between changes, down from about 10 calls every 2 s.

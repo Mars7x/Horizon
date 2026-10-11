@@ -15,7 +15,7 @@ for what isn't, discrete steps only, on one 24x20 grid at the battery's scale.
 | Ethernet, limited | The port with a `!` in place of its pins |
 | Another kind of connection | A globe (with `!` when limited) |
 | Offline | The faint Wi-Fi glyph, struck through |
-| Battery | An outline filled in five steps, a bolt while charging, red at 20% and below |
+| Battery | A grey casing (never coloured) with a charge in five steps: red at 20% and below (charging or not), green while charging, the foreground ink otherwise. While charging, a bolt in the foreground ink (white in dark) sits centred, cut out of the charge by a thin clearance |
 
 The earlier GNOME status icons are retired; the sections below record their
 history.

@@ -10,40 +10,55 @@ global StatusStyle {
     out property <length> stroke: 1.8px;
     out property <color> ink: Theme.foreground;
     out property <color> faint: Theme.foreground.with-alpha(0.28);
-    // Battery warning: from the level, not the accent; readable on both
-    // backgrounds.
-    out property <color> warning: Theme.is-dark ? #ff6875 : #b42318;
+    // The battery's casing: grey in every state, so only the charge is coloured.
+    out property <color> casing: Theme.foreground.with-alpha(0.5);
+    // Battery states, from the level and charger, never the accent; both
+    // readable on light and dark backgrounds.
+    out property <color> warning: Theme.is-dark ? #ff5a67 : #d92d20;
+    out property <color> charging: Theme.is-dark ? #34c759 : #1f9d47;
+}
+
+// The charging bolt, on the battery's 35x24 pixel grid.
+component Bolt inherits Path {
+    x: 0px; y: 0px; width: 35px; height: 24px;
+    viewbox-width: 35; viewbox-height: 24;
+    commands: "M 16.9 6.8 L 11 12.9 H 14.7 L 13.6 17.2 L 19.5 11.1 H 15.8 Z";
+    stroke-width: 0px; stroke-line-join: round;
 }
 
 export component BatteryIndicator inherits Rectangle {
     in property <int> percent: 0;
     in property <bool> charging: false;
-    private property <color> ink: root.percent <= 20 ? StatusStyle.warning : StatusStyle.ink;
+    // The charge is red at 20% and below (charging or not), green while
+    // charging, the foreground ink otherwise. The outline never changes.
+    private property <color> charge: root.percent <= 20 ? StatusStyle.warning
+        : root.charging ? StatusStyle.charging : StatusStyle.ink;
     width: 35px; height: 24px; background: transparent;
     Path {
         x: 0px; y: 1px; width: 34px; height: 22px;
         viewbox-width: 30; viewbox-height: 20;
         commands: "M 3 4 H 23 Q 26 4 26 7 V 13 Q 26 16 23 16 H 3 Q 1 16 1 13 V 7 Q 1 4 3 4 M 28 8 V 12";
-        fill: transparent; stroke: root.ink;
+        fill: transparent; stroke: StatusStyle.casing;
         stroke-width: StatusStyle.stroke; stroke-line-cap: round; stroke-line-join: round;
     }
     // Discrete fill avoids a blurry fractional-pixel right edge.
+    private property <length> level: root.percent >= 95 ? 18px : root.percent >= 75 ? 14px
+        : root.percent >= 50 ? 10px : root.percent >= 25 ? 6px
+        : root.percent > 0 ? 2px : 0px;
     Rectangle {
-        x: 5px; y: 8px;
-        width: root.percent >= 95 ? 18px : root.percent >= 75 ? 14px
-            : root.percent >= 50 ? 10px : root.percent >= 25 ? 6px
-            : root.percent > 0 ? 2px : 0px;
-        height: 8px; border-radius: 1px;
-        background: root.ink;
+        x: 5px; y: 8px; width: root.level; height: 8px; border-radius: 1px;
+        background: root.charge;
     }
-    if root.charging : Path {
-        x: 8px; y: 1px; width: 17px; height: 21px;
-        viewbox-width: 16; viewbox-height: 20;
-        commands: "M 10 0 L 3 10 H 8 L 6 20 L 14 8 H 9 Z";
-        // A solid bolt with a background-coloured clearance stroke, so it
-        // reads against the fill at small sizes.
-        fill: root.ink; stroke: Theme.background;
-        stroke-width: StatusStyle.stroke; stroke-line-join: round;
+    // Charging: a bolt centred in the outline in the foreground ink (white in
+    // dark), cut out of the charge by a thin clearance so it reads at every
+    // level, over the charge and over the empty part alike.
+    if root.charging : Rectangle {
+        width: parent.width; height: parent.height; background: transparent;
+        Rectangle {
+            x: 5px; y: 8px; width: root.level; height: 8px; clip: true;
+            Bolt { x: -5px; y: -8px; fill: Theme.background; stroke: Theme.background; stroke-width: 2.4px; }
+        }
+        Bolt { fill: StatusStyle.ink; }
     }
 }
 
