@@ -1332,6 +1332,7 @@ impl CaptureSource for SteamCaptures {
                 let Ok(files) = fs::read_dir(&folder) else {
                     continue;
                 };
+                let deletable = super::support::writable(&folder);
                 for file in files.filter_map(Result::ok) {
                     let path = file.path();
                     let Some(kind) = MediaKind::from_path(&path) else {
@@ -1356,11 +1357,57 @@ impl CaptureSource for SteamCaptures {
                         external_id: external_id.clone(),
                         captured_at,
                         preview: preview.is_file().then_some(preview),
+                        deletable,
                     });
                 }
             }
         }
         captures
+    }
+
+    /// Deletes a screenshot and Steam's thumbnail of it. Only a media file
+    /// directly in `userdata/<active account>/760/remote/<appid>/screenshots/`
+    /// of a known Steam root qualifies; links are resolved first, so nothing
+    /// outside those folders can be reached. Steam's own `screenshots.vdf`
+    /// index is left to Steam.
+    fn delete(&self, path: &Path) -> io::Result<()> {
+        let refuse = || io::Error::new(io::ErrorKind::PermissionDenied, "not a Steam screenshot");
+        let file = fs::canonicalize(path)?;
+        if !fs::symlink_metadata(&file)?.is_file() || MediaKind::from_path(&file).is_none() {
+            return Err(refuse());
+        }
+        let folder = file.parent().ok_or_else(refuse)?;
+        let game = folder.parent().ok_or_else(refuse)?;
+        let remote = game.parent().ok_or_else(refuse)?;
+        let screenshots = remote.parent().ok_or_else(refuse)?;
+        let account = screenshots.parent().ok_or_else(refuse)?;
+        let named = |dir: &Path, name: &str| dir.file_name().is_some_and(|n| n == name);
+        let is_game = game
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.parse::<u32>().is_ok_and(|id| id > 0));
+        if !named(folder, "screenshots")
+            || !is_game
+            || !named(remote, "remote")
+            || !named(screenshots, "760")
+        {
+            return Err(refuse());
+        }
+        let known = self
+            .roots
+            .iter()
+            .filter_map(|root| active_account_dir(root))
+            .filter_map(|dir| fs::canonicalize(dir).ok())
+            .any(|dir| dir == account);
+        if !known {
+            return Err(refuse());
+        }
+        fs::remove_file(&file)?;
+        if let Some(name) = file.file_name() {
+            // Steam's small copy; absent is fine.
+            let _ = fs::remove_file(folder.join("thumbnails").join(name));
+        }
+        Ok(())
     }
 }
 
@@ -1887,6 +1934,49 @@ mod tests {
             "falls back to the file's modified time"
         );
         assert!(undated.preview.is_none());
+        assert!(
+            dated.deletable,
+            "a writable folder's screenshots can be deleted"
+        );
+
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn deleting_removes_a_screenshot_and_its_thumbnail_and_nothing_else() {
+        let root = temp_dir("delete");
+        let shots = root.join("userdata/123/760/remote/1245620/screenshots");
+        fs::create_dir_all(shots.join("thumbnails")).expect("screenshots");
+        fs::write(shots.join("20261010143012_1.jpg"), b"jpg").expect("shot");
+        fs::write(shots.join("thumbnails/20261010143012_1.jpg"), b"jpg").expect("thumb");
+        fs::write(shots.join("screenshots.vdf"), b"vdf").expect("index");
+        fs::write(root.join("userdata/123/localconfig.jpg"), b"x").expect("elsewhere");
+        let steam = SteamCaptures::with_roots(vec![root.clone()]);
+
+        steam
+            .delete(&shots.join("20261010143012_1.jpg"))
+            .expect("deleted");
+        assert!(!shots.join("20261010143012_1.jpg").exists());
+        assert!(!shots.join("thumbnails/20261010143012_1.jpg").exists());
+        assert!(
+            shots.join("screenshots.vdf").exists(),
+            "Steam's index is Steam's"
+        );
+
+        // Anything else is refused: not media, not in a screenshots folder,
+        // or reached through `..`.
+        assert!(steam.delete(&shots.join("screenshots.vdf")).is_err());
+        assert!(
+            steam
+                .delete(&root.join("userdata/123/localconfig.jpg"))
+                .is_err()
+        );
+        assert!(
+            steam
+                .delete(&shots.join("../../../../localconfig.jpg"))
+                .is_err()
+        );
+        assert!(root.join("userdata/123/localconfig.jpg").exists());
 
         fs::remove_dir_all(root).expect("cleanup");
     }

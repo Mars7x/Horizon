@@ -40,7 +40,13 @@ and `$XDG_CACHE_HOME/io.github.Mars7x.Horizon/`, falling back to `~/.local/share
   [Database](DATABASE.md). Captures need no schema: each file is its own
   record ([Album](ALBUM.md)).
 - Files other programs own (Steam's screenshots, artwork, metadata) are read
-  in place and never copied into data or changed.
+  in place and never copied into data. The one change Horizon makes to them is
+  deleting a Steam screenshot the user asked to delete in the Album (and
+  Steam's thumbnail of it); nothing else in Steam's folders is written.
+- **Pictures/Horizon** is the only folder outside Horizon's own that it
+  writes: the Album's Save copies captures there
+  (`data_paths::pictures_export_dir`, the user's Pictures folder from their
+  desktop's folder names).
 - **config** holds user choices and credentials. One file per concern, named
   after it. Never put secrets anywhere else.
 - **cache** holds only what can be rebuilt. Each cache folder has a `.version`

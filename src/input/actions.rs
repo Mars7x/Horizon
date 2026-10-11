@@ -17,6 +17,9 @@ pub enum UiAction {
     /// The X (west) face button, or Delete on a keyboard. Pages give it a
     /// meaning; the Album uses it to delete.
     Secondary,
+    /// The Y (north) face button, or Insert on a keyboard. The Album uses it
+    /// to save a capture to Pictures.
+    Tertiary,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,6 +62,7 @@ impl UiAction {
             "LB" => Self::LeftBumper,
             "RB" => Self::RightBumper,
             "X" => Self::Secondary,
+            "Y" => Self::Tertiary,
             _ => return None,
         })
     }
@@ -99,7 +103,8 @@ mod tests {
         assert_eq!(UiAction::from_hint("LB"), Some(UiAction::LeftBumper));
         assert_eq!(UiAction::from_hint("RB"), Some(UiAction::RightBumper));
         assert_eq!(UiAction::from_hint("X"), Some(UiAction::Secondary));
-        assert_eq!(UiAction::from_hint("Y"), None);
+        assert_eq!(UiAction::from_hint("Y"), Some(UiAction::Tertiary));
+        assert_eq!(UiAction::from_hint("Z"), None);
     }
 
     #[test]

@@ -17,6 +17,7 @@ struct RawInfo {
     duration_us: i64,
     has_video: c_int,
     has_audio: c_int,
+    hardware: c_int,
 }
 
 #[repr(C)]
@@ -42,6 +43,7 @@ unsafe extern "C" {
         path: *const c_char,
         box_width: c_int,
         box_height: c_int,
+        hardware: c_int,
         want_audio: c_int,
         out_rate: c_int,
         out_channels: c_int,
@@ -59,6 +61,8 @@ unsafe extern "C" {
 pub struct MediaInfo {
     pub duration: Option<Duration>,
     pub has_audio: bool,
+    /// The video decodes on the GPU (VA-API).
+    pub hardware: bool,
 }
 
 /// One decoded unit, borrowed until the next call on its `Media`.
@@ -91,8 +95,15 @@ unsafe impl Send for Media {}
 
 impl Media {
     /// Opens `path`. Frames are scaled down (never up) to fit `max`. With
-    /// `audio`, sound is decoded and resampled to that (rate, channels).
-    pub fn open(path: &Path, max: (u32, u32), audio: Option<(u32, u32)>) -> Result<Self, String> {
+    /// `hardware`, the video may decode on the GPU (for playback; one
+    /// poster frame isn't worth starting it). With `audio`, sound is decoded
+    /// and resampled to that (rate, channels).
+    pub fn open(
+        path: &Path,
+        max: (u32, u32),
+        hardware: bool,
+        audio: Option<(u32, u32)>,
+    ) -> Result<Self, String> {
         let path = CString::new(path.as_os_str().as_bytes())
             .map_err(|_| "the path contains a NUL byte".to_owned())?;
         let (rate, channels) = audio.unwrap_or((0, 0));
@@ -103,6 +114,7 @@ impl Media {
                 path.as_ptr(),
                 clamp(max.0),
                 clamp(max.1),
+                c_int::from(hardware),
                 c_int::from(audio.is_some()),
                 clamp(rate),
                 clamp(channels),
@@ -128,12 +140,14 @@ impl Media {
             duration_us: -1,
             has_video: 0,
             has_audio: 0,
+            hardware: 0,
         };
         // SAFETY: `raw` is open; `info` is a valid out-pointer.
         unsafe { hz_media_info_get(self.raw.as_ptr(), &mut info) };
         MediaInfo {
             duration: micros(info.duration_us),
             has_audio: info.has_audio != 0,
+            hardware: info.hardware != 0,
         }
     }
 
