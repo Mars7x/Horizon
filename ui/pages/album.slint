@@ -121,7 +121,8 @@ component AlbumTile inherits Rectangle {
         clicked => { root.clicked(); }
         scroll-event(event) => {
             if event.delta-y != 0px {
-                root.wheel(Wheel.rows(event.delta-y));
+                let rows = Wheel.rows(event.delta-y);
+                if rows != 0 { root.wheel(rows); }
                 return accept;
             }
             reject
@@ -341,7 +342,8 @@ export component AlbumPage inherits Rectangle {
             enabled: !root.viewing;
             scroll-event(event) => {
                 if event.delta-y != 0px {
-                    root.scroll-rows(Wheel.rows(event.delta-y));
+                    let rows = Wheel.rows(event.delta-y);
+                    if rows != 0 { root.scroll-rows(rows); }
                     return accept;
                 }
                 reject

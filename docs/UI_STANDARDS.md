@@ -183,11 +183,14 @@ Activity's session history) scrolls the same way, through
 Horizontal carousels (Home, Activity covers) are not lists and keep their
 own camera.
 
-## Mouse wheel
+## Mouse wheel and touchpad
 
-Wheel input moves the camera only, never selection or focus, and always goes
-through `Wheel.rows()` (`ui/components/wheel.slint`), which follows the
-desktop's natural/traditional scrolling setting.
+Wheel and touchpad input move the camera only, never selection or focus, and
+always go through `Wheel.rows()` (`ui/components/wheel.slint`), which follows
+the desktop's natural/traditional scrolling setting. A wheel notch (a whole
+multiple of 60px) moves one row. Touchpad deltas add up, and every 100px of
+travel moves one row; reversing direction drops what had built up. A result
+of 0 means "not yet", and callers send nothing.
 
 ## Checking a change
 
