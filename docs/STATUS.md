@@ -9,7 +9,7 @@ for what isn't, discrete steps only, on one 24x20 grid at the battery's scale.
 
 | State | Glyph |
 | --- | --- |
-| Wi-Fi | A dot and three arcs; arcs light up at >=25, >=50 and >=75 percent strength, the rest stay faint |
+| Wi-Fi | A dot and three arcs; arcs light up at above 5, 30 and 55 percent strength (NetworkManager's bar thresholds), the rest stay faint |
 | Wi-Fi, limited (no internet or a captive portal) | Faint arcs with a `!` beside the dot |
 | Ethernet | A network port with three pins |
 | Ethernet, limited | The port with a `!` in place of its pins |
@@ -39,7 +39,7 @@ as reported by `org.freedesktop.NetworkManager` on the *system* D-Bus. A primary
 Ethernet or Wi-Fi connection wins; if a VPN is primary, the preferred underlying
 physical connection is used instead. When several physical connections are active
 and none is primary, Ethernet takes precedence. Wi-Fi draws three signal arcs
-based on the associated access point's `Strength`: >=25, >=50, >=75 percent.
+based on the associated access point's `Strength`: above 5, 30 and 55 percent, NetworkManager's own bar thresholds.
 The small dot is always present for an associated Wi-Fi network. When
 NetworkManager confirms no active physical link, a crossed-out Wi-Fi
 symbol appears. A one-off D-Bus failure or transitional connection snapshot

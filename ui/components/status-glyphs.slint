@@ -98,11 +98,15 @@ export component NetworkIndicator inherits Rectangle {
     in property <bool> limited: false;
     width: 30px; height: 28px; background: transparent;
 
+    // NetworkManager's own bar thresholds (as nmcli draws them).
     private property <int> bars: root.kind != 2 || root.limited ? 0
-        : root.strength >= 75 ? 3 : root.strength >= 50 ? 2 : root.strength >= 25 ? 1 : 0;
+        : root.strength > 55 ? 3 : root.strength > 30 ? 2 : root.strength > 5 ? 1 : 0;
 
+    // The Wi-Fi fan's ink sits low in its cell (the dot hangs below the
+    // arcs), so it rises 1px to share the battery's centre line.
     glyph := Rectangle {
-        x: (parent.width - 27px) / 2; y: (parent.height - 22.5px) / 2;
+        x: (parent.width - 27px) / 2;
+        y: (parent.height - 22.5px) / 2 - (root.kind == 2 || root.kind == 0 ? 1px : 0px);
         width: 27px; height: 22.5px; background: transparent;
 
         // Wi-Fi (and offline, drawn as an empty Wi-Fi): a dot and three arcs
