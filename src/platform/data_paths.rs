@@ -6,8 +6,8 @@
 //! shared with every other program, so Horizon uses an `<app-id>` subfolder.
 //!
 //! ```text
-//! data/    library.sqlite3  album/
-//! config/  appearance.json  steamgriddb.json  steam-account.json   (0700 dir)
+//! data/    library.sqlite3  album/  profile.png  profile-steam(-frame).png
+//! config/  appearance.json  profile.json  steamgriddb.json  steam-account.json   (0700 dir)
 //! cache/   artwork/local/  artwork/steamgriddb/  achievements/  album/  (disposable)
 //! ```
 //!
@@ -30,8 +30,12 @@ const DATABASE_FILE: &str = "library.sqlite3";
 const STEAMGRIDDB_FILE: &str = "steamgriddb.json";
 const APPEARANCE_FILE: &str = "appearance.json";
 const STEAM_ACCOUNT_FILE: &str = "steam-account.json";
+const PROFILE_FILE: &str = "profile.json";
 const CACHE_VERSION_FILE: &str = ".version";
 const ALBUM_DIR: &str = "album";
+const PROFILE_PICTURE_FILE: &str = "profile.png";
+const STEAM_PICTURE_FILE: &str = "profile-steam.png";
+const STEAM_FRAME_FILE: &str = "profile-steam-frame.png";
 
 #[derive(Debug, Error)]
 pub enum DataPathError {
@@ -105,6 +109,12 @@ pub fn appearance_settings_path() -> Result<PathBuf, DataPathError> {
     config_file_path(APPEARANCE_FILE)
 }
 
+/// Which profile picture to show (a chosen picture, Steam's, or a built-in
+/// avatar).
+pub fn profile_settings_path() -> Result<PathBuf, DataPathError> {
+    config_file_path(PROFILE_FILE)
+}
+
 /// Normalized cover art built from each source's own files.
 pub fn local_artwork_cache_dir(version: &str) -> Option<PathBuf> {
     cache_dir("artwork/local", version)
@@ -124,6 +134,23 @@ pub fn achievements_cache_dir(version: &str) -> Option<PathBuf> {
 /// rebuilt. The folder is created when the first capture is written.
 pub fn album_dir() -> Result<PathBuf, DataPathError> {
     Ok(app_dir(BaseDir::Data)?.join(ALBUM_DIR))
+}
+
+/// The profile picture chosen in Settings: Horizon's own square copy, not
+/// a link to the original (which may be moved, or live behind the document
+/// portal only for a session). Data, not cache. Its folder is the data folder.
+pub fn profile_picture_path() -> Result<PathBuf, DataPathError> {
+    Ok(app_dir(BaseDir::Data)?.join(PROFILE_PICTURE_FILE))
+}
+
+/// The last Steam profile picture fetched, kept so it shows offline.
+pub fn steam_profile_picture_path() -> Result<PathBuf, DataPathError> {
+    Ok(app_dir(BaseDir::Data)?.join(STEAM_PICTURE_FILE))
+}
+
+/// The Steam avatar frame last fetched (absent when none is equipped).
+pub fn steam_profile_frame_path() -> Result<PathBuf, DataPathError> {
+    Ok(app_dir(BaseDir::Data)?.join(STEAM_FRAME_FILE))
 }
 
 /// Album thumbnails and video durations.

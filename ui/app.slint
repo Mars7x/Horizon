@@ -305,6 +305,20 @@ export component AppWindow inherits Window {
     in property <bool> settings-synthetic-key-insertion: false;
     in-out property <string> settings-key-draft: "";
     in property <string> settings-feedback: "";
+    // The profile picture (presentation/profile.rs): Home's avatar, and
+    // Settings → Profile.
+    in property <image> profile-picture;
+    in property <bool> profile-has-picture: false;
+    // A Steam picture shown square, with its avatar frame (if one is equipped).
+    in property <bool> profile-square: false;
+    in property <image> profile-frame;
+    in property <bool> profile-has-frame: false;
+    in property <bool> settings-profile-steam-square: false;
+    in property <bool> settings-profile-choosing: false;
+    in property <bool> settings-profile-has-chosen: false;
+    in property <bool> settings-profile-uses-steam: false;
+    in property <bool> settings-profile-steam-available: false;
+    in property <string> settings-profile-feedback: "";
     in property <string> settings-appearance-feedback: "";
     in property <string> settings-artwork-status: "";
     in property <bool> settings-refresh-open: false;
@@ -706,6 +720,17 @@ export component AppWindow inherits Window {
                     synthetic-key-insertion: root.settings-synthetic-key-insertion;
                     key-draft <=> root.settings-key-draft;
                     feedback: root.settings-feedback;
+                    profile-picture: root.profile-picture;
+                    profile-has-picture: root.profile-has-picture;
+                    profile-choosing: root.settings-profile-choosing;
+                    profile-has-chosen: root.settings-profile-has-chosen;
+                    profile-uses-steam: root.settings-profile-uses-steam;
+                    profile-steam-available: root.settings-profile-steam-available;
+                    profile-steam-square: root.settings-profile-steam-square;
+                    profile-square: root.profile-square;
+                    profile-frame: root.profile-frame;
+                    profile-has-frame: root.profile-has-frame;
+                    profile-feedback: root.settings-profile-feedback;
                     artwork-status: root.settings-artwork-status;
                     refresh-open: root.settings-refresh-open;
                     refresh-running: root.settings-refresh-running;
@@ -799,6 +824,11 @@ export component AppWindow inherits Window {
                 width: parent.width;
                 height: Metrics.top-chrome-height;
                 icon-render-scale: root.ui-scale;
+                profile-picture: root.profile-picture;
+                profile-has-picture: root.profile-has-picture;
+                profile-square: root.profile-square;
+                profile-frame: root.profile-frame;
+                profile-has-frame: root.profile-has-frame;
                 visible: root.shell-chrome-visible;
                 // Above the page layers (z 1-2): a leaving page shrinks to
                 // 94% and must not cover the chrome unevenly while it fades.

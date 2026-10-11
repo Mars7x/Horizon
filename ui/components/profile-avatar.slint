@@ -1,0 +1,137 @@
+import { Theme } from "../theme/theme.slint";
+
+// The profile picture at the top left of Home, after the reference mockup.
+//
+// Round (the default): a circle set into a raised ring. The ring catches light
+// along its top edge (a bright crescent above its body colour, built from two
+// solid circles so every renderer draws it alike), has a fine edge and casts a
+// soft shadow; the picture sits in it behind a thin shaded rim. White in light
+// mode, a light gray in dark, plain foreground in High Contrast. Until there
+// is a picture, a monogram on the flat accent stands in for it.
+//
+// Square (a Steam picture, as Steam shows it): the picture square, with the
+// account's avatar frame drawn around it at full size, or without a frame a
+// fine edge and the same shadow.
+export component ProfileAvatar inherits Rectangle {
+    in property <image> picture;
+    in property <bool> has-picture: false;
+    in property <string> monogram: "H";
+    in property <bool> square: false;
+    in property <image> frame;
+    in property <bool> has-frame: false;
+    // 54px in the top bar; the ring, monogram and frame scale with it.
+    in property <length> size: 54px;
+    private property <length> ring: max(4px, root.size * 4 / 54);
+    private property <length> inner: root.size - 2 * root.ring;
+    // The lit edge, and the ring's body.
+    private property <color> ring-light: Theme.high-contrast ? Theme.foreground
+        : Theme.is-dark ? #eceef2 : #ffffff;
+    private property <color> ring-body: Theme.high-contrast ? Theme.foreground
+        : Theme.is-dark ? #c6c7ce : #eeeff3;
+    private property <color> shadow: Theme.is-dark ? #000000a0 : #00000047;
+    // Steam draws a frame about 1.22 times the avatar it surrounds.
+    private property <length> square-side: root.has-frame ? root.size / 1.22 : root.size * 0.88;
+    width: root.size;
+    height: root.size;
+    background: transparent;
+
+    if !root.square : Rectangle {
+        width: root.size; height: root.size;
+        border-radius: root.size / 2;
+        background: root.ring-light;
+        drop-shadow-offset-y: root.size * 3 / 54;
+        drop-shadow-blur: root.size * 14 / 54;
+        drop-shadow-color: root.shadow;
+
+        // The body, a touch smaller and lower, so the light shows along the top.
+        Rectangle {
+            x: 1px; y: 1.6px;
+            width: root.size - 2px; height: root.size - 2px;
+            border-radius: (root.size - 2px) / 2;
+            background: root.ring-body;
+        }
+        // A fine edge around the whole ring.
+        Rectangle {
+            width: root.size; height: root.size;
+            border-radius: root.size / 2;
+            border-width: Theme.high-contrast ? 0px : 1px;
+            border-color: Theme.is-dark ? #00000066 : #00000014;
+            background: transparent;
+        }
+        Rectangle {
+            x: root.ring; y: root.ring;
+            width: root.inner;
+            height: root.inner;
+            border-radius: root.inner / 2;
+            background: Theme.accent;
+            if !root.has-picture : Text {
+                width: parent.width; height: parent.height;
+                text: root.monogram;
+                color: Theme.accent-foreground;
+                font-size: root.size * 22 / 54;
+                font-weight: 700;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            // The picture gets its own clipped circle.
+            if root.has-picture : Rectangle {
+                width: parent.width; height: parent.height;
+                border-radius: root.inner / 2;
+                clip: true;
+                Image {
+                    width: parent.width; height: parent.height;
+                    source: root.picture;
+                    image-fit: cover;
+                }
+            }
+            // The picture sits into the ring: a thin shaded rim at its edge.
+            Rectangle {
+                width: parent.width; height: parent.height;
+                border-radius: root.inner / 2;
+                border-width: Theme.high-contrast ? 0px : 1px;
+                border-color: #00000038;
+                background: transparent;
+            }
+        }
+    }
+
+    if root.square : Rectangle {
+        width: root.size; height: root.size;
+        background: transparent;
+        Rectangle {
+            x: (root.size - root.square-side) / 2;
+            y: (root.size - root.square-side) / 2;
+            width: root.square-side; height: root.square-side;
+            background: Theme.accent;
+            drop-shadow-offset-y: root.has-frame ? 0px : root.size * 3 / 54;
+            drop-shadow-blur: root.has-frame ? 0px : root.size * 14 / 54;
+            drop-shadow-color: root.shadow;
+            if root.has-picture : Image {
+                width: parent.width; height: parent.height;
+                source: root.picture;
+                image-fit: cover;
+            }
+            if !root.has-picture : Text {
+                width: parent.width; height: parent.height;
+                text: root.monogram;
+                color: Theme.accent-foreground;
+                font-size: root.size * 22 / 54;
+                font-weight: 700;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            if !root.has-frame : Rectangle {
+                width: parent.width; height: parent.height;
+                border-width: Theme.high-contrast ? 2px : 1px;
+                border-color: Theme.high-contrast ? Theme.foreground
+                    : Theme.is-dark ? #ffffff2e : #00000024;
+                background: transparent;
+            }
+        }
+        if root.has-frame : Image {
+            width: root.size; height: root.size;
+            source: root.frame;
+            image-fit: contain;
+        }
+    }
+}

@@ -15,6 +15,39 @@ use std::{
 
 static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
 
+const PLAYER_SUMMARIES: &str = "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/";
+const PROFILE_ITEMS: &str =
+    "https://api.steampowered.com/IPlayerService/GetProfileItemsEquipped/v1/";
+/// Where Steam's community item images (avatar frames) live; the API gives
+/// only the path after it.
+const ITEM_IMAGES: &str = "https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/";
+/// Where Steam serves profile avatars.
+const AVATAR_HOSTS: &[&str] = &[
+    "avatars.steamstatic.com",
+    "avatars.akamai.steamstatic.com",
+    "avatars.cloudflare.steamstatic.com",
+    "steamcdn-a.akamaihd.net",
+];
+/// Where Steam serves achievement badges.
+const BADGE_HOSTS: &[&str] = &[
+    "cdn.cloudflare.steamstatic.com",
+    "cdn.akamai.steamstatic.com",
+    "steamcdn-a.akamaihd.net",
+    "community.akamai.steamstatic.com",
+];
+
+/// Why the Steam profile picture couldn't be fetched. Never carries a
+/// request URL: the Web API one holds the key.
+#[derive(Debug, thiserror::Error)]
+pub enum SteamAvatarError {
+    #[error("Steam didn't answer: {0}")]
+    Network(String),
+    #[error("Steam's answer had no profile picture")]
+    Missing,
+    #[error("the profile picture couldn't be downloaded")]
+    Download,
+}
+
 #[derive(Clone)]
 pub struct SteamAccountCredentials {
     key: String,
@@ -190,15 +223,49 @@ impl SteamWebApiClient {
     /// Download a public Steam achievement badge with no API-key query string.
     /// This is an allowlisted image transport, not a generic URL fetcher.
     pub fn download_badge(&self, url: &str) -> Option<Vec<u8>> {
+        let bytes = self.download_public_image(url, BADGE_HOSTS, 256 * 1024)?;
+        let image = crate::services::image::decode(&bytes, None).ok()?;
+        let badge = image
+            .resize_exact(56, 56, image::imageops::FilterType::CatmullRom)
+            .to_rgba8();
+        Some(badge.into_raw())
+    }
+    /// The account's profile picture (Steam's largest, 184 px): the image
+    /// file's bytes, checked to be a picture of sane size but not decoded.
+    pub fn profile_avatar(&self) -> Result<Vec<u8>, SteamAvatarError> {
+        let steam_id = self.account.steam_id64.clone();
+        let body = self
+            .get(PLAYER_SUMMARIES, &[("steamids", steam_id.as_str())])
+            .map_err(|error| SteamAvatarError::Network(error.without_url().to_string()))?;
+        let url = avatar_url(&body).ok_or(SteamAvatarError::Missing)?;
+        self.download_public_image(&url, AVATAR_HOSTS, 1024 * 1024)
+            .ok_or(SteamAvatarError::Download)
+    }
+
+    /// The avatar frame the account has equipped, if any: the image file's
+    /// bytes (often an animated PNG; its first frame is the picture).
+    pub fn profile_frame(&self) -> Result<Option<Vec<u8>>, SteamAvatarError> {
+        let body = self
+            .get(PROFILE_ITEMS, &[])
+            .map_err(|error| SteamAvatarError::Network(error.without_url().to_string()))?;
+        let Some(path) = frame_path(&body) else {
+            return Ok(None);
+        };
+        self.download_public_image(
+            &format!("{ITEM_IMAGES}{path}"),
+            BADGE_HOSTS,
+            4 * 1024 * 1024,
+        )
+        .map(Some)
+        .ok_or(SteamAvatarError::Download)
+    }
+
+    /// An image from one of Steam's public image hosts, over HTTPS, with no
+    /// API key: at most `max_bytes`, and no larger than 1024 px a side by its
+    /// header. An allowlisted image transport, not a generic URL fetcher.
+    fn download_public_image(&self, url: &str, hosts: &[&str], max_bytes: u64) -> Option<Vec<u8>> {
         let address = reqwest::Url::parse(url).ok()?;
-        let allowed = matches!(
-            address.host_str()?,
-            "cdn.cloudflare.steamstatic.com"
-                | "cdn.akamai.steamstatic.com"
-                | "steamcdn-a.akamaihd.net"
-                | "community.akamai.steamstatic.com"
-        );
-        if !allowed
+        if !hosts.contains(&address.host_str()?)
             || address.scheme() != "https"
             || address.port().is_some()
             || !address.username().is_empty()
@@ -213,14 +280,11 @@ impl SteamWebApiClient {
             .ok()?
             .error_for_status()
             .ok()?;
-        if response
-            .content_length()
-            .is_some_and(|len| len > 256 * 1024)
-        {
+        if response.content_length().is_some_and(|len| len > max_bytes) {
             return None;
         }
         let bytes = response.bytes().ok()?;
-        if bytes.len() > 256 * 1024 {
+        if bytes.len() as u64 > max_bytes {
             return None;
         }
         // Check the size from the header before decoding anything.
@@ -228,12 +292,9 @@ impl SteamWebApiClient {
         if width > 1024 || height > 1024 {
             return None;
         }
-        let image = crate::services::image::decode(&bytes, None).ok()?;
-        let badge = image
-            .resize_exact(56, 56, image::imageops::FilterType::CatmullRom)
-            .to_rgba8();
-        Some(badge.into_raw())
+        Some(bytes.to_vec())
     }
+
     pub fn get(
         &self,
         endpoint: &'static str,
@@ -254,9 +315,141 @@ impl SteamWebApiClient {
     }
 }
 
+/// `avatarfull` (else `avatarmedium`) of the first player in a
+/// GetPlayerSummaries answer.
+fn avatar_url(body: &str) -> Option<String> {
+    #[derive(Deserialize)]
+    struct Answer {
+        response: Players,
+    }
+    #[derive(Deserialize)]
+    struct Players {
+        players: Vec<Player>,
+    }
+    #[derive(Deserialize)]
+    struct Player {
+        avatarfull: Option<String>,
+        avatarmedium: Option<String>,
+    }
+    let player = serde_json::from_str::<Answer>(body)
+        .ok()?
+        .response
+        .players
+        .into_iter()
+        .next()?;
+    player
+        .avatarfull
+        .or(player.avatarmedium)
+        .filter(|url| !url.is_empty())
+}
+
+/// The equipped avatar frame's image path (`items/<appid>/<file>.png`) in a
+/// GetProfileItemsEquipped answer: the large image, else the small. Only a
+/// plain relative path is accepted, since it is joined onto Steam's address.
+fn frame_path(body: &str) -> Option<String> {
+    #[derive(Deserialize)]
+    struct Answer {
+        response: Items,
+    }
+    #[derive(Deserialize)]
+    struct Items {
+        avatar_frame: Option<Frame>,
+    }
+    #[derive(Deserialize)]
+    struct Frame {
+        image_large: Option<String>,
+        image_small: Option<String>,
+    }
+    let frame = serde_json::from_str::<Answer>(body)
+        .ok()?
+        .response
+        .avatar_frame?;
+    [frame.image_large, frame.image_small]
+        .into_iter()
+        .flatten()
+        .find(|path| {
+            path.starts_with("items/")
+                && !path.contains("..")
+                && path
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '_' | '-' | '.'))
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_frame_is_a_plain_item_path_or_nothing() {
+        let body = r#"{"response":{"avatar_frame":{"communityitemid":"1",
+            "image_small":"items/2861690/small.png","image_large":"items/2861690/large.png"}}}"#;
+        assert_eq!(frame_path(body).as_deref(), Some("items/2861690/large.png"));
+        let small = r#"{"response":{"avatar_frame":{"image_small":"items/1/s.png"}}}"#;
+        assert_eq!(frame_path(small).as_deref(), Some("items/1/s.png"));
+        assert_eq!(frame_path(r#"{"response":{}}"#), None);
+        assert_eq!(frame_path(r#"{"response":{"avatar_frame":{}}}"#), None);
+        for bad in [
+            "../x.png",
+            "items/../../x",
+            "https://evil/x.png",
+            "items/1/x.png?k=v",
+            "items/a b.png",
+        ] {
+            let body = format!(r#"{{"response":{{"avatar_frame":{{"image_large":"{bad}"}}}}}}"#);
+            assert_eq!(frame_path(&body), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_avatar_comes_from_the_first_player() {
+        let body = r#"{"response":{"players":[{"steamid":"76561198000000000",
+            "avatarmedium":"https://avatars.steamstatic.com/abc_medium.jpg",
+            "avatarfull":"https://avatars.steamstatic.com/abc_full.jpg"}]}}"#;
+        assert_eq!(
+            avatar_url(body).as_deref(),
+            Some("https://avatars.steamstatic.com/abc_full.jpg")
+        );
+        let medium_only = r#"{"response":{"players":[{"avatarmedium":"https://avatars.steamstatic.com/m.jpg"}]}}"#;
+        assert_eq!(
+            avatar_url(medium_only).as_deref(),
+            Some("https://avatars.steamstatic.com/m.jpg")
+        );
+        assert_eq!(avatar_url(r#"{"response":{"players":[]}}"#), None);
+        assert_eq!(avatar_url("not json"), None);
+    }
+
+    #[test]
+    fn public_images_come_only_from_steam_hosts_over_https() {
+        let client = SteamWebApiClient::new(
+            SteamAccountCredentials::new("key", "76561198000000000").unwrap(),
+        )
+        .unwrap();
+        // Rejected before any request is made.
+        for url in [
+            "http://avatars.steamstatic.com/a.jpg",
+            "https://example.com/a.jpg",
+            "https://avatars.steamstatic.com:8443/a.jpg",
+            "https://user@avatars.steamstatic.com/a.jpg",
+            "not a url",
+        ] {
+            assert!(
+                client
+                    .download_public_image(url, AVATAR_HOSTS, 1024)
+                    .is_none(),
+                "{url}"
+            );
+        }
+        assert!(
+            client
+                .download_public_image(
+                    "https://cdn.akamai.steamstatic.com/b.jpg",
+                    AVATAR_HOSTS,
+                    1024
+                )
+                .is_none()
+        );
+    }
     #[test]
     fn identity_and_key_validation() {
         assert!(SteamAccountCredentials::new("key", "76561198000000000").is_ok());
