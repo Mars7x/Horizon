@@ -9,7 +9,7 @@ screenshots). See [ADR 0166](adr/0166-album-captures-and-media-pipeline.md).
 | Where | Input | Does |
 | --- | --- | --- |
 | Grid | D-pad / stick | Move between captures (reading order; no wrap) |
-| Grid | A, or click the selected tile | Open the capture full-screen |
+| Grid | A, or click any tile | Open the capture full-screen (a click opens it straight away) |
 | Grid | X | Start selecting: A (or a click) ticks captures, X asks to delete the ticked ones, B finishes |
 | Grid | LB / click "Game" | Next game filter: All games, then each game with captures, most recent first |
 | Grid | RB / click "Type" | All → Screenshots → Videos |
