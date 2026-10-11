@@ -6,7 +6,7 @@
 //! shared with every other program, so Horizon uses an `<app-id>` subfolder.
 //!
 //! ```text
-//! data/    library.sqlite3  album/  profile.png  profile-steam(-frame).png
+//! data/    library.sqlite3  album/  profile.png  profile-animated  profile-steam.png  profile-steam-{frame,animated}
 //! config/  appearance.json  profile.json  steamgriddb.json  steam-account.json   (0700 dir)
 //! cache/   artwork/local/  artwork/steamgriddb/  achievements/  album/  (disposable)
 //! ```
@@ -34,8 +34,10 @@ const PROFILE_FILE: &str = "profile.json";
 const CACHE_VERSION_FILE: &str = ".version";
 const ALBUM_DIR: &str = "album";
 const PROFILE_PICTURE_FILE: &str = "profile.png";
+const PROFILE_ANIMATED_FILE: &str = "profile-animated";
 const STEAM_PICTURE_FILE: &str = "profile-steam.png";
-const STEAM_FRAME_FILE: &str = "profile-steam-frame.png";
+const STEAM_FRAME_FILE: &str = "profile-steam-frame";
+const STEAM_ANIMATED_FILE: &str = "profile-steam-animated";
 
 #[derive(Debug, Error)]
 pub enum DataPathError {
@@ -143,14 +145,27 @@ pub fn profile_picture_path() -> Result<PathBuf, DataPathError> {
     Ok(app_dir(BaseDir::Data)?.join(PROFILE_PICTURE_FILE))
 }
 
+/// The chosen profile picture's original file, when it is animated (a GIF,
+/// an animated PNG), so it can play; `profile.png` is its still.
+pub fn profile_animated_path() -> Result<PathBuf, DataPathError> {
+    Ok(app_dir(BaseDir::Data)?.join(PROFILE_ANIMATED_FILE))
+}
+
 /// The last Steam profile picture fetched, kept so it shows offline.
 pub fn steam_profile_picture_path() -> Result<PathBuf, DataPathError> {
     Ok(app_dir(BaseDir::Data)?.join(STEAM_PICTURE_FILE))
 }
 
-/// The Steam avatar frame last fetched (absent when none is equipped).
+/// The Steam avatar frame last fetched, as Steam's original file (often an
+/// animated PNG); absent when none is equipped.
 pub fn steam_profile_frame_path() -> Result<PathBuf, DataPathError> {
     Ok(app_dir(BaseDir::Data)?.join(STEAM_FRAME_FILE))
+}
+
+/// The Steam animated avatar last fetched, as Steam's original file (a GIF);
+/// absent when none is equipped.
+pub fn steam_animated_avatar_path() -> Result<PathBuf, DataPathError> {
+    Ok(app_dir(BaseDir::Data)?.join(STEAM_ANIMATED_FILE))
 }
 
 /// Album thumbnails and video durations.

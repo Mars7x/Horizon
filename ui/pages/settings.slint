@@ -7,6 +7,7 @@ import { TransitionDriver, TransitionLayer } from "../components/transition.slin
 import { ActionButton as SettingsButton } from "../components/action-button.slint";
 import { ModalDialog } from "../components/modal-dialog.slint";
 import { ProfileAvatar } from "../components/profile-avatar.slint";
+import { ProfileFrameData } from "../models/profile.slint";
 
 // Settings rows are the shared ListRow plus a trailing action label or a
 // switch. Selection and persistence remain Rust-owned so mouse and controller agree.
@@ -170,6 +171,9 @@ export component SettingsPage inherits Rectangle {
     in property <bool> profile-square: false;
     in property <image> profile-frame;
     in property <bool> profile-has-frame: false;
+    in property <[ProfileFrameData]> profile-picture-frames;
+    in property <[ProfileFrameData]> profile-frame-frames;
+    in property <bool> profile-playing: false;
     in property <string> profile-feedback: "";
     // Keep the Rust-owned artwork diagnostic property available to the backend,
     // but do not display worker telemetry in the Third-Party preferences view.
@@ -491,6 +495,9 @@ export component SettingsPage inherits Rectangle {
             square: root.profile-square;
             frame: root.profile-frame;
             has-frame: root.profile-has-frame;
+            picture-frames: root.profile-picture-frames;
+            frame-frames: root.profile-frame-frames;
+            playing: root.profile-playing;
         }
         Text {
             x: 96px + Metrics.spacing-lg; y: Metrics.breadcrumb-height + Metrics.spacing-sm + 18px;

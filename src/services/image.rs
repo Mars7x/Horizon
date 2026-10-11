@@ -16,11 +16,13 @@ use std::{
     io::{BufRead, Cursor, Seek},
     path::Path,
     sync::Once,
+    time::Duration,
 };
 
 use image::{
     AnimationDecoder, DynamicImage, Frames, ImageDecoder, ImageFormat, ImageReader, ImageResult,
-    Limits, RgbaImage, codecs::gif::GifDecoder,
+    Limits, RgbaImage,
+    codecs::{gif::GifDecoder, png::PngDecoder},
 };
 
 /// Largest width or height Horizon will decode (16K).
@@ -81,6 +83,67 @@ pub fn gif_frames(path: &Path) -> ImageResult<Option<Frames<'static>>> {
     let mut decoder = GifDecoder::new(reader.into_inner())?;
     decoder.set_limits(limits())?;
     Ok(Some(decoder.into_frames()))
+}
+
+/// Frame delays below this play at [`UNSET_FRAME_DELAY`], as browsers do
+/// (0 and 10 ms usually mean "unset").
+pub const MIN_FRAME_DELAY: Duration = Duration::from_millis(20);
+pub const UNSET_FRAME_DELAY: Duration = Duration::from_millis(100);
+
+pub fn frame_delay(delay: Duration) -> Duration {
+    if delay < MIN_FRAME_DELAY {
+        UNSET_FRAME_DELAY
+    } else {
+        delay
+    }
+}
+
+/// A small animation decoded whole: an animated GIF or PNG, every frame
+/// scaled to fit `max` with its delay (`square`: each cropped to its centre
+/// square first). For little pictures (a profile's), at most `max_frames`
+/// frames; `None` for a still image or another format. A frame that fails
+/// ends the animation where it is.
+pub fn small_animation(
+    bytes: &[u8],
+    max: (u32, u32),
+    max_frames: usize,
+    square: bool,
+) -> ImageResult<Option<Vec<(RgbaImage, Duration)>>> {
+    let format = image::guess_format(bytes)?;
+    let frames: Frames<'_> = match format {
+        ImageFormat::Gif => {
+            let mut decoder = GifDecoder::new(Cursor::new(bytes))?;
+            decoder.set_limits(limits())?;
+            decoder.into_frames()
+        }
+        ImageFormat::Png => {
+            let decoder = PngDecoder::with_limits(Cursor::new(bytes), limits())?;
+            if !decoder.is_apng()? {
+                return Ok(None);
+            }
+            decoder.apng()?.into_frames()
+        }
+        _ => return Ok(None),
+    };
+    let decoded: Vec<_> = frames
+        .take(max_frames)
+        .map_while(Result::ok)
+        .map(|frame| {
+            let delay = frame_delay(frame.delay().into());
+            let mut image = DynamicImage::ImageRgba8(frame.into_buffer());
+            if square {
+                let side = image.width().min(image.height());
+                image = image.crop_imm(
+                    (image.width() - side) / 2,
+                    (image.height() - side) / 2,
+                    side,
+                    side,
+                );
+            }
+            (fit(image, max), delay)
+        })
+        .collect();
+    Ok((decoded.len() > 1).then_some(decoded))
 }
 
 /// Width and height from the header alone.
@@ -144,6 +207,39 @@ mod tests {
             }
         }
         bytes
+    }
+
+    #[test]
+    fn small_animations_decode_whole_and_stills_do_not() {
+        let gif = animated_gif(3);
+        let frames = small_animation(&gif, (3, 3), 10, false).unwrap().unwrap();
+        assert_eq!(frames.len(), 3);
+        assert_eq!(frames[0].0.dimensions(), (3, 2));
+        assert_eq!(frames[0].1, Duration::from_millis(30));
+        let squared = small_animation(&gif, (3, 3), 10, true).unwrap().unwrap();
+        assert_eq!(squared[0].0.dimensions(), (3, 3));
+        assert_eq!(
+            small_animation(&gif, (3, 3), 2, false)
+                .unwrap()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert!(
+            small_animation(&animated_gif(1), (3, 3), 10, false)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            small_animation(&png(4, 4), (3, 3), 10, false)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(frame_delay(Duration::ZERO), UNSET_FRAME_DELAY);
+        assert_eq!(
+            frame_delay(Duration::from_millis(40)),
+            Duration::from_millis(40)
+        );
     }
 
     #[test]

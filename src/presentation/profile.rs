@@ -4,7 +4,9 @@
 //! chose, the Steam account's avatar, or a built-in avatar. Everything slow
 //! (the FileChooser portal, decoding, Steam) runs on worker threads; the UI
 //! thread only shows results. Each source keeps its own copy on disk, so
-//! switching between them is instant and Steam's shows offline.
+//! switching between them is instant and Steam's shows offline. A Steam
+//! animated avatar and an animated avatar frame are kept as Steam's original
+//! files and decoded whole, small, so Slint can play them (`AnimatedPicture`).
 
 use std::{
     cell::{Cell, RefCell},
@@ -14,16 +16,16 @@ use std::{
 };
 
 use image::RgbaImage;
-use slint::{ComponentHandle, Image, Rgba8Pixel, SharedPixelBuffer};
+use slint::{ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use tracing::warn;
 
 use crate::{
-    AppWindow,
+    AppWindow, ProfileFrameData,
     platform::{data_paths, file_chooser},
     presentation::wake::drain_notify,
     services::{
-        profile::{self, ProfileSource},
-        steam_account::{SteamAccountService, SteamWebApiClient},
+        profile::{self, Animation, ProfileSource},
+        steam_account::{ProfileItem, SteamAccountService, SteamWebApiClient},
         worker::{WorkerSender, spawn, worker_channel},
     },
 };
@@ -32,33 +34,67 @@ enum ProfileEvent {
     /// The stored copies, read at startup.
     Loaded {
         chosen: Option<RgbaImage>,
+        chosen_animated: Option<Animation>,
         steam: Option<RgbaImage>,
-        frame: Option<RgbaImage>,
+        frame: Option<Animation>,
+        animated: Option<Animation>,
     },
-    /// A pick finished: a new picture, cancelled (`None`), or why it failed.
-    Chosen(Result<Option<RgbaImage>, String>),
+    /// A pick finished: a new picture (and its frames, when it moves),
+    /// cancelled (`None`), or why it failed.
+    Chosen(Result<Option<(RgbaImage, Option<Animation>)>, String>),
     /// A Steam fetch finished. `quiet`: a background refresh, which says
     /// nothing unless it changed something.
     Steam {
-        result: Result<(RgbaImage, FrameUpdate), String>,
+        result: Result<SteamProfile, String>,
         quiet: bool,
     },
 }
 
-/// What a Steam fetch learned about the avatar frame.
-enum FrameUpdate {
+struct SteamProfile {
+    picture: RgbaImage,
+    frame: Update<Animation>,
+    animated: Update<Animation>,
+}
+
+/// What a Steam fetch learned about an equipped item.
+enum Update<T> {
     /// Equipped: this is it.
-    Set(RgbaImage),
+    Set(T),
     /// None equipped.
     Clear,
     /// It couldn't be fetched: keep the last one.
     Keep,
 }
 
+/// A picture that may move, ready for Slint.
+struct Moving {
+    still: Image,
+    frames: ModelRc<ProfileFrameData>,
+}
+
+impl From<Animation> for Moving {
+    fn from(animation: Animation) -> Self {
+        let frames: Vec<_> = animation
+            .frames
+            .into_iter()
+            .map(|(frame, delay)| ProfileFrameData {
+                image: slint_image(frame),
+                delay_ms: delay.as_millis().min(i32::MAX as u128) as i32,
+            })
+            .collect();
+        Self {
+            still: slint_image(animation.still),
+            frames: ModelRc::new(VecModel::from(frames)),
+        }
+    }
+}
+
 struct Paths {
     chosen: PathBuf,
+    chosen_animated: PathBuf,
     steam: PathBuf,
     frame: PathBuf,
+    animated: PathBuf,
     settings: PathBuf,
 }
 
@@ -70,9 +106,13 @@ pub struct ProfileController {
     receiver: RefCell<Receiver<ProfileEvent>>,
     source: RefCell<ProfileSource>,
     chosen: RefCell<Option<Image>>,
+    /// The chosen picture's frames, when it is animated.
+    chosen_animated: RefCell<Option<Moving>>,
     steam: RefCell<Option<Image>>,
     /// The Steam avatar frame, shown around a square Steam picture.
-    frame: RefCell<Option<Image>>,
+    frame: RefCell<Option<Moving>>,
+    /// The Steam animated avatar, shown in place of the Steam picture.
+    animated: RefCell<Option<Moving>>,
     /// The built-in avatar last shown, decoded once.
     avatar: RefCell<Option<(String, Image)>>,
     /// A pick or a Steam fetch is under way (one at a time).
@@ -85,8 +125,10 @@ impl ProfileController {
         let paths = (|| {
             Ok::<_, data_paths::DataPathError>(Paths {
                 chosen: data_paths::profile_picture_path()?,
+                chosen_animated: data_paths::profile_animated_path()?,
                 steam: data_paths::steam_profile_picture_path()?,
                 frame: data_paths::steam_profile_frame_path()?,
+                animated: data_paths::steam_animated_avatar_path()?,
                 settings: data_paths::profile_settings_path()?,
             })
         })()
@@ -106,25 +148,33 @@ impl ProfileController {
             receiver: RefCell::new(receiver),
             source: RefCell::new(source),
             chosen: RefCell::new(None),
+            chosen_animated: RefCell::new(None),
             steam: RefCell::new(None),
             frame: RefCell::new(None),
+            animated: RefCell::new(None),
             avatar: RefCell::new(None),
             busy: Cell::new(false),
             feedback: RefCell::new(String::new()),
         });
         drain.bind(&controller);
         if let Some(paths) = &controller.paths {
-            let (chosen, steam, frame) = (
+            let chosen_animated = paths.chosen_animated.clone();
+            let (chosen, steam, frame, animated) = (
                 paths.chosen.clone(),
                 paths.steam.clone(),
                 paths.frame.clone(),
+                paths.animated.clone(),
             );
             let sender = controller.sender.clone();
             spawn("profile-load", move || {
                 let _ = sender.send(ProfileEvent::Loaded {
                     chosen: profile::load(&chosen),
+                    chosen_animated: std::fs::read(&chosen_animated).ok().and_then(|bytes| {
+                        profile::decode_chosen_animation(&bytes, profile::ANIMATED_SIDE)
+                    }),
                     steam: profile::load(&steam),
-                    frame: profile::load(&frame),
+                    frame: profile::load_animation(&frame, profile::FRAME_SIDE),
+                    animated: profile::load_animation(&animated, profile::ANIMATED_SIDE),
                 });
             });
         }
@@ -164,7 +214,11 @@ impl ProfileController {
 
     /// Open the file picker. Returns whether a pick started.
     pub fn choose(&self, ui: &AppWindow) -> bool {
-        let Some(path) = self.paths.as_ref().map(|paths| paths.chosen.clone()) else {
+        let Some((path, animated_path)) = self
+            .paths
+            .as_ref()
+            .map(|paths| (paths.chosen.clone(), paths.chosen_animated.clone()))
+        else {
             self.say(ui, "Profile pictures can't be saved here.");
             return false;
         };
@@ -179,7 +233,19 @@ impl ProfileController {
                 Ok(None) => Ok(None),
                 Ok(Some(source)) => profile::prepare(&source)
                     .and_then(|picture| profile::save(&path, &picture).map(|()| picture))
-                    .map(Some)
+                    .map(|picture| {
+                        // An animated picture keeps its original, to play.
+                        let animation = std::fs::read(&source).ok().and_then(|bytes| {
+                            let animation =
+                                profile::decode_chosen_animation(&bytes, profile::ANIMATED_SIDE)?;
+                            profile::save_bytes(&animated_path, &bytes).ok()?;
+                            Some(animation)
+                        });
+                        if animation.is_none() {
+                            let _ = profile::remove(&animated_path);
+                        }
+                        Some((picture, animation))
+                    })
                     .map_err(|error| error.to_string()),
                 Err(error) => Err(error.to_string()),
             };
@@ -200,9 +266,10 @@ impl ProfileController {
         if !self.has_chosen_picture() || self.busy.get() {
             return false;
         }
-        match profile::remove(&paths.chosen) {
+        match profile::remove(&paths.chosen).and(profile::remove(&paths.chosen_animated)) {
             Ok(()) => {
                 *self.chosen.borrow_mut() = None;
+                *self.chosen_animated.borrow_mut() = None;
                 self.say(ui, "Picture removed.");
                 true
             }
@@ -250,11 +317,13 @@ impl ProfileController {
     }
 
     fn fetch_steam(&self, quiet: bool) {
-        let Some((path, frame_path)) = self
-            .paths
-            .as_ref()
-            .map(|paths| (paths.steam.clone(), paths.frame.clone()))
-        else {
+        let Some((path, frame_path, animated_path)) = self.paths.as_ref().map(|paths| {
+            (
+                paths.steam.clone(),
+                paths.frame.clone(),
+                paths.animated.clone(),
+            )
+        }) else {
             self.busy.set(false);
             return;
         };
@@ -274,24 +343,27 @@ impl ProfileController {
                             profile::prepare_bytes(&bytes).map_err(|error| error.to_string())
                         })?;
                     profile::save(&path, &picture).map_err(|error| error.to_string())?;
-                    // The frame is a nicety: failing to get it keeps the last.
-                    let frame = match client.profile_frame() {
-                        Ok(Some(bytes)) => match profile::prepare_frame(&bytes) {
-                            Ok(frame) if profile::save(&frame_path, &frame).is_ok() => {
-                                FrameUpdate::Set(frame)
-                            }
-                            _ => FrameUpdate::Keep,
-                        },
-                        Ok(None) => {
-                            let _ = profile::remove(&frame_path);
-                            FrameUpdate::Clear
-                        }
+                    // Equipped items are niceties: failing to get them keeps
+                    // the last ones.
+                    let (frame, animated) = match client.profile_items() {
+                        Ok(items) => (
+                            keep_item(&items.frame, &frame_path, profile::FRAME_SIDE),
+                            keep_item(
+                                &items.animated_avatar,
+                                &animated_path,
+                                profile::ANIMATED_SIDE,
+                            ),
+                        ),
                         Err(error) => {
-                            warn!(%error, "the Steam avatar frame was not fetched");
-                            FrameUpdate::Keep
+                            warn!(%error, "Steam profile items were not fetched");
+                            (Update::Keep, Update::Keep)
                         }
                     };
-                    Ok((picture, frame))
+                    Ok(SteamProfile {
+                        picture,
+                        frame,
+                        animated,
+                    })
                 });
             let _ = sender.send(ProfileEvent::Steam { result, quiet });
         });
@@ -323,26 +395,33 @@ impl ProfileController {
             match event {
                 ProfileEvent::Loaded {
                     chosen,
+                    chosen_animated,
                     steam,
                     frame,
+                    animated,
                 } => {
                     // A pick or fetch that finished first wins over the
                     // startup read.
                     if self.chosen.borrow().is_none() {
                         *self.chosen.borrow_mut() = chosen.map(slint_image);
+                        *self.chosen_animated.borrow_mut() = chosen_animated.map(Moving::from);
                     }
                     if self.steam.borrow().is_none() {
                         *self.steam.borrow_mut() = steam.map(slint_image);
                     }
                     if self.frame.borrow().is_none() {
-                        *self.frame.borrow_mut() = frame.map(slint_image);
+                        *self.frame.borrow_mut() = frame.map(Moving::from);
+                    }
+                    if self.animated.borrow().is_none() {
+                        *self.animated.borrow_mut() = animated.map(Moving::from);
                     }
                 }
                 ProfileEvent::Chosen(result) => {
                     self.busy.set(false);
                     match result {
-                        Ok(Some(picture)) => {
+                        Ok(Some((picture, animation))) => {
                             *self.chosen.borrow_mut() = Some(slint_image(picture));
+                            *self.chosen_animated.borrow_mut() = animation.map(Moving::from);
                             // Choosing a picture is choosing to show it.
                             self.set_source(ProfileSource::Chosen);
                             *self.feedback.borrow_mut() = "Picture updated.".into();
@@ -357,15 +436,14 @@ impl ProfileController {
                 ProfileEvent::Steam { result, quiet } => {
                     self.busy.set(false);
                     match result {
-                        Ok((picture, frame)) => {
+                        Ok(SteamProfile {
+                            picture,
+                            frame,
+                            animated,
+                        }) => {
                             *self.steam.borrow_mut() = Some(slint_image(picture));
-                            match frame {
-                                FrameUpdate::Set(frame) => {
-                                    *self.frame.borrow_mut() = Some(slint_image(frame));
-                                }
-                                FrameUpdate::Clear => *self.frame.borrow_mut() = None,
-                                FrameUpdate::Keep => {}
-                            }
+                            apply(&self.frame, frame);
+                            apply(&self.animated, animated);
                             if !quiet {
                                 *self.feedback.borrow_mut() = "Using your Steam picture.".into();
                             }
@@ -392,7 +470,12 @@ impl ProfileController {
     fn current(&self) -> Option<Image> {
         match &*self.source.borrow() {
             ProfileSource::Chosen => self.chosen.borrow().clone(),
-            ProfileSource::Steam { .. } => self.steam.borrow().clone(),
+            ProfileSource::Steam { .. } => self
+                .animated
+                .borrow()
+                .as_ref()
+                .map(|animated| animated.still.clone())
+                .or_else(|| self.steam.borrow().clone()),
             ProfileSource::Avatar { id } => {
                 if let Some((shown, image)) = &*self.avatar.borrow()
                     && shown == id
@@ -417,12 +500,54 @@ impl ProfileController {
         let square = self.steam_square();
         ui.set_settings_profile_steam_square(square);
         ui.set_profile_square(square);
-        let frame = self.frame.borrow().clone().filter(|_| square);
+        let none = || ModelRc::new(VecModel::<ProfileFrameData>::default());
+        let frame = self.frame.borrow();
+        let frame = frame.as_ref().filter(|_| square);
         ui.set_profile_has_frame(frame.is_some());
-        ui.set_profile_frame(frame.unwrap_or_default());
+        ui.set_profile_frame(frame.map(|frame| frame.still.clone()).unwrap_or_default());
+        ui.set_profile_frame_frames(frame.map_or_else(none, |frame| frame.frames.clone()));
+        // Whichever picture is shown plays, if it moves.
+        let frames = match &*self.source.borrow() {
+            ProfileSource::Chosen => self
+                .chosen_animated
+                .borrow()
+                .as_ref()
+                .map(|moving| moving.frames.clone()),
+            ProfileSource::Steam { .. } => self
+                .animated
+                .borrow()
+                .as_ref()
+                .map(|moving| moving.frames.clone()),
+            ProfileSource::Avatar { .. } => None,
+        };
+        ui.set_profile_picture_frames(frames.unwrap_or_else(none));
         ui.set_settings_profile_steam_available(self.steam_account.borrow().connected());
         ui.set_settings_profile_choosing(self.busy.get());
         ui.set_settings_profile_feedback(self.feedback.borrow().clone().into());
+    }
+}
+
+/// Keep an equipped item's original file and decode it, or forget it when
+/// none is equipped; `Keep` when it couldn't be fetched, decoded or kept.
+fn keep_item(item: &ProfileItem, path: &std::path::Path, side: u32) -> Update<Animation> {
+    match item {
+        ProfileItem::Downloaded(bytes) => match profile::decode_animation(bytes, side) {
+            Ok(animation) if profile::save_bytes(path, bytes).is_ok() => Update::Set(animation),
+            _ => Update::Keep,
+        },
+        ProfileItem::NotEquipped => {
+            let _ = profile::remove(path);
+            Update::Clear
+        }
+        ProfileItem::Failed => Update::Keep,
+    }
+}
+
+fn apply(slot: &RefCell<Option<Moving>>, update: Update<Animation>) {
+    match update {
+        Update::Set(animation) => *slot.borrow_mut() = Some(animation.into()),
+        Update::Clear => *slot.borrow_mut() = None,
+        Update::Keep => {}
     }
 }
 

@@ -16,6 +16,8 @@ export { AlbumTileData }
 export { HintData }
 
 import { AppRouteView } from "models/navigation.slint";
+import { ProfileFrameData } from "models/profile.slint";
+export { ProfileFrameData }
 export { AppRouteView }
 
 import { TopNavigation } from "components/top-navigation.slint";
@@ -313,6 +315,9 @@ export component AppWindow inherits Window {
     in property <bool> profile-square: false;
     in property <image> profile-frame;
     in property <bool> profile-has-frame: false;
+    // A Steam animated avatar's and avatar frame's frames (empty when still).
+    in property <[ProfileFrameData]> profile-picture-frames;
+    in property <[ProfileFrameData]> profile-frame-frames;
     in property <bool> settings-profile-steam-square: false;
     in property <bool> settings-profile-choosing: false;
     in property <bool> settings-profile-has-chosen: false;
@@ -730,6 +735,9 @@ export component AppWindow inherits Window {
                     profile-square: root.profile-square;
                     profile-frame: root.profile-frame;
                     profile-has-frame: root.profile-has-frame;
+                    profile-picture-frames: root.profile-picture-frames;
+                    profile-frame-frames: root.profile-frame-frames;
+                    profile-playing: root.current-route == AppRouteView.settings && root.settings-view == 5;
                     profile-feedback: root.settings-profile-feedback;
                     artwork-status: root.settings-artwork-status;
                     refresh-open: root.settings-refresh-open;
@@ -829,6 +837,9 @@ export component AppWindow inherits Window {
                 profile-square: root.profile-square;
                 profile-frame: root.profile-frame;
                 profile-has-frame: root.profile-has-frame;
+                profile-picture-frames: root.profile-picture-frames;
+                profile-frame-frames: root.profile-frame-frames;
+                profile-playing: root.shell-chrome-visible;
                 visible: root.shell-chrome-visible;
                 // Above the page layers (z 1-2): a leaving page shrinks to
                 // 94% and must not cover the chrome unevenly while it fades.

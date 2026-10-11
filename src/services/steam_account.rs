@@ -36,6 +36,22 @@ const BADGE_HOSTS: &[&str] = &[
     "community.akamai.steamstatic.com",
 ];
 
+/// Equipped Steam profile items, as image files.
+#[derive(Debug)]
+pub struct ProfileItems {
+    pub frame: ProfileItem,
+    pub animated_avatar: ProfileItem,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum ProfileItem {
+    NotEquipped,
+    /// The image file's bytes.
+    Downloaded(Vec<u8>),
+    /// Equipped, but it couldn't be downloaded (so keep any earlier copy).
+    Failed,
+}
+
 /// Why the Steam profile picture couldn't be fetched. Never carries a
 /// request URL: the Web API one holds the key.
 #[derive(Debug, thiserror::Error)]
@@ -242,22 +258,33 @@ impl SteamWebApiClient {
             .ok_or(SteamAvatarError::Download)
     }
 
-    /// The avatar frame the account has equipped, if any: the image file's
-    /// bytes (often an animated PNG; its first frame is the picture).
-    pub fn profile_frame(&self) -> Result<Option<Vec<u8>>, SteamAvatarError> {
+    /// The profile items the account has equipped: its avatar frame (often
+    /// an animated PNG) and animated avatar (a GIF), as the image files.
+    pub fn profile_items(&self) -> Result<ProfileItems, SteamAvatarError> {
         let body = self
             .get(PROFILE_ITEMS, &[])
             .map_err(|error| SteamAvatarError::Network(error.without_url().to_string()))?;
-        let Some(path) = frame_path(&body) else {
-            return Ok(None);
+        let paths = item_paths(&body);
+        let download = |path: Option<String>, what: &str| {
+            let Some(path) = path else {
+                return ProfileItem::NotEquipped;
+            };
+            match self.download_public_image(
+                &format!("{ITEM_IMAGES}{path}"),
+                BADGE_HOSTS,
+                8 * 1024 * 1024,
+            ) {
+                Some(bytes) => ProfileItem::Downloaded(bytes),
+                None => {
+                    tracing::warn!(item = what, "a Steam profile item could not be downloaded");
+                    ProfileItem::Failed
+                }
+            }
         };
-        self.download_public_image(
-            &format!("{ITEM_IMAGES}{path}"),
-            BADGE_HOSTS,
-            4 * 1024 * 1024,
-        )
-        .map(Some)
-        .ok_or(SteamAvatarError::Download)
+        Ok(ProfileItems {
+            frame: download(paths.frame, "avatar frame"),
+            animated_avatar: download(paths.animated_avatar, "animated avatar"),
+        })
     }
 
     /// An image from one of Steam's public image hosts, over HTTPS, with no
@@ -343,37 +370,51 @@ fn avatar_url(body: &str) -> Option<String> {
         .filter(|url| !url.is_empty())
 }
 
-/// The equipped avatar frame's image path (`items/<appid>/<file>.png`) in a
-/// GetProfileItemsEquipped answer: the large image, else the small. Only a
-/// plain relative path is accepted, since it is joined onto Steam's address.
-fn frame_path(body: &str) -> Option<String> {
+#[derive(Debug, Default, PartialEq)]
+struct ItemPaths {
+    frame: Option<String>,
+    animated_avatar: Option<String>,
+}
+
+/// The equipped avatar frame's and animated avatar's image paths
+/// (`items/<appid>/<file>`) in a GetProfileItemsEquipped answer: each the
+/// large image, else the small. Only a plain relative path is accepted, since
+/// it is joined onto Steam's address.
+fn item_paths(body: &str) -> ItemPaths {
     #[derive(Deserialize)]
     struct Answer {
         response: Items,
     }
     #[derive(Deserialize)]
     struct Items {
-        avatar_frame: Option<Frame>,
+        avatar_frame: Option<Item>,
+        animated_avatar: Option<Item>,
     }
     #[derive(Deserialize)]
-    struct Frame {
+    struct Item {
         image_large: Option<String>,
         image_small: Option<String>,
     }
-    let frame = serde_json::from_str::<Answer>(body)
-        .ok()?
-        .response
-        .avatar_frame?;
-    [frame.image_large, frame.image_small]
-        .into_iter()
-        .flatten()
-        .find(|path| {
-            path.starts_with("items/")
-                && !path.contains("..")
-                && path
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '_' | '-' | '.'))
-        })
+    let plain = |item: Option<Item>| {
+        let item = item?;
+        [item.image_large, item.image_small]
+            .into_iter()
+            .flatten()
+            .find(|path| {
+                path.starts_with("items/")
+                    && !path.contains("..")
+                    && path
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '_' | '-' | '.'))
+            })
+    };
+    let Ok(answer) = serde_json::from_str::<Answer>(body) else {
+        return ItemPaths::default();
+    };
+    ItemPaths {
+        frame: plain(answer.response.avatar_frame),
+        animated_avatar: plain(answer.response.animated_avatar),
+    }
 }
 
 #[cfg(test)]
@@ -381,14 +422,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_frame_is_a_plain_item_path_or_nothing() {
+    fn item_paths_are_plain_item_paths_or_nothing() {
         let body = r#"{"response":{"avatar_frame":{"communityitemid":"1",
-            "image_small":"items/2861690/small.png","image_large":"items/2861690/large.png"}}}"#;
-        assert_eq!(frame_path(body).as_deref(), Some("items/2861690/large.png"));
+            "image_small":"items/2861690/small.png","image_large":"items/2861690/large.png"},
+            "animated_avatar":{"image_small":"items/2873080/a.gif","image_large":"items/2873080/b.gif"}}}"#;
+        assert_eq!(
+            item_paths(body),
+            ItemPaths {
+                frame: Some("items/2861690/large.png".into()),
+                animated_avatar: Some("items/2873080/b.gif".into()),
+            }
+        );
         let small = r#"{"response":{"avatar_frame":{"image_small":"items/1/s.png"}}}"#;
-        assert_eq!(frame_path(small).as_deref(), Some("items/1/s.png"));
-        assert_eq!(frame_path(r#"{"response":{}}"#), None);
-        assert_eq!(frame_path(r#"{"response":{"avatar_frame":{}}}"#), None);
+        assert_eq!(item_paths(small).frame.as_deref(), Some("items/1/s.png"));
+        assert_eq!(item_paths(small).animated_avatar, None);
+        assert_eq!(item_paths(r#"{"response":{}}"#), ItemPaths::default());
+        assert_eq!(item_paths("not json"), ItemPaths::default());
         for bad in [
             "../x.png",
             "items/../../x",
@@ -397,7 +446,7 @@ mod tests {
             "items/a b.png",
         ] {
             let body = format!(r#"{{"response":{{"avatar_frame":{{"image_large":"{bad}"}}}}}}"#);
-            assert_eq!(frame_path(&body), None, "{bad}");
+            assert_eq!(item_paths(&body).frame, None, "{bad}");
         }
     }
 

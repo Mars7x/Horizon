@@ -149,19 +149,6 @@ impl Drop for AnimationPlayback {
     }
 }
 
-/// Shortest frame delay honoured: shorter ones (often 0 or 10 ms, which
-/// browsers also treat as unset) play at 100 ms, as browsers do.
-const MIN_FRAME_DELAY: Duration = Duration::from_millis(20);
-const UNSET_FRAME_DELAY: Duration = Duration::from_millis(100);
-
-fn frame_delay(delay: Duration) -> Duration {
-    if delay < MIN_FRAME_DELAY {
-        UNSET_FRAME_DELAY
-    } else {
-        delay
-    }
-}
-
 /// Play an animated GIF, scaled to fit `max`, looping until dropped. The
 /// first frame is already on screen (it is the photo), so `frame` receives
 /// every later one, each at the file's own pace; frames are decoded as they
@@ -202,7 +189,7 @@ fn animate(path: &Path, max: (u32, u32), frame: &dyn Fn(RgbaImage), stop: &Atomi
                 return;
             };
             count += 1;
-            let delay = frame_delay(decoded.delay().into());
+            let delay = decoding::frame_delay(decoded.delay().into());
             if !(first_pass && count == 1) {
                 // Far behind (a slow machine, a suspended system): start
                 // timing afresh rather than racing to catch up.
