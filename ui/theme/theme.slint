@@ -218,8 +218,6 @@ export global Motion {
     out property <duration> marquee-end-pause: 2.4s;
     out property <duration> marquee-fade-out: 140ms;
     out property <duration> marquee-fade-in: 180ms;
-    // The soft edges follow the text while it moves.
-    out property <duration> marquee-edge-fade: 120ms;
     // Reading speed: longer overflows take longer, but not proportionally.
     public pure function marquee-travel(distance: length) -> duration {
         distance <= 16px ? 650ms :

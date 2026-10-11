@@ -592,3 +592,7 @@ was removed from inside the tile: the existing selected-title pill above the
 carousel remains its only visible name. There is no small caption, fake cover
 art, background pattern, gradient or extra focus layer. Other game-card
 components, recent ordering and input semantics remain unchanged. See ADR 0137.
+
+## Marquee edge fades follow the travel
+
+Each edge fade's strength now comes from the title's animated position rather than an on/off switch with its own 120 ms transition. The left fade grows over the first 30 px of travel; the right fade shrinks over the last 30 px. The removed transition lagged the moving text, so glyphs crossing the clipping edge were briefly visible at the start and end of travel. Each fade's outer 40% (12 px) is now solid, so a glyph cut by the clip never shows through. `MarqueeText` uses the same rule (22 px or a sixth of its width), and `Motion.marquee-edge-fade` is gone.

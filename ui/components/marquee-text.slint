@@ -27,8 +27,12 @@ export component MarqueeText inherits Rectangle {
     private property <bool> animate-travel: false;
     private property <bool> animate-fade: false;
     private property <float> text-opacity: 1.0;
-    private property <bool> fade-left: root.offset > 3px;
-    private property <bool> fade-right: root.offset < root.distance - 3px;
+    // Each edge fade is exactly as strong as the text hidden behind it,
+    // following the (animated) offset, so no glyph is caught at a clipping
+    // edge while its fade is still appearing.
+    private property <length> fade-width: min(22px, root.width / 6);
+    private property <float> fade-left: max(0.0, min(1.0, root.offset / root.fade-width));
+    private property <float> fade-right: max(0.0, min(1.0, (root.distance - root.offset) / root.fade-width));
     private property <bool> running: root.active && root.overflows && !Motion.reduced-motion;
 
     function restart() {
@@ -72,16 +76,19 @@ export component MarqueeText inherits Rectangle {
         }
     }
     // Stationary edge fades (not segmented glyph masks, which caused seams).
-    if root.overflows && root.active && root.fade-left : Rectangle {
-        x: 0px; width: min(19px, parent.width / 6); height: parent.height;
+    // A solid band at the clip, then a taper.
+    if root.overflows && root.active : Rectangle {
+        x: 0px; width: root.fade-width; height: parent.height;
+        opacity: root.fade-left;
         background: @linear-gradient(90deg,
-            root.edge-color 0%, root.edge-color.with-alpha(0.72) 35%, transparent 100%);
+            root.edge-color 0%, root.edge-color 25%, root.edge-color.with-alpha(0.6) 55%, transparent 100%);
     }
-    if root.overflows && root.fade-right : Rectangle {
+    if root.overflows : Rectangle {
         x: parent.width - self.width;
-        width: min(19px, parent.width / 6); height: parent.height;
+        width: root.fade-width; height: parent.height;
+        opacity: root.fade-right;
         background: @linear-gradient(90deg,
-            transparent 0%, root.edge-color.with-alpha(0.72) 65%, root.edge-color 100%);
+            transparent 0%, root.edge-color.with-alpha(0.6) 45%, root.edge-color 75%, root.edge-color 100%);
     }
     animate offset {
         enabled: root.animate-travel && !Motion.reduced-motion;
