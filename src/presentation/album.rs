@@ -834,31 +834,26 @@ impl AlbumController {
         self.publish(ui);
     }
 
-    /// A click selects a tile; clicking the selected tile opens it.
+    /// A click opens the tile straight away (selecting it, so Back returns
+    /// to it). While selecting, it ticks the tile instead.
     pub fn choose(&self, ui: &AppWindow, index: i32) -> bool {
         let Ok(index) = usize::try_from(index) else {
             return false;
         };
-        let (open, selecting) = {
+        let selecting = {
             let mut s = self.state.borrow_mut();
             if s.viewing || s.dialog.is_some() || index >= s.order.len() {
                 return false;
             }
-            let open = s.selection == index;
             s.selection = index;
             s.wheel_scrolled = false;
             s.notice = None;
-            (open, s.selecting)
+            s.selecting
         };
-        // While selecting, a click ticks the tile instead of opening it.
         if selecting {
             return self.toggle_checked(ui) == AlbumFeedback::Ok;
         }
-        if open {
-            return self.open_viewer(ui);
-        }
-        self.publish(ui);
-        false
+        self.open_viewer(ui)
     }
 
     pub fn scroll_rows(&self, ui: &AppWindow, delta: i32) {
