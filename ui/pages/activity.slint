@@ -19,7 +19,7 @@ export component ActivityPage inherits Rectangle {
     in property <string> week-total: "0 min";
     in property <string> month-total: "0 min";
     in property <[AchievementEntryData]> recent-achievements;
-    in property <string> achievement-status: "Connect Steam achievements in the Achievements utility";
+    in property <string> achievement-status: "Connect Steam in Settings";
     callback choose-game(int);
     background: Theme.background;
 
@@ -106,7 +106,7 @@ export component ActivityPage inherits Rectangle {
         x: Metrics.page-margin; y: root.covers-top + 42px;
         width: root.width - 2 * Metrics.page-margin;
         height: 65px; wrap: word-wrap;
-        text: "No observed playtime yet. Games will appear after a tracked session.";
+        text: "Play a game to see it here";
         color: Theme.secondary-foreground;
         font-size: Typography.body-size;
     }

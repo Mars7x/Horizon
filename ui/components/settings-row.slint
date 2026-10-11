@@ -4,15 +4,22 @@ import { ListRow } from "list-row.slint";
 // An option row (Settings, Profile): the shared ListRow plus a trailing
 // action label or a switch. Selection and persistence remain Rust-owned so
 // mouse and controller agree.
+//
+// `secondary` ("Remove", "Disconnect") adds a small button before the
+// trailing label, for undoing what the row sets. It is the X button's job on
+// a controller (the page shows "X Remove" in its hints); a click calls
+// `secondary-activated`.
 export component SettingsRow inherits ListRow {
     in property <string> trailing: "";
     in property <bool> toggle: false;
     in property <bool> checked: false;
-    trailing-width: root.toggle ? 130px : 230px;
+    in property <string> secondary: "";
+    callback secondary-activated();
+    trailing-width: root.toggle ? 130px : root.secondary != "" ? 360px : 230px;
     accessible-checkable: root.toggle;
     accessible-checked: root.checked;
 
-    Text {
+    trailing-text := Text {
         visible: !root.toggle;
         x: parent.width - 224px; y: 12px;
         width: 196px; height: 30px;
@@ -42,6 +49,34 @@ export component SettingsRow inherits ListRow {
             border-radius: 13px;
             background: #ffffff; // Consistently white thumb in both states.
             animate x { duration: Motion.value-swap-duration; easing: ease-out; }
+        }
+    }
+    if root.secondary != "" && !root.toggle : Rectangle {
+        width: secondary-label.preferred-width + 28px;
+        height: 32px;
+        x: trailing-text.x + trailing-text.width - trailing-text.preferred-width - self.width - 16px;
+        y: trailing-text.y + (trailing-text.height - self.height) / 2;
+        border-radius: self.height / 2;
+        border-width: 1px;
+        border-color: Theme.divider;
+        background: secondary-touch.pressed ? Theme.surface-raised.darker(0.06)
+            : secondary-touch.has-hover ? Theme.surface-raised : Theme.surface;
+        animate background { duration: Motion.hover-duration; easing: ease-in-out; }
+        accessible-role: button;
+        accessible-label: root.secondary;
+        secondary-label := Text {
+            width: parent.width; height: parent.height;
+            text: root.secondary;
+            color: Theme.secondary-foreground;
+            font-size: Typography.caption-size;
+            font-weight: Typography.emphasis-weight;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        secondary-touch := TouchArea {
+            width: parent.width; height: parent.height;
+            mouse-cursor: pointer;
+            clicked => { root.secondary-activated(); }
         }
     }
 }

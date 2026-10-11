@@ -175,14 +175,14 @@ export component LibraryPage inherits Rectangle {
         x: Metrics.page-margin; y: root.height / 2;
         width: parent.width - Metrics.page-margin * 2;
         horizontal-alignment: center;
-        text: "No games found. Install games in Steam or Heroic, then refresh your library.";
+        text: "No games found. Install some in Steam or Heroic";
         color: Theme.secondary-foreground; font-size: Typography.body-size;
     }
     if root.collection-count > 0 && root.total-count == 0 : Text {
         x: Metrics.page-margin; y: root.height / 2;
         width: parent.width - Metrics.page-margin * 2;
         horizontal-alignment: center;
-        text: "No games match this source.";
+        text: "No games here";
         color: Theme.secondary-foreground; font-size: Typography.body-size;
     }
 

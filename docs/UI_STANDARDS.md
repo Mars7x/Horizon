@@ -17,6 +17,19 @@ utilities, footer) and is not changed by these rules. See
 | Route changes | The shared Zoom transition (below). Bottom-bar chrome (hints, bottom-bar context, the bottom scroll shadow) switches with the route instantly, so a leaving page never ghosts into Home's footer. | `focus-visible` / `active` on each page |
 | Scroll edges | Top shadow only once content has scrolled under the header; bottom shadow only while more content is below. Strength is `Scroll.edge` of the hidden pixels, from the animated camera. | `ScrollEdgeShadow`, `Scroll.edge` |
 
+
+## Writing
+
+The UI is meant to be clean, so its words are few and plain.
+
+- **Short.** A subtitle is a few words ("Cover art · Connected", "Your Steam avatar"), not a sentence of how it works. Explanations belong in the docs, not on screen.
+- **No technical terms** where a plain one works: "Steam ID", not "SteamID64"; "Saved", not "Configured · key hidden". Names of services (Steam, SteamGridDB) and of things the user must type ("Web API key") stay.
+- **No confirmations for things that show themselves.** A new picture, a saved name or a removed key is visible; don't also say "Picture updated." Say something only when it went wrong ("Couldn't save", "Can't reach Steam right now").
+- **No ellipses**, and no full stops on one-line labels and messages. A loading state is quiet (empty) or a plain phrase ("Loading achievements").
+- **Removing is not a row.** Undoing what a row sets (a key, an account, a picture) is a small secondary button on that row (`SettingsRow.secondary`) and X on a controller, shown in the hints ("X Remove"). It asks first with `ConfirmDialog` (`components/confirm-dialog.slint`, also the Album's delete): a short question, Cancel focused, then the action. A line under the question only when it adds something real ("It's deleted from Steam too").
+- **No captions explaining a page.** A heading or breadcrumb names it; rows say their state. No "System matches your desktop" or "Saved on this device" lines.
+- **Unknown is not zero**, still: say what's missing ("Your Steam friends list is private"), never show it as none.
+
 ## Controller hints
 
 `page-hints` in `ui/app.slint` is the single mapping from page state to hints,

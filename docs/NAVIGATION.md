@@ -18,20 +18,20 @@ SDL3 / keyboard / pointer intent
          ui/app.slint      -> visible retained route layers
 ```
 
-`src/navigation/mod.rs` defines `AppRoute::Home`, `AppRoute::Library` and `AppRoute::Utility(UtilityPage)`; the **six** utility pages are, in order, **Friends, Album, Activity, Achievements, Settings, Shop**. There is no Web utility (removed; ADR 0174). `TopUtility` and Slint must agree on these positions. The Rust controller alone decides route push/pop, focus restoration and global action handling.
+`src/navigation/mod.rs` defines `AppRoute::Home`, `AppRoute::Library` and `AppRoute::Utility(UtilityPage)`; the **five** utility pages are, in order, **Album, Activity, Achievements, Settings, Shop**. There is no Web utility (removed; ADR 0174) and no Friends utility (removed; Steam friends are on the Profile page, ADR 0178). `TopUtility` and Slint must agree on these positions. The Rust controller alone decides route push/pop, focus restoration and global action handling.
 
 ## Shell vs full-shell surfaces
 
 - **Home** owns the persistent utility row and shell chrome. Its established cover, focus and marquee geometry must not be redesigned when updating another route.
 - **Library** is a full-shell page with local Source/Sort controls and grid focus; it is *not* a second Home-header page.
-- **All six utilities** occupy the full-shell destination, hiding Home's chrome. Achievements and Album have their own views; Friends and Shop are retained as their existing placeholder destinations until explicitly implemented. Album's viewer is page-local state: B closes it before route Back applies, as with Achievements' game view.
+- **All five utilities** occupy the full-shell destination, hiding Home's chrome. Achievements and Album have their own views; Shop is retained as its existing placeholder destination until explicitly implemented. Album's viewer is page-local state: B closes it before route Back applies, as with Achievements' game view.
 - **Menu/Start opens Library**, using the same route as the Home Library tile (`NavigationController::handle_menu`). It is not currently a global modal overlay; older Phase 4 documentation describes a superseded menu design.
 
 The current `AppRoute::uses_shell_chrome()` returns true for **Home only**. Do not copy older docs asserting that Library also displays Home chrome.
 
 ## Profile
 
-`AppRoute::Profile` is the Profile page, opened from Home's avatar ([PROFILE.md](PROFILE.md)). The avatar is a focus position at the left end of the top row: `ShellFocus::profile` within the `TopUtilities` region, recorded in `FocusSnapshot`, so leaving and returning to Home restores it. It is not a `TopUtility`, and the six utilities keep their indices and geometry.
+`AppRoute::Profile` is the Profile page, opened from Home's avatar ([PROFILE.md](PROFILE.md)). The avatar is a focus position at the left end of the top row: `ShellFocus::profile` within the `TopUtilities` region, recorded in `FocusSnapshot`, so leaving and returning to Home restores it. It is not a `TopUtility`; Left from Album, the first utility, reaches it.
 
 ## Back, Home and route visits
 

@@ -51,12 +51,12 @@ impl SettingsService {
     pub fn set_steamgriddb_key(&mut self, key: &str) -> Result<(), String> {
         let key = key.trim();
         if key.is_empty() || key.len() > 512 || key.chars().any(char::is_whitespace) {
-            return Err("Enter a nonempty API key without spaces (maximum 512 characters).".into());
+            return Err("Enter a valid key, with no spaces".into());
         }
         let mut next = self.values.clone();
         next.set_steamgriddb_key(key.to_string());
         self.commit(next)
-            .map_err(|_| "Could not save API key. Check Horizon's config directory.".into())
+            .map_err(|_| "Couldn't save the key".into())
     }
 
     pub fn remove_steamgriddb_key(&mut self) -> Result<(), SettingsStoreError> {

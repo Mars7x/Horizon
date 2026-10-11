@@ -38,7 +38,7 @@ export component AchievementsPage inherits Rectangle {
     in property <float> selected-game-fraction: 0.0;
     in property <string> source-label: "All sources";
     in property <bool> has-source-choice: false;
-    in property <string> status: "Connect an account in Third-Party settings.";
+    in property <string> status: "Connect Steam in Settings";
     in property <bool> loading: false;
     // False while this page is fading out: bottom-bar chrome (the bottom
     // shadows) switches with the route like the hint bar.
@@ -209,7 +209,7 @@ export component AchievementsPage inherits Rectangle {
             }
             if root.games.length == 0 : Text {
                 x: 0px; y: Metrics.spacing-lg; width: parent.width;
-                text: root.loading ? "Retrieving achievements…" : root.status;
+                text: root.status;
                 color: Theme.secondary-foreground; font-size: Typography.body-size;
                 wrap: word-wrap;
             }
@@ -316,7 +316,7 @@ export component AchievementsPage inherits Rectangle {
             }
             if root.entries.length == 0 : Text {
                 x: 0px; y: Metrics.spacing-lg; width: parent.width;
-                text: "No achievement details are available for this game.";
+                text: "No achievements for this game";
                 color: Theme.secondary-foreground; font-size: Typography.body-size;
             }
         }

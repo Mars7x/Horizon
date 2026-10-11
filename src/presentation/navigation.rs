@@ -969,7 +969,6 @@ fn route_view(route: AppRoute) -> AppRouteView {
     match route {
         AppRoute::Home => AppRouteView::Home,
         AppRoute::Library => AppRouteView::Library,
-        AppRoute::Utility(UtilityPage::Friends) => AppRouteView::Friends,
         AppRoute::Utility(UtilityPage::Album) => AppRouteView::Album,
         AppRoute::Utility(UtilityPage::Activity) => AppRouteView::Activity,
         AppRoute::Utility(UtilityPage::Achievements) => AppRouteView::Achievements,
@@ -995,7 +994,6 @@ mod tests {
             AppRouteView::Library
         ));
 
-        assert!(route_view(AppRoute::Utility(UtilityPage::Friends)) == AppRouteView::Friends);
         assert!(route_view(AppRoute::Utility(UtilityPage::Album)) == AppRouteView::Album);
         assert!(route_view(AppRoute::Utility(UtilityPage::Activity)) == AppRouteView::Activity);
         assert!(

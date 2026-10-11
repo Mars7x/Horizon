@@ -114,17 +114,13 @@ impl AchievementsController {
             return;
         };
         if self.steam_games.is_empty() {
-            ui.set_achievements_status("No imported Steam games are available.".into());
+            ui.set_achievements_status("No Steam games".into());
             return;
         }
         self.started.set(true);
         ui.set_achievements_loading(true);
         ui.set_achievements_status(
-            format!(
-                "Reading Steam achievements… 0 / {} games",
-                self.steam_games.len()
-            )
-            .into(),
+            format!("Loading achievements · 0 of {}", self.steam_games.len()).into(),
         );
         let jobs = self.steam_games.clone();
         let sender = self.sender.borrow().clone();
@@ -322,36 +318,36 @@ impl AchievementsController {
         let full = self.steam_games.len();
         if self.finished.get() {
             ui.set_achievements_loading(false);
-            ui.set_achievements_status("No accessible achievements from connected sources.".into());
+            ui.set_achievements_status("No achievements".into());
             ui.set_activity_achievement_status(if recent.is_empty() {
-                "No recently unlocked achievements available".into()
+                "No recent achievements".into()
             } else {
-                "Recently unlocked achievements".into()
+                "Recent achievements".into()
             });
         } else if self.started.get() {
             ui.set_achievements_status(
-                format!("Reading Steam achievements… {scanned} / {full} games").into(),
+                format!("Loading achievements · {scanned} of {full}").into(),
             );
             ui.set_activity_achievement_status(if recent.is_empty() {
-                "Checking achievements…".into()
+                "Loading achievements".into()
             } else {
-                "Recently unlocked achievements".into()
+                "Recent achievements".into()
             });
         } else {
             ui.set_achievements_loading(false);
             ui.set_achievements_status(
                 if self.account.borrow().connected() {
-                    "Open Achievements or Activity to load Steam achievements."
+                    "No achievements loaded yet"
                 } else {
-                    "Configure SteamID64 and Web API key in Settings > Third-Party > Steam Account."
+                    "Connect Steam in Settings"
                 }
                 .into(),
             );
             ui.set_activity_achievement_status(
                 if self.account.borrow().connected() {
-                    "Open Activity to load recent achievements."
+                    "No achievements loaded yet"
                 } else {
-                    "Connect a supported account in Settings > Third-Party."
+                    "Connect Steam in Settings"
                 }
                 .into(),
             );

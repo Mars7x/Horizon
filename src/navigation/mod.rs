@@ -8,14 +8,13 @@ mod edge_step;
 pub mod grid;
 pub use edge_step::step_with_edge_wrap;
 
-/// Full-shell submenu pages opened from the six top utility icons.
+/// Full-shell submenu pages opened from the five top utility icons.
 ///
 /// These are real navigation destinations, not modal overlays. Grouping them
 /// under one type keeps the shell model explicit without pretending every
 /// utility page is an unrelated root-level section.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UtilityPage {
-    Friends,
     Album,
     #[default]
     Activity,
@@ -25,23 +24,22 @@ pub enum UtilityPage {
 }
 
 impl UtilityPage {
-    const COUNT: usize = 6;
+    const COUNT: usize = 5;
 
     const fn index(self) -> usize {
         match self {
-            Self::Friends => 0,
-            Self::Album => 1,
-            Self::Activity => 2,
-            Self::Achievements => 3,
-            Self::Settings => 4,
-            Self::Shop => 5,
+            Self::Album => 0,
+            Self::Activity => 1,
+            Self::Achievements => 2,
+            Self::Settings => 3,
+            Self::Shop => 4,
         }
     }
 }
 
 /// Navigable destinations in Horizon's Phase 4 application shell.
 ///
-/// Only Home uses persistent top/bottom shell chrome. Library and all six
+/// Only Home uses persistent top/bottom shell chrome. Library and all five
 /// utility destinations are durable full-shell routes with Back/Home history.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AppRoute {
@@ -49,8 +47,8 @@ pub enum AppRoute {
     Home,
     Library,
     Utility(UtilityPage),
-    /// The user's profile (name and picture), opened from the avatar at the
-    /// top left of Home.
+    /// The user's profile (name, picture and Steam friends), opened from the
+    /// avatar at the top left of Home.
     Profile,
 }
 
@@ -87,10 +85,9 @@ pub enum ShellFocusRegion {
     TopUtilities,
 }
 
-/// Stable ordering of the six utility icons in the persistent header.
+/// Stable ordering of the five utility icons in the persistent header.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum TopUtility {
-    Friends,
     Album,
     #[default]
     Activity,
@@ -100,34 +97,31 @@ pub enum TopUtility {
 }
 
 impl TopUtility {
-    pub const COUNT: i32 = 6;
+    pub const COUNT: i32 = 5;
 
     pub const fn index(self) -> i32 {
         match self {
-            Self::Friends => 0,
-            Self::Album => 1,
-            Self::Activity => 2,
-            Self::Achievements => 3,
-            Self::Settings => 4,
-            Self::Shop => 5,
+            Self::Album => 0,
+            Self::Activity => 1,
+            Self::Achievements => 2,
+            Self::Settings => 3,
+            Self::Shop => 4,
         }
     }
 
     pub const fn from_index(index: i32) -> Option<Self> {
         match index {
-            0 => Some(Self::Friends),
-            1 => Some(Self::Album),
-            2 => Some(Self::Activity),
-            3 => Some(Self::Achievements),
-            4 => Some(Self::Settings),
-            5 => Some(Self::Shop),
+            0 => Some(Self::Album),
+            1 => Some(Self::Activity),
+            2 => Some(Self::Achievements),
+            3 => Some(Self::Settings),
+            4 => Some(Self::Shop),
             _ => None,
         }
     }
 
     pub const fn page(self) -> UtilityPage {
         match self {
-            Self::Friends => UtilityPage::Friends,
             Self::Album => UtilityPage::Album,
             Self::Activity => UtilityPage::Activity,
             Self::Achievements => UtilityPage::Achievements,
@@ -144,7 +138,6 @@ impl TopUtility {
 impl UtilityPage {
     pub const fn top_utility(self) -> TopUtility {
         match self {
-            Self::Friends => TopUtility::Friends,
             Self::Album => TopUtility::Album,
             Self::Activity => TopUtility::Activity,
             Self::Achievements => TopUtility::Achievements,
@@ -231,7 +224,6 @@ impl Default for RouteFocusMemory {
             snapshots: [
                 FocusSnapshot::for_route(AppRoute::Home),
                 FocusSnapshot::for_route(AppRoute::Library),
-                FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Friends)),
                 FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Album)),
                 FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Activity)),
                 FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Achievements)),
@@ -374,7 +366,7 @@ impl ShellFocus {
         self.utility_moved_since_entry = false;
         // From the avatar, Up returns to the first utility.
         self.content_return_utility = Some(if self.profile {
-            TopUtility::Friends
+            TopUtility::Album
         } else {
             self.utility
         });
@@ -426,7 +418,7 @@ impl ShellFocus {
                 return false;
             }
             self.profile = false;
-            self.utility = TopUtility::Friends;
+            self.utility = TopUtility::Album;
             self.utility_moved_since_entry = true;
             return true;
         }
@@ -595,7 +587,6 @@ mod tests {
         );
 
         for page in [
-            UtilityPage::Friends,
             UtilityPage::Album,
             UtilityPage::Activity,
             UtilityPage::Achievements,
@@ -641,19 +632,19 @@ mod tests {
     #[test]
     fn the_avatar_sits_left_of_the_first_utility() {
         let mut focus = ShellFocus::default();
-        assert!(focus.enter_utilities_from_content(TopUtility::Album, 3));
+        assert!(focus.enter_utilities_from_content(TopUtility::Activity, 3));
         assert!(focus.move_utility(-1, false));
-        assert_eq!(focus.utility(), TopUtility::Friends);
+        assert_eq!(focus.utility(), TopUtility::Album);
         assert!(!focus.profile());
-        // Left from Friends reaches the avatar, fresh or held, and stops there.
+        // Left from Album reaches the avatar, fresh or held, and stops there.
         assert!(focus.move_utility(-1, true));
         assert!(focus.profile());
         assert!(!focus.move_utility(-1, false));
         assert!(focus.profile());
-        // Right goes back to Friends.
+        // Right goes back to Album.
         assert!(focus.move_utility(1, false));
         assert!(!focus.profile());
-        assert_eq!(focus.utility(), TopUtility::Friends);
+        assert_eq!(focus.utility(), TopUtility::Album);
         // Remembered with the route, forgotten on leaving the row.
         focus.move_utility(-1, false);
         let snapshot = focus.snapshot();
@@ -665,7 +656,7 @@ mod tests {
         assert!(!focus.profile());
         assert_eq!(
             focus.anchored_utility_for_content(0),
-            Some(TopUtility::Friends)
+            Some(TopUtility::Album)
         );
         // Other routes never keep header focus.
         assert!(!snapshot.normalized_for_route(AppRoute::Profile).profile());
@@ -745,7 +736,6 @@ mod tests {
         let mut navigator = Navigator::default();
         for route in [
             AppRoute::Library,
-            AppRoute::Utility(UtilityPage::Friends),
             AppRoute::Utility(UtilityPage::Album),
             AppRoute::Utility(UtilityPage::Activity),
             AppRoute::Utility(UtilityPage::Achievements),
@@ -757,7 +747,7 @@ mod tests {
         }
 
         assert_eq!(navigator.current(), AppRoute::Home);
-        assert_eq!(navigator.back_stack_depth(), 8);
+        assert_eq!(navigator.back_stack_depth(), 7);
     }
 
     #[test]
@@ -780,26 +770,25 @@ mod tests {
         focus.enter_utilities();
 
         assert!(focus.move_utility(-2, true));
-        assert_eq!(focus.utility(), TopUtility::Friends);
+        assert_eq!(focus.utility(), TopUtility::Album);
         // The row's left end is the avatar, not a wrap to Shop.
         assert!(focus.move_utility(-1, true));
         assert!(focus.profile());
         assert!(!focus.move_utility(-1, false));
         assert!(focus.move_utility(1, false));
-        // The right end clamps when held and wraps to Friends when fresh.
+        // The right end clamps when held and wraps to Album when fresh.
         for _ in 0..5 {
             focus.move_utility(1, true);
         }
         assert_eq!(focus.utility(), TopUtility::Shop);
         assert!(!focus.move_utility(1, true));
         assert!(focus.move_utility(1, false));
-        assert_eq!(focus.utility(), TopUtility::Friends);
+        assert_eq!(focus.utility(), TopUtility::Album);
     }
 
     #[test]
     fn every_top_utility_opens_a_durable_submenu_route() {
         for (utility, page) in [
-            (TopUtility::Friends, UtilityPage::Friends),
             (TopUtility::Album, UtilityPage::Album),
             (TopUtility::Activity, UtilityPage::Activity),
             (TopUtility::Achievements, UtilityPage::Achievements),
@@ -871,7 +860,6 @@ mod tests {
         );
 
         for (page, utility) in [
-            (UtilityPage::Friends, TopUtility::Friends),
             (UtilityPage::Album, TopUtility::Album),
             (UtilityPage::Activity, TopUtility::Activity),
             (UtilityPage::Achievements, TopUtility::Achievements),
@@ -924,12 +912,11 @@ mod tests {
         let step = 64.0;
 
         for (x, utility) in [
-            (480.0, TopUtility::Friends),
-            (544.0, TopUtility::Album),
-            (608.0, TopUtility::Activity),
-            (672.0, TopUtility::Achievements),
-            (736.0, TopUtility::Settings),
-            (800.0, TopUtility::Shop),
+            (512.0, TopUtility::Album),
+            (576.0, TopUtility::Activity),
+            (640.0, TopUtility::Achievements),
+            (704.0, TopUtility::Settings),
+            (768.0, TopUtility::Shop),
         ] {
             assert_eq!(nearest_utility_for_x(x, viewport_width, step), utility);
         }
@@ -938,7 +925,7 @@ mod tests {
     #[test]
     fn utility_and_game_center_helpers_support_reverse_spatial_transfer() {
         let activity_x = utility_center_x(TopUtility::Activity, 1280.0, 64.0);
-        assert_eq!(activity_x, 608.0);
+        assert_eq!(activity_x, 576.0);
 
         assert_eq!(nearest_game_for_x(activity_x, 439.0, 250.0, 8), 1);
         assert_eq!(nearest_game_for_x(768.0, 439.0, 250.0, 8), 1);
@@ -964,7 +951,6 @@ mod tests {
     fn rapid_route_churn_unwinds_exactly_in_reverse_order() {
         let routes = [
             AppRoute::Library,
-            AppRoute::Utility(UtilityPage::Friends),
             AppRoute::Utility(UtilityPage::Album),
             AppRoute::Utility(UtilityPage::Activity),
             AppRoute::Utility(UtilityPage::Achievements),

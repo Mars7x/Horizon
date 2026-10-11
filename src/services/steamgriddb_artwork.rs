@@ -127,14 +127,10 @@ impl Drop for RefreshProgress {
 
 fn error_status(error: &SteamGridDbError) -> &'static str {
     match error {
-        SteamGridDbError::Unauthorized => "SteamGridDB rejected the API key.",
-        SteamGridDbError::RateLimited => {
-            "SteamGridDB rate limit reached. Existing artwork retained."
-        }
-        SteamGridDbError::Network(_) => {
-            "SteamGridDB unavailable or offline. Cached artwork retained."
-        }
-        _ => "SteamGridDB could not load some artwork. Existing artwork retained.",
+        SteamGridDbError::Unauthorized => "SteamGridDB didn't accept the key",
+        SteamGridDbError::RateLimited => "SteamGridDB is busy. Try again later",
+        SteamGridDbError::Network(_) => "Can't reach SteamGridDB",
+        _ => "Some covers couldn't load",
     }
 }
 

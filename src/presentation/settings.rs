@@ -55,6 +55,10 @@ struct PageState {
     editor_kind: EditorKind,
     editor_target: i32,
     feedback: String,
+    /// The row whose Remove / Disconnect awaits confirmation, and the
+    /// dialog's focus (0 Cancel, 1 the action).
+    confirm: Option<i32>,
+    confirm_focus: i32,
 }
 
 pub struct SettingsController {
@@ -146,7 +150,7 @@ impl SettingsController {
         self.page.borrow_mut().feedback = if result.is_ok() {
             String::new()
         } else {
-            "Could not save UI sound preference.".into()
+            "Couldn't save".into()
         };
         self.publish(ui);
     }
@@ -201,6 +205,27 @@ impl SettingsController {
             }
             return true;
         }
+        if self.page.borrow().confirm.is_some() {
+            match action {
+                UiAction::Left | UiAction::Up | UiAction::Right | UiAction::Down => {
+                    self.page.borrow_mut().confirm_focus =
+                        i32::from(matches!(action, UiAction::Right | UiAction::Down));
+                    self.publish(ui);
+                }
+                UiAction::Accept if !event.repeated => {
+                    let focus = self.page.borrow().confirm_focus;
+                    self.choose_confirm(ui, focus);
+                }
+                UiAction::Back => self.choose_confirm(ui, 0),
+                UiAction::Home => {
+                    self.page.borrow_mut().confirm = None;
+                    self.publish(ui);
+                    return false;
+                }
+                _ => {}
+            }
+            return true;
+        }
         if self.page.borrow().editing_key {
             match action {
                 UiAction::Back => self.cancel_key(ui),
@@ -240,12 +265,7 @@ impl SettingsController {
             UiAction::Back => return self.back_inside(ui),
             UiAction::Up | UiAction::Down => {
                 let mut page = self.page.borrow_mut();
-                // An unavailable remove action is never included in focus wrap.
-                let count = selection_count(
-                    page.view,
-                    self.service.borrow().has_steamgriddb_key(),
-                    self.steam_account.borrow().saved(),
-                );
+                let count = selection_count(page.view);
                 let delta = if action == UiAction::Up { -1 } else { 1 };
                 page.selected = if page.view == SettingsView::Appearance {
                     appearance_step_vertical(
@@ -287,6 +307,11 @@ impl SettingsController {
             UiAction::Accept if !event.repeated => {
                 let selected = self.page.borrow().selected;
                 self.activate(ui, selected);
+            }
+            UiAction::Secondary if !event.repeated => {
+                let selected = self.page.borrow().selected;
+                self.ask_remove(ui, selected);
+                return true;
             }
             UiAction::Home | UiAction::Menu => return false,
             _ => {}
@@ -340,10 +365,23 @@ impl SettingsController {
         });
         let weak = ui.as_weak();
         let controller = Rc::clone(self);
+        ui.on_settings_remove(move |row| {
+            if let Some(ui) = weak.upgrade() {
+                controller.ask_remove(&ui, row);
+            }
+        });
+        let weak = ui.as_weak();
+        let controller = Rc::clone(self);
+        ui.on_settings_confirm(move |choice| {
+            if let Some(ui) = weak.upgrade() {
+                controller.choose_confirm(&ui, choice);
+            }
+        });
+        let weak = ui.as_weak();
+        let controller = Rc::clone(self);
         ui.on_settings_paste_failed(move || {
             if let Some(ui) = weak.upgrade() {
-                controller.page.borrow_mut().feedback =
-                    "Unable to read clipboard text. Check the copied key and retry.".into();
+                controller.page.borrow_mut().feedback = "Couldn't paste".into();
                 controller.publish(&ui);
             }
         });
@@ -402,7 +440,7 @@ impl SettingsController {
                 self.page.borrow_mut().feedback = if result.is_ok() {
                     String::new()
                 } else {
-                    "Could not save appearance settings.".into()
+                    "Couldn't save".into()
                 };
                 if result.is_ok() {
                     self.cue(UiSoundCue::Ok);
@@ -428,38 +466,21 @@ impl SettingsController {
             SettingsView::SteamGridDb | SettingsView::SteamAccount => {}
         }
         if view == SettingsView::SteamAccount {
-            if !(0..=2).contains(&selected) {
+            if !(0..=1).contains(&selected) {
                 return;
             }
             self.page.borrow_mut().selected = selected;
             match selected {
                 0 => self.open_editor(ui, EditorKind::SteamId),
-                1 => self.open_editor(ui, EditorKind::SteamWebKey),
-                2 => {
-                    let has_saved_account = self.steam_account.borrow().saved();
-                    if has_saved_account {
-                        let result = self.steam_account.borrow_mut().remove();
-                        let ok = result.is_ok();
-                        self.page.borrow_mut().feedback = if ok {
-                            "Saved Steam account removed locally.".into()
-                        } else {
-                            "Unable to remove Steam account settings.".into()
-                        };
-                        if ok {
-                            self.notify_steam_account_changed();
-                            self.cue(UiSoundCue::Ok);
-                        }
-                    }
-                }
-                _ => {}
+                _ => self.open_editor(ui, EditorKind::SteamWebKey),
             }
             self.publish(ui);
             return;
         }
-        if !(0..=3).contains(&selected) {
+        if !(0..=2).contains(&selected) {
             return;
         }
-        if (selected == 2 || selected == 3) && !self.service.borrow().has_steamgriddb_key() {
+        if selected == 2 && !self.service.borrow().has_steamgriddb_key() {
             return;
         }
         self.page.borrow_mut().selected = selected;
@@ -486,21 +507,83 @@ impl SettingsController {
                     self.cue(UiSoundCue::Ok);
                 }
             }
-            3 if self.service.borrow().has_steamgriddb_key() => {
+            _ => {}
+        }
+        self.publish(ui);
+    }
+
+    /// What X (or a row's Remove button) removes on the row, if anything:
+    /// the SteamGridDB key on its row, the whole Steam account on the Steam
+    /// ID row. Its label, for the hints.
+    fn secondary_label(&self, view: SettingsView, row: i32) -> &'static str {
+        match (view, row) {
+            (SettingsView::SteamGridDb, 0) if self.service.borrow().has_steamgriddb_key() => {
+                "Remove"
+            }
+            (SettingsView::SteamAccount, 0) if self.steam_account.borrow().saved() => "Disconnect",
+            _ => "",
+        }
+    }
+
+    /// Ask before removing what a row sets (X, or the row's Remove button).
+    fn ask_remove(&self, ui: &AppWindow, row: i32) {
+        let view = self.page.borrow().view;
+        let mut page = self.page.borrow_mut();
+        if page.editing_key || page.confirm.is_some() || self.secondary_label(view, row).is_empty()
+        {
+            return;
+        }
+        page.selected = row;
+        page.confirm = Some(row);
+        page.confirm_focus = 0;
+        drop(page);
+        self.cue(UiSoundCue::Ok);
+        self.publish(ui);
+    }
+
+    /// The confirmation's answer: 0 Cancel, 1 remove.
+    fn choose_confirm(&self, ui: &AppWindow, choice: i32) {
+        let Some(row) = self.page.borrow_mut().confirm.take() else {
+            return;
+        };
+        if choice == 1 {
+            self.remove(ui, row);
+        } else {
+            self.cue(UiSoundCue::Back);
+            self.publish(ui);
+        }
+    }
+
+    /// Remove what a row sets, once confirmed.
+    fn remove(&self, ui: &AppWindow, row: i32) {
+        let view = self.page.borrow().view;
+        if self.secondary_label(view, row).is_empty() {
+            return;
+        }
+        let removed = match view {
+            SettingsView::SteamGridDb => {
                 let result = self.service.borrow_mut().remove_steamgriddb_key();
                 if result.is_ok() {
                     self.notify_artwork_changed();
-                    self.cue(UiSoundCue::Ok);
-                    // Move focus to a usable control after removing the key.
-                    self.page.borrow_mut().selected = 0;
                 }
-                self.page.borrow_mut().feedback = if result.is_ok() {
-                    "Saved API key removed.".into()
-                } else {
-                    "Could not remove the API key.".into()
-                };
+                result.is_ok()
             }
-            _ => {}
+            SettingsView::SteamAccount => {
+                let ok = self.steam_account.borrow_mut().remove().is_ok();
+                if ok {
+                    self.notify_steam_account_changed();
+                }
+                ok
+            }
+            _ => return,
+        };
+        self.page.borrow_mut().feedback = if removed {
+            String::new()
+        } else {
+            "Couldn't remove".into()
+        };
+        if removed {
+            self.cue(UiSoundCue::Ok);
         }
         self.publish(ui);
     }
@@ -541,8 +624,7 @@ impl SettingsController {
         }
         // Keep the entire clipboard operation off the Slint event loop.
         let Some(clipboard) = self.ensure_wayland_clipboard(ui) else {
-            self.page.borrow_mut().feedback =
-                "Wayland clipboard is unavailable for this window.".into();
+            self.page.borrow_mut().feedback = "Couldn't paste".into();
             self.publish(ui);
             return;
         };
@@ -627,9 +709,9 @@ impl SettingsController {
             self.cue(UiSoundCue::Ok);
         }
         self.page.borrow_mut().feedback = if result.is_ok() {
-            "Artwork source preference saved.".into()
+            String::new()
         } else {
-            "Could not save the artwork preference.".into()
+            "Couldn't save".into()
         };
         self.publish(ui);
     }
@@ -662,15 +744,10 @@ impl SettingsController {
                 self.paste_generation.fetch_add(1, Ordering::Relaxed);
                 self.page.borrow_mut().editing_key = false;
                 self.page.borrow_mut().feedback = match kind {
-                    EditorKind::SteamGridDb => "SteamGridDB API key saved locally.",
-                    EditorKind::SteamId => {
-                        if self.steam_account.borrow().connected() {
-                            "SteamID64 updated."
-                        } else {
-                            "SteamID64 entered. Add the Web API key to connect."
-                        }
+                    EditorKind::SteamId if !self.steam_account.borrow().connected() => {
+                        "Now add your Web API key"
                     }
-                    EditorKind::SteamWebKey => "Steam Web API key saved locally.",
+                    _ => "",
                 }
                 .into();
                 ui.set_settings_editing_key(false);
@@ -744,7 +821,7 @@ impl SettingsController {
         ui.set_settings_selection(page.selected);
         ui.set_settings_key_present(settings.has_steamgriddb_key());
         let account = self.steam_account.borrow();
-        ui.set_settings_steam_identity(account.identity().unwrap_or("Not configured").into());
+        ui.set_settings_steam_identity(account.identity().unwrap_or("Not set").into());
         ui.set_settings_steam_connected(account.connected());
         ui.set_settings_steam_saved(account.saved());
         ui.set_settings_editor_kind(match page.editor_kind {
@@ -756,6 +833,21 @@ impl SettingsController {
         ui.set_settings_editing_key(page.editing_key);
         ui.set_settings_editor_target(page.editor_target);
         ui.set_settings_feedback(page.feedback.clone().into());
+        ui.set_settings_confirm_open(page.confirm.is_some());
+        ui.set_settings_confirm_focus(page.confirm_focus);
+        let (title, action) = match page.view {
+            SettingsView::SteamAccount => ("Disconnect Steam?", "Disconnect"),
+            _ => ("Remove your SteamGridDB key?", "Remove"),
+        };
+        ui.set_settings_confirm_title(title.into());
+        ui.set_settings_confirm_action(action.into());
+        let secondary =
+            if page.editing_key || page.confirm.is_some() || ui.get_settings_refresh_open() {
+                ""
+            } else {
+                self.secondary_label(page.view, page.selected)
+            };
+        ui.set_settings_secondary_label(secondary.into());
     }
 }
 
@@ -772,19 +864,13 @@ fn settings_parent(view: SettingsView) -> Option<(SettingsView, i32)> {
 }
 
 /// Keep controller focus within visible/enabled Third-Party actions.
-fn selection_count(view: SettingsView, _has_key: bool, steam_saved: bool) -> i32 {
+fn selection_count(view: SettingsView) -> i32 {
     match view {
         SettingsView::Root => 2,
         SettingsView::Appearance => 14,
         SettingsView::ThirdParty => 2,
-        SettingsView::SteamGridDb => 4,
-        SettingsView::SteamAccount => {
-            if steam_saved {
-                3
-            } else {
-                2
-            }
-        }
+        SettingsView::SteamGridDb => 3,
+        SettingsView::SteamAccount => 2,
     }
 }
 
@@ -800,7 +886,7 @@ fn next_id_editor_target(target: i32, direction: UiAction, can_save: bool) -> i3
     }
 }
 
-/// Without a key, Refresh and Remove are unavailable and skipped by focus.
+/// Without a key, Refresh is unavailable and skipped by focus.
 fn steamgriddb_step_without_key(selected: i32, delta: i32, repeated: bool) -> i32 {
     let selectable = [0, 1];
     let index = selectable
@@ -936,30 +1022,15 @@ mod editor_navigation_tests {
 
     #[test]
     fn refresh_row_is_included_only_with_saved_key() {
-        assert_eq!(super::selection_count(SettingsView::Root, false, false), 2);
-        assert_eq!(
-            super::selection_count(SettingsView::Appearance, false, false),
-            14
-        );
-        assert_eq!(
-            super::selection_count(SettingsView::ThirdParty, false, false),
-            2
-        );
-        assert_eq!(
-            super::selection_count(SettingsView::SteamGridDb, true, false),
-            4
-        );
+        assert_eq!(super::selection_count(SettingsView::Root), 2);
+        assert_eq!(super::selection_count(SettingsView::Appearance), 14);
+        assert_eq!(super::selection_count(SettingsView::ThirdParty), 2);
+        // Removing a key is X on its row, not a row of its own.
+        assert_eq!(super::selection_count(SettingsView::SteamGridDb), 3);
         // Without a key, focus moves only between API key and the preference.
         assert_eq!(super::steamgriddb_step_without_key(1, 1, false), 0);
         assert_eq!(super::steamgriddb_step_without_key(0, 1, false), 1);
-        assert_eq!(
-            super::selection_count(SettingsView::SteamAccount, true, true),
-            3
-        );
-        assert_eq!(
-            super::selection_count(SettingsView::SteamAccount, true, false),
-            2
-        );
+        assert_eq!(super::selection_count(SettingsView::SteamAccount), 2);
     }
 
     #[test]

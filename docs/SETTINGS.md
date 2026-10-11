@@ -1,6 +1,6 @@
 # Settings — Phase 9.5.44.57
 
-> **Current-state guide:** Settings lists **Appearance** and **Third-Party**. The profile (name and picture) is not a Settings section: it has its own page, opened from Home's avatar (see [PROFILE.md](PROFILE.md)). **Settings → Third-Party** lists one row per service, and each opens its own page: **SteamGridDB** (API key, prefer artwork, refresh, remove key) and **Steam Account** (SteamID64, Web API key, disconnect). These are independent services laid out the same way. Back from either returns to its row in Third-Party. Both use Settings navigation; the Achievements page does not collect credentials. See [ACHIEVEMENTS.md](ACHIEVEMENTS.md) and [PROJECT_STATE.md](PROJECT_STATE.md). Later phase-specific notes below supersede earlier Settings behavior.
+> **Current-state guide:** Settings lists **Appearance** and **Third-Party**. The profile (name and picture) is not a Settings section: it has its own page, opened from Home's avatar (see [PROFILE.md](PROFILE.md)). **Settings → Third-Party** lists one row per service, and each opens its own page: **SteamGridDB** (API key, prefer artwork, refresh) and **Steam Account** (Steam ID, Web API key). Removing is not a row of its own: the API key row and the Steam ID row carry a small **Remove** / **Disconnect** button before their trailing label, and **X** does the same while the row is focused (hinted as "X Remove" / "X Disconnect", like the Album's X Delete). Either asks first ("Remove your SteamGridDB key?", "Disconnect Steam?") in the shared `ConfirmDialog`, Cancel focused. Disconnect removes the Steam ID and key together. These are independent services laid out the same way. Back from either returns to its row in Third-Party. Both use Settings navigation; the Achievements page does not collect credentials. See [ACHIEVEMENTS.md](ACHIEVEMENTS.md) and [PROJECT_STATE.md](PROJECT_STATE.md). Later phase-specific notes below supersede earlier Settings behavior.
 
 
 Horizon supports SteamGridDB square artwork for Steam and Heroic.
@@ -192,11 +192,12 @@ secret never appears in Slint. The SteamGridDB artwork integration remains
 separate and uses its original settings file.
 
 A new Steam Account row remains reachable even when SteamGridDB is unconfigured.
-Disabled SteamGridDB refresh/remove rows and the unavailable Steam disconnect
-row are excluded from controller focus traversal. Leaving the nested account
+The disabled SteamGridDB refresh row is excluded from controller focus
+traversal; removing a key or disconnecting is X (or the row's button) on the
+key or Steam ID row. Leaving the nested account
 settings screen returns to Third-Party settings rather than to the root page.
-The Steam account service is shared with Achievements and reserved for a future
-Friends integration; Friends' UI and behavior are unchanged.
+The Steam account service is shared with Achievements and with the Profile
+page's picture and Steam friends list.
 
 Credentials are stored with mode 0600 in an application-private XDG config
 file, not in SQLite, the source tree, or the achievement UI. This is **not

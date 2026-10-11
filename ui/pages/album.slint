@@ -4,8 +4,7 @@ import { PageHeader, HeaderValue, ScrollEdgeShadow } from "../components/page-he
 import { MarqueeText } from "../components/marquee-text.slint";
 import { FocusFrame } from "../components/focus-frame.slint";
 import { TransitionDriver } from "../components/transition.slint";
-import { ActionButton } from "../components/action-button.slint";
-import { ModalDialog } from "../components/modal-dialog.slint";
+import { ConfirmDialog } from "../components/confirm-dialog.slint";
 import { Stopwatch } from "../components/stopwatch.slint";
 import { GridRefresh } from "../components/grid-refresh.slint";
 import { Scroll, ScrollCamera } from "../components/scroll.slint";
@@ -331,7 +330,7 @@ export component AlbumPage inherits Rectangle {
         width: root.width - root.margin * 2;
         horizontal-alignment: center;
         wrap: word-wrap;
-        text: root.collection-count == 0 ? root.status : "No captures match this filter.";
+        text: root.collection-count == 0 ? root.status : "Nothing here";
         color: Theme.secondary-foreground;
         font-size: Typography.body-size;
     }
@@ -636,44 +635,13 @@ export component AlbumPage inherits Rectangle {
 
     // Delete confirmation, over the grid or the fullscreen viewer. Modal:
     // the backdrop takes every click. Cancel is focused first.
-    ModalDialog {
+    ConfirmDialog {
         area-width: root.width; area-height: root.height;
         open: root.dialog-open;
-        card-width: 456px;
-        card-height: 196px;
-        Text {
-            x: 29px; y: 27px;
-            width: parent.width - 58px; height: 34px;
-            text: root.dialog-title;
-            color: Theme.foreground;
-            font-size: Typography.heading-size;
-            font-weight: Typography.heading-weight;
-            vertical-alignment: center;
-        }
-        Text {
-            x: 29px; y: 66px;
-            width: parent.width - 58px; height: 44px;
-            text: root.dialog-text;
-            color: Theme.secondary-foreground;
-            font-size: Typography.body-size;
-            wrap: word-wrap;
-        }
-        ActionButton {
-            x: parent.width - 29px - 2 * 107px - 12px; y: 132px;
-            width: 107px; height: 40px;
-            label: "Cancel";
-            focused: root.dialog-open && root.dialog-focus == 0;
-            enabled: root.dialog-open;
-            activated => { root.dialog-choose(0); }
-        }
-        ActionButton {
-            x: parent.width - 29px - 107px; y: 132px;
-            width: 107px; height: 40px;
-            label: "Delete";
-            primary: true;
-            focused: root.dialog-open && root.dialog-focus == 1;
-            enabled: root.dialog-open;
-            activated => { root.dialog-choose(1); }
-        }
+        title: root.dialog-title;
+        text: root.dialog-text;
+        action: "Delete";
+        selected: root.dialog-focus;
+        choose(choice) => { root.dialog-choose(choice); }
     }
 }

@@ -1,20 +1,26 @@
 import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { SelectionFocusSurface } from "../components/selection-focus-surface.slint";
-import { PageHeader } from "../components/page-header.slint";
+import { PageHeader, ScrollEdgeShadow } from "../components/page-header.slint";
 import { MarqueeText } from "../components/marquee-text.slint";
 import { ActionButton } from "../components/action-button.slint";
 import { ModalDialog } from "../components/modal-dialog.slint";
+import { ConfirmDialog } from "../components/confirm-dialog.slint";
 import { SettingsRow } from "../components/settings-row.slint";
 import { ProfileAvatar } from "../components/profile-avatar.slint";
-import { ProfileFrameData } from "../models/profile.slint";
+import { ProfileFrameData, FriendData } from "../models/profile.slint";
+import { Surface } from "../components/list-row.slint";
+import { Scroll, ScrollCamera } from "../components/scroll.slint";
+import { FriendsIcon } from "../components/utility-icons.slint";
 
 // The user's profile, opened from the avatar at the top left of Home. The
-// page itself is the profile, not its options: the avatar large, the name
-// beneath it, and two actions. "Change picture" opens a dialog with the
-// picture's options beside a live preview; "Edit name" opens the name editor.
-// Selection, the open dialog, persistence and the editor's focus are
-// Rust-owned (presentation/profile.rs), so mouse, keyboard and controller
-// agree.
+// page itself is the profile, not its options: a card with the avatar large
+// and the name beneath it, beside the Steam friends list. The avatar is the
+// page's one focus: pressing it opens the Edit profile dialog (name and
+// picture, beside a live preview). The friends list is read-only: Up/Down
+// and the wheel scroll it. Selection, the open dialog, persistence,
+// the list's position and the editor's focus are Rust-owned
+// (presentation/profile.rs, presentation/friends.rs), so mouse, keyboard and
+// controller agree.
 export component ProfilePage inherits Rectangle {
     // The avatar, as Home shows it.
     in property <image> picture;
@@ -22,14 +28,12 @@ export component ProfilePage inherits Rectangle {
     in property <string> monogram: "H";
     in property <[ProfileFrameData]> picture-frames;
     in property <bool> playing: false;
-    // The page: 0 Change picture, 1 Edit name.
     in property <string> name: "";
-    in property <string> picture-caption: "";
-    in property <int> selection: 0;
     in property <string> feedback: "";
-    // The picture dialog: 0 Choose, 1 Steam, 2 Remove, 3 Done.
-    in property <bool> picture-open: false;
-    in property <int> picture-selection: 0;
+    // The Edit profile dialog: 0 Name, 1 Choose (X removes the chosen
+    // picture), 2 Steam, 3 Done.
+    in property <bool> edit-open: false;
+    in property <int> edit-selection: 0;
     in property <bool> has-chosen: false;
     in property <bool> uses-steam: false;
     in property <bool> steam-available: false;
@@ -38,55 +42,90 @@ export component ProfilePage inherits Rectangle {
     in property <bool> editing-name: false;
     in property <int> editor-target: 0;
     in-out property <string> name-draft: "";
-    callback activate(int);
-    callback activate-picture(int);
+    // Steam friends (presentation/friends.rs). State: 0 no Steam account,
+    // 1 loading, 2 listed, 3 private, 4 unreachable. `friends-row` is the
+    // row at the top of the view (Rust-owned; Up/Down move it).
+    in property <[FriendData]> friends;
+    in property <int> friends-state: 0;
+    in property <int> friends-count: 0;
+    in property <string> friends-summary: "";
+    in property <int> friends-row: 0;
+    in property <float> icon-render-scale: 1.0;
+    callback edit();
+    callback activate-option(int);
+    callback remove-picture();
+    // Removing the chosen picture asks first: 0 Cancel, 1 Remove.
+    in property <bool> confirm-open: false;
+    in property <int> confirm-focus: 0;
+    callback confirm(int);
+    callback scroll-friends(int);
     callback save-name(string);
     callback cancel-name();
 
     background: Theme.background;
-    private property <bool> dialog-open: root.picture-open || root.editing-name;
-    private property <length> avatar-size: 184px;
-    private property <length> button-width: 200px;
-    private property <length> button-height: 50px;
-    // The picture dialog's rows, right of its preview.
+    private property <bool> dialog-open: root.edit-open || root.editing-name || root.confirm-open;
+    // The Edit profile dialog's rows, right of its preview.
     private property <length> rows-x: 232px;
     private property <length> row-step: Metrics.list-row-height + Metrics.list-row-gap;
-    // The hero: avatar, name, where the picture comes from, the actions and
-    // a line of feedback, centred in the page below the header.
-    private property <length> hero-height: root.avatar-size + 28px + 44px + 4px + 22px
-        + 36px + root.button-height + 18px + 22px;
+
+    // Two columns under the header: the profile card, and the friends.
+    private property <length> inset: Metrics.page-margin;
+    private property <length> top: Metrics.page-header-height + Metrics.spacing-sm;
+    private property <length> bottom: root.height - Metrics.page-bottom-bar-height;
+    private property <length> card-width: 360px;
+    private property <length> friends-x: root.inset + root.card-width + Metrics.spacing-lg;
+    private property <length> friends-width: max(1px, root.width - root.friends-x - root.inset);
+    // The card's contents, centred in it.
+    private property <length> avatar-size: 168px;
+    private property <bool> avatar-focused: root.playing && !root.dialog-open;
+    private property <length> card-block-height: root.avatar-size + 28px + 40px + 10px + 20px;
+    // Presence colours: Steam's own meanings, readable on light and dark.
+    private property <color> playing-color: Theme.is-dark ? #6cc36f : #2f8f3a;
+    private property <color> away-color: Theme.is-dark ? #e0a63a : #b07510;
 
     PageHeader { width: parent.width; title: "Profile"; }
 
-    hero := Rectangle {
-        x: Metrics.page-margin;
-        width: root.width - Metrics.page-margin * 2;
-        height: root.hero-height;
-        y: Metrics.page-header-height
-            + max(0px, (root.height - Metrics.page-header-height - self.height) / 2 - 24px);
-        background: transparent;
+    // The profile: the avatar (the page's focus) and the name.
+    card := Surface {
+        x: root.inset; y: root.top;
+        width: root.card-width;
+        height: max(1px, root.bottom - root.top - Metrics.spacing-md);
 
         avatar := ProfileAvatar {
-            x: (parent.width - self.width) / 2; y: 0px;
+            x: (parent.width - self.width) / 2;
+            y: max(24px, (card.height - root.card-block-height) / 2)
+                + (root.avatar-focused && !Motion.reduced-motion ? -2px : 0px);
+            animate y { duration: Motion.focus-duration; easing: ease-in-out; }
             size: root.avatar-size;
             picture: root.picture;
             has-picture: root.has-picture;
             monogram: root.monogram;
             picture-frames: root.picture-frames;
             playing: root.playing;
-            TouchArea {
-                width: parent.width; height: parent.height;
-                mouse-cursor: pointer;
-                clicked => { if (!root.dialog-open) { root.activate(0); } }
-            }
+            accessible-role: button;
+            accessible-label: "Edit profile";
+        }
+        // The focus ring, as on Home's avatar.
+        SelectionFocusSurface {
+            x: avatar.x - 6px; y: avatar.y - 6px;
+            width: avatar.width + 12px; height: avatar.height + 12px;
+            corner-radius: self.width / 2;
+            focused: root.avatar-focused;
+            filled: false;
+            soft-shadow: false;
+        }
+        TouchArea {
+            x: avatar.x; y: avatar.y;
+            width: avatar.width; height: avatar.height;
+            mouse-cursor: pointer;
+            clicked => { if (!root.dialog-open) { root.edit(); } }
         }
         name-text := MarqueeText {
-            x: (parent.width - self.width) / 2;
-            y: avatar.y + avatar.height + 28px;
-            width: min(parent.width, 720px); height: 44px;
+            x: 24px; y: avatar.y + avatar.height + 28px;
+            width: parent.width - 48px; height: 40px;
             text: root.name != "" ? root.name : "No name yet";
             text-color: root.name != "" ? Theme.foreground : Theme.secondary-foreground;
-            edge-color: Theme.background;
+            edge-color: Theme.surface;
             font-size: Typography.title-size;
             font-weight: Typography.title-weight;
             horizontal-alignment: center;
@@ -94,38 +133,13 @@ export component ProfilePage inherits Rectangle {
             TouchArea {
                 width: parent.width; height: parent.height;
                 mouse-cursor: pointer;
-                clicked => { if (!root.dialog-open) { root.activate(1); } }
+                clicked => { if (!root.dialog-open) { root.edit(); } }
             }
         }
-        caption := Text {
-            x: 0px; y: name-text.y + name-text.height + 4px;
-            width: parent.width; height: 22px;
-            text: root.picture-caption;
-            color: Theme.secondary-foreground;
-            font-size: Typography.body-size;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
-        ActionButton {
-            x: parent.width / 2 - root.button-width - Metrics.spacing-sm;
-            y: caption.y + caption.height + 36px;
-            width: root.button-width; height: root.button-height;
-            label: "Change picture";
-            focused: root.selection == 0 && !root.dialog-open;
-            activated => { if (!root.dialog-open) { root.activate(0); } }
-        }
-        name-button := ActionButton {
-            x: parent.width / 2 + Metrics.spacing-sm;
-            y: caption.y + caption.height + 36px;
-            width: root.button-width; height: root.button-height;
-            label: "Edit name";
-            focused: root.selection == 1 && !root.dialog-open;
-            activated => { if (!root.dialog-open) { root.activate(1); } }
-        }
         Text {
-            x: 0px; y: name-button.y + name-button.height + 18px;
-            width: parent.width; height: 22px;
-            text: root.picture-open ? "" : root.feedback;
+            x: 24px; y: name-text.y + name-text.height + 10px;
+            width: parent.width - 48px; height: 20px;
+            text: root.edit-open ? "" : root.feedback;
             color: Theme.secondary-foreground;
             font-size: Typography.caption-size;
             horizontal-alignment: center;
@@ -133,18 +147,167 @@ export component ProfilePage inherits Rectangle {
         }
     }
 
-    // The picture's options, beside a preview of the avatar as it is now.
+    // Steam friends: read-only rows that scroll with Up/Down and the wheel.
+    FriendsIcon {
+        x: root.friends-x; y: root.top + 3px;
+        width: 28px; height: 28px;
+        render-scale: root.icon-render-scale;
+    }
+    Text {
+        x: root.friends-x + 40px; y: root.top;
+        width: root.friends-width * 0.5; height: 34px;
+        text: "Friends";
+        color: Theme.foreground;
+        font-size: Typography.heading-size;
+        font-weight: Typography.heading-weight;
+        vertical-alignment: center;
+    }
+    Text {
+        x: root.friends-x + root.friends-width * 0.5; y: root.top;
+        width: root.friends-width * 0.5; height: 34px;
+        text: root.friends-summary;
+        color: Theme.secondary-foreground;
+        font-size: Typography.caption-size;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+    }
+
+    private property <length> list-top: root.top + 46px;
+    private property <length> list-height: max(0px, root.bottom - root.list-top - Metrics.spacing-md);
+    private property <length> friend-step: 72px;
+    out property <int> friends-visible-rows: max(1, Math.floor(
+        (root.list-height + Metrics.list-row-gap) / root.friend-step));
+    private property <length> friends-content: root.friends-count * root.friend-step - Metrics.list-row-gap;
+    friends-camera := ScrollCamera {
+        rest-row: root.friends-row;
+        stride: root.friend-step;
+        content: root.friends-content;
+        viewport: root.list-height;
+        settle-key: root.playing ? 1 : 0;
+        scrolled(rows) => { root.scroll-friends(rows); }
+    }
+
+    Rectangle {
+        x: root.friends-x; y: root.list-top;
+        width: root.friends-width; height: root.list-height;
+        background: transparent;
+        clip: true;
+        // The wheel and touchpad pan the list; nothing in it takes focus.
+        TouchArea {
+            width: parent.width; height: parent.height;
+            enabled: root.playing && !root.dialog-open;
+            scroll-event(event) => {
+                if event.delta-y != 0px {
+                    friends-camera.scroll(event.delta-y);
+                    return accept;
+                }
+                reject
+            }
+        }
+        for friend[index] in root.friends : Surface {
+            y: index * root.friend-step - friends-camera.camera;
+            width: parent.width;
+            height: root.friend-step - Metrics.list-row-gap;
+            // Only rows near the view are drawn.
+            visible: self.y + self.height > 0px && self.y < parent.height;
+
+            property <color> presence: friend.kind == 0 ? root.playing-color
+                : friend.kind == 1 ? Theme.accent
+                : friend.kind == 2 ? root.away-color
+                : Theme.secondary-foreground;
+            Rectangle {
+                x: 14px; y: (parent.height - self.height) / 2;
+                width: 44px; height: 44px;
+                border-radius: self.width / 2;
+                background: Theme.accent;
+                clip: true;
+                if !friend.has-avatar : Text {
+                    width: parent.width; height: parent.height;
+                    text: friend.initial;
+                    color: Theme.accent-foreground;
+                    font-size: 18px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                if friend.has-avatar : Image {
+                    width: parent.width; height: parent.height;
+                    source: friend.avatar;
+                    image-fit: cover;
+                }
+            }
+            // Presence: a dot at the avatar's corner, ringed in the row's colour.
+            Rectangle {
+                x: 14px + 44px - 13px; y: (parent.height - 44px) / 2 + 44px - 13px;
+                width: 15px; height: 15px;
+                border-radius: self.width / 2;
+                background: Theme.surface;
+                Rectangle {
+                    x: 3px; y: 3px; width: 9px; height: 9px;
+                    border-radius: self.width / 2;
+                    background: presence;
+                }
+            }
+            MarqueeText {
+                x: 74px; y: 8px;
+                width: parent.width - 74px - 16px; height: 24px;
+                text: friend.name;
+                text-color: friend.kind == 3 ? Theme.secondary-foreground : Theme.foreground;
+                edge-color: Theme.surface;
+                font-size: Typography.body-size;
+                font-weight: Typography.emphasis-weight;
+            }
+            MarqueeText {
+                x: 74px; y: 33px;
+                width: parent.width - 74px - 16px; height: 20px;
+                text: friend.status;
+                text-color: friend.kind == 3 ? Theme.secondary-foreground : presence;
+                edge-color: Theme.surface;
+                font-size: Typography.caption-size;
+            }
+        }
+        // No list: why, in place of it.
+        if root.friends-state != 2 || root.friends-count == 0 : Text {
+            x: 24px; width: parent.width - 48px;
+            y: 0px; height: min(parent.height, 160px);
+            text: root.friends-state == 0 ? "Connect Steam in Settings to see your friends"
+                : root.friends-state == 1 ? ""
+                : root.friends-state == 3 ? "Your Steam friends list is private"
+                : root.friends-state == 4 ? "Can't reach Steam right now"
+                : "No friends yet";
+            color: Theme.secondary-foreground;
+            font-size: Typography.body-size;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            wrap: word-wrap;
+        }
+    }
+    // Elevation only while friends are hidden above or below the view.
+    if root.friends-count > 0 : ScrollEdgeShadow {
+        x: root.friends-x; y: root.list-top;
+        width: root.friends-width;
+        strength: Scroll.edge(friends-camera.camera);
+    }
+    if root.friends-count > 0 : ScrollEdgeShadow {
+        x: root.friends-x; y: root.list-top + root.list-height - self.height;
+        width: root.friends-width;
+        bottom: true;
+        strength: Scroll.edge(root.friends-content - friends-camera.camera - root.list-height);
+    }
+
+    // Edit profile: the name and the picture's options, beside a preview of
+    // the avatar as it is now.
     picture-dialog := ModalDialog {
         area-width: root.width; area-height: root.height;
         z: 20;
-        open: root.picture-open;
+        open: root.edit-open;
         card-width: 860px;
         card-height: 428px;
 
         Text {
             x: 28px; y: 22px;
             width: parent.width - 56px; height: 34px;
-            text: "Profile picture";
+            text: "Edit profile";
             color: Theme.foreground;
             font-size: Typography.heading-size;
             font-weight: Typography.heading-weight;
@@ -158,41 +321,42 @@ export component ProfilePage inherits Rectangle {
             has-picture: root.has-picture;
             monogram: root.monogram;
             picture-frames: root.picture-frames;
-            playing: root.playing && root.picture-open;
+            playing: root.playing && root.edit-open;
         }
         SettingsRow {
             x: root.rows-x; y: 76px;
             width: parent.width - root.rows-x - 28px;
-            title: "Choose a picture";
-            subtitle: "PNG, JPEG, GIF or JPEG XL";
-            trailing: root.busy ? "Working…" : "Choose  ›";
-            enabled: !root.busy;
-            focused: root.picture-selection == 0;
-            activated => { root.activate-picture(0); }
+            title: "Name";
+            subtitle: root.name != "" ? root.name : "Not set";
+            trailing: "Edit  ›";
+            focused: root.edit-selection == 0;
+            activated => { root.activate-option(0); }
         }
         SettingsRow {
             x: root.rows-x; y: 76px + root.row-step;
             width: parent.width - root.rows-x - 28px;
-            title: "Use Steam picture";
-            subtitle: root.steam-available || root.uses-steam
-                ? "Your Steam avatar; animated ones play"
-                : "Set up your Steam Account in Settings → Third-Party first";
-            toggle: true;
-            accessible-role: switch;
-            checked: root.uses-steam;
-            enabled: (root.steam-available || root.uses-steam) && !root.busy;
-            focused: root.picture-selection == 1;
-            activated => { root.activate-picture(1); }
+            title: "Choose a picture";
+            subtitle: "From this device";
+            trailing: "Choose  ›";
+            secondary: root.has-chosen && !root.busy ? "Remove" : "";
+            secondary-activated => { root.remove-picture(); }
+            enabled: !root.busy;
+            focused: root.edit-selection == 1;
+            activated => { root.activate-option(1); }
         }
         SettingsRow {
             x: root.rows-x; y: 76px + root.row-step * 2;
             width: parent.width - root.rows-x - 28px;
-            title: "Remove chosen picture";
-            subtitle: root.has-chosen ? "Forget the picture you chose" : "No picture has been chosen";
-            trailing: root.has-chosen ? "Remove  ›" : "";
-            enabled: root.has-chosen && !root.busy;
-            focused: root.picture-selection == 2;
-            activated => { root.activate-picture(2); }
+            title: "Use Steam picture";
+            subtitle: root.steam-available || root.uses-steam
+                ? "Your Steam avatar"
+                : "Connect Steam in Settings first";
+            toggle: true;
+            accessible-role: switch;
+            checked: root.uses-steam;
+            enabled: (root.steam-available || root.uses-steam) && !root.busy;
+            focused: root.edit-selection == 2;
+            activated => { root.activate-option(2); }
         }
         Text {
             x: 28px; y: parent.height - 70px;
@@ -207,8 +371,8 @@ export component ProfilePage inherits Rectangle {
             width: 112px; height: 46px;
             primary: true;
             label: "Done";
-            focused: root.picture-selection == 3;
-            activated => { root.activate-picture(3); }
+            focused: root.edit-selection == 3;
+            activated => { root.activate-option(3); }
         }
     }
 
@@ -218,7 +382,7 @@ export component ProfilePage inherits Rectangle {
         z: 20;
         open: root.editing-name;
         card-width: 520px;
-        card-height: 230px;
+        card-height: 204px;
 
         Text {
             x: 26px; y: 22px;
@@ -229,16 +393,8 @@ export component ProfilePage inherits Rectangle {
             font-weight: Typography.heading-weight;
             vertical-alignment: center;
         }
-        Text {
-            x: 26px; y: 58px;
-            width: parent.width - 52px; height: 22px;
-            text: "Shown on Home. Up to 32 characters; leave it empty for none.";
-            color: Theme.secondary-foreground;
-            font-size: Typography.caption-size;
-            vertical-alignment: center;
-        }
         Rectangle {
-            x: 26px; y: 92px;
+            x: 26px; y: 66px;
             width: parent.width - 52px; height: 52px;
             background: Theme.surface;
             border-radius: Metrics.radius-md;
@@ -283,20 +439,30 @@ export component ProfilePage inherits Rectangle {
             }
         }
         ActionButton {
-            x: parent.width - 253px; y: 166px;
+            x: parent.width - 253px; y: 138px;
             width: 105px; height: 43px;
             label: "Cancel";
             focused: root.editor-target == 1;
             activated => { root.cancel-name(); }
         }
         ActionButton {
-            x: parent.width - 138px; y: 166px;
+            x: parent.width - 138px; y: 138px;
             width: 112px; height: 43px;
             primary: true;
             label: "Save";
             focused: root.editor-target == 2;
             activated => { root.save-name(root.name-draft); }
         }
+    }
+
+    ConfirmDialog {
+        area-width: root.width; area-height: root.height;
+        z: 30;
+        open: root.confirm-open;
+        title: "Remove your picture?";
+        action: "Remove";
+        selected: root.confirm-focus;
+        choose(choice) => { root.confirm(choice); }
     }
 
     // Typing goes straight to the field once the editor has opened.

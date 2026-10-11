@@ -3,6 +3,7 @@
 //! The Web API key is *not* a Steam login or OAuth token. Like Horizon's
 //! SteamGridDB settings, this is private local storage (0600), NOT encryption.
 //! Never return a saved key to Slint or print credentials in logs/errors.
+use crate::services::friends;
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, OpenOptions},
@@ -16,6 +17,7 @@ use std::{
 static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
 
 const PLAYER_SUMMARIES: &str = "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/";
+const FRIEND_LIST: &str = "https://api.steampowered.com/ISteamUser/GetFriendList/v1/";
 const PROFILE_ITEMS: &str =
     "https://api.steampowered.com/IPlayerService/GetProfileItemsEquipped/v1/";
 /// Where Steam's community item images (avatar frames) live; the API gives
@@ -68,10 +70,10 @@ impl SteamAccountCredentials {
         let key = key.trim();
         let id = id.trim();
         if id.len() != 17 || !id.starts_with("7656119") || id.parse::<u64>().is_err() {
-            return Err("Enter your 17-digit SteamID64 (starting with 7656119).");
+            return Err("Enter the 17-digit Steam ID that starts with 7656119");
         }
         if key.is_empty() || key.len() > 128 || !key.bytes().all(|b| b.is_ascii_alphanumeric()) {
-            return Err("Enter a valid Steam Web API key without spaces (max 128 characters).");
+            return Err("Enter a valid key, with no spaces");
         }
         Ok(Self {
             key: key.to_owned(),
@@ -114,7 +116,7 @@ impl SteamAccountService {
                 )
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => None,
-            Err(_) => return Err("Unable to read Steam account settings."),
+            Err(_) => return Err("Couldn't read your Steam account"),
         };
         Ok(Self {
             path,
@@ -145,7 +147,7 @@ impl SteamAccountService {
     pub fn set_steam_id64(&mut self, steam_id64: &str) -> Result<(), &'static str> {
         let id = steam_id64.trim();
         if id.len() != 17 || !id.starts_with("7656119") || id.parse::<u64>().is_err() {
-            return Err("Enter your 17-digit SteamID64 (starting with 7656119).");
+            return Err("Enter the 17-digit Steam ID that starts with 7656119");
         }
         if let Some(account) = self.credentials() {
             self.save(&account.key, id)
@@ -155,10 +157,7 @@ impl SteamAccountService {
         }
     }
     pub fn set_web_api_key(&mut self, key: &str) -> Result<(), &'static str> {
-        let id = self
-            .identity()
-            .ok_or("Set SteamID64 before adding the Web API key.")?
-            .to_owned();
+        let id = self.identity().ok_or("Add your Steam ID first")?.to_owned();
         self.save(key, &id)
     }
     pub fn save(&mut self, key: &str, steam_id64: &str) -> Result<(), &'static str> {
@@ -195,7 +194,7 @@ impl SteamAccountService {
         })();
         if result.is_err() {
             let _ = fs::remove_file(&temp);
-            return Err("Unable to save Steam account settings.");
+            return Err("Couldn't save");
         }
         self.saved = Some(candidate);
         self.pending_id = None;
@@ -205,7 +204,7 @@ impl SteamAccountService {
         match fs::remove_file(&self.path) {
             Ok(()) => {}
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-            Err(_) => return Err("Unable to remove saved Steam account settings."),
+            Err(_) => return Err("Couldn't remove"),
         }
         self.saved = None;
         self.pending_id = None;
@@ -213,7 +212,7 @@ impl SteamAccountService {
     }
 }
 
-/// Used by current read-only Achievements and later by Friends without sharing
+/// Used by read-only Achievements, the profile and its friends without sharing
 /// provider-specific presentation models or making UI-thread network requests.
 pub struct SteamWebApiClient {
     client: reqwest::blocking::Client,
@@ -273,6 +272,38 @@ impl SteamWebApiClient {
                 }
             },
         )
+    }
+
+    /// The account's Steam friends with what each is doing, unsorted. A
+    /// private friend list is [`FriendsError::Private`]. Avatars are not
+    /// downloaded here (see [`Self::friend_avatar`]).
+    pub fn friends(&self) -> Result<Vec<friends::Friend>, friends::FriendsError> {
+        let network = |error: reqwest::Error| {
+            if error.status() == Some(reqwest::StatusCode::UNAUTHORIZED) {
+                friends::FriendsError::Private
+            } else {
+                friends::FriendsError::Network(error.without_url().to_string())
+            }
+        };
+        let body = self
+            .get(FRIEND_LIST, &[("relationship", "friend")])
+            .map_err(network)?;
+        let ids = friends::friend_ids(&body)?;
+        let mut all = Vec::with_capacity(ids.len());
+        for batch in ids.chunks(friends::SUMMARIES_PER_REQUEST) {
+            let joined = batch.join(",");
+            let body = self
+                .get(PLAYER_SUMMARIES, &[("steamids", joined.as_str())])
+                .map_err(network)?;
+            all.extend(friends::summaries(&body)?);
+        }
+        Ok(all)
+    }
+
+    /// A friend's avatar from Steam's avatar hosts: the image file's bytes,
+    /// checked to be a picture of sane size but not decoded.
+    pub fn friend_avatar(&self, url: &str) -> Option<Vec<u8>> {
+        self.download_public_image(url, AVATAR_HOSTS, 256 * 1024)
     }
 
     /// An image from one of Steam's public image hosts, over HTTPS, with no

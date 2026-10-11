@@ -16,7 +16,7 @@ export { AlbumTileData }
 export { HintData }
 
 import { AppRouteView } from "models/navigation.slint";
-import { ProfileFrameData } from "models/profile.slint";
+import { ProfileFrameData, FriendData } from "models/profile.slint";
 export { ProfileFrameData }
 export { AppRouteView }
 
@@ -87,9 +87,9 @@ export component AppWindow inherits Window {
     }
     pure function route-key(route: AppRouteView) -> int {
         return route == AppRouteView.home ? 0 : route == AppRouteView.library ? 1
-            : route == AppRouteView.friends ? 2 : route == AppRouteView.album ? 3
-            : route == AppRouteView.activity ? 4 : route == AppRouteView.achievements ? 5
-            : route == AppRouteView.settings ? 6 : route == AppRouteView.shop ? 7 : 8;
+            : route == AppRouteView.album ? 2 : route == AppRouteView.activity ? 3
+            : route == AppRouteView.achievements ? 4 : route == AppRouteView.settings ? 5
+            : route == AppRouteView.shop ? 6 : 7;
     }
     private property <int> route-phase: route-transition.phase;
     private property <bool> route-back: root.current-route == AppRouteView.home
@@ -111,16 +111,20 @@ export component AppWindow inherits Window {
         // The Album's hints depend on its viewer, selection and capture
         // owners; its controller publishes them (`album-hints`).
         : root.current-route == AppRouteView.album ? root.album-hints
-        : root.current-route == AppRouteView.settings
-            ? [{ button: "B", label: "Back" }, { button: "A", label: "Select" }]
-        : root.current-route == AppRouteView.profile ? (root.profile-editing-name
+        : root.current-route == AppRouteView.settings && root.settings-confirm-open
             ? [{ button: "B", label: "Cancel" }, { button: "A", label: "Select" }]
-            : root.profile-picture-open
-            ? [{ button: "B", label: "Close" }, { button: "A", label: "Select" }]
+        : root.current-route == AppRouteView.settings ? (root.settings-secondary-label != ""
+            ? [{ button: "X", label: root.settings-secondary-label }, { button: "B", label: "Back" }, { button: "A", label: "Select" }]
             : [{ button: "B", label: "Back" }, { button: "A", label: "Select" }])
+        : root.current-route == AppRouteView.profile ? (root.profile-editing-name || root.profile-confirm-open
+            ? [{ button: "B", label: "Cancel" }, { button: "A", label: "Select" }]
+            : root.profile-edit-open ? (root.profile-edit-selection == 1 && root.profile-page-has-chosen
+                ? [{ button: "X", label: "Remove" }, { button: "B", label: "Close" }, { button: "A", label: "Select" }]
+                : [{ button: "B", label: "Close" }, { button: "A", label: "Select" }])
+            : [{ button: "B", label: "Back" }, { button: "A", label: "Edit profile" }])
         : [{ button: "B", label: "Back" }];
     in property <bool> top-utilities-focused: false;
-    in property <int> focused-utility-index: 2;
+    in property <int> focused-utility-index: 1;
 
     // Home alone owns its top utilities and status/footer chrome. Library is
     // a durable full-shell destination, like Settings and other submenu routes.
@@ -188,7 +192,7 @@ export component AppWindow inherits Window {
     in property <string> activity-month-total: "0 min";
     in property <int> activity-selected-index: 0;
     in property <[AchievementEntryData]> activity-recent-achievements;
-    in property <string> activity-achievement-status: "Connect Steam achievements in the Achievements utility";
+    in property <string> activity-achievement-status: "Connect Steam in Settings";
     in property <string> achievements-game-count: "0 games";
     in property <string> achievements-source-label: "All sources";
     in property <bool> achievements-has-source-choice: false;
@@ -199,7 +203,7 @@ export component AppWindow inherits Window {
     callback achievements-cycle-source(int);
     in property <[AchievementGameData]> achievement-games;
     in property <[AchievementEntryData]> achievement-entries;
-    in property <string> achievements-status: "Connect Steam to display achievements.";
+    in property <string> achievements-status: "Connect Steam in Settings";
     in property <bool> achievements-loading: false;
     in property <int> achievements-selected-index: 0;
     in property <int> achievements-visit-revision: 0;
@@ -300,7 +304,7 @@ export component AppWindow inherits Window {
     in property <bool> settings-ui-sounds-enabled: true;
 
     in property <bool> settings-key-present: false;
-    in property <string> settings-steam-identity: "Not configured";
+    in property <string> settings-steam-identity: "Not set";
     in property <bool> settings-steam-connected: false;
     in property <bool> settings-steam-saved: false;
     in property <int> settings-editor-kind: 0;
@@ -325,11 +329,9 @@ export component AppWindow inherits Window {
     // The Profile page (presentation/profile.rs): its actions, the picture
     // dialog and the name editor.
     in property <string> profile-name: "";
-    in property <string> profile-picture-caption: "";
-    in property <int> profile-page-selection: 0;
     in property <string> profile-page-feedback: "";
-    in property <bool> profile-picture-open: false;
-    in property <int> profile-picture-selection: 0;
+    in property <bool> profile-edit-open: false;
+    in property <int> profile-edit-selection: 0;
     in property <bool> profile-page-busy: false;
     in property <bool> profile-page-has-chosen: false;
     in property <bool> profile-page-uses-steam: false;
@@ -337,11 +339,23 @@ export component AppWindow inherits Window {
     in property <bool> profile-editing-name: false;
     in property <int> profile-editor-target: 0;
     in-out property <string> profile-name-draft: "";
+    // The Profile page's Steam friends (presentation/friends.rs).
+    in property <[FriendData]> profile-friends;
+    in property <int> profile-friends-state: 0;
+    in property <int> profile-friends-count: 0;
+    in property <string> profile-friends-summary: "";
+    in property <int> profile-friends-row: 0;
+    out property <int> profile-friends-visible-rows: profile-page.friends-visible-rows;
     // The avatar was clicked; a Profile page action or a picture dialog
     // option was clicked; the name editor saved or cancelled.
     callback profile-open();
-    callback profile-activate(int);
-    callback profile-activate-picture(int);
+    callback profile-edit();
+    callback profile-activate-option(int);
+    callback profile-remove-picture();
+    in property <bool> profile-confirm-open: false;
+    in property <int> profile-confirm-focus: 0;
+    callback profile-confirm(int);
+    callback profile-scroll-friends(int);
     callback profile-save-name(string);
     callback profile-cancel-name();
     in property <string> settings-appearance-feedback: "";
@@ -372,6 +386,16 @@ export component AppWindow inherits Window {
     callback activity-choose(int);
     callback activity-detail-back();
     callback activate-utility(int);
+    // X on a Settings row removes what it sets ("Remove", "Disconnect");
+    // its label, or "" where X does nothing (presentation/settings.rs).
+    in property <string> settings-secondary-label: "";
+    callback settings-remove(int);
+    // Its confirmation (presentation/settings.rs).
+    in property <bool> settings-confirm-open: false;
+    in property <string> settings-confirm-title: "";
+    in property <string> settings-confirm-action: "";
+    in property <int> settings-confirm-focus: 0;
+    callback settings-confirm(int);
     callback settings-activate(int);
     callback settings-back();
     callback settings-save-key(string);
@@ -530,26 +554,8 @@ export component AppWindow inherits Window {
                 }
             }
 
-            // All six top utilities are durable full-shell submenu routes. They
-            // share one page component and normal Navigator history semantics.
-            TransitionLayer {
-                x: 0px;
-                width: parent.width;
-                height: parent.height;
-                active: root.current-route == AppRouteView.friends;
-                phase: root.route-phase;
-                returning: root.route-back;
-                outgoing: root.current-route != AppRouteView.friends
-                    && root.transition-from-route == AppRouteView.friends;
-
-                UtilitySubmenuPage {
-                    width: parent.width;
-                    height: parent.height;
-                    title: "Friends";
-                    description: "Friends and social activity will appear here.";
-                }
-            }
-
+            // All five top utilities are durable full-shell submenu routes. They
+            // share normal Navigator history semantics.
             TransitionLayer {
                 x: 0px;
                 width: parent.width;
@@ -728,7 +734,7 @@ export component AppWindow inherits Window {
                 outgoing: root.current-route != AppRouteView.profile
                     && root.transition-from-route == AppRouteView.profile;
 
-                ProfilePage {
+                profile-page := ProfilePage {
                     width: parent.width;
                     height: parent.height;
                     picture: root.profile-picture;
@@ -737,11 +743,9 @@ export component AppWindow inherits Window {
                     picture-frames: root.profile-picture-frames;
                     playing: root.current-route == AppRouteView.profile;
                     name: root.profile-name;
-                    picture-caption: root.profile-picture-caption;
-                    selection: root.profile-page-selection;
                     feedback: root.profile-page-feedback;
-                    picture-open: root.profile-picture-open;
-                    picture-selection: root.profile-picture-selection;
+                    edit-open: root.profile-edit-open;
+                    edit-selection: root.profile-edit-selection;
                     has-chosen: root.profile-page-has-chosen;
                     uses-steam: root.profile-page-uses-steam;
                     steam-available: root.profile-page-steam-available;
@@ -749,8 +753,19 @@ export component AppWindow inherits Window {
                     editing-name: root.profile-editing-name;
                     editor-target: root.profile-editor-target;
                     name-draft <=> root.profile-name-draft;
-                    activate(row) => { if (root.current-route == AppRouteView.profile) { root.profile-activate(row); } }
-                    activate-picture(row) => { if (root.current-route == AppRouteView.profile) { root.profile-activate-picture(row); } }
+                    friends: root.profile-friends;
+                    friends-state: root.profile-friends-state;
+                    friends-count: root.profile-friends-count;
+                    friends-summary: root.profile-friends-summary;
+                    friends-row: root.profile-friends-row;
+                    icon-render-scale: root.ui-scale;
+                    scroll-friends(rows) => { root.profile-scroll-friends(rows); }
+                    edit => { if (root.current-route == AppRouteView.profile) { root.profile-edit(); } }
+                    activate-option(row) => { if (root.current-route == AppRouteView.profile) { root.profile-activate-option(row); } }
+                    remove-picture => { if (root.current-route == AppRouteView.profile) { root.profile-remove-picture(); } }
+                    confirm-open: root.profile-confirm-open;
+                    confirm-focus: root.profile-confirm-focus;
+                    confirm(choice) => { if (root.current-route == AppRouteView.profile) { root.profile-confirm(choice); } }
                     save-name(name) => { root.profile-save-name(name); }
                     cancel-name => { root.profile-cancel-name(); }
                 }
@@ -794,6 +809,12 @@ export component AppWindow inherits Window {
                     refresh-error: root.settings-refresh-error;
                     dismiss-refresh => { root.settings-dismiss-refresh(); }
                     activate(index) => { root.settings-activate(index); }
+                    remove(index) => { root.settings-remove(index); }
+                    confirm-open: root.settings-confirm-open;
+                    confirm-title: root.settings-confirm-title;
+                    confirm-action: root.settings-confirm-action;
+                    confirm-focus: root.settings-confirm-focus;
+                    confirm(choice) => { root.settings-confirm(choice); }
                     go-back => { root.settings-back(); }
                     save-key(key) => { root.settings-save-key(key); }
                     cancel-key => { root.settings-cancel-key(); }
@@ -815,7 +836,7 @@ export component AppWindow inherits Window {
                     width: parent.width;
                     height: parent.height;
                     title: "Shop";
-                    description: "The Horizon shop will appear here in a later phase.";
+                    description: "Coming soon";
                 }
             }
 
