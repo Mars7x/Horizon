@@ -21,7 +21,13 @@ use zbus::{
 // Periodic safety poll. Actual network changes trigger a D-Bus signal wake-up.
 const NETWORK_INTERVAL: Duration = Duration::from_secs(5);
 const NETWORK_DISCONNECT_CONFIRM: Duration = Duration::from_millis(150);
-const BATTERY_INTERVAL: Duration = Duration::from_secs(2);
+// Battery and controller power follow UPower's and BlueZ's change signals;
+// this safety recheck covers a missed signal or a bus restart.
+const POWER_SAFETY_INTERVAL: Duration = Duration::from_secs(60);
+// A change arrives as a burst of signals: read once it settles.
+const POWER_SETTLE: Duration = Duration::from_millis(100);
+// Without any signal stream, read on this period instead.
+const POWER_FALLBACK_INTERVAL: Duration = Duration::from_secs(5);
 const NM: &str = "org.freedesktop.NetworkManager";
 const NM_PATH: &str = "/org/freedesktop/NetworkManager";
 const NM_IFACE: &str = "org.freedesktop.NetworkManager";
@@ -171,7 +177,7 @@ impl StatusMonitor {
         let (network_wake, network_events) = mpsc::sync_channel::<()>(1);
         if let Err(error) = thread::Builder::new()
             .name("horizon-network-events".into())
-            .spawn(move || watch_network_changes(network_wake))
+            .spawn(move || watch_signals(NM, &network_wake))
         {
             tracing::warn!(%error, "network event listener unavailable; polling fallback active");
         }
@@ -210,10 +216,24 @@ impl StatusMonitor {
         {
             tracing::warn!(%error, "network status observer unavailable");
         }
+        // UPower (host battery, controllers) and BlueZ (controller battery)
+        // signal their changes; one coalesced wake re-reads both.
+        let (power_wake, power_events) = mpsc::sync_channel::<()>(1);
+        for service in [UPOWER, BLUEZ] {
+            let wake = power_wake.clone();
+            if let Err(error) = thread::Builder::new()
+                .name("horizon-power-events".into())
+                .spawn(move || watch_signals(service, &wake))
+            {
+                tracing::warn!(%error, service, "power event listener unavailable");
+            }
+        }
+        drop(power_wake);
         if let Err(error) = thread::Builder::new()
             .name("horizon-power-status".into())
             .spawn(move || {
                 let mut bus: Option<Connection> = None;
+                let mut last = None;
                 loop {
                     if bus.is_none() {
                         bus = Connection::system().ok();
@@ -222,13 +242,26 @@ impl StatusMonitor {
                     // NetworkManager; invalid reports remain None, not 100%.
                     let host = bus.as_ref().and_then(read_host_battery);
                     let controller = bus.as_ref().and_then(read_controller_battery);
-                    if sender
-                        .send(StatusUpdate::Power { host, controller })
-                        .is_err()
-                    {
-                        break;
+                    // Only a change reaches (and wakes) the UI.
+                    if last != Some((host, controller)) {
+                        last = Some((host, controller));
+                        if sender
+                            .send(StatusUpdate::Power { host, controller })
+                            .is_err()
+                        {
+                            break;
+                        }
                     }
-                    thread::sleep(BATTERY_INTERVAL);
+                    match power_events.recv_timeout(POWER_SAFETY_INTERVAL) {
+                        Ok(()) => {
+                            thread::sleep(POWER_SETTLE);
+                            while power_events.try_recv().is_ok() {}
+                        }
+                        Err(RecvTimeoutError::Timeout) => {}
+                        Err(RecvTimeoutError::Disconnected) => {
+                            thread::sleep(POWER_FALLBACK_INTERVAL)
+                        }
+                    }
                 }
             })
         {
@@ -271,13 +304,15 @@ impl StatusMonitor {
 // ActiveConnection.State, device carrier/link changes, and access-point
 // Strength updates can all originate at different NetworkManager object paths.
 // Signals are hints to re-query the authoritative snapshot, not status values.
-fn watch_network_changes(wake: SyncSender<()>) {
+/// Wakes `wake` (coalesced) on every signal `service` broadcasts. Keeps
+/// listening across bus restarts and service owner changes.
+fn watch_signals(service: &'static str, wake: &SyncSender<()>) {
     loop {
         let attempt = (|| -> zbus::Result<()> {
             let bus = Connection::system()?;
             let rule = MatchRule::builder()
                 .msg_type(MessageType::Signal)
-                .sender(NM)?
+                .sender(service)?
                 .build();
             let mut messages = MessageIterator::for_match_rule(rule, &bus, Some(32))?;
             for message in &mut messages {
@@ -292,15 +327,38 @@ fn watch_network_changes(wake: SyncSender<()>) {
             Ok(())
         })();
         if let Err(error) = attempt {
-            tracing::debug!(%error, "NetworkManager signal stream unavailable; retrying");
+            tracing::debug!(%error, service, "signal stream unavailable; retrying");
+        }
+        if wake
+            .try_send(())
+            .is_err_and(|error| matches!(error, TrySendError::Disconnected(())))
+        {
+            return;
         }
         // When a connection drops, reinstall match rules for the new owner.
         thread::sleep(Duration::from_secs(1));
     }
 }
 
+/// A proxy that reads properties on demand. `Proxy::new` fetches every
+/// property and subscribes to their changes each time, which is wasteful for
+/// the few one-off reads here.
+fn proxy<'a>(
+    bus: &Connection,
+    destination: &'a str,
+    path: &'a str,
+    interface: &'a str,
+) -> zbus::Result<Proxy<'a>> {
+    zbus::blocking::proxy::Builder::<Proxy>::new(bus)
+        .destination(destination)?
+        .path(path)?
+        .interface(interface)?
+        .cache_properties(zbus::proxy::CacheProperties::No)
+        .build()
+}
+
 fn read_network(bus: &Connection) -> Option<NetworkReading> {
-    let root = Proxy::new(bus, NM, NM_PATH, NM_IFACE).ok()?;
+    let root = proxy(bus, NM, NM_PATH, NM_IFACE).ok()?;
     // 1=none, 2=portal, 3=limited, 4=full, 0=unknown.
     let connectivity = root.get_property::<u32>("Connectivity").unwrap_or(0);
     let active_paths: Vec<OwnedObjectPath> = root.get_property("ActiveConnections").ok()?;
@@ -308,7 +366,7 @@ fn read_network(bus: &Connection) -> Option<NetworkReading> {
     let mut choices: Vec<(bool, NetworkKind, u8)> = Vec::new();
     let mut incomplete = false;
     for path in active_paths {
-        let Ok(active) = Proxy::new(bus, NM, path.as_str(), ACTIVE_IFACE) else {
+        let Ok(active) = proxy(bus, NM, path.as_str(), ACTIVE_IFACE) else {
             incomplete = true;
             continue;
         };
@@ -361,7 +419,7 @@ fn read_network(bus: &Connection) -> Option<NetworkReading> {
 fn wifi_strength(bus: &Connection, active: &Proxy<'_>) -> Option<u8> {
     let paths: Vec<OwnedObjectPath> = active.get_property("Devices").ok()?;
     for path in paths {
-        let Ok(device) = Proxy::new(bus, NM, path.as_str(), WIRELESS_IFACE) else {
+        let Ok(device) = proxy(bus, NM, path.as_str(), WIRELESS_IFACE) else {
             continue;
         };
         let Ok(ap_path) = device.get_property::<OwnedObjectPath>("ActiveAccessPoint") else {
@@ -370,7 +428,7 @@ fn wifi_strength(bus: &Connection, active: &Proxy<'_>) -> Option<u8> {
         if ap_path.as_str() == "/" {
             continue;
         }
-        if let Ok(ap) = Proxy::new(bus, NM, ap_path.as_str(), ACCESS_POINT_IFACE)
+        if let Ok(ap) = proxy(bus, NM, ap_path.as_str(), ACCESS_POINT_IFACE)
             && let Ok(strength) = ap.get_property::<u8>("Strength")
         {
             return Some(strength.min(100));
@@ -380,7 +438,7 @@ fn wifi_strength(bus: &Connection, active: &Proxy<'_>) -> Option<u8> {
 }
 
 fn read_host_battery(bus: &Connection) -> Option<BatteryReading> {
-    let device = Proxy::new(bus, UPOWER, DISPLAY_DEVICE, UPOWER_DEVICE).ok()?;
+    let device = proxy(bus, UPOWER, DISPLAY_DEVICE, UPOWER_DEVICE).ok()?;
     // UPower's display device aggregates *system* batteries and excludes
     // wireless peripheral batteries from host charge status.
     let present = device.get_property::<bool>("IsPresent").ok()?;
@@ -403,11 +461,11 @@ fn read_controller_battery(bus: &Connection) -> Option<BatteryReading> {
 }
 
 fn read_upower_gamepad_battery(bus: &Connection) -> Option<BatteryReading> {
-    let root = Proxy::new(bus, UPOWER, UPOWER_ROOT, UPOWER_IFACE).ok()?;
+    let root = proxy(bus, UPOWER, UPOWER_ROOT, UPOWER_IFACE).ok()?;
     let paths: Vec<OwnedObjectPath> = root.call("EnumerateDevices", &()).ok()?;
     let mut candidates = Vec::new();
     for path in paths {
-        let Ok(device) = Proxy::new(bus, UPOWER, path.as_str(), UPOWER_DEVICE) else {
+        let Ok(device) = proxy(bus, UPOWER, path.as_str(), UPOWER_DEVICE) else {
             continue;
         };
         if device.get_property::<u32>("Type").ok() != Some(UPOWER_GAME_CONTROLLER_TYPE) {
@@ -429,7 +487,7 @@ fn read_upower_gamepad_battery(bus: &Connection) -> Option<BatteryReading> {
 }
 
 fn read_bluez_gamepad_battery(bus: &Connection) -> Option<BatteryReading> {
-    let objects = Proxy::new(bus, BLUEZ, "/", BLUEZ_OBJECT_MANAGER).ok()?;
+    let objects = proxy(bus, BLUEZ, "/", BLUEZ_OBJECT_MANAGER).ok()?;
     let managed: HashMap<OwnedObjectPath, HashMap<String, HashMap<String, OwnedValue>>> =
         objects.call("GetManagedObjects", &()).ok()?;
     let mut candidates = Vec::new();
@@ -437,7 +495,7 @@ fn read_bluez_gamepad_battery(bus: &Connection) -> Option<BatteryReading> {
         if !interfaces.contains_key(BLUEZ_BATTERY) || !interfaces.contains_key(BLUEZ_DEVICE) {
             continue;
         }
-        let Ok(device) = Proxy::new(bus, BLUEZ, path.as_str(), BLUEZ_DEVICE) else {
+        let Ok(device) = proxy(bus, BLUEZ, path.as_str(), BLUEZ_DEVICE) else {
             continue;
         };
         if device.get_property::<bool>("Connected").ok() != Some(true) {
@@ -451,7 +509,7 @@ fn read_bluez_gamepad_battery(bus: &Connection) -> Option<BatteryReading> {
         if !is_gamepad_device(&icon, &name) {
             continue;
         }
-        let Ok(battery) = Proxy::new(bus, BLUEZ, path.as_str(), BLUEZ_BATTERY) else {
+        let Ok(battery) = proxy(bus, BLUEZ, path.as_str(), BLUEZ_BATTERY) else {
             continue;
         };
         let Ok(percent) = battery.get_property::<u8>("Percentage") else {

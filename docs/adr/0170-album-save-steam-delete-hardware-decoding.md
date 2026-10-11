@@ -1,5 +1,10 @@
 # ADR 0170: Album Save, Steam screenshot deletion, hardware video decoding
 
+> **Save removed.** The user decided the Album doesn't need Save to Pictures.
+> The Y/Insert action, `services::album::export`, the Pictures lookup and both
+> Flatpak grants (`xdg-pictures/Horizon`, `user-dirs.dirs`) are gone. The rest
+> of this ADR stands.
+
 **Status:** Implemented. The build and gate pass, including a release build in GNOME Builder's Flatpak environment. The live Album harness covers saving and deleting a source's capture. Hardware decoding is untested on real VA-API hardware: this machine (Snapdragon X Elite, Adreno) has no VA-API decoder, so only the software fallback ran here.
 
 ## Context

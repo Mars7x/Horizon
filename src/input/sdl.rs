@@ -527,7 +527,6 @@ pub const fn action_for_button(button: Button) -> Option<UiAction> {
         Button::South => Some(UiAction::Accept),
         Button::East => Some(UiAction::Back),
         Button::West => Some(UiAction::Secondary),
-        Button::North => Some(UiAction::Tertiary),
         Button::Start => Some(UiAction::Menu),
         Button::Guide => Some(UiAction::Home),
         Button::LeftShoulder => Some(UiAction::LeftBumper),

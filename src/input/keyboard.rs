@@ -24,8 +24,6 @@ pub fn action_for_key(text: &str, repeated: bool) -> Option<UiAction> {
         UiAction::Home
     } else if key_matches(text, Key::Delete) {
         UiAction::Secondary
-    } else if key_matches(text, Key::Insert) {
-        UiAction::Tertiary
     } else {
         return None;
     };
@@ -92,15 +90,6 @@ mod tests {
             Some(UiAction::Secondary)
         );
         assert_eq!(action_for_key(encoded(Key::Delete).as_str(), true), None);
-    }
-
-    #[test]
-    fn insert_is_the_tertiary_button() {
-        assert_eq!(
-            action_for_key(encoded(Key::Insert).as_str(), false),
-            Some(UiAction::Tertiary)
-        );
-        assert_eq!(action_for_key(encoded(Key::Insert).as_str(), true), None);
     }
 
     #[test]

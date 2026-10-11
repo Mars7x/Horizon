@@ -1,5 +1,35 @@
 # Live top-bar system indicators
 
+## Glyphs (current)
+
+The battery and network glyphs are drawn natively in one style
+(`ui/components/status-glyphs.slint`, ADR 0171): a 1.8px stroked outline with
+round caps in the foreground ink, solid parts for what is filled, a faint ink
+for what isn't, discrete steps only, on one 24x20 grid at the battery's scale.
+
+| State | Glyph |
+| --- | --- |
+| Wi-Fi | A dot and three arcs; arcs light up at >=25, >=50 and >=75 percent strength, the rest stay faint |
+| Wi-Fi, limited (no internet or a captive portal) | Faint arcs with a `!` beside the dot |
+| Ethernet | A network port with three pins |
+| Ethernet, limited | The port with a `!` in place of its pins |
+| Another kind of connection | A globe (with `!` when limited) |
+| Offline | The faint Wi-Fi glyph, struck through |
+| Battery | An outline filled in five steps, a bolt while charging, red at 20% and below |
+
+The earlier GNOME status icons are retired; the sections below record their
+history.
+
+## Power updates (current)
+
+Host and controller battery follow UPower's and BlueZ's change signals: a
+signal wakes the power worker, which waits 100 ms for the burst to settle and
+re-reads once. A 60-second recheck covers missed signals and bus restarts
+(5 s if no signal stream is available at all). Reads fetch only the properties
+they need (no property cache or change subscription per proxy), and only a
+changed reading reaches the UI. SDL3 controller power is still read every 2 s
+on the input path while a controller is connected.
+
 Phase 9.5.44.67 replaces the static Wi-Fi and battery drawings.
 
 ## Network
@@ -80,7 +110,7 @@ DInput mode can expose battery charge; Xbox/XInput emulation may not. This
 may depend on 8BitDo firmware and HID access in the Flatpak. Horizon does
 not change controller firmware, write udev rules, or broaden device grants.
 
-### GNOME symbolic network icons (Phase 9.5.44.72)
+### GNOME symbolic network icons (Phase 9.5.44.72, retired by ADR 0171)
 
 The status cluster renders eight original SVG symbols supplied from GNOME's
 Symbolic/Adwaita icon sets. Slint tints the SVG alpha mask with the current
@@ -107,7 +137,8 @@ independent of the conditional host/controller battery display.
 The network and power observers now run independently on background system-D-Bus
 connections. NetworkManager retains its five-second cadence and connection
 stability filter. UPower and BlueZ host/controller battery checks begin immediately
-and repeat about every two seconds, without waiting for network queries. SDL3
+and repeat about every two seconds, without waiting for network queries
+(superseded: signal-driven, see "Power updates" above). SDL3
 controller power is also refreshed every two seconds, not on the 8 ms input path.
 The main-thread timer merges partial updates so that a network-only observation
 cannot overwrite a fresh battery or vice versa. Only changes are published.

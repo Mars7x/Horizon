@@ -694,8 +694,7 @@ impl NavigationController {
             | UiAction::Accept
             | UiAction::LeftBumper
             | UiAction::RightBumper
-            | UiAction::Secondary
-            | UiAction::Tertiary => {
+            | UiAction::Secondary => {
                 debug!(
                     action = ?event.action,
                     repeated = event.repeated,
