@@ -196,6 +196,9 @@ export global Motion {
     // slightly under the 115ms input repeat, so held steps join into one
     // continuous movement.
     out property <duration> scroll-duration: reduced-motion ? 0ms : 110ms;
+    // A touchpad pulling past a list's end stretches it (components/scroll.slint);
+    // once the fingers stop, it springs back over this, eased out.
+    out property <duration> overscroll-return-duration: reduced-motion ? 0ms : 340ms;
     // Modal dialogs (components/modal-dialog.slint): the backdrop fades and
     // the card lifts into place together.
     out property <duration> dialog-duration: reduced-motion ? 0ms : 180ms;

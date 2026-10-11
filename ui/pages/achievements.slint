@@ -73,20 +73,7 @@ export component AchievementsPage inherits Rectangle {
         root.first-game = min(root.first-game,
             max(0, root.games.length - root.visible-games));
     }
-    changed selected-index => {
-        if (root.selected-index < root.first-game) {
-            root.first-game = max(0, root.selected-index);
-        } else if (root.selected-index >= root.first-game + root.visible-games) {
-            root.first-game = root.selected-index - root.visible-games + 1;
-        }
-    }
-    changed visible-games => {
-        if (root.selected-index < root.first-game) {
-            root.first-game = max(0, root.selected-index);
-        } else if (root.selected-index >= root.first-game + root.visible-games) {
-            root.first-game = root.selected-index - root.visible-games + 1;
-        }
-    }
+    // Focus keeps itself in view through `games-camera` below.
     // Rows sit 2px in (room for the focus ring), so content is the rows
     // plus that inset on both ends.
     private property <length> game-content: root.games.length * root.row-stride - Metrics.list-row-gap + 4px;
@@ -98,8 +85,12 @@ export component AchievementsPage inherits Rectangle {
         stride: root.row-stride;
         content: root.game-content;
         viewport: root.game-viewport-height;
-        settle-key: root.visit-revision * 2 + (root.viewing-entries ? 1 : 0);
+        // Opening a game's achievements leaves this list exactly where it was.
+        settle-key: root.visit-revision;
         focus-key: root.selected-index;
+        // A row sits 2px in, for the focus ring.
+        focus-row: root.selected-index;
+        focus-span: Metrics.list-row-height + 4px;
         scrolled(rows) => { root.first-game = max(0, root.first-game + rows); }
     }
     entries-camera := ScrollCamera {

@@ -134,6 +134,10 @@ export component LibraryPage inherits Rectangle {
         viewport: root.available-grid-height;
         settle-key: root.focus-visible ? 1 : 0;
         focus-key: root.selected-index;
+        // A cover, with the grid's padding around it (room for the lift and
+        // focus frame).
+        focus-row: root.focus-visible ? Math.floor(root.selected-index / root.grid-columns) : -1;
+        focus-span: root.card-size + 2 * root.grid-pad;
         instant: root.grid-reordering;
         scrolled(rows) => { root.scroll-rows(rows); }
     }

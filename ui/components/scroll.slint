@@ -17,6 +17,15 @@ export global Scroll {
     public pure function camera(target: length, content: length, viewport: length) -> length {
         max(0px, min(target, content - viewport))
     }
+    // How far content stretches for a touchpad `pull` past its end: it
+    // follows at first, then resists, never beyond `overscroll-limit`. None
+    // with Reduced Motion.
+    out property <length> overscroll-limit: 80px;
+    public pure function rubber(pull: length) -> length {
+        Motion.reduced-motion ? 0px
+            : pull >= 0px ? Scroll.overscroll-limit * pull / (pull + Scroll.overscroll-limit)
+            : -Scroll.overscroll-limit * -pull / (-pull + Scroll.overscroll-limit)
+    }
     // Shadow strength for `hidden` pixels of content beyond an edge.
     public pure function edge(hidden: length) -> float {
         max(0.0, min(1.0, hidden / 24px))
@@ -46,19 +55,23 @@ export component CameraSettle {
     }
 }
 
-// A camera for a vertical list or grid that focus places on whole rows and
-// that the wheel and touchpad move freely, pixel by pixel.
+// The camera for a vertical list or grid. It rests wherever it was left, to
+// the pixel; nothing snaps it back onto rows.
 //
-// - At rest it follows `rest-row` (set by focus or the controller) like any
-//   `Scroll.camera`, gliding linearly; `settle-key` and `instant` make it jump.
-// - `scroll(delta-y)` (from a `scroll-event`) moves it by pixels instead: a
-//   touchpad directly, a wheel notch with the standard glide. The camera
-//   never moves focus. Whenever its top edge crosses into another row it
-//   reports the change through `scrolled(rows)`, so the owner (Rust, or the
-//   page) can keep `rest-row` and its mounted rows in step.
-// - It settles back onto whole rows when focus moves (`focus-key`) or when
-//   `rest-row` changes to something it didn't report (keys stepping a read-only
-//   list).
+// - Focus (`focus-key` changes, with the focused item at `focus-row`, taking
+//   `focus-span` from the top of its row) moves it only when that item isn't
+//   fully in view, and then only as far as needed to show it, with the
+//   standard glide.
+// - `scroll(delta-y)` (from a `scroll-event`) moves it by pixels: a touchpad
+//   directly, a wheel notch with the glide. It never moves focus.
+// - The owner (Rust, or the page) keeps `rest-row`, the row at the top, for
+//   mounting rows near the camera: whenever the camera's top edge moves into
+//   another row it says so through `scrolled(rows)`, relative to `rest-row`.
+// - The owner can also move the camera itself by setting `rest-row` to a row
+//   it wasn't told (Up/Down in a read-only list), or reset it through
+//   `settle-key` (a fresh visit: instant, as does `instant`).
+// - A touchpad pulling past either end stretches the content (`Scroll.rubber`);
+//   when the fingers stop (no touchpad movement for a moment) it springs back.
 export component ScrollCamera {
     in property <int> rest-row: 0;
     in property <length> stride: 1px;
@@ -66,49 +79,119 @@ export component ScrollCamera {
     in property <length> viewport: 0px;
     in property <int> settle-key: 0;
     in property <int> focus-key: 0;
+    // The focused item's row (-1 for none), and how far it reaches from the
+    // top of that row, margins included.
+    in property <int> focus-row: -1;
+    in property <length> focus-span: 0px;
     in property <bool> instant: false;
     callback scrolled(int);
 
-    private property <bool> free: false;
+    // Where the camera rests. Until something moves it, it follows the
+    // owner's row.
+    private property <length> position: Scroll.camera(root.rest-row * root.stride, root.content, root.viewport);
+    // The top row last agreed with the owner.
+    private property <int> agreed-row: 0;
+    private property <int> seen-focus: 0;
+    init => {
+        root.agreed-row = root.rest-row;
+        root.seen-focus = root.focus-key;
+    }
     // Touchpad input follows directly, without a glide.
     private property <bool> follow: false;
-    private property <length> free-camera: 0px;
-    private property <int> reported: 0;
+    // Touchpad travel past the content's ends (negative: above the top), and
+    // whether the fingers are still moving.
+    private property <length> pull: 0px;
+    private property <bool> pulling: false;
     private property <length> limit: max(0px, root.content - root.viewport);
     // Where the camera is going.
-    out property <length> target: root.free ? max(0px, min(root.free-camera, root.limit))
-        : Scroll.camera(root.rest-row * root.stride, root.content, root.viewport);
-    // Where it is: draw with this.
-    out property <length> camera: root.target;
-    animate camera {
-        duration: !settle.settled || root.instant || (root.free && root.follow)
-            ? 0ms : Motion.scroll-duration;
+    out property <length> target: max(0px, min(root.limit, root.position));
+    private property <length> base: root.target;
+    animate base {
+        duration: !settle.settled || root.instant || root.follow ? 0ms : Motion.scroll-duration;
         easing: linear;
     }
+    private property <length> stretch: Scroll.rubber(root.pull);
+    animate stretch {
+        duration: root.pulling ? 0ms : Motion.overscroll-return-duration;
+        easing: ease-out;
+    }
+    // Where it is: draw with this.
+    out property <length> camera: root.base + root.stretch;
 
     settle := CameraSettle { key: root.settle-key; }
-
-    public function scroll(delta-y: length) {
-        if !root.free {
-            root.free-camera = root.target;
-            root.reported = root.rest-row;
-            root.free = true;
-        }
-        root.follow = !Wheel.is-notch(delta-y);
-        root.free-camera = max(0px, min(root.limit, root.free-camera + Wheel.distance(delta-y)));
-        let top = Math.floor(root.free-camera / root.stride);
-        if top != root.reported {
-            let rows = top - root.reported;
-            root.reported = top;
-            root.scrolled(rows);
+    release := Timer {
+        interval: 90ms;
+        running: false;
+        triggered => {
+            self.stop();
+            root.pulling = false;
+            root.pull = 0px;
         }
     }
 
-    changed focus-key => { root.free = false; }
-    changed settle-key => { root.free = false; }
-    changed rest-row => {
-        if root.free && root.rest-row != root.reported {
-            root.free = false;
+    // Tell the owner which row is now at the top.
+    function report() {
+        let top = Math.floor(root.target / root.stride);
+        root.agreed-row = top;
+        if top != root.rest-row {
+            root.scrolled(top - root.rest-row);
         }
+    }
+    // Show the focused item, moving no further than needed.
+    function reveal-focus() {
+        root.seen-focus = root.focus-key;
+        root.follow = false;
+        root.pull = 0px;
+        root.position = root.target;
+        if root.focus-row >= 0 {
+            let top = root.focus-row * root.stride;
+            let lowest = top + root.focus-span - root.viewport;
+            root.position = min(top, max(lowest, root.position));
+        }
+        root.report();
+    }
+    // Go where the owner says.
+    function rest-on-row() {
+        root.follow = false;
+        root.pull = 0px;
+        root.position = Scroll.camera(root.rest-row * root.stride, root.content, root.viewport);
+        root.agreed-row = root.rest-row;
+    }
+
+    public function scroll(delta-y: length) {
+        root.follow = !Wheel.is-notch(delta-y);
+        root.position = root.target;
+        if root.follow {
+            // Past an end, the travel becomes pull rather than movement.
+            let raw = root.position + root.pull + Wheel.distance(delta-y);
+            root.position = max(0px, min(root.limit, raw));
+            root.pull = raw - root.position;
+            root.pulling = true;
+            release.stop();
+            release.start();
+        } else {
+            root.pull = 0px;
+            root.position = max(0px, min(root.limit, root.position + Wheel.distance(delta-y)));
+        }
+        root.report();
+    }
+
+    // Rust publishes focus and the row together; whichever change is seen
+    // first, a focus move is handled as one.
+    changed focus-key => {
+        if root.focus-key != root.seen-focus {
+            root.reveal-focus();
+        }
+    }
+    changed rest-row => {
+        if root.focus-key != root.seen-focus {
+            root.reveal-focus();
+        } else if root.rest-row != root.agreed-row {
+            root.rest-on-row();
+        }
+    }
+    changed settle-key => {
+        root.seen-focus = root.focus-key;
+        root.rest-on-row();
     }
 }

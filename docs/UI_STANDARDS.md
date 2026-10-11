@@ -164,9 +164,12 @@ Every vertical list and grid (Library, Album, Achievements' two lists,
 Activity's session history) scrolls the same way, through one
 `ScrollCamera` (`ui/components/scroll.slint`):
 
-- **Target:** the first whole row in view. Moving focus past an edge moves
-  the camera the least distance that brings the focused row fully into view.
-  The wheel and touchpad move it freely instead (below).
+- **Focus:** the camera rests wherever it was left, to the pixel. Moving
+  focus to an item that is fully in view doesn't move it at all; moving to
+  one that is partly or wholly out of view moves it the least distance that
+  shows the item fully (its padding and focus frame included), with the
+  standard glide. It never snaps onto row boundaries. The wheel and touchpad
+  move it freely (below).
 - **Never past the end:** `Scroll.camera` clamps the camera to
   `[0, content − viewport]`. At the end, the last row rests on the
   viewport's bottom edge; there is never empty space under it. A short list
@@ -198,8 +201,14 @@ so follows the desktop's natural/traditional scrolling setting:
 - The camera stays where it was scrolled, between rows if need be, clamped
   to the content. Whenever its top edge crosses into another row it tells
   the owner (`scrolled(rows)`), so Rust can keep the mounted rows around it.
-- It settles back onto whole rows when focus moves, or when the owner
-  changes the row itself (Up/Down in a read-only list).
+- Focus moving afterwards follows the rule above: no movement if the item
+  is fully in view. Only the owner changing the row itself (Up/Down in a
+  read-only list, a fresh visit) puts the camera back on a row.
+- **Overscroll:** a touchpad pulling past either end stretches the content
+  with growing resistance (`Scroll.rubber`, at most 80 px), and once the
+  fingers stop (no touchpad movement for 90 ms) it springs back over
+  `Motion.overscroll-return-duration` (340 ms, ease-out). A wheel just stops
+  at the end. Reduced Motion turns it off. Home's carousel does the same.
 
 Horizontal scrolling is used by Home only: it pans the carousel's camera the
 same way, clamped to the shelf's ends.
