@@ -4,15 +4,19 @@
 //! Sounds play on a native PipeWire stream (`platform::pipewire`) that asks
 //! the graph for about 5 ms per cycle. Playing a cue is one atomic store,
 //! which PipeWire's next cycle picks up: nothing queues between a press and
-//! the sound. A small controller thread opens the stream, pauses it after a
-//! quiet spell (so the device can sleep) and resumes it on the next cue.
+//! the sound. A small controller thread opens the stream and keeps it
+//! running whenever Horizon is in front (silence costs little, and an output
+//! that falls asleep drops the first cue on waking, Bluetooth especially).
+//! It pauses only while a game has the foreground, and restarts the moment
+//! Horizon is back. After any restart, a cue waits until the output has run
+//! for `WARM_UP`, so it is delayed rather than lost.
 //! The UI thread never waits on PipeWire: a stalled server only silences
 //! the clicks.
 use std::{
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
-        mpsc::{self, RecvTimeoutError, SyncSender, TrySendError},
+        mpsc::{self, SyncSender, TrySendError},
     },
     time::{Duration, Instant},
 };
@@ -28,8 +32,11 @@ const BACK_WAV: &[u8] = include_bytes!("../ui/assets/horizon-back.wav");
 const SAMPLE_RATE: u32 = 48_000;
 /// Frames per PipeWire cycle while sounds are live (about 5 ms).
 const LATENCY_FRAMES: u32 = 256;
-/// The stream pauses after this long without a cue.
-const IDLE_PAUSE: Duration = Duration::from_secs(10);
+/// After the output (re)starts, cues wait until it has run this long:
+/// a waking output, Bluetooth headsets especially, drops its first moments.
+const WARM_UP: Duration = Duration::from_millis(300);
+/// A pause between PipeWire's calls this long means the output restarted.
+const RESTART_GAP: Duration = Duration::from_millis(50);
 /// A failed open is retried no sooner than this.
 const RETRY_DELAY: Duration = Duration::from_secs(5);
 
@@ -172,6 +179,9 @@ fn control(
     let cues = Arc::clone(request);
     let mut seen = cues.0.load(Ordering::Acquire);
     let mut playing: Option<(usize, usize)> = None;
+    let mut last_call: Option<Instant> = None;
+    let mut warm = 0usize;
+    let warm_up = (WARM_UP.as_millis() as usize) * SAMPLE_RATE as usize / 1000;
     let stream = match AudioStream::open(
         "Horizon UI sounds",
         Role::Game,
@@ -179,9 +189,16 @@ fn control(
         1,
         LATENCY_FRAMES,
         Box::new(move |out: &mut [f32], _delay| {
-            // A newer cue replaces the one playing (no pile-up on held input).
+            let now = Instant::now();
+            if last_call.is_none_or(|last| now.duration_since(last) > RESTART_GAP) {
+                warm = 0; // the output (re)started
+            }
+            last_call = Some(now);
+            // A newer cue replaces the one playing (no pile-up on held
+            // input). While the output warms up it waits, rather than being
+            // lost in the first moments the device drops.
             let latest = cues.0.load(Ordering::Acquire);
-            if latest != seen {
+            if latest != seen && warm >= warm_up {
                 seen = latest;
                 playing = Some(((latest & 0xff) as usize, 0));
             }
@@ -197,6 +214,7 @@ fn control(
                 }
             }
             out[written..].fill(0.0);
+            warm = warm.saturating_add(out.len());
         }),
     ) {
         Ok(stream) => stream,
@@ -205,22 +223,17 @@ fn control(
             return;
         }
     };
+    // Running whenever Horizon is in front, so the output never falls asleep
+    // under the user; paused while a game has the foreground.
     let mut foreground = true;
     let mut active = true;
-    loop {
-        let command = if active {
-            commands.recv_timeout(IDLE_PAUSE)
-        } else {
-            commands.recv().map_err(|_| RecvTimeoutError::Disconnected)
-        };
+    for command in commands {
         let want = match command {
-            Ok(Command::Wake) => foreground,
-            Ok(Command::Foreground(now)) => {
+            Command::Wake => foreground,
+            Command::Foreground(now) => {
                 foreground = now;
-                false
+                now
             }
-            Err(RecvTimeoutError::Timeout) => false,
-            Err(RecvTimeoutError::Disconnected) => break,
         };
         if want != active {
             stream.set_active(want);

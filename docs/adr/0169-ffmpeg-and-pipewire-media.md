@@ -36,7 +36,8 @@ The clock:
 
 **UI sounds.** One native stream asking for 256-frame (about 5 ms) cycles:
 - A cue is an atomic store that the next cycle picks up.
-- It pauses after 10 quiet seconds and while a game has the foreground.
+- It runs whenever Horizon is in front and pauses only while a game has the foreground. (An earlier 10-second idle pause let the output fall asleep, and a Bluetooth headset dropped the first cue on waking.)
+- After any restart, a cue waits until the output has run for 300 ms, so it is delayed rather than lost.
 
 **Sandbox.** Nothing uses PulseAudio any more. The Flatpak drops `--socket=pulseaudio` and keeps `--filesystem=xdg-run/pipewire-0`.
 

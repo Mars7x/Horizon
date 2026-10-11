@@ -1125,10 +1125,10 @@ impl AlbumController {
     fn publish_video(&self, ui: &AppWindow) {
         let video = self.active_video.borrow();
         let Some(video) = video.as_ref() else {
+            // The timeline keeps its place while the viewer fades out; the
+            // next video resets it when it starts.
             ui.set_album_viewer_playing(false);
             ui.set_album_video_clock_running(false);
-            ui.set_album_video_duration_ms(0);
-            set_clock(ui, Duration::ZERO, false);
             return;
         };
         let duration = video
