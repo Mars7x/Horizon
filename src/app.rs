@@ -348,6 +348,9 @@ pub fn run() -> Result<(), AppError> {
         Rc::clone(&steam_account),
         data_paths::achievements_cache_dir(ACHIEVEMENTS_CACHE_VERSION),
     );
+    // Read achievements now, in the background, so Activity's Milestones
+    // are already there the first time it opens.
+    achievements.preload(&ui);
     let achievement_updates = Rc::clone(&achievements);
     let achievement_ui = ui.as_weak();
     settings.set_steam_account_changed(Rc::new(move || {

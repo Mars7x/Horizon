@@ -41,6 +41,8 @@ pub struct AchievementsController {
     finished: Cell<bool>,
     unavailable: Cell<usize>,
     requested_badges: RefCell<BTreeSet<u32>>,
+    /// Badges asked for one by one: the Milestones preview's recent unlocks.
+    requested_recent: RefCell<BTreeSet<(u32, String)>>,
 }
 
 impl AchievementsController {
@@ -80,6 +82,7 @@ impl AchievementsController {
             finished: Cell::new(false),
             unavailable: Cell::new(0),
             requested_badges: RefCell::new(BTreeSet::new()),
+            requested_recent: RefCell::new(BTreeSet::new()),
         });
         drain.bind(&controller);
         controller.publish(ui);
@@ -105,6 +108,13 @@ impl AchievementsController {
         self.viewing_entries.set(false);
         self.entry_scroll.set(0);
         ui.set_achievements_viewing_entries(false);
+        self.preload(ui);
+    }
+
+    /// Start reading achievements (the cache first, then Steam) if nothing
+    /// has yet. Called at startup, so Activity's Milestones are already there
+    /// when it first opens, and again on each visit (a no-op once started).
+    pub fn preload(&self, ui: &AppWindow) {
         if self.started.get() {
             self.publish(ui);
             return;
@@ -153,6 +163,7 @@ impl AchievementsController {
         *self.receiver.borrow_mut() = receiver;
         self.loaded.borrow_mut().clear();
         self.requested_badges.borrow_mut().clear();
+        self.requested_recent.borrow_mut().clear();
         self.started.set(false);
         self.finished.set(false);
         self.unavailable.set(0);
@@ -244,6 +255,7 @@ impl AchievementsController {
         }
         if changed {
             self.publish(ui);
+            self.request_recent_badges();
             if catalog_changed {
                 ui.set_achievements_catalog_revision(
                     ui.get_achievements_catalog_revision().wrapping_add(1),
@@ -474,6 +486,51 @@ impl AchievementsController {
             }
         }
         true
+    }
+
+    /// Fetch the missing badges of the Milestones preview's recent unlocks,
+    /// and only those, so the preview is complete without opening each game.
+    fn request_recent_badges(&self) {
+        let Some(credentials) = self.account.borrow().credentials() else {
+            return;
+        };
+        let wanted: Vec<SteamGameAchievements> = {
+            let loaded = self.loaded.borrow();
+            let mut recent = loaded
+                .iter()
+                .flat_map(|game| {
+                    game.achievements
+                        .iter()
+                        .filter(|a| a.unlocked)
+                        .filter_map(move |a| a.unlocked_at.map(|at| (at, game, a)))
+                })
+                .collect::<Vec<_>>();
+            recent.sort_unstable_by_key(|row| std::cmp::Reverse(row.0));
+            let mut requested = self.requested_recent.borrow_mut();
+            recent
+                .into_iter()
+                .take(3)
+                .filter(|(_, _, a)| a.badge_rgba.is_none())
+                .filter(|(_, game, a)| requested.insert((game.game.app_id, a.api_name.clone())))
+                .map(|(_, game, a)| SteamGameAchievements {
+                    game: game.game.clone(),
+                    achievements: vec![a.clone()],
+                })
+                .collect()
+        };
+        for game in wanted {
+            let (credentials, sender, cache_root) = (
+                credentials.clone(),
+                self.sender.borrow().clone(),
+                self.cache_root.clone(),
+            );
+            let key = (game.game.app_id, game.achievements[0].api_name.clone());
+            if !spawn("achievements-recent-badge", move || {
+                hydrate_game_badges(credentials, game, cache_root, sender)
+            }) {
+                self.requested_recent.borrow_mut().remove(&key);
+            }
+        }
     }
 
     pub fn exit_entries(&self, ui: &AppWindow) -> bool {
