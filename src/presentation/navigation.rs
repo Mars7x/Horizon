@@ -716,7 +716,7 @@ impl NavigationController {
                 } else {
                     1
                 };
-                if self.focus.borrow_mut().move_utility(delta, event.repeated) {
+                if self.focus.borrow_mut().move_utility(delta) {
                     debug!(utility = ?self.focus.borrow().utility(), "top utility focus moved");
                     self.publish_focus(ui);
                 }
