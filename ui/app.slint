@@ -303,7 +303,7 @@ export component AppWindow inherits Window {
     // Settings: root, Appearance, Third-Party. All selection and persistence Rust-owned.
     in property <int> settings-view: 0;
     in property <int> settings-selection: 0;
-    in property <int> settings-theme-index: 0; // System, Light, Dark
+    in property <int> settings-theme-index: 0; // System, Light, Dark, Black
     in property <int> settings-accent-index: 0; // System, spectrum presets
     in property <bool> settings-ui-sounds-enabled: true;
 
@@ -929,13 +929,16 @@ export component AppWindow inherits Window {
                 opacity: root.chrome-opacity;
                 transform-scale: root.chrome-scale;
                 transform-origin: { x: self.width / 2, y: root.height / 2 - self.y };
-                background: Theme.surface.with-alpha(Theme.is-dark ? 0.78 : 0.92);
+                // Black keeps the bar on the black page; the divider marks its edge.
+                background: Theme.is-black ? Theme.background
+                    : Theme.surface.with-alpha(Theme.is-dark ? 0.78 : 0.92);
 
                 Rectangle {
                     x: 0px;
                     y: parent.height - 1px;
                     width: parent.width;
                     height: 1px;
+                    visible: !Theme.is-black;
                     background: Theme.divider.with-alpha(0.55);
                 }
             }

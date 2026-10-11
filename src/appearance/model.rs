@@ -23,6 +23,8 @@ pub enum ThemePreference {
     System,
     Light,
     Dark,
+    /// Dark with true-black backgrounds, for OLED screens.
+    Black,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -37,6 +39,14 @@ pub enum AccentPreference {
 pub enum EffectiveTheme {
     Light,
     Dark,
+    /// Dark on true black. Only chosen explicitly; the system never asks for it.
+    Black,
+}
+
+impl EffectiveTheme {
+    pub fn is_dark(self) -> bool {
+        !matches!(self, Self::Light)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -54,6 +64,7 @@ impl AppearancePreferences {
             ThemePreference::System => 0,
             ThemePreference::Light => 1,
             ThemePreference::Dark => 2,
+            ThemePreference::Black => 3,
         }
     }
 
@@ -122,6 +133,7 @@ impl AppearanceState {
             ThemePreference::System => self.system.preferred_theme.unwrap_or(EffectiveTheme::Light),
             ThemePreference::Light => EffectiveTheme::Light,
             ThemePreference::Dark => EffectiveTheme::Dark,
+            ThemePreference::Black => EffectiveTheme::Black,
         };
 
         let accent = match self.preferences.accent {
@@ -164,6 +176,16 @@ impl Palette {
                     Rgb::new(165, 165, 173),
                     Rgb::new(56, 56, 63),
                 ),
+                // Pixels that are off: black page, surfaces only just lifted
+                // off it so cards and rows still read as shapes.
+                (EffectiveTheme::Black, false) => (
+                    Rgb::BLACK,
+                    Rgb::new(14, 14, 16),
+                    Rgb::new(24, 24, 27),
+                    Rgb::new(246, 246, 247),
+                    Rgb::new(160, 160, 168),
+                    Rgb::new(44, 44, 50),
+                ),
                 (EffectiveTheme::Light, true) => (
                     Rgb::WHITE,
                     Rgb::WHITE,
@@ -172,7 +194,7 @@ impl Palette {
                     Rgb::new(45, 45, 45),
                     Rgb::BLACK,
                 ),
-                (EffectiveTheme::Dark, true) => (
+                (EffectiveTheme::Dark | EffectiveTheme::Black, true) => (
                     Rgb::BLACK,
                     Rgb::BLACK,
                     Rgb::new(16, 16, 16),
@@ -187,9 +209,10 @@ impl Palette {
         // readable focus token; shade it while preserving the chosen hue.
         // 4.5:1 also exceeds the 3:1 non-text focus contrast requirement.
         let threshold = if high_contrast { 7.0 } else { 4.5 };
-        let target = match theme {
-            EffectiveTheme::Light => Rgb::BLACK,
-            EffectiveTheme::Dark => Rgb::WHITE,
+        let target = if theme.is_dark() {
+            Rgb::WHITE
+        } else {
+            Rgb::BLACK
         };
         let accent = (0..=100)
             .map(|step| accent.mix(target, step as f32 / 100.0))
@@ -206,7 +229,7 @@ impl Palette {
                 accent.mix(Rgb::BLACK, 0.16),
                 background.mix(accent, if high_contrast { 0.22 } else { 0.13 }),
             ),
-            EffectiveTheme::Dark => (
+            EffectiveTheme::Dark | EffectiveTheme::Black => (
                 accent.mix(Rgb::WHITE, 0.12),
                 accent.mix(Rgb::WHITE, 0.20),
                 background.mix(accent, if high_contrast { 0.28 } else { 0.18 }),
@@ -239,7 +262,11 @@ mod tests {
 
     #[test]
     fn all_preset_accents_remain_readable_on_all_theme_surfaces() {
-        for theme in [EffectiveTheme::Light, EffectiveTheme::Dark] {
+        for theme in [
+            EffectiveTheme::Light,
+            EffectiveTheme::Dark,
+            EffectiveTheme::Black,
+        ] {
             for high_contrast in [false, true] {
                 for (_, swatch) in super::ACCENT_PRESETS {
                     let palette = super::Palette::new(theme, swatch, high_contrast);
@@ -294,6 +321,17 @@ mod tests {
         };
 
         assert_eq!(state.resolve().theme, EffectiveTheme::Dark);
+    }
+
+    #[test]
+    fn black_is_dark_on_a_true_black_page() {
+        let mut state = AppearanceState::default();
+        state.preferences.theme = ThemePreference::Black;
+        let resolved = state.resolve();
+        assert_eq!(resolved.theme, EffectiveTheme::Black);
+        assert!(resolved.theme.is_dark());
+        assert_eq!(resolved.palette.background, Rgb::BLACK);
+        assert_eq!(state.preferences.theme_index(), 3);
     }
 
     #[test]

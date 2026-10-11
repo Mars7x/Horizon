@@ -94,7 +94,7 @@ component AccentSwatch inherits Rectangle {
 
 export component SettingsPage inherits Rectangle {
     in property <int> view: 0; // 0 Settings, 1 Appearance, 2 Third-Party, 3 Steam Account
-    in property <int> theme-index: 0; // System, Light, Dark
+    in property <int> theme-index: 0; // System, Light, Dark, Black
     in property <int> accent-index: 0; // System, nine spectrum colours
     in property <bool> ui-sounds-enabled: true;
     in property <string> appearance-feedback: "";
@@ -253,37 +253,46 @@ export component SettingsPage inherits Rectangle {
             font-size: Typography.heading-size;
             font-weight: Typography.heading-weight;
         }
-        // A compact three-way selector instead of full-width, double-outlined cards.
+        // A compact four-way selector instead of full-width, double-outlined cards.
         theme-choices := Rectangle {
             x: 0px; y: 76px;
             width: min(parent.width, 780px); height: 66px;
             background: transparent;
             AppearanceChoice {
-                x: (parent.width - 24px) / 3 * 0 + 0px;
+                x: (parent.width - 36px) / 4 * 0 + 0px;
                 y: 0px;
-                width: (parent.width - 24px) / 3; height: 66px;
+                width: (parent.width - 36px) / 4; height: 66px;
                 label: "System";
                 selected: root.theme-index == 0;
                 focused: root.view == 1 && root.selection == 0;
                 activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(0); } }
             }
             AppearanceChoice {
-                x: (parent.width - 24px) / 3 * 1 + 12px;
+                x: (parent.width - 36px) / 4 * 1 + 12px;
                 y: 0px;
-                width: (parent.width - 24px) / 3; height: 66px;
+                width: (parent.width - 36px) / 4; height: 66px;
                 label: "Light";
                 selected: root.theme-index == 1;
                 focused: root.view == 1 && root.selection == 1;
                 activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(1); } }
             }
             AppearanceChoice {
-                x: (parent.width - 24px) / 3 * 2 + 24px;
+                x: (parent.width - 36px) / 4 * 2 + 24px;
                 y: 0px;
-                width: (parent.width - 24px) / 3; height: 66px;
+                width: (parent.width - 36px) / 4; height: 66px;
                 label: "Dark";
                 selected: root.theme-index == 2;
                 focused: root.view == 1 && root.selection == 2;
                 activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(2); } }
+            }
+            AppearanceChoice {
+                x: (parent.width - 36px) / 4 * 3 + 36px;
+                y: 0px;
+                width: (parent.width - 36px) / 4; height: 66px;
+                label: "Black";
+                selected: root.theme-index == 3;
+                focused: root.view == 1 && root.selection == 3;
+                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(3); } }
             }
         }
         Text {
@@ -305,8 +314,8 @@ export component SettingsPage inherits Rectangle {
                 width: 104px; height: 56px;
                 label: "System";
                 selected: root.accent-index == 0;
-                focused: root.view == 1 && root.selection == 3;
-                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(3); } }
+                focused: root.view == 1 && root.selection == 4;
+                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(4); } }
             }
             AccentSwatch {
                 x: 130px; y: 11px;
@@ -314,8 +323,8 @@ export component SettingsPage inherits Rectangle {
                 label: "Red";
                 swatch-color: #e5484d;
                 selected: root.accent-index == 1;
-                focused: root.view == 1 && root.selection == 4;
-                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(4); } }
+                focused: root.view == 1 && root.selection == 5;
+                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(5); } }
             }
             AccentSwatch {
                 x: 192px; y: 11px;
@@ -323,8 +332,8 @@ export component SettingsPage inherits Rectangle {
                 label: "Orange";
                 swatch-color: #f28c28;
                 selected: root.accent-index == 2;
-                focused: root.view == 1 && root.selection == 5;
-                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(5); } }
+                focused: root.view == 1 && root.selection == 6;
+                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(6); } }
             }
             AccentSwatch {
                 x: 254px; y: 11px;
@@ -332,8 +341,8 @@ export component SettingsPage inherits Rectangle {
                 label: "Yellow";
                 swatch-color: #f2c94c;
                 selected: root.accent-index == 3;
-                focused: root.view == 1 && root.selection == 6;
-                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(6); } }
+                focused: root.view == 1 && root.selection == 7;
+                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(7); } }
             }
             AccentSwatch {
                 x: 316px; y: 11px;
@@ -341,8 +350,8 @@ export component SettingsPage inherits Rectangle {
                 label: "Green";
                 swatch-color: #3cb978;
                 selected: root.accent-index == 4;
-                focused: root.view == 1 && root.selection == 7;
-                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(7); } }
+                focused: root.view == 1 && root.selection == 8;
+                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(8); } }
             }
             AccentSwatch {
                 x: 378px; y: 11px;
@@ -350,8 +359,8 @@ export component SettingsPage inherits Rectangle {
                 label: "Teal";
                 swatch-color: #24b6a8;
                 selected: root.accent-index == 5;
-                focused: root.view == 1 && root.selection == 8;
-                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(8); } }
+                focused: root.view == 1 && root.selection == 9;
+                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(9); } }
             }
             AccentSwatch {
                 x: 440px; y: 11px;
@@ -359,8 +368,8 @@ export component SettingsPage inherits Rectangle {
                 label: "Blue";
                 swatch-color: #3584e4;
                 selected: root.accent-index == 6;
-                focused: root.view == 1 && root.selection == 9;
-                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(9); } }
+                focused: root.view == 1 && root.selection == 10;
+                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(10); } }
             }
             AccentSwatch {
                 x: 502px; y: 11px;
@@ -368,8 +377,8 @@ export component SettingsPage inherits Rectangle {
                 label: "Purple";
                 swatch-color: #8b5cf6;
                 selected: root.accent-index == 7;
-                focused: root.view == 1 && root.selection == 10;
-                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(10); } }
+                focused: root.view == 1 && root.selection == 11;
+                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(11); } }
             }
             AccentSwatch {
                 x: 564px; y: 11px;
@@ -377,19 +386,19 @@ export component SettingsPage inherits Rectangle {
                 label: "Pink";
                 swatch-color: #e65da7;
                 selected: root.accent-index == 8;
-                focused: root.view == 1 && root.selection == 11;
-                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(11); } }
+                focused: root.view == 1 && root.selection == 12;
+                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(12); } }
             }
             AccentSwatch {
                 x: 626px; y: 11px;
                 width: 48px; height: 50px;
                 label: "White";
                 // This is the same contrast-adjusted white/grey as the actual
-                // app accent for the current Light/Dark/High Contrast setting.
+                // app accent for the current Light/Dark/Black/High Contrast setting.
                 swatch-color: Theme.appearance-white-swatch;
                 selected: root.accent-index == 9;
-                focused: root.view == 1 && root.selection == 12;
-                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(12); } }
+                focused: root.view == 1 && root.selection == 13;
+                activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(13); } }
             }
         }
         Text {
@@ -407,8 +416,8 @@ export component SettingsPage inherits Rectangle {
             subtitle: "Sounds when you move and select";
             toggle: true;
             checked: root.ui-sounds-enabled;
-            focused: root.view == 1 && root.selection == 13;
-            activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(13); } }
+            focused: root.view == 1 && root.selection == 14;
+            activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(14); } }
         }
     }
 

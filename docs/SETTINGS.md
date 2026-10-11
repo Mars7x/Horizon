@@ -9,7 +9,7 @@ category rows use a bounded vertical layout and no longer overlap. In
 Appearance, selected Theme/System choices use accent-coloured text instead of
 both a checkmark and an outline. The nine accent presets appear as a compact
 spectrum of colour circles, retaining accessible names for screen readers.
-The White swatch changes from white in Dark mode to the same readable grey
+The White swatch changes from white in Dark and Black to the same readable grey
 used throughout Horizon in Light mode, with an animated transition.
 
 Appearance contains the independent theme, accent, and UI Sounds preferences.
@@ -115,8 +115,8 @@ subtitle reflects these three sounds rather than referring only to navigation.
 
 System accent and the nine colour dots form **one row**: Right from System
 focuses Red, and Left from Red focuses System. Left/Right continue through all
-nine swatches and wrap between White and System. Theme System/Light/Dark retains
-its own three-option horizontal row. Vertical moves preserve the nearest visual
+nine swatches and wrap between White and System. Theme System/Light/Dark/Black retains
+its own four-option horizontal row. Vertical moves preserve the nearest visual
 column and remember the last accent when returning from Theme or UI Sounds.
 Only Accept/click changes a theme or accent preference; the navigation sound is
 played only for real focus movement. UI Sounds continues to use Left/Right as

@@ -272,7 +272,7 @@ impl SettingsController {
                     appearance_step_vertical(
                         page.selected,
                         action,
-                        page.last_accent_selection.unwrap_or(3),
+                        page.last_accent_selection.unwrap_or(4),
                         event.repeated,
                     )
                 } else if page.view == SettingsView::SteamGridDb
@@ -282,7 +282,7 @@ impl SettingsController {
                 } else {
                     step_with_edge_wrap(page.selected, 0, count - 1, delta, event.repeated)
                 };
-                if page.view == SettingsView::Appearance && (3..=12).contains(&page.selected) {
+                if page.view == SettingsView::Appearance && (4..=13).contains(&page.selected) {
                     page.last_accent_selection = Some(page.selected);
                 }
             }
@@ -292,7 +292,7 @@ impl SettingsController {
                     let preferred = action == UiAction::Right;
                     drop(page);
                     self.set_preference(ui, preferred);
-                } else if page.view == SettingsView::Appearance && page.selected == 13 {
+                } else if page.view == SettingsView::Appearance && page.selected == 14 {
                     drop(page);
                     self.set_ui_sounds_enabled(ui, action == UiAction::Right);
                 } else if page.view == SettingsView::Appearance {
@@ -300,7 +300,7 @@ impl SettingsController {
                     let mut page = self.page.borrow_mut();
                     page.selected =
                         appearance_step_horizontal(page.selected, action, event.repeated);
-                    if (3..=12).contains(&page.selected) {
+                    if (4..=13).contains(&page.selected) {
                         page.last_accent_selection = Some(page.selected);
                     }
                 }
@@ -408,17 +408,17 @@ impl SettingsController {
                 return;
             }
             SettingsView::Appearance => {
-                if !(0..=13).contains(&selected) {
+                if !(0..=14).contains(&selected) {
                     return;
                 }
                 {
                     let mut page = self.page.borrow_mut();
                     page.selected = selected;
-                    if (3..=12).contains(&selected) {
+                    if (4..=13).contains(&selected) {
                         page.last_accent_selection = Some(selected);
                     }
                 }
-                if selected == 13 {
+                if selected == 14 {
                     let enabled = !self.appearance.preferences().ui_sounds_enabled;
                     self.set_ui_sounds_enabled(ui, enabled);
                     return;
@@ -433,10 +433,13 @@ impl SettingsController {
                     2 => self
                         .appearance
                         .set_theme_preference(ui, ThemePreference::Dark),
-                    3 => self.appearance.use_system_accent(ui),
+                    3 => self
+                        .appearance
+                        .set_theme_preference(ui, ThemePreference::Black),
+                    4 => self.appearance.use_system_accent(ui),
                     _ => self
                         .appearance
-                        .set_custom_accent(ui, ACCENT_PRESETS[(selected - 4) as usize].1),
+                        .set_custom_accent(ui, ACCENT_PRESETS[(selected - 5) as usize].1),
                 };
                 self.page.borrow_mut().feedback = if result.is_ok() {
                     String::new()
@@ -868,7 +871,7 @@ fn settings_parent(view: SettingsView) -> Option<(SettingsView, i32)> {
 fn selection_count(view: SettingsView) -> i32 {
     match view {
         SettingsView::Root => 2,
-        SettingsView::Appearance => 14,
+        SettingsView::Appearance => 15,
         SettingsView::ThirdParty => 2,
         SettingsView::SteamGridDb => 3,
         SettingsView::SteamAccount => 2,
@@ -909,71 +912,68 @@ fn root_destination(index: i32) -> Option<SettingsView> {
 }
 
 // Two horizontal focus rows match the visible Appearance layout:
-// Theme (System, Light, Dark), then Accent (System + nine swatches).
+// Theme (System, Light, Dark, Black), then Accent (System + nine swatches).
 // The UI Sounds switch is a separate full-width row. Do not separate the
 // System accent from the swatches: they share the same y coordinate.
 fn appearance_step_horizontal(index: i32, direction: UiAction, repeated: bool) -> i32 {
     let (first, last) = match index {
-        0..=2 => (0, 2),
-        3..=12 => (3, 12),
+        0..=3 => (0, 3),
+        4..=13 => (4, 13),
         _ => return index, // UI Sounds uses Left/Right to switch Off/On.
     };
     let delta = if direction == UiAction::Left { -1 } else { 1 };
     step_with_edge_wrap(index, first, last, delta, repeated)
 }
 
+/// The accents under each theme choice, by horizontal position: System and
+/// Red under System, Orange to Green under Light, Teal to Purple under Dark,
+/// Pink and White under Black. The second value is where Down lands first.
+fn accent_column(theme: i32) -> (std::ops::RangeInclusive<i32>, i32) {
+    match theme {
+        0 => (4..=5, 4),
+        1 => (6..=8, 7),
+        2 => (9..=11, 10),
+        _ => (12..=13, 13),
+    }
+}
+
 // Vertical movement follows approximate horizontal positions of the visual
-// controls, preserving the last accent on a return trip. The accent layout is
-// fixed: System + Red/Orange align to Theme System, Yellow through Blue to
-// Theme Light, and Purple/Pink/White to Theme Dark.
+// controls, preserving the last accent on a return trip.
 fn appearance_step_vertical(
     index: i32,
     direction: UiAction,
     last_accent: i32,
     repeated: bool,
 ) -> i32 {
-    let last_accent = if (3..=12).contains(&last_accent) {
+    let last_accent = if (4..=13).contains(&last_accent) {
         last_accent
     } else {
-        3
+        4
     };
     match (index, direction) {
-        (0, UiAction::Down) => {
-            if (3..=5).contains(&last_accent) {
+        (0..=3, UiAction::Down) => {
+            let (column, first) = accent_column(index);
+            if column.contains(&last_accent) {
                 last_accent
             } else {
-                3
+                first
             }
         }
-        (1, UiAction::Down) => {
-            if (6..=9).contains(&last_accent) {
-                last_accent
-            } else {
-                8
-            }
-        }
-        (2, UiAction::Down) => {
-            if (10..=12).contains(&last_accent) {
-                last_accent
-            } else {
-                12
-            }
-        }
-        (0..=2, UiAction::Up) => {
+        (0..=3, UiAction::Up) => {
             if repeated {
                 index
             } else {
-                13
+                14
             }
         }
-        (3..=5, UiAction::Up) => 0,
-        (6..=9, UiAction::Up) => 1,
-        (10..=12, UiAction::Up) => 2,
-        (3..=12, UiAction::Down) => 13,
-        (13, UiAction::Up) => last_accent,
-        (13, UiAction::Down) => {
+        (4..=13, UiAction::Up) => (0..=3)
+            .find(|&theme| accent_column(theme).0.contains(&index))
+            .unwrap_or(0),
+        (4..=13, UiAction::Down) => 14,
+        (14, UiAction::Up) => last_accent,
+        (14, UiAction::Down) => {
             if repeated {
-                13
+                14
             } else {
                 0
             }
@@ -1024,7 +1024,7 @@ mod editor_navigation_tests {
     #[test]
     fn refresh_row_is_included_only_with_saved_key() {
         assert_eq!(super::selection_count(SettingsView::Root), 2);
-        assert_eq!(super::selection_count(SettingsView::Appearance), 14);
+        assert_eq!(super::selection_count(SettingsView::Appearance), 15);
         assert_eq!(super::selection_count(SettingsView::ThirdParty), 2);
         // Removing a key is X on its row, not a row of its own.
         assert_eq!(super::selection_count(SettingsView::SteamGridDb), 3);
@@ -1037,59 +1037,58 @@ mod editor_navigation_tests {
     #[test]
     fn appearance_navigation_respects_visual_rows() {
         use UiAction::{Down, Left, Right, Up};
-        assert_eq!(appearance_step_horizontal(0, Left, false), 2);
-        assert_eq!(appearance_step_horizontal(2, Right, false), 0);
+        assert_eq!(appearance_step_horizontal(0, Left, false), 3);
+        assert_eq!(appearance_step_horizontal(3, Right, false), 0);
 
         // System accent is in the SAME horizontal row as the nine swatches.
-        let mut focus = 3;
-        for expected in 4..=12 {
+        let mut focus = 4;
+        for expected in 5..=13 {
             focus = appearance_step_horizontal(focus, Right, false);
             assert_eq!(focus, expected);
         }
-        assert_eq!(appearance_step_horizontal(12, Right, false), 3);
-        assert_eq!(appearance_step_horizontal(3, Left, false), 12);
-        assert_eq!(appearance_step_horizontal(4, Left, false), 3);
-        for accent in 3..=12 {
+        assert_eq!(appearance_step_horizontal(13, Right, false), 4);
+        assert_eq!(appearance_step_horizontal(4, Left, false), 13);
+        for accent in 4..=13 {
             let next = appearance_step_horizontal(accent, Right, false);
             assert_eq!(appearance_step_horizontal(next, Left, false), accent);
         }
 
         // Up/Down uses spatial columns and reverses when returning to a swatch.
-        for accent in 3..=12 {
+        for accent in 4..=13 {
             let theme = appearance_step_vertical(accent, Up, accent, false);
-            let expected_theme = if accent <= 5 {
-                0
-            } else if accent <= 9 {
-                1
-            } else {
-                2
+            let expected_theme = match accent {
+                4..=5 => 0,
+                6..=8 => 1,
+                9..=11 => 2,
+                _ => 3,
             };
             assert_eq!(theme, expected_theme);
             assert_eq!(appearance_step_vertical(theme, Down, accent, false), accent);
-            assert_eq!(appearance_step_vertical(accent, Down, accent, false), 13);
-            assert_eq!(appearance_step_vertical(13, Up, accent, false), accent);
+            assert_eq!(appearance_step_vertical(accent, Down, accent, false), 14);
+            assert_eq!(appearance_step_vertical(14, Up, accent, false), accent);
         }
-        assert_eq!(appearance_step_vertical(0, Down, 8, false), 3);
-        assert_eq!(appearance_step_vertical(1, Down, 3, false), 8);
-        assert_eq!(appearance_step_vertical(2, Down, 3, false), 12);
-        assert_eq!(appearance_step_vertical(13, Up, 0, false), 3);
-        assert_eq!(appearance_step_vertical(13, Down, 8, false), 0);
-        assert_eq!(appearance_step_horizontal(13, Left, false), 13);
-        assert_eq!(appearance_step_horizontal(13, Right, false), 13);
+        assert_eq!(appearance_step_vertical(0, Down, 8, false), 4);
+        assert_eq!(appearance_step_vertical(1, Down, 4, false), 7);
+        assert_eq!(appearance_step_vertical(2, Down, 4, false), 10);
+        assert_eq!(appearance_step_vertical(3, Down, 4, false), 13);
+        assert_eq!(appearance_step_vertical(14, Up, 0, false), 4);
+        assert_eq!(appearance_step_vertical(14, Down, 8, false), 0);
+        assert_eq!(appearance_step_horizontal(14, Left, false), 14);
+        assert_eq!(appearance_step_horizontal(14, Right, false), 14);
     }
 
     #[test]
     fn held_navigation_never_wraps_in_settings() {
         use UiAction::{Down, Left, Right, Up};
-        assert_eq!(appearance_step_horizontal(2, Right, true), 2);
+        assert_eq!(appearance_step_horizontal(3, Right, true), 3);
         assert_eq!(appearance_step_horizontal(0, Left, true), 0);
-        assert_eq!(appearance_step_horizontal(12, Right, true), 12);
-        assert_eq!(appearance_step_horizontal(3, Left, true), 3);
-        assert_eq!(appearance_step_horizontal(11, Right, true), 12);
-        assert_eq!(appearance_step_vertical(0, Up, 3, true), 0);
-        assert_eq!(appearance_step_vertical(13, Down, 3, true), 13);
-        assert_eq!(appearance_step_vertical(0, Up, 3, false), 13);
-        assert_eq!(appearance_step_vertical(13, Down, 3, false), 0);
+        assert_eq!(appearance_step_horizontal(13, Right, true), 13);
+        assert_eq!(appearance_step_horizontal(4, Left, true), 4);
+        assert_eq!(appearance_step_horizontal(12, Right, true), 13);
+        assert_eq!(appearance_step_vertical(0, Up, 4, true), 0);
+        assert_eq!(appearance_step_vertical(14, Down, 4, true), 14);
+        assert_eq!(appearance_step_vertical(0, Up, 4, false), 14);
+        assert_eq!(appearance_step_vertical(14, Down, 4, false), 0);
     }
 
     #[test]
