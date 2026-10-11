@@ -402,14 +402,10 @@ impl ShellFocus {
         changed
     }
 
-    /// Move horizontally inside the utility strip with the same boundary
-    /// policy as Home and Settings. A held direction clamps; a fresh press
-    /// already at the edge wraps. A real move clears the return anchor.
-    ///
-    /// The avatar sits left of the first utility: Left from it is the end
-    /// of the row (no wrap), Right from it is the first utility, and Left
-    /// from the first utility reaches it, held or not.
-    pub fn move_utility(&mut self, delta: i32, repeated: bool) -> bool {
+    /// Move horizontally inside the utility strip. The row never wraps:
+    /// the avatar is its left end and Shop its right end. A real move
+    /// clears the return anchor.
+    pub fn move_utility(&mut self, delta: i32) -> bool {
         if self.region != ShellFocusRegion::TopUtilities || delta == 0 {
             return false;
         }
@@ -428,13 +424,7 @@ impl ShellFocus {
             return true;
         }
 
-        let index = step_with_edge_wrap(
-            self.utility.index(),
-            0,
-            TopUtility::COUNT - 1,
-            delta,
-            repeated,
-        );
+        let index = (self.utility.index() + delta).clamp(0, TopUtility::COUNT - 1);
         let Some(next) = TopUtility::from_index(index) else {
             return false;
         };
@@ -633,20 +623,20 @@ mod tests {
     fn the_avatar_sits_left_of_the_first_utility() {
         let mut focus = ShellFocus::default();
         assert!(focus.enter_utilities_from_content(TopUtility::Activity, 3));
-        assert!(focus.move_utility(-1, false));
+        assert!(focus.move_utility(-1));
         assert_eq!(focus.utility(), TopUtility::Album);
         assert!(!focus.profile());
         // Left from Album reaches the avatar, fresh or held, and stops there.
-        assert!(focus.move_utility(-1, true));
+        assert!(focus.move_utility(-1));
         assert!(focus.profile());
-        assert!(!focus.move_utility(-1, false));
+        assert!(!focus.move_utility(-1));
         assert!(focus.profile());
         // Right goes back to Album.
-        assert!(focus.move_utility(1, false));
+        assert!(focus.move_utility(1));
         assert!(!focus.profile());
         assert_eq!(focus.utility(), TopUtility::Album);
         // Remembered with the route, forgotten on leaving the row.
-        focus.move_utility(-1, false);
+        focus.move_utility(-1);
         let snapshot = focus.snapshot();
         assert!(snapshot.profile());
         let mut restored = ShellFocus::default();
@@ -757,7 +747,7 @@ mod tests {
         assert_eq!(focus.utility(), TopUtility::Activity);
 
         assert!(focus.enter_utilities());
-        assert!(focus.move_utility(1, false));
+        assert!(focus.move_utility(1));
         assert_eq!(focus.utility(), TopUtility::Achievements);
         assert!(focus.leave_utilities());
         assert!(focus.enter_utilities());
@@ -765,25 +755,25 @@ mod tests {
     }
 
     #[test]
-    fn utility_strip_held_repeat_clamps_but_fresh_edge_press_wraps() {
+    fn utility_strip_never_wraps() {
         let mut focus = ShellFocus::default();
         focus.enter_utilities();
 
-        assert!(focus.move_utility(-2, true));
+        assert!(focus.move_utility(-2));
         assert_eq!(focus.utility(), TopUtility::Album);
         // The row's left end is the avatar, not a wrap to Shop.
-        assert!(focus.move_utility(-1, true));
+        assert!(focus.move_utility(-1));
         assert!(focus.profile());
-        assert!(!focus.move_utility(-1, false));
-        assert!(focus.move_utility(1, false));
-        // The right end clamps when held and wraps to Album when fresh.
+        assert!(!focus.move_utility(-1));
+        assert!(focus.move_utility(1));
+        // The right end stops at Shop, held or fresh.
         for _ in 0..5 {
-            focus.move_utility(1, true);
+            focus.move_utility(1);
         }
         assert_eq!(focus.utility(), TopUtility::Shop);
-        assert!(!focus.move_utility(1, true));
-        assert!(focus.move_utility(1, false));
-        assert_eq!(focus.utility(), TopUtility::Album);
+        assert!(!focus.move_utility(1));
+        assert!(!focus.move_utility(1));
+        assert_eq!(focus.utility(), TopUtility::Shop);
     }
 
     #[test]
@@ -816,7 +806,7 @@ mod tests {
         let mut focus = ShellFocus::default();
 
         assert!(focus.enter_utilities_from_content(TopUtility::Album, 3));
-        assert!(focus.move_utility(1, false));
+        assert!(focus.move_utility(1));
         assert_eq!(focus.utility(), TopUtility::Activity);
         assert_eq!(focus.content_anchor_index(), None);
     }
@@ -826,7 +816,7 @@ mod tests {
         let mut focus = ShellFocus::default();
 
         assert!(focus.enter_utilities_from_content(TopUtility::Album, 3));
-        assert!(focus.move_utility(1, false));
+        assert!(focus.move_utility(1));
         assert_eq!(focus.utility(), TopUtility::Activity);
 
         assert!(focus.leave_utilities_to_content(5));

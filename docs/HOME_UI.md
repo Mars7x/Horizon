@@ -486,8 +486,9 @@ for the game carousel, but uses the same `Theme.focus`, 140 ms focus transition
 and Reduced Motion behaviour as menu focus. Header utilities now use the same
 outline-only focus treatment as Settings (rounded to each icon's geometry).
 Directional repeat NEVER wraps. A new discrete Left/Right press when already
-at the game/header row boundary MAY wrap to the opposite end; the same press
-that reaches an edge does not wrap. Keyboard, controller D-pad and analog share
+at the game row boundary MAY wrap to the opposite end; the same press that
+reaches an edge does not wrap. The header row never wraps (since ADR 0178's
+follow-up): the avatar is its left end and Shop its right end. Keyboard, controller D-pad and analog share
 one Rust policy. See ADR 0117.
 
 

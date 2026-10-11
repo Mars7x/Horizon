@@ -31,7 +31,7 @@ The current `AppRoute::uses_shell_chrome()` returns true for **Home only**. Do n
 
 ## Profile
 
-`AppRoute::Profile` is the Profile page, opened from Home's avatar ([PROFILE.md](PROFILE.md)). The avatar is a focus position at the left end of the top row: `ShellFocus::profile` within the `TopUtilities` region, recorded in `FocusSnapshot`, so leaving and returning to Home restores it. It is not a `TopUtility`; Left from Album, the first utility, reaches it.
+`AppRoute::Profile` is the Profile page, opened from Home's avatar ([PROFILE.md](PROFILE.md)). The avatar is a focus position at the left end of the top row: `ShellFocus::profile` within the `TopUtilities` region, recorded in `FocusSnapshot`, so leaving and returning to Home restores it. It is not a `TopUtility`; Left from Album, the first utility, reaches it. The top row never wraps at either end.
 
 ## Back, Home and route visits
 

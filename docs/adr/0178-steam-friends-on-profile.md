@@ -20,3 +20,7 @@ The Friends utility was a placeholder page ("Friends and social activity will ap
 - Presence is as fresh as the last fetch (at most a minute old on opening the page); it does not update while the page stays open.
 - A large friend list mounts every row; rows outside the view are hidden, not unmounted. Steam's 2,000-friend cap keeps this bounded.
 - Errors and logs never carry the request URL (`without_url()`), which holds the key.
+
+## Follow-up: no wrap in the top row
+
+The utility row no longer wraps: a fresh Right on Shop used to jump to Album. Now the avatar is the row's left end and Shop its right end, held or fresh (`ShellFocus::move_utility` clamps; its `repeated` argument is gone). The Home game row's fresh-press wrap is unchanged.
