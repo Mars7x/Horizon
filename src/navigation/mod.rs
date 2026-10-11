@@ -464,10 +464,13 @@ pub fn nearest_game_for_x(
 /// `navigate_to` behaves like pushing a destination onto a back stack. The
 /// global Home action is deliberately different: it resets the stack and makes
 /// Home the root so Back cannot immediately return to the page that Home left.
+/// Like a browser, Back remembers the page it left so Forward (a mouse's
+/// forward button) can reopen it; opening any page or going Home forgets it.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Navigator {
     current: AppRoute,
     back_stack: Vec<AppRoute>,
+    forward_stack: Vec<AppRoute>,
 }
 
 impl Navigator {
@@ -489,6 +492,7 @@ impl Navigator {
         }
 
         self.back_stack.push(self.current);
+        self.forward_stack.clear();
         self.current = route;
         true
     }
@@ -499,6 +503,18 @@ impl Navigator {
             return false;
         };
 
+        self.forward_stack.push(self.current);
+        self.current = route;
+        true
+    }
+
+    /// Reopen the route Back last left, when there is one.
+    pub fn go_forward(&mut self) -> bool {
+        let Some(route) = self.forward_stack.pop() else {
+            return false;
+        };
+
+        self.back_stack.push(self.current);
         self.current = route;
         true
     }
@@ -508,6 +524,7 @@ impl Navigator {
         let changed = self.current != AppRoute::Home || !self.back_stack.is_empty();
         self.current = AppRoute::Home;
         self.back_stack.clear();
+        self.forward_stack.clear();
         changed
     }
 }
@@ -542,6 +559,38 @@ mod tests {
         ] {
             assert!(!AppRoute::Utility(page).uses_shell_chrome());
         }
+    }
+
+    #[test]
+    fn forward_reopens_what_back_left_until_a_new_page_opens() {
+        let mut navigator = Navigator::default();
+        let album = AppRoute::Utility(UtilityPage::Album);
+        let settings = AppRoute::Utility(UtilityPage::Settings);
+        assert!(!navigator.go_forward());
+        navigator.navigate_to(album);
+        navigator.navigate_to(settings);
+        assert!(navigator.go_back());
+        assert!(navigator.go_back());
+        assert_eq!(navigator.current(), AppRoute::Home);
+        assert!(navigator.go_forward());
+        assert_eq!(navigator.current(), album);
+        assert!(navigator.go_forward());
+        assert_eq!(navigator.current(), settings);
+        assert!(!navigator.go_forward());
+
+        // Back, then opening another page, forgets the way forward.
+        assert!(navigator.go_back());
+        navigator.navigate_to(AppRoute::Library);
+        assert!(!navigator.go_forward());
+        assert!(navigator.go_back());
+        assert_eq!(navigator.current(), album);
+
+        // So does Home.
+        assert!(navigator.go_back());
+        navigator.navigate_to(album);
+        assert!(navigator.go_back());
+        navigator.go_home();
+        assert!(!navigator.go_forward());
     }
 
     #[test]

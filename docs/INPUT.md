@@ -84,6 +84,10 @@ The Slint `FocusScope` forwards a logical key string and repeat flag to Rust. Ru
 
 Unrecognized keys are rejected so they are not silently claimed by Horizon.
 
+## Mouse side buttons
+
+`src/input/mouse.rs` maps a mouse's back button to Back and its forward button to Forward (see NAVIGATION.md), wherever the pointer is. `app.rs` reads them from winit (`on_winit_window_event`), claims only those two buttons, and dispatches the action on the next event-loop turn, through the same action sink as the keyboard, controller and hint clicks.
+
 ## Presentation behavior after Phase 4.2
 
 The Rust `NavigationController` remains above page controllers while `AppWindow` now renders the published active route inside a persistent shell:
@@ -148,7 +152,7 @@ Focus ownership is remembered per route above the input-adapter layer. SDL3 and 
 
 ## Phase 4.5 canonical global actions
 
-The shell now treats `Back`, `Menu`, and `Home` as an explicit global-action set. They are handled before focus-region or page-local input and never auto-repeat.
+The shell now treats `Back`, `Forward`, `Menu`, and `Home` as an explicit global-action set. They are handled before focus-region or page-local input and never auto-repeat.
 
 Canonical mappings:
 
@@ -158,6 +162,7 @@ Canonical mappings:
 | Back | Escape / Back | East face button |
 | Menu | Menu key | Start |
 | Home | Home key | Guide |
+| Forward | (mouse forward button) | — |
 
 The adapters only produce `UiAction`; `NavigationController` owns meaning. Back closes the global shell Menu when open, then falls through to normal route history. All five top utilities are real routed submenu destinations, so there is no separate utility-overlay modal priority. Menu toggles Horizon's shell Menu without mutating route history. Home closes the shell Menu and resets navigation to Home content focus with the first Home game selected. Unit tests cover both keyboard and SDL mappings so the two input paths cannot silently drift.
 
