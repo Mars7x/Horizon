@@ -535,6 +535,7 @@ impl HomeController {
             | UiAction::LeftBumper
             | UiAction::RightBumper
             | UiAction::Secondary
+            | UiAction::StickPress
             | UiAction::Forward => {
                 debug!(action = ?event.action, repeated = event.repeated, "UI action has no Home-local behavior");
             }

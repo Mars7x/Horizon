@@ -1,0 +1,10 @@
+// One on-screen keyboard key (presentation/keyboard.rs). `kind`: 0 a
+// character, 1 Backspace, 2 Shift, 3 the layer switch, 4 Space, 5 Done.
+// `x` and `width` are in row units (every row is 12 wide).
+export struct KeyboardKeyData {
+    label: string,
+    kind: int,
+    row: int,
+    x: float,
+    width: float,
+}

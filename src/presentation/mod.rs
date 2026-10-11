@@ -5,6 +5,7 @@ pub mod appearance;
 pub mod clock;
 pub mod friends;
 pub mod home;
+pub mod keyboard;
 pub mod library;
 pub mod navigation;
 pub mod profile;

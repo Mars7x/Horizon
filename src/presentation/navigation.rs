@@ -11,7 +11,10 @@ use crate::{
         AppRoute, Navigator, RouteFocusMemory, ShellFocus, ShellFocusRegion, TopUtility,
         UtilityPage, nearest_game_for_x, nearest_utility_for_x, utility_center_x,
     },
-    presentation::profile::{ProfileController, ProfileFeedback},
+    presentation::{
+        keyboard::{KeyboardController, KeyboardFeedback},
+        profile::{ProfileController, ProfileFeedback},
+    },
 };
 
 use super::{
@@ -42,6 +45,7 @@ pub struct NavigationController {
     achievements: RefCell<Option<Rc<AchievementsController>>>,
     profile: RefCell<Option<Rc<ProfileController>>>,
     album: RefCell<Option<Rc<AlbumController>>>,
+    keyboard: RefCell<Option<Rc<KeyboardController>>>,
 }
 
 impl NavigationController {
@@ -64,6 +68,7 @@ impl NavigationController {
             achievements: RefCell::new(None),
             profile: RefCell::new(None),
             album: RefCell::new(None),
+            keyboard: RefCell::new(None),
         });
         controller.publish_route(ui);
         controller.publish_focus(ui);
@@ -79,6 +84,11 @@ impl NavigationController {
     /// Refresh Activity's visible data before publishing the new page route.
     pub fn set_activity_on_enter(&self, callback: Rc<dyn Fn(&AppWindow)>) {
         *self.activity_on_enter.borrow_mut() = Some(callback);
+    }
+
+    /// The on-screen keyboard: while open, it takes input before any page.
+    pub fn set_keyboard(&self, keyboard: Rc<KeyboardController>) {
+        *self.keyboard.borrow_mut() = Some(keyboard);
     }
 
     /// The Profile page, opened by clicking Home's avatar (or A on it).
@@ -369,6 +379,16 @@ impl NavigationController {
     pub fn handle_action(&self, ui: &AppWindow, event: UiActionEvent) {
         if event.repeated && event.action.is_global() {
             debug!(action = ?event.action, "repeated global action ignored by navigation layer");
+            return;
+        }
+        let keyboard = self
+            .keyboard
+            .borrow()
+            .as_ref()
+            .map_or(KeyboardFeedback::Ignored, |keyboard| {
+                keyboard.handle_action(ui, event)
+            });
+        if keyboard == KeyboardFeedback::Handled {
             return;
         }
         if self.current_route() == AppRoute::Profile {
@@ -769,7 +789,8 @@ impl NavigationController {
             | UiAction::Accept
             | UiAction::LeftBumper
             | UiAction::RightBumper
-            | UiAction::Secondary => {
+            | UiAction::Secondary
+            | UiAction::StickPress => {
                 debug!(
                     action = ?event.action,
                     repeated = event.repeated,

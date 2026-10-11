@@ -484,6 +484,11 @@ impl ProfileController {
         let target = self.page.borrow().editor_target;
         let next = match (target, event.action) {
             (EDITOR_TEXT, UiAction::Down) => EDITOR_SAVE,
+            // A on the field brings up the on-screen keyboard.
+            (EDITOR_TEXT, UiAction::Accept) if !event.repeated => {
+                ui.invoke_keyboard_show(1);
+                return ProfileFeedback::Handled;
+            }
             (EDITOR_CANCEL | EDITOR_SAVE, UiAction::Up) => EDITOR_TEXT,
             (EDITOR_SAVE, UiAction::Left) => EDITOR_CANCEL,
             (EDITOR_CANCEL, UiAction::Right) => EDITOR_SAVE,

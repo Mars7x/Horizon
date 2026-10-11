@@ -528,6 +528,7 @@ pub const fn action_for_button(button: Button) -> Option<UiAction> {
         Button::East => Some(UiAction::Back),
         Button::West => Some(UiAction::Secondary),
         Button::Start => Some(UiAction::Menu),
+        Button::LeftStick | Button::RightStick => Some(UiAction::StickPress),
         Button::Guide => Some(UiAction::Home),
         Button::LeftShoulder => Some(UiAction::LeftBumper),
         Button::RightShoulder => Some(UiAction::RightBumper),

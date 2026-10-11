@@ -15,10 +15,13 @@ export component ModalDialog inherits Rectangle {
     in property <length> area-height;
     in property <length> card-width: 456px;
     in property <length> card-height: 196px;
+    // Keep the card above this much of the area's bottom (the on-screen
+    // keyboard); the backdrop still covers the whole area.
+    in property <length> lift: 0px;
     width: min(root.card-width, root.area-width - 64px);
     height: root.card-height;
     x: (root.area-width - self.width) / 2;
-    y: (root.area-height - self.height) / 2 + (root.open ? 0px : Motion.dialog-rise);
+    y: (root.area-height - root.lift - self.height) / 2 + (root.open ? 0px : Motion.dialog-rise);
     animate y { duration: Motion.dialog-duration; easing: ease-out; }
     opacity: root.open ? 1.0 : 0.0;
     animate opacity { duration: Motion.dialog-duration; easing: ease-in-out; }

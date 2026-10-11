@@ -1,0 +1,144 @@
+import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
+import { SelectionFocusSurface } from "selection-focus-surface.slint";
+import { KeyboardKeyData } from "../models/keyboard.slint";
+
+// Horizon's on-screen keyboard, for a controller or a touch screen. It is
+// drawn in Horizon's own window, not a system keyboard, so it behaves the
+// same on a desktop and inside gamescope. Layout, focus, Shift and what each
+// key does are Rust-owned (navigation/keyboard.rs, presentation/keyboard.rs);
+// this draws the keys and reports clicks and taps.
+//
+// It docks at the bottom of `area-height`, centred, and slides up into place
+// (Motion.dialog-duration; Reduced Motion shows it at once).
+export component OnScreenKeyboard inherits Rectangle {
+    in property <bool> open: false;
+    in property <[KeyboardKeyData]> keys;
+    in property <int> focused: 0;
+    // 0 off, 1 the next letter, 2 locked.
+    in property <int> shift: 0;
+    in property <length> area-width;
+    in property <length> area-height;
+    callback key-activated(int);
+
+    // Its height, for pages to keep their dialogs above it.
+    out property <length> panel-height: root.inset * 2 + root.key-height * 5 + root.gap * 4;
+    private property <length> inset: 16px;
+    private property <length> key-height: 52px;
+    private property <length> gap: 8px;
+    private property <length> panel-width: min(root.area-width - 32px, 940px);
+    private property <length> unit: (root.panel-width - root.inset * 2 + root.gap) / 12;
+
+    x: (root.area-width - root.panel-width) / 2;
+    y: root.area-height - root.panel-height + (root.open ? 0px : root.panel-height + 24px);
+    animate y { duration: Motion.dialog-duration; easing: ease-out; }
+    width: root.panel-width;
+    height: root.panel-height;
+    visible: root.open || self.y < root.area-height;
+    background: Theme.surface-raised;
+    border-radius: Metrics.radius-lg;
+    border-width: Theme.high-contrast ? 2px : 1px;
+    border-color: Theme.divider;
+    drop-shadow-offset-y: 6px;
+    drop-shadow-blur: 28px;
+    drop-shadow-color: Theme.is-dark ? #00000090 : #00000030;
+    // Clicks between keys stay on the keyboard.
+    TouchArea { width: parent.width; height: parent.height; }
+
+    for key[index] in root.keys : Rectangle {
+        x: root.inset + key.x * root.unit;
+        y: root.inset + key.row * (root.key-height + root.gap);
+        width: key.width * root.unit - root.gap;
+        height: root.key-height;
+
+        property <bool> lit: key.kind == 5 || (key.kind == 2 && root.shift == 2);
+        border-radius: Metrics.radius-sm;
+        border-width: Theme.high-contrast ? 2px : 1px;
+        border-color: root.focused == index ? transparent
+            : key.kind == 2 && root.shift == 1 ? Theme.accent : Theme.divider.with-alpha(0.6);
+        background: touch.pressed ? (self.lit ? Theme.accent-pressed : Theme.divider)
+            : self.lit ? (touch.has-hover ? Theme.accent-hover : Theme.accent)
+            : key.kind == 0 || key.kind == 4 ? (touch.has-hover ? Theme.surface-raised : Theme.surface)
+            : Theme.is-dark ? Theme.background : Theme.surface.darker(0.08);
+        animate background { duration: Motion.hover-duration; easing: ease-in-out; }
+        accessible-role: button;
+        accessible-label: key.kind == 1 ? "Backspace" : key.kind == 2 ? "Shift"
+            : key.kind == 4 ? "Space" : key.label;
+
+        SelectionFocusSurface {
+            x: -4px; y: -4px;
+            width: parent.width + 8px; height: parent.height + 8px;
+            corner-radius: Metrics.radius-sm + 4px;
+            focused: root.open && root.focused == index;
+            filled: false;
+            soft-shadow: false;
+        }
+        if key.kind != 1 && key.kind != 2 : Text {
+            width: parent.width; height: parent.height;
+            text: key.label;
+            color: parent.lit ? Theme.accent-foreground : Theme.foreground;
+            font-size: key.kind == 0 ? 20px : Typography.body-size;
+            font-weight: key.kind == 0 ? Typography.body-weight : Typography.emphasis-weight;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        // Backspace and Shift are drawn, so no font is needed for them.
+        if key.kind == 1 : Path {
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            width: 26px; height: 20px;
+            viewbox-width: 26; viewbox-height: 20;
+            commands: "M 9 2 H 22 Q 24 2 24 4 V 16 Q 24 18 22 18 H 9 L 2 10 Z M 12 6.5 L 19 13.5 M 19 6.5 L 12 13.5";
+            fill: transparent;
+            stroke: Theme.foreground;
+            stroke-width: 1.8px;
+            stroke-line-cap: round;
+            stroke-line-join: round;
+        }
+        if key.kind == 2 : Path {
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            width: 22px; height: 22px;
+            viewbox-width: 22; viewbox-height: 22;
+            commands: root.shift == 2
+                ? "M 11 2 L 20 11 H 15 V 15 H 7 V 11 H 2 Z M 7 18.5 H 15"
+                : "M 11 2 L 20 11 H 15 V 18 H 7 V 11 H 2 Z";
+            fill: root.shift > 0 ? (root.shift == 2 ? Theme.accent-foreground : Theme.accent) : transparent;
+            stroke: root.shift == 2 ? Theme.accent-foreground : root.shift == 1 ? Theme.accent : Theme.foreground;
+            stroke-width: 1.8px;
+            stroke-line-cap: round;
+            stroke-line-join: round;
+        }
+        touch := TouchArea {
+            width: parent.width; height: parent.height;
+            enabled: root.open;
+            clicked => { root.key-activated(index); }
+        }
+    }
+}
+
+// A text field's keyboard button: opens the on-screen keyboard by pointer,
+// for a touch screen that arrives as a mouse (as under gamescope).
+export component KeyboardButton inherits Rectangle {
+    callback activated();
+    width: 36px;
+    height: 36px;
+    border-radius: Metrics.radius-sm;
+    background: touch.pressed ? Theme.divider : touch.has-hover ? Theme.surface-raised : transparent;
+    animate background { duration: Motion.hover-duration; easing: ease-in-out; }
+    accessible-role: button;
+    accessible-label: "Keyboard";
+    Path {
+        x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+        width: 24px; height: 18px;
+        viewbox-width: 24; viewbox-height: 18;
+        commands: "M 3 2 H 21 Q 23 2 23 4 V 14 Q 23 16 21 16 H 3 Q 1 16 1 14 V 4 Q 1 2 3 2 Z M 5.5 6.5 H 6.5 M 9.5 6.5 H 10.5 M 13.5 6.5 H 14.5 M 17.5 6.5 H 18.5 M 7 11.5 H 17";
+        fill: transparent;
+        stroke: Theme.secondary-foreground;
+        stroke-width: 1.6px;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+    }
+    touch := TouchArea {
+        width: parent.width; height: parent.height;
+        mouse-cursor: pointer;
+        clicked => { root.activated(); }
+    }
+}
