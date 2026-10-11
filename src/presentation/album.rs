@@ -38,8 +38,8 @@ use crate::{
     },
     presentation::wake::drain_notify,
     services::album::{
-        HorizonAlbum, MediaLoader, MediaResult, ThumbnailCache, VideoBackend, VideoFrame,
-        VideoPlayback, VideoSink, scan_all,
+        AnimationPlayback, HorizonAlbum, MediaLoader, MediaResult, ThumbnailCache, VideoBackend,
+        VideoFrame, VideoPlayback, VideoSink, play_animation, scan_all,
     },
     services::worker::{WorkerSender, spawn, worker_channel},
     sources::CaptureSource,
@@ -263,7 +263,10 @@ pub struct AlbumController {
     failed: RefCell<HashSet<PathBuf>>,
     display: RefCell<ImageMemory<(PathBuf, (u32, u32))>>,
     active_video: RefCell<Option<ActiveVideo>>,
-    /// Which playback may deliver frames; older ones are ignored.
+    /// The open GIF animating, if any. Stopped with the video.
+    animation: RefCell<Option<AnimationPlayback>>,
+    /// Which playback (video or animation) may deliver frames; older ones
+    /// are ignored.
     video_generation: Arc<AtomicU64>,
     /// Bumped by every seek: frames decoded before it never move the
     /// timeline back.
@@ -328,6 +331,7 @@ impl AlbumController {
             failed: RefCell::new(HashSet::new()),
             display: RefCell::new(ImageMemory::new(DISPLAY_MEMORY)),
             active_video: RefCell::new(None),
+            animation: RefCell::new(None),
             video_generation: Arc::new(AtomicU64::new(0)),
             seek_epoch: Arc::new(AtomicU64::new(0)),
             ui: ui.as_weak(),
@@ -1054,7 +1058,44 @@ impl AlbumController {
         }
         if capture.kind() == MediaKind::Video {
             self.start_video(ui, &capture);
+        } else if is_gif(&path) {
+            self.start_animation(ui, &path);
         }
+    }
+
+    /// An animated GIF plays in place of its first frame, looping silently,
+    /// until the viewer moves on (`stop_video`).
+    fn start_animation(&self, ui: &AppWindow, path: &std::path::Path) {
+        let generation = self.video_generation.load(Ordering::SeqCst);
+        let current = Arc::clone(&self.video_generation);
+        let pending = Arc::new(AtomicBool::new(false));
+        let weak = self.ui.clone();
+        let playback = play_animation(
+            path,
+            display_size(ui),
+            Box::new(move |frame| {
+                // A frame still waiting for the UI is replaced, never queued.
+                if current.load(Ordering::SeqCst) != generation
+                    || pending.swap(true, Ordering::SeqCst)
+                {
+                    return;
+                }
+                let buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                    frame.as_raw(),
+                    frame.width(),
+                    frame.height(),
+                );
+                let (pending, current) = (Arc::clone(&pending), Arc::clone(&current));
+                let _ = weak.upgrade_in_event_loop(move |ui| {
+                    pending.store(false, Ordering::SeqCst);
+                    if current.load(Ordering::SeqCst) == generation {
+                        ui.set_album_viewer_image(Image::from_rgba8(buffer));
+                        ui.set_album_viewer_has_image(true);
+                    }
+                });
+            }),
+        );
+        *self.animation.borrow_mut() = Some(playback);
     }
 
     fn show(&self, ui: &AppWindow, image: Option<Image>) {
@@ -1098,6 +1139,7 @@ impl AlbumController {
         self.video_generation.fetch_add(1, Ordering::SeqCst);
         // Dropping the playback stops it and frees the decoder.
         *self.active_video.borrow_mut() = None;
+        *self.animation.borrow_mut() = None;
         self.publish_video(ui);
     }
 
@@ -1570,6 +1612,14 @@ fn clock_text(duration: Duration) -> String {
 /// One copy out of the decoder's buffer into Slint's: a single memcpy when
 /// rows are tightly packed (the usual case), never a zero-filled buffer
 /// first.
+/// Only GIFs animate. The name only decides whether to try: the player reads
+/// the content and sends nothing for anything else.
+fn is_gif(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("gif"))
+}
+
 fn copy_frame(frame: &VideoFrame<'_>) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
     let row = frame.width as usize * 4;
     let height = frame.height as usize;

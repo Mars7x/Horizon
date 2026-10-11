@@ -33,6 +33,7 @@ grep -Fq "serde 1.x / serde_json 1.x" "$notice" || { echo "Serde provenance miss
 grep -Fq "zbus 5.x" "$notice" || { echo "zbus provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
 grep -Fq "**FFmpeg**" "$notice" || { echo "FFmpeg provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
 grep -Fq "**PipeWire**" "$notice" || { echo "PipeWire provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
+grep -Fq "**jxl-oxide 0.12.x**" "$notice" || { echo "jxl-oxide provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
 
 for license in "${required_licenses[@]}"; do
   test -s "$root/LICENSES/$license" || { echo "missing license text: $license" >&2; exit 1; }

@@ -63,8 +63,19 @@ game starts). Leaving the Album stops playback.
   `thumbnails/` copy is offered as a preview. Horizon never changes source
   files.
 
-Supported formats are decided by extension: PNG and JPEG photos; MP4, M4V,
-MKV, WebM and MOV videos (whatever the runtime's FFmpeg can decode).
+Supported formats are listed by extension: PNG, JPEG, GIF and JPEG XL (`.jxl`)
+photos; MP4, M4V, MKV, WebM and MOV videos (whatever the runtime's FFmpeg can
+decode). Photos are then decoded by their content, whatever the name says
+(`services::image`).
+
+- **Animated GIFs** play in the viewer, looping silently with no controls, in
+  place of their first frame (which is the grid thumbnail). A small thread
+  decodes each frame as it falls due, at the file's own pace (delays under
+  20 ms play at 100 ms, as browsers do), so memory stays at a frame or two
+  however long the GIF is. It stops whenever the video would: another capture,
+  closing the viewer, leaving the page.
+- **JPEG XL** decodes through `jxl-oxide` (ADR 0175), as a still image; an
+  animated JXL shows its first frame.
 
 ## Deleting
 
