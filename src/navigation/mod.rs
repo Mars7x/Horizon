@@ -8,7 +8,7 @@ mod edge_step;
 pub mod grid;
 pub use edge_step::step_with_edge_wrap;
 
-/// Full-shell submenu pages opened from the seven top utility icons.
+/// Full-shell submenu pages opened from the six top utility icons.
 ///
 /// These are real navigation destinations, not modal overlays. Grouping them
 /// under one type keeps the shell model explicit without pretending every
@@ -20,13 +20,12 @@ pub enum UtilityPage {
     #[default]
     Activity,
     Achievements,
-    Web,
     Settings,
     Shop,
 }
 
 impl UtilityPage {
-    const COUNT: usize = 7;
+    const COUNT: usize = 6;
 
     const fn index(self) -> usize {
         match self {
@@ -34,16 +33,15 @@ impl UtilityPage {
             Self::Album => 1,
             Self::Activity => 2,
             Self::Achievements => 3,
-            Self::Web => 4,
-            Self::Settings => 5,
-            Self::Shop => 6,
+            Self::Settings => 4,
+            Self::Shop => 5,
         }
     }
 }
 
 /// Navigable destinations in Horizon's Phase 4 application shell.
 ///
-/// Only Home uses persistent top/bottom shell chrome. Library and all seven
+/// Only Home uses persistent top/bottom shell chrome. Library and all six
 /// utility destinations are durable full-shell routes with Back/Home history.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AppRoute {
@@ -85,7 +83,7 @@ pub enum ShellFocusRegion {
     TopUtilities,
 }
 
-/// Stable ordering of the seven utility icons in the persistent header.
+/// Stable ordering of the six utility icons in the persistent header.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum TopUtility {
     Friends,
@@ -93,13 +91,12 @@ pub enum TopUtility {
     #[default]
     Activity,
     Achievements,
-    Web,
     Settings,
     Shop,
 }
 
 impl TopUtility {
-    pub const COUNT: i32 = 7;
+    pub const COUNT: i32 = 6;
 
     pub const fn index(self) -> i32 {
         match self {
@@ -107,9 +104,8 @@ impl TopUtility {
             Self::Album => 1,
             Self::Activity => 2,
             Self::Achievements => 3,
-            Self::Web => 4,
-            Self::Settings => 5,
-            Self::Shop => 6,
+            Self::Settings => 4,
+            Self::Shop => 5,
         }
     }
 
@@ -119,9 +115,8 @@ impl TopUtility {
             1 => Some(Self::Album),
             2 => Some(Self::Activity),
             3 => Some(Self::Achievements),
-            4 => Some(Self::Web),
-            5 => Some(Self::Settings),
-            6 => Some(Self::Shop),
+            4 => Some(Self::Settings),
+            5 => Some(Self::Shop),
             _ => None,
         }
     }
@@ -132,7 +127,6 @@ impl TopUtility {
             Self::Album => UtilityPage::Album,
             Self::Activity => UtilityPage::Activity,
             Self::Achievements => UtilityPage::Achievements,
-            Self::Web => UtilityPage::Web,
             Self::Settings => UtilityPage::Settings,
             Self::Shop => UtilityPage::Shop,
         }
@@ -150,7 +144,6 @@ impl UtilityPage {
             Self::Album => TopUtility::Album,
             Self::Activity => TopUtility::Activity,
             Self::Achievements => TopUtility::Achievements,
-            Self::Web => TopUtility::Web,
             Self::Settings => TopUtility::Settings,
             Self::Shop => TopUtility::Shop,
         }
@@ -230,7 +223,6 @@ impl Default for RouteFocusMemory {
                 FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Album)),
                 FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Activity)),
                 FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Achievements)),
-                FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Web)),
                 FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Settings)),
                 FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Shop)),
             ],
@@ -553,7 +545,6 @@ mod tests {
             UtilityPage::Album,
             UtilityPage::Activity,
             UtilityPage::Achievements,
-            UtilityPage::Web,
             UtilityPage::Settings,
             UtilityPage::Shop,
         ] {
@@ -652,7 +643,6 @@ mod tests {
             AppRoute::Utility(UtilityPage::Album),
             AppRoute::Utility(UtilityPage::Activity),
             AppRoute::Utility(UtilityPage::Achievements),
-            AppRoute::Utility(UtilityPage::Web),
             AppRoute::Utility(UtilityPage::Settings),
             AppRoute::Utility(UtilityPage::Shop),
             AppRoute::Home,
@@ -661,7 +651,7 @@ mod tests {
         }
 
         assert_eq!(navigator.current(), AppRoute::Home);
-        assert_eq!(navigator.back_stack_depth(), 9);
+        assert_eq!(navigator.back_stack_depth(), 8);
     }
 
     #[test]
@@ -700,7 +690,6 @@ mod tests {
             (TopUtility::Album, UtilityPage::Album),
             (TopUtility::Activity, UtilityPage::Activity),
             (TopUtility::Achievements, UtilityPage::Achievements),
-            (TopUtility::Web, UtilityPage::Web),
             (TopUtility::Settings, UtilityPage::Settings),
             (TopUtility::Shop, UtilityPage::Shop),
         ] {
@@ -752,7 +741,7 @@ mod tests {
     fn changing_game_invalidates_utility_return_anchor() {
         let mut focus = ShellFocus::default();
 
-        assert!(focus.enter_utilities_from_content(TopUtility::Web, 4));
+        assert!(focus.enter_utilities_from_content(TopUtility::Settings, 4));
         assert!(focus.leave_utilities_to_content(4));
 
         assert_eq!(focus.anchored_utility_for_content(5), None);
@@ -773,7 +762,6 @@ mod tests {
             (UtilityPage::Album, TopUtility::Album),
             (UtilityPage::Activity, TopUtility::Activity),
             (UtilityPage::Achievements, TopUtility::Achievements),
-            (UtilityPage::Web, TopUtility::Web),
             (UtilityPage::Settings, TopUtility::Settings),
             (UtilityPage::Shop, TopUtility::Shop),
         ] {
@@ -789,14 +777,14 @@ mod tests {
         let mut focus = ShellFocus::default();
         let settings = AppRoute::Utility(UtilityPage::Settings);
 
-        focus.enter_utilities_from_content(TopUtility::Web, 2);
+        focus.enter_utilities_from_content(TopUtility::Shop, 2);
         memory.remember(AppRoute::Home, focus.snapshot());
 
         focus.restore(FocusSnapshot::for_route(settings));
         focus.enter_utilities();
         memory.remember(settings, focus.snapshot());
 
-        assert_eq!(memory.recall(AppRoute::Home).utility(), TopUtility::Web);
+        assert_eq!(memory.recall(AppRoute::Home).utility(), TopUtility::Shop);
         assert_eq!(
             memory.recall(AppRoute::Home).region(),
             ShellFocusRegion::TopUtilities
@@ -822,40 +810,22 @@ mod tests {
         let viewport_width = 1280.0;
         let step = 64.0;
 
-        assert_eq!(
-            nearest_utility_for_x(448.0, viewport_width, step),
-            TopUtility::Friends
-        );
-        assert_eq!(
-            nearest_utility_for_x(512.0, viewport_width, step),
-            TopUtility::Album
-        );
-        assert_eq!(
-            nearest_utility_for_x(576.0, viewport_width, step),
-            TopUtility::Activity
-        );
-        assert_eq!(
-            nearest_utility_for_x(640.0, viewport_width, step),
-            TopUtility::Achievements
-        );
-        assert_eq!(
-            nearest_utility_for_x(704.0, viewport_width, step),
-            TopUtility::Web
-        );
-        assert_eq!(
-            nearest_utility_for_x(768.0, viewport_width, step),
-            TopUtility::Settings
-        );
-        assert_eq!(
-            nearest_utility_for_x(832.0, viewport_width, step),
-            TopUtility::Shop
-        );
+        for (x, utility) in [
+            (480.0, TopUtility::Friends),
+            (544.0, TopUtility::Album),
+            (608.0, TopUtility::Activity),
+            (672.0, TopUtility::Achievements),
+            (736.0, TopUtility::Settings),
+            (800.0, TopUtility::Shop),
+        ] {
+            assert_eq!(nearest_utility_for_x(x, viewport_width, step), utility);
+        }
     }
 
     #[test]
     fn utility_and_game_center_helpers_support_reverse_spatial_transfer() {
         let activity_x = utility_center_x(TopUtility::Activity, 1280.0, 64.0);
-        assert_eq!(activity_x, 576.0);
+        assert_eq!(activity_x, 608.0);
 
         assert_eq!(nearest_game_for_x(activity_x, 439.0, 250.0, 8), 1);
         assert_eq!(nearest_game_for_x(768.0, 439.0, 250.0, 8), 1);
@@ -864,7 +834,7 @@ mod tests {
     #[test]
     fn full_shell_focus_memory_normalizes_hidden_header_focus() {
         let mut memory = RouteFocusMemory::default();
-        let route = AppRoute::Utility(UtilityPage::Web);
+        let route = AppRoute::Utility(UtilityPage::Shop);
         let mut focus = ShellFocus::default();
 
         assert!(focus.enter_utilities_from_content(TopUtility::Settings, 6));
@@ -885,7 +855,6 @@ mod tests {
             AppRoute::Utility(UtilityPage::Album),
             AppRoute::Utility(UtilityPage::Activity),
             AppRoute::Utility(UtilityPage::Achievements),
-            AppRoute::Utility(UtilityPage::Web),
             AppRoute::Utility(UtilityPage::Settings),
             AppRoute::Utility(UtilityPage::Shop),
         ];

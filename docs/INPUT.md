@@ -97,7 +97,7 @@ The Rust `NavigationController` remains above page controllers while `AppWindow`
 - Accept is recognized but intentionally does not launch anything yet
 - Back is interpreted at the navigation layer and restores route history when available
 - Home resets route history to the Home root
-- Library, Activity, Achievements, Album and Settings have page-local controllers (see their feature guides); Friends, Web and Shop have no page-local navigation policy
+- Library, Activity, Achievements, Album and Settings have page-local controllers (see their feature guides); Friends and Shop have no page-local navigation policy
 - Up / Down / Menu / bumpers remain semantic and gain additional screen-level behavior in later Phase 4 passes
 
 The input adapters themselves are unchanged: they never inspect or choose application routes. See `NAVIGATION.md`.

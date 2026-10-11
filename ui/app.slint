@@ -84,7 +84,7 @@ export component AppWindow inherits Window {
         return route == AppRouteView.home ? 0 : route == AppRouteView.library ? 1
             : route == AppRouteView.friends ? 2 : route == AppRouteView.album ? 3
             : route == AppRouteView.activity ? 4 : route == AppRouteView.achievements ? 5
-            : route == AppRouteView.web ? 6 : route == AppRouteView.settings ? 7 : 8;
+            : route == AppRouteView.settings ? 6 : 7;
     }
     private property <int> route-phase: route-transition.phase;
     private property <bool> route-back: root.current-route == AppRouteView.home
@@ -486,7 +486,7 @@ export component AppWindow inherits Window {
                 }
             }
 
-            // All seven top utilities are durable full-shell submenu routes. They
+            // All six top utilities are durable full-shell submenu routes. They
             // share one page component and normal Navigator history semantics.
             TransitionLayer {
                 x: 0px;
@@ -671,24 +671,6 @@ export component AppWindow inherits Window {
                     close-details() => {
                         if (root.current-route == AppRouteView.achievements) { root.achievements-back(); }
                     }
-                }
-            }
-
-            TransitionLayer {
-                x: 0px;
-                width: parent.width;
-                height: parent.height;
-                active: root.current-route == AppRouteView.web;
-                phase: root.route-phase;
-                returning: root.route-back;
-                outgoing: root.current-route != AppRouteView.web
-                    && root.transition-from-route == AppRouteView.web;
-
-                UtilitySubmenuPage {
-                    width: parent.width;
-                    height: parent.height;
-                    title: "Web";
-                    description: "Web access will be connected here in a later phase.";
                 }
             }
 

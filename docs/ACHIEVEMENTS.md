@@ -4,7 +4,7 @@
 
 ## Feature contract
 
-- Achievements is the **seventh Home utility**, after Activity, not a replacement for the Activity page. `TopUtility` ordering is maintained in `src/navigation/mod.rs`, navigation presentation and Slint.
+- Achievements is the **fourth Home utility**, after Activity, not a replacement for the Activity page. `TopUtility` ordering is maintained in `src/navigation/mod.rs`, navigation presentation and Slint.
 - The full-shell **Achievements utility** is a **single-column vertical game list**. Each full-width row shows the game title, real provider, and the count of unlocked versus total achievements at the right, with a left-origin completion bar. Up/Down navigates through games; A opens the selected game's full-width, read-only achievement list with the OK sound (Right does not open it); Up/Down scrolls that list; only B (Back) returns to the same game selection; Left does nothing. Pointer-clicking a game also opens details, with the same OK sound; clicking the details breadcrumb returns to games. Achievement rows are not focusable. Scroll-edge elevation and a partially visible next row reveal continuation; the scrolling camera is animated and respects Reduced Motion.
 - The **source selector** is designed to admit additional providers without reworking the screen. The initial options are All sources and Steam, which necessarily show the same results until another provider exists. LB/RB or pointer cycles the selector. Do not imply achievements from Heroic or any other provider are already available.
 - **Activity → Milestones** is a compact preview of up to **three most recently unlocked real Steam achievements**. It does not create artificial Horizon time-played goals.
