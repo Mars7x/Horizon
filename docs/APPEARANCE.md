@@ -22,7 +22,7 @@ The portal is optional. If a setting or the entire portal is unavailable, Horizo
 - No contrast preference: normal contrast
 - No reduced-motion preference: normal motion
 
-Phase 9.5.44.55 implements **Settings → Appearance** as the first Settings category. Theme is **System, Light, Dark**. **System** follows only the desktop light/dark preference; it is not a third visual theme. Accent colour independently offers **System, Red, Orange, Yellow, Green, Teal, Blue, Purple, Pink, White**. The nine accessible preset choices run from warm red through cool blue/purple to pink, with neutral white last. Appearance choices take effect immediately, can be changed with mouse or controller, and persist in `config/appearance.json` (0600 under private 0700 config dir; see [Files on disk](STORAGE.md)). Saving is atomic and a failed write leaves the previous selection active.
+Phase 9.5.44.55 implements **Settings → Appearance** as the first Settings category. Theme is **System, Light, Dark, Black**. **System** follows only the desktop light/dark preference; it is not a visual theme of its own and never picks Black. **Black** is Dark on a true-black page for OLED screens (see [ADR 0180](adr/0180-black-oled-theme.md)). Accent colour independently offers **System, Red, Orange, Yellow, Green, Teal, Blue, Purple, Pink, White**. The nine accessible preset choices run from warm red through cool blue/purple to pink, with neutral white last. Appearance choices take effect immediately, can be changed with mouse or controller, and persist in `config/appearance.json` (0600 under private 0700 config dir; see [Files on disk](STORAGE.md)). Saving is atomic and a failed write leaves the previous selection active.
 
 Phase 9.5.44.57 simplifies the settings UI: independent category rows cannot
 physically overlap, Theme choices show the selected value with accent text (no
@@ -151,17 +151,18 @@ preference, accessibility, and Flatpak audio permissions remain unchanged.
 
 The keyboard/controller focus graph matches the rendered layout rather than
 artificially separating System accent from the adjacent swatches. Theme
-(System, Light, Dark) is one horizontal row; accent (System, Red, Orange,
+(System, Light, Dark, Black) is one horizontal row; accent (System, Red, Orange,
 Yellow, Green, Teal, Blue, Purple, Pink, White) is another. Left/Right travel
 through every option in each row, with wraparound at the ends. Confirm activates
 only the focused option; moving focus alone never changes a saved preference.
 
-Up from an accent moves to the nearest Theme column (System/Red/Orange → Theme
-System; Yellow/Green/Teal/Blue → Theme Light; Purple/Pink/White → Theme Dark).
+Up from an accent moves to the nearest Theme column (System/Red → Theme
+System; Orange/Yellow/Green → Theme Light; Teal/Blue/Purple → Theme Dark;
+Pink/White → Theme Black).
 Down from that Theme column restores the most recently focused accent when it
 belongs to that column, rather than unexpectedly jumping to a different swatch.
-The defaults for columns with no focus history are accent System, Teal, and
-White respectively. Down from an accent enters UI Sounds; Up restores the last
+The defaults for columns with no focus history are accent System, Yellow,
+Blue, and White respectively. Down from an accent enters UI Sounds; Up restores the last
 focused accent. On UI Sounds, Left sets Off and Right sets On without moving
 focus. The Third-Party layout and editor grid remain unchanged. Semantic focus
 changes continue to trigger exactly one navigation sound when enabled.
