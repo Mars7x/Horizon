@@ -1,4 +1,8 @@
-use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, HashMap},
+    rc::Rc,
+};
 use tracing::warn;
 
 use slint::{Model, ModelRc, VecModel};
@@ -161,7 +165,19 @@ struct State {
     metadata_game_id: Option<i64>,
     metadata_sequence: i32,
     browse_sequence: i32,
+    /// A Source/Sort change waiting for its first publish: the grid refresh
+    /// glides cards that stay and fades the rest.
+    glide: Option<Glide>,
 }
+
+/// The grid as it was before a Source or Sort change.
+struct Glide {
+    /// The cards that were mounted, frozen, with their games.
+    previous: Vec<(i64, LibraryCardData)>,
+    /// Each of those games' place in the old order.
+    from: HashMap<i64, i32>,
+}
+
 impl State {
     fn start_fresh_visit(&mut self) {
         self.selection = 0;
@@ -185,6 +201,7 @@ impl Default for State {
             metadata_game_id: None,
             metadata_sequence: 0,
             browse_sequence: 0,
+            glide: None,
         }
     }
 }
@@ -268,21 +285,32 @@ impl LibraryController {
 
     /// Freeze only the already-mounted overscan rows, not the entire library.
     /// The current VecModel is about to be replaced by a new source/sort order;
-    /// reusing that model for both views produced the old barely-visible flash.
+    /// the next publish shows the frozen rows as the outgoing grid.
     fn capture_previous_grid(&self, ui: &AppWindow) {
+        let mut s = self.state.borrow_mut();
         let previous = (0..self.rows.row_count())
             .filter_map(|index| self.rows.row_data(index))
+            .filter_map(|card| {
+                let original = *s.order.get(card.absolute_index as usize)?;
+                Some((self.catalog[original].game().id().get(), card))
+            })
             .collect::<Vec<_>>();
-        let has_previous = !previous.is_empty();
-        let s = self.state.borrow();
-        ui.set_library_previous_cards(ModelRc::from(Rc::new(VecModel::from(previous))));
+        let from = s
+            .order
+            .iter()
+            .enumerate()
+            .skip(s.mounted_start)
+            .take(s.mounted_len)
+            .map(|(index, original)| (self.catalog[*original].game().id().get(), index as i32))
+            .collect();
         ui.set_library_previous_grid_columns(
             grid_columns(ui.get_logical_viewport_width_px()) as i32
         );
         ui.set_library_previous_scroll_row(s.scroll_top as i32);
         ui.set_library_previous_total_count(s.order.len() as i32);
         ui.set_library_previous_selected_index(s.selection as i32);
-        ui.set_library_has_previous_grid(has_previous);
+        ui.set_library_has_previous_grid(!previous.is_empty());
+        s.glide = Some(Glide { previous, from });
     }
 
     fn rebuild(&self, ui: &AppWindow, preferred_id: Option<i64>) {
@@ -349,6 +377,14 @@ impl LibraryController {
         }
         let metadata_sequence = s.metadata_sequence;
         let browse_sequence = s.browse_sequence;
+        let glide = if refresh_window { s.glide.take() } else { None };
+        let from = |original: usize| {
+            glide
+                .as_ref()
+                .and_then(|glide| glide.from.get(&self.catalog[original].game().id().get()))
+                .copied()
+                .unwrap_or(-1)
+        };
         let cards: Vec<LibraryCardData> = if refresh_window {
             s.order[start..end]
                 .iter()
@@ -364,6 +400,8 @@ impl LibraryController {
                             .join(" · ")
                             .into(),
                         absolute_index: (start + i) as i32,
+                        from_index: from(original),
+                        stays: false,
                     })
                 })
                 .collect()
@@ -392,11 +430,31 @@ impl LibraryController {
         let sort = s.sort.label();
         let selection = s.selection;
         let top = s.scroll_top;
+        let mounted_ids: Vec<i64> = if glide.is_some() {
+            s.order[start..end]
+                .iter()
+                .map(|original| self.catalog[*original].game().id().get())
+                .collect()
+        } else {
+            Vec::new()
+        };
         drop(s);
         // Signal the new arrangement before mutating the model/scroll offsets.
         // This lets Slint choose an instant camera reposition while the two
         // stationary snapshots crossfade rather than also sliding the grid.
         ui.set_library_browse_sequence(browse_sequence);
+        if let Some(glide) = glide {
+            // Old cards whose game is still mounted glide instead of fading.
+            let previous: Vec<LibraryCardData> = glide
+                .previous
+                .into_iter()
+                .map(|(id, mut card)| {
+                    card.stays = mounted_ids.contains(&id);
+                    card
+                })
+                .collect();
+            ui.set_library_previous_cards(ModelRc::from(Rc::new(VecModel::from(previous))));
+        }
         if refresh_window {
             self.rows.set_vec(cards);
         }

@@ -322,7 +322,9 @@ never overlaps artwork, and both light/dark themes show a subtle edge shadow.
 > **Superseded (ADR 0167):** Source and Sort now share the grid refresh
 > (`components/grid-refresh.slint`), which is the former Source animation
 > below. Album's Game and Type filters use it too. The separate Sort
-> animation is gone.
+> animation is gone. **Superseded again (ADR 0172):** covers now glide
+> from their old places to their new ones; leavers fade out and newcomers
+> fade in. The column-by-column reveal below is history.
 
 - **Source (LB / click):** The frozen prior viewport fades away over 85ms.
   Incoming card shells then fade in and settle upward 6px, revealing by

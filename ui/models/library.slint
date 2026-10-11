@@ -6,4 +6,9 @@ export struct LibraryCardData {
     game: GameCardData,
     source: string,
     absolute-index: int,
+    // The grid refresh (components/grid-refresh.slint): in the new grid, this
+    // card's place in the old one (-1 when it is new); in the old grid,
+    // whether it stays (and glides) rather than fading out.
+    from-index: int,
+    stays: bool,
 }
