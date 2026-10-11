@@ -376,6 +376,7 @@ pub fn run() -> Result<(), AppError> {
         album_dir,
         capture_sources,
         data_paths::album_cache_dir(ALBUM_CACHE_VERSION),
+        data_paths::pictures_export_dir(),
         video,
     );
     navigation.set_album(Rc::clone(&album), &ui);

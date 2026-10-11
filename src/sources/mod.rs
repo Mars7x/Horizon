@@ -434,6 +434,8 @@ pub struct SourceCapture {
     pub captured_at: i64,
     /// A smaller copy the source already keeps beside the original.
     pub preview: Option<PathBuf>,
+    /// The source can delete it (`CaptureSource::delete`).
+    pub deletable: bool,
 }
 
 /// Lists captures a source keeps (Steam's screenshots). Separate from
@@ -444,6 +446,13 @@ pub trait CaptureSource: Send + Sync {
     /// Directory listing only: no decoding. A missing or unreadable folder is
     /// an empty result, not an error, so one source never hides the others.
     fn captures(&self) -> Vec<SourceCapture>;
+
+    /// Deletes one of this source's captures, with the source's own copies
+    /// of it (Steam's thumbnail). Refuses anything it didn't list as
+    /// deletable. Sources that keep their captures read-only don't override.
+    fn delete(&self, _path: &std::path::Path) -> std::io::Result<()> {
+        Err(std::io::ErrorKind::Unsupported.into())
+    }
 }
 
 /// The capture sources Horizon reads, built like `production_source_registry`.

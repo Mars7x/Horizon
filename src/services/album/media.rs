@@ -18,7 +18,8 @@ use crate::{
 };
 
 /// Bump when the thumbnail format or size changes; the folder is cleared.
-pub const ALBUM_CACHE_VERSION: &str = "1";
+// 2: a video's thumbnail is its first frame (was a second in).
+pub const ALBUM_CACHE_VERSION: &str = "2";
 /// Thumbnails fit inside this box. Large enough for a grid tile on a 4K
 /// screen; a few tens of KiB each as JPEG.
 pub const THUMBNAIL_SIZE: (u32, u32) = (480, 270);

@@ -213,6 +213,7 @@ pub fn scan_all(
                 capture.captured_at,
             )
             .with_preview(capture.preview)
+            .with_deletable(capture.deletable)
         }));
     }
     captures.sort_by(newest_first);

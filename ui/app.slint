@@ -11,6 +11,7 @@ export { AchievementGameData, AchievementEntryData }
 export { ActivityCoverData, ActivityDayData, ActivityHistoryRowData }
 import { AlbumTileData } from "models/album.slint";
 export { AlbumTileData }
+export { HintData }
 
 import { AppRouteView } from "models/navigation.slint";
 export { AppRouteView }
@@ -102,27 +103,9 @@ export component AppWindow inherits Window {
             ? [{ button: "B", label: "Back" }]
             : [{ button: "B", label: "Back" }, { button: "A", label: "Open" }])
         // Fullscreen: Left/Right browse and LB/RB skip 10 s are not listed.
-        : root.current-route == AppRouteView.album ? (root.album-viewing
-            ? (root.album-viewer-is-video
-                ? (root.album-can-delete
-                    ? [{ button: "X", label: "Delete" },
-                       { button: "B", label: "Back" },
-                       { button: "A", label: root.album-viewer-playing ? "Pause" : "Play" }]
-                    : [{ button: "B", label: "Back" },
-                       { button: "A", label: root.album-viewer-playing ? "Pause" : "Play" }])
-                : (root.album-can-delete
-                    ? [{ button: "X", label: "Delete" }, { button: "B", label: "Back" }]
-                    : [{ button: "B", label: "Back" }]))
-            : root.album-selecting
-            ? (root.album-selected-count > 0
-                ? [{ button: "X", label: "Delete" }, { button: "B", label: "Done" },
-                   { button: "A", label: "Select" }]
-                : [{ button: "B", label: "Done" }, { button: "A", label: "Select" }])
-            : root.album-total-count == 0 ? [{ button: "B", label: "Back" }]
-            : root.album-has-deletable
-            ? [{ button: "X", label: "Delete" }, { button: "B", label: "Back" },
-               { button: "A", label: "View" }]
-            : [{ button: "B", label: "Back" }, { button: "A", label: "View" }])
+        // The Album's hints depend on its viewer, selection and capture
+        // owners; its controller publishes them (`album-hints`).
+        : root.current-route == AppRouteView.album ? root.album-hints
         : root.current-route == AppRouteView.settings
             ? [{ button: "B", label: "Back" }, { button: "A", label: "Select" }]
         : [{ button: "B", label: "Back" }];
@@ -219,6 +202,7 @@ export component AppWindow inherits Window {
     callback achievements-back();
     // Album: Rust owns the captures, order, selection and decoding; the page
     // reports its grid shape back.
+    in property <[HintData]> album-hints;
     in property <[AlbumTileData]> album-tiles;
     in property <[AlbumTileData]> album-previous-tiles;
     in property <int> album-previous-scroll-row: 0;
@@ -250,9 +234,7 @@ export component AppWindow inherits Window {
     // Deleting (Horizon's own captures only). `selecting` is the grid's
     // multi-select; the dialog confirms. Focus is Rust-owned.
     in property <bool> album-selecting: false;
-    in property <int> album-selected-count: 0;
     in property <bool> album-can-delete: false;
-    in property <bool> album-has-deletable: false;
     in property <bool> album-dialog-open: false;
     in property <string> album-dialog-title: "";
     in property <string> album-dialog-text: "";

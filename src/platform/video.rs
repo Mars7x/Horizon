@@ -15,7 +15,8 @@
 //! ends, runs on the system clock.
 //!
 //! Frames come out of FFmpeg already scaled to fit the requested box, as
-//! packed RGBA. The UI side never waits: opening, seeking and pausing are
+//! packed RGBA. Playback decodes on the GPU through VA-API when the system
+//! has it and the GPU takes the codec, otherwise in software. The UI side never waits: opening, seeking and pausing are
 //! requests to these threads, and a stalled audio server only silences the
 //! sound.
 use std::{
@@ -43,8 +44,11 @@ use crate::{
     },
 };
 
-/// The poster frame: a second in, or a tenth of a short clip, past fades.
+/// The poster for a clip that opens on black: a second in, or a tenth of a
+/// short clip, past the fade.
 const POSTER_OFFSET: Duration = Duration::from_secs(1);
+/// A frame this dark on average (of 255) counts as black.
+const DARK_LEVEL: u64 = 16;
 /// Sound is decoded to this, and PipeWire converts it for the device.
 const AUDIO_RATE: u32 = 48_000;
 const AUDIO_CHANNELS: u32 = 2;
@@ -72,32 +76,23 @@ impl VideoBackend for FfmpegVideo {
             path: path.to_owned(),
             message,
         };
-        let mut media = Media::open(path, max, None).map_err(failed)?;
+        let mut media = Media::open(path, max, false, None).map_err(failed)?;
         let duration = media.info().duration;
-        let offset = duration.map_or(POSTER_OFFSET, |d| POSTER_OFFSET.min(d / 10));
-        // The keyframe at or before the offset, or the first frame.
-        for (attempt, start) in [offset, Duration::ZERO].into_iter().enumerate() {
-            if attempt > 0 || !start.is_zero() {
-                media.seek(start, false).map_err(failed)?;
+        // The first frame, so opening the video shows exactly its thumbnail.
+        // A clip that opens on black (a fade-in) takes a frame a little in.
+        let first = next_frame(&mut media).map_err(failed)?;
+        let poster = match first {
+            Some(frame) if !is_dark(&frame) => frame,
+            first => {
+                let offset = duration.map_or(POSTER_OFFSET, |d| POSTER_OFFSET.min(d / 10));
+                media.seek(offset, false).map_err(failed)?;
+                next_frame(&mut media)
+                    .map_err(failed)?
+                    .or(first)
+                    .ok_or_else(|| failed("no frame".into()))?
             }
-            loop {
-                match media.decode_next().map_err(failed)? {
-                    Unit::Video {
-                        pixels,
-                        width,
-                        height,
-                        ..
-                    } => {
-                        let poster = RgbaImage::from_raw(width, height, pixels.to_vec())
-                            .ok_or_else(|| failed("bad frame size".into()))?;
-                        return Ok(VideoProbe { poster, duration });
-                    }
-                    Unit::Audio { .. } => {}
-                    Unit::End => break,
-                }
-            }
-        }
-        Err(failed("no frame".into()))
+        };
+        Ok(VideoProbe { poster, duration })
     }
 
     fn play(
@@ -128,6 +123,42 @@ impl VideoBackend for FfmpegVideo {
         }
         Ok(Box::new(Playback { shared }))
     }
+}
+
+/// The next video frame from `media`, as an image.
+fn next_frame(media: &mut Media) -> Result<Option<RgbaImage>, String> {
+    loop {
+        match media.decode_next()? {
+            Unit::Video {
+                pixels,
+                width,
+                height,
+                ..
+            } => return Ok(RgbaImage::from_raw(width, height, pixels.to_vec())),
+            Unit::Audio { .. } => {}
+            Unit::End => return Ok(None),
+        }
+    }
+}
+
+/// True for a black (or nearly black) frame.
+fn is_dark(image: &RgbaImage) -> bool {
+    let pixels = image.pixels().len() as u64;
+    if pixels == 0 {
+        return true;
+    }
+    // Sampled: one pixel in 16 is plenty for an average.
+    let (sum, count) = image
+        .pixels()
+        .step_by(16)
+        .fold((0u64, 0u64), |(sum, count), pixel| {
+            let [r, g, b, _] = pixel.0;
+            (
+                sum + (u64::from(r) * 2 + u64::from(g) * 5 + u64::from(b)) / 8,
+                count + 1,
+            )
+        });
+    sum / count.max(1) < DARK_LEVEL
 }
 
 /// A decoded frame waiting for its moment.
@@ -388,7 +419,7 @@ fn frames_duration(frames: usize) -> Duration {
 
 /// The decoder thread.
 fn decode(shared: &Shared, path: &Path, max: (u32, u32), sink: &dyn VideoSink) {
-    let mut media = match Media::open(path, max, Some((AUDIO_RATE, AUDIO_CHANNELS))) {
+    let mut media = match Media::open(path, max, true, Some((AUDIO_RATE, AUDIO_CHANNELS))) {
         Ok(media) => media,
         Err(message) => {
             sink.failed(message);
@@ -397,6 +428,7 @@ fn decode(shared: &Shared, path: &Path, max: (u32, u32), sink: &dyn VideoSink) {
         }
     };
     let info = media.info();
+    tracing::debug!(hardware = info.hardware, "video decoding");
     shared
         .duration_us
         .store(info.duration.map_or(u64::MAX, micros), Ordering::Release);
@@ -735,6 +767,26 @@ mod tests {
             .probe(&fixture("clip-vp8-silent.webm"), (1920, 1080))
             .expect("probe");
         assert_eq!(silent.poster.dimensions(), (640, 360), "never scaled up");
+    }
+
+    #[test]
+    fn the_poster_is_the_first_frame_unless_it_is_black() {
+        assert!(is_dark(&RgbaImage::new(64, 36)));
+        assert!(!is_dark(&RgbaImage::from_pixel(
+            64,
+            36,
+            image::Rgba([90, 90, 90, 255])
+        )));
+        // The fixture opens on colour bars: its poster is frame 0, the frame
+        // playback starts on.
+        let backend = FfmpegVideo::new().unwrap();
+        let probe = backend
+            .probe(&fixture("clip-h264-aac.mp4"), (320, 320))
+            .unwrap();
+        let mut media =
+            Media::open(&fixture("clip-h264-aac.mp4"), (320, 320), false, None).unwrap();
+        let first = next_frame(&mut media).unwrap().unwrap();
+        assert_eq!(probe.poster, first);
     }
 
     #[test]

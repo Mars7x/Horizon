@@ -5,9 +5,15 @@
 // runtime ships the libraries (with its codecs-extra extension), so nothing
 // is bundled.
 //
+// Playback can decode on the GPU through VA-API (AMD and Intel, the Steam
+// Deck included). Frames are copied back from the GPU and scaled as usual.
+// Anything the GPU can't take, and any system without VA-API, decodes in
+// software on every core instead.
+//
 // One hz_media is used by one thread at a time. A unit returned by
 // hz_media_next stays valid until the next call on the same media.
 #include <errno.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -16,7 +22,9 @@
 #include <libavformat/avformat.h>
 #include <libavutil/channel_layout.h>
 #include <libavutil/error.h>
+#include <libavutil/hwcontext.h>
 #include <libavutil/mem.h>
+#include <libavutil/pixdesc.h>
 #include <libswresample/swresample.h>
 #include <libswscale/swscale.h>
 
@@ -26,6 +34,7 @@ typedef struct {
     int64_t duration_us; // -1 when unknown
     int has_video;
     int has_audio;
+    int hardware; // the video decodes on the GPU
 } hz_media_info;
 
 typedef struct {
@@ -48,6 +57,8 @@ typedef struct hz_media {
 
     int video_index;
     AVCodecContext *video;
+    enum AVPixelFormat hardware_format; // AV_PIX_FMT_NONE: software
+    AVFrame *transfer;                  // a GPU frame copied back
     int video_done;
     struct SwsContext *scaler;
     uint8_t *pixels;
@@ -87,7 +98,58 @@ static int64_t to_us(int64_t value, AVRational base) {
     return av_rescale_q(value, base, AV_TIME_BASE_Q);
 }
 
-static AVCodecContext *open_decoder(AVStream *stream, const AVCodec *codec, int *error) {
+// One VA-API device for the whole process, opened on first use; NULL when
+// the system has none.
+static pthread_once_t hardware_once = PTHREAD_ONCE_INIT;
+static AVBufferRef *hardware_device;
+
+static void open_hardware_device(void) {
+    // No VA-API is an ordinary answer (software decoding), not an error.
+    int level = av_log_get_level();
+    av_log_set_level(AV_LOG_QUIET);
+    if (av_hwdevice_ctx_create(&hardware_device, AV_HWDEVICE_TYPE_VAAPI, NULL, NULL, 0) < 0) {
+        hardware_device = NULL;
+    }
+    av_log_set_level(level);
+}
+
+// The GPU frame format `codec` decodes to through VA-API, if it can.
+static enum AVPixelFormat hardware_format_for(const AVCodec *codec) {
+    for (int i = 0;; i++) {
+        const AVCodecHWConfig *config = avcodec_get_hw_config(codec, i);
+        if (!config) {
+            return AV_PIX_FMT_NONE;
+        }
+        if ((config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) &&
+            config->device_type == AV_HWDEVICE_TYPE_VAAPI) {
+            return config->pix_fmt;
+        }
+    }
+}
+
+// FFmpeg asks once it knows the stream: the GPU format when offered (the
+// GPU supports this profile), otherwise software.
+static enum AVPixelFormat choose_format(AVCodecContext *context,
+                                        const enum AVPixelFormat *formats) {
+    hz_media *media = context->opaque;
+    for (const enum AVPixelFormat *format = formats; *format != AV_PIX_FMT_NONE; format++) {
+        if (*format == media->hardware_format) {
+            return *format;
+        }
+    }
+    media->hardware_format = AV_PIX_FMT_NONE;
+    for (const enum AVPixelFormat *format = formats; *format != AV_PIX_FMT_NONE; format++) {
+        const AVPixFmtDescriptor *descriptor = av_pix_fmt_desc_get(*format);
+        if (descriptor && !(descriptor->flags & AV_PIX_FMT_FLAG_HWACCEL)) {
+            return *format;
+        }
+    }
+    return AV_PIX_FMT_NONE;
+}
+
+// `media` set: this is the video decoder and may use the GPU.
+static AVCodecContext *open_decoder(AVStream *stream, const AVCodec *codec, hz_media *media,
+                                    int *error) {
     AVCodecContext *context = avcodec_alloc_context3(codec);
     if (!context) {
         *error = AVERROR(ENOMEM);
@@ -96,13 +158,31 @@ static AVCodecContext *open_decoder(AVStream *stream, const AVCodec *codec, int 
     *error = avcodec_parameters_to_context(context, stream->codecpar);
     if (*error >= 0) {
         context->pkt_timebase = stream->time_base;
-        // Decode on every core (frame and slice threads).
-        context->thread_count = 0;
-        context->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
+        enum AVPixelFormat hardware = media ? hardware_format_for(codec) : AV_PIX_FMT_NONE;
+        if (hardware != AV_PIX_FMT_NONE) {
+            pthread_once(&hardware_once, open_hardware_device);
+        }
+        if (hardware != AV_PIX_FMT_NONE && hardware_device) {
+            media->hardware_format = hardware;
+            context->hw_device_ctx = av_buffer_ref(hardware_device);
+            context->opaque = media;
+            context->get_format = choose_format;
+            context->thread_count = 1; // the GPU does the work
+        } else {
+            // Decode on every core (frame and slice threads).
+            context->thread_count = 0;
+            context->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
+        }
         *error = avcodec_open2(context, codec, NULL);
     }
     if (*error < 0) {
         avcodec_free_context(&context);
+        if (media && media->hardware_format != AV_PIX_FMT_NONE) {
+            // The GPU decoder didn't start: decode in software.
+            media->hardware_format = AV_PIX_FMT_NONE;
+            AVCodecContext *software = open_decoder(stream, codec, NULL, error);
+            return software;
+        }
         return NULL;
     }
     return context;
@@ -120,16 +200,20 @@ void hz_media_close(hz_media *media) {
     av_freep(&media->pixels);
     av_freep(&media->samples);
     av_frame_free(&media->frame);
+    av_frame_free(&media->transfer);
     av_packet_free(&media->packet);
     avformat_close_input(&media->format);
     av_free(media);
 }
 
 // Opens `path`. `box_width` x `box_height` bounds the video frames (scaled
-// down, never up, keeping the display aspect ratio). With `want_audio`,
-// audio is decoded and resampled to `out_rate` Hz, `out_channels` channels.
-hz_media *hz_media_open(const char *path, int box_width, int box_height, int want_audio,
-                        int out_rate, int out_channels, char *error, size_t error_length) {
+// down, never up, keeping the display aspect ratio). With `hardware`, the
+// video may decode on the GPU (worth it for playback, not for one poster
+// frame). With `want_audio`, audio is decoded and resampled to `out_rate`
+// Hz, `out_channels` channels.
+hz_media *hz_media_open(const char *path, int box_width, int box_height, int hardware,
+                        int want_audio, int out_rate, int out_channels, char *error,
+                        size_t error_length) {
     av_log_set_level(AV_LOG_ERROR);
     hz_media *media = av_mallocz(sizeof *media);
     if (!media) {
@@ -138,6 +222,7 @@ hz_media *hz_media_open(const char *path, int box_width, int box_height, int wan
     }
     media->video_index = -1;
     media->audio_index = -1;
+    media->hardware_format = AV_PIX_FMT_NONE;
     media->box_width = box_width > 0 ? box_width : 1;
     media->box_height = box_height > 0 ? box_height : 1;
     media->out_rate = out_rate;
@@ -166,8 +251,8 @@ hz_media *hz_media_open(const char *path, int box_width, int box_height, int wan
         hz_media_close(media);
         return NULL;
     }
-    media->video =
-        open_decoder(media->format->streams[media->video_index], video_codec, &result);
+    media->video = open_decoder(media->format->streams[media->video_index], video_codec,
+                                hardware ? media : NULL, &result);
     if (!media->video) {
         set_error(error, error_length, "can't decode the video", result);
         hz_media_close(media);
@@ -180,7 +265,7 @@ hz_media *hz_media_open(const char *path, int box_width, int box_height, int wan
                                         media->video_index, &audio_codec, 0);
         if (index >= 0) {
             media->audio =
-                open_decoder(media->format->streams[index], audio_codec, &result);
+                open_decoder(media->format->streams[index], audio_codec, NULL, &result);
             // A clip whose sound can't be decoded still plays, silently.
             if (media->audio) {
                 media->audio_index = index;
@@ -197,7 +282,8 @@ hz_media *hz_media_open(const char *path, int box_width, int box_height, int wan
 
     media->packet = av_packet_alloc();
     media->frame = av_frame_alloc();
-    if (!media->packet || !media->frame) {
+    media->transfer = av_frame_alloc();
+    if (!media->packet || !media->frame || !media->transfer) {
         set_error(error, error_length, "out of memory", 0);
         hz_media_close(media);
         return NULL;
@@ -209,6 +295,7 @@ void hz_media_info_get(const hz_media *media, hz_media_info *info) {
     info->duration_us = media->format->duration == AV_NOPTS_VALUE ? -1 : media->format->duration;
     info->has_video = media->video != NULL;
     info->has_audio = media->audio != NULL;
+    info->hardware = media->hardware_format != AV_PIX_FMT_NONE;
 }
 
 // Seeks to the keyframe at or before `position_us`. With `accurate`, the
@@ -278,12 +365,22 @@ static int make_video_unit(hz_media *media, hz_media_unit *unit) {
         return 0; // before an accurate seek's target
     }
 
+    // A GPU frame is copied back to memory first.
+    AVFrame *source = frame;
+    if (media->hardware_format != AV_PIX_FMT_NONE && frame->format == media->hardware_format) {
+        av_frame_unref(media->transfer);
+        if (av_hwframe_transfer_data(media->transfer, frame, 0) < 0) {
+            return HZ_ERROR;
+        }
+        source = media->transfer;
+    }
+
     int width, height;
     AVRational aspect = av_guess_sample_aspect_ratio(media->format, stream, frame);
-    fit_size(frame->width, frame->height, aspect, media->box_width, media->box_height, &width,
-             &height);
-    media->scaler = sws_getCachedContext(media->scaler, frame->width, frame->height,
-                                         (enum AVPixelFormat)frame->format, width, height,
+    fit_size(source->width, source->height, aspect, media->box_width, media->box_height,
+             &width, &height);
+    media->scaler = sws_getCachedContext(media->scaler, source->width, source->height,
+                                         (enum AVPixelFormat)source->format, width, height,
                                          AV_PIX_FMT_RGBA, SWS_BILINEAR, NULL, NULL, NULL);
     if (!media->scaler) {
         return HZ_ERROR;
@@ -300,8 +397,8 @@ static int make_video_unit(hz_media *media, hz_media_unit *unit) {
     }
     uint8_t *planes[4] = {media->pixels, NULL, NULL, NULL};
     int strides[4] = {width * 4, 0, 0, 0};
-    sws_scale(media->scaler, (const uint8_t *const *)frame->data, frame->linesize, 0,
-              frame->height, planes, strides);
+    sws_scale(media->scaler, (const uint8_t *const *)source->data, source->linesize, 0,
+              source->height, planes, strides);
 
     memset(unit, 0, sizeof *unit);
     unit->pixels = media->pixels;

@@ -10,13 +10,15 @@ screenshots). See [ADR 0166](adr/0166-album-captures-and-media-pipeline.md).
 | --- | --- | --- |
 | Grid | D-pad / stick | Move between captures (reading order; no wrap) |
 | Grid | A, or click the selected tile | Open the capture full-screen |
-| Grid | X | Start selecting to delete: A (or a click) ticks captures, X asks to delete the ticked ones, B finishes |
+| Grid | Y | Saves the selected capture to Pictures/Horizon (while selecting: the ticked ones) |
+| Grid | X | Start selecting: A (or a click) ticks captures, X asks to delete the ticked ones, Y saves them, B finishes |
 | Grid | LB / click "Game" | Next game filter: All games, then each game with captures, most recent first |
 | Grid | RB / click "Type" | All → Screenshots → Videos |
 | Grid | Mouse wheel | Moves the camera only, never the selection |
 | Viewer | Left / Right, or click the screen edges | Previous / next capture, sliding in from that side; stops at either end |
 | Viewer (video) | A, or click the video | Play / pause; at the end, A plays it again |
 | Viewer (video) | LB / RB | Back / forward 10 seconds |
+| Viewer | Y | Saves this capture to Pictures/Horizon |
 | Viewer | X | Asks to delete this capture (Cancel is focused first) |
 | Viewer (video) | Click the timeline | Seek |
 | Viewer | B | Back to the grid, on the capture that was open |
@@ -65,15 +67,35 @@ game starts). Leaving the Album stops playback.
 Supported formats are decided by extension: PNG and JPEG photos; MP4, M4V,
 MKV, WebM and MOV videos (whatever the runtime's FFmpeg can decode).
 
+## Saving to Pictures
+
+Y copies the capture to `Pictures/Horizon` (the user's Pictures folder, from
+their desktop's folder names; `data_paths::pictures_export_dir`) under a
+readable name, `<Game> 2026-10-11 14.30.12.png` (`Horizon …` without a game).
+An existing file is never replaced: ` (2)`, ` (3)`… are added. The copy is
+written to `.part` first and renamed, on a worker thread (videos can be
+large); the bottom bar, or the viewer's top line, says "Saved to
+Pictures/Horizon". The Flatpak grants only that folder
+(`xdg-pictures/Horizon:create`) and reads `user-dirs.dirs` to find Pictures.
+See `services::album::export`.
+
 ## Deleting
 
-Only Horizon's own captures can be deleted: their tiles get tick boxes when
-selecting, and other tiles dim. A source's captures (Steam's screenshots)
-belong to that source. Horizon's sandbox can only read them, and they are
-deleted in Steam. `HorizonAlbum::delete` refuses any path outside Horizon's
-album folder, removes the file permanently after the confirmation dialog,
-and tidies empty game folders. If a file can't be deleted, the bottom bar
-says so.
+Each capture is deleted by its owner, after the confirmation dialog:
+
+- **Horizon's own:** `HorizonAlbum::delete` refuses any path outside
+  Horizon's album folder, removes the file and tidies empty game folders.
+- **Steam's screenshots:** `SteamCaptures::delete` removes the screenshot and
+  Steam's thumbnail of it. It accepts only a media file directly inside
+  `userdata/<active account>/760/remote/<appid>/screenshots/` of a known Steam
+  root, after resolving links. Steam's `screenshots.vdf` index is left to
+  Steam. The dialog says the files go "from Steam too".
+
+A source's capture is deletable only when the source supports it and its
+folder is actually writable (`access()`, which honours a read-only sandbox
+mount). The Flatpak makes Steam's `userdata` writable for this; everything
+else in Steam stays read-only. Captures that can't be deleted dim while
+selecting. If a file can't be deleted, the bottom bar says so.
 
 ## Video timeline
 

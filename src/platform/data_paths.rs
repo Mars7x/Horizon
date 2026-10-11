@@ -131,6 +131,42 @@ pub fn album_cache_dir(version: &str) -> Option<PathBuf> {
     cache_dir("album", version)
 }
 
+/// Where the Album saves captures for the user: `Horizon` in their Pictures
+/// folder, the one folder outside Horizon's own that it writes. The Flatpak
+/// grants exactly that folder (`xdg-pictures/Horizon:create`) and reads the
+/// desktop's folder names (`user-dirs.dirs`) to find Pictures, which may be
+/// localized; without them, `~/Pictures`.
+pub fn pictures_export_dir() -> Option<PathBuf> {
+    let home = non_empty_env("HOME").map(PathBuf::from)?;
+    let config = if in_flatpak() {
+        non_empty_env("HOST_XDG_CONFIG_HOME").map(PathBuf::from)
+    } else {
+        non_empty_env("XDG_CONFIG_HOME").map(PathBuf::from)
+    }
+    .unwrap_or_else(|| home.join(".config"));
+    let pictures = fs::read_to_string(config.join("user-dirs.dirs"))
+        .ok()
+        .and_then(|dirs| pictures_from_user_dirs(&dirs, &home))
+        .unwrap_or_else(|| home.join("Pictures"));
+    Some(pictures.join("Horizon"))
+}
+
+/// `XDG_PICTURES_DIR="$HOME/Pictures"` from a `user-dirs.dirs` file.
+fn pictures_from_user_dirs(dirs: &str, home: &Path) -> Option<PathBuf> {
+    let value = dirs.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("XDG_PICTURES_DIR=")
+            .map(|value| value.trim().trim_matches('"'))
+    })?;
+    let path = match value.strip_prefix("$HOME") {
+        Some(rest) => home.join(rest.trim_start_matches('/')),
+        None => PathBuf::from(value),
+    };
+    // The spec allows only $HOME-relative or absolute paths; `$HOME` alone
+    // means "no Pictures folder", so fall back.
+    (path.is_absolute() && path != home).then_some(path)
+}
+
 fn config_file_path(filename: &str) -> Result<PathBuf, DataPathError> {
     let dir = app_dir(BaseDir::Config)?;
     fs::create_dir_all(&dir).map_err(|source| DataPathError::CreateConfigDirectory {
@@ -295,6 +331,29 @@ mod tests {
         assert_eq!(
             app_dir_in(Path::new("/home/user/.local/share"), false),
             PathBuf::from("/home/user/.local/share/io.github.Mars7x.Horizon")
+        );
+    }
+
+    #[test]
+    fn pictures_come_from_the_desktops_folder_names() {
+        let home = Path::new("/home/someone");
+        let dirs =
+            "# comment\nXDG_DESKTOP_DIR=\"$HOME/Desktop\"\nXDG_PICTURES_DIR=\"$HOME/Bilder\"\n";
+        assert_eq!(
+            pictures_from_user_dirs(dirs, home),
+            Some(home.join("Bilder"))
+        );
+        assert_eq!(
+            pictures_from_user_dirs("XDG_PICTURES_DIR=\"/data/photos\"", home),
+            Some(PathBuf::from("/data/photos"))
+        );
+        assert_eq!(
+            pictures_from_user_dirs("XDG_PICTURES_DIR=\"$HOME/\"", home),
+            None
+        );
+        assert_eq!(
+            pictures_from_user_dirs("XDG_MUSIC_DIR=\"$HOME/Music\"", home),
+            None
         );
     }
 }

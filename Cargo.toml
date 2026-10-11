@@ -12,9 +12,11 @@ license = "GPL-3.0-or-later"
 ashpd = { version = "0.13", default-features = false, features = ["open_uri", "settings", "tokio"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 futures-util = "0.3"
-# Album video: playback and poster frames through the runtime's GStreamer.
 image = { version = "0.25", default-features = false, features = ["ico", "jpeg", "png"] }
 ico = "0.5"
+# `access()` for honest writability checks (a read-only sandbox mount keeps
+# its write permission bits). Already in the build through other crates.
+libc = "0.2"
 rusqlite = { version = "0.37", features = ["bundled"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }

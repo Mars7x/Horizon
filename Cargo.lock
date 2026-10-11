@@ -1588,6 +1588,7 @@ dependencies = [
  "futures-util",
  "ico",
  "image",
+ "libc",
  "pkg-config",
  "reqwest",
  "rusqlite",

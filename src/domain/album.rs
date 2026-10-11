@@ -60,6 +60,9 @@ pub struct Capture {
     captured_at: i64,
     /// A smaller copy the owner already keeps (Steam's `thumbnails/`).
     preview: Option<PathBuf>,
+    /// Its owner can delete it here (Horizon's own always; a source's when
+    /// that source supports it and its folder is writable).
+    deletable: bool,
 }
 
 impl Capture {
@@ -70,6 +73,7 @@ impl Capture {
         game: Option<SourceGameRef>,
         captured_at: i64,
     ) -> Self {
+        let deletable = origin_deletable(&origin);
         Self {
             path,
             kind,
@@ -77,7 +81,14 @@ impl Capture {
             game,
             captured_at,
             preview: None,
+            deletable,
         }
+    }
+
+    /// Whether its owner can delete it (only a source's captures vary).
+    pub fn with_deletable(mut self, deletable: bool) -> Self {
+        self.deletable = self.origin.is_horizon() || deletable;
+        self
     }
 
     pub fn with_preview(mut self, preview: Option<PathBuf>) -> Self {
@@ -106,15 +117,20 @@ impl Capture {
         self.captured_at
     }
 
-    /// Only Horizon's own captures can be deleted from the Album; a
-    /// source's files belong to that source.
+    /// Whether the Album can delete it: Horizon's own captures always; a
+    /// source's when the source deletes it (Steam's screenshots, given write
+    /// access to Steam's folder).
     pub fn deletable(&self) -> bool {
-        self.origin.is_horizon()
+        self.deletable
     }
 
     pub fn preview(&self) -> Option<&std::path::Path> {
         self.preview.as_deref()
     }
+}
+
+fn origin_deletable(origin: &CaptureOrigin) -> bool {
+    origin.is_horizon()
 }
 
 /// Album order: newest first; the path breaks ties so order is stable.
