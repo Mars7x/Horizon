@@ -1,0 +1,54 @@
+import { Theme, Typography } from "../theme/theme.slint";
+import { ModalDialog } from "modal-dialog.slint";
+import { ActionButton } from "action-button.slint";
+
+// Horizon's one confirmation: a question, an optional line under it, and
+// Cancel beside the action ("Delete", "Remove", "Disconnect"). Focus is
+// Rust-owned (`selected`: 0 Cancel, 1 the action); a click calls `choose` with
+// the same numbers. Without `text` the card is shorter.
+export component ConfirmDialog inherits ModalDialog {
+    in property <string> title;
+    in property <string> text: "";
+    in property <string> action: "OK";
+    in property <int> selected: 0;
+    callback choose(int);
+
+    card-width: 456px;
+    card-height: root.text != "" ? 196px : 152px;
+    private property <length> buttons-y: root.text != "" ? 132px : 88px;
+
+    Text {
+        x: 29px; y: 27px;
+        width: parent.width - 58px; height: 34px;
+        text: root.title;
+        color: Theme.foreground;
+        font-size: Typography.heading-size;
+        font-weight: Typography.heading-weight;
+        vertical-alignment: center;
+    }
+    if root.text != "" : Text {
+        x: 29px; y: 66px;
+        width: parent.width - 58px; height: 44px;
+        text: root.text;
+        color: Theme.secondary-foreground;
+        font-size: Typography.body-size;
+        wrap: word-wrap;
+    }
+    ActionButton {
+        x: parent.width - 29px - 2 * 120px - 12px; y: root.buttons-y;
+        width: 120px; height: 40px;
+        label: "Cancel";
+        focused: root.open && root.selected == 0;
+        enabled: root.open;
+        activated => { root.choose(0); }
+    }
+    ActionButton {
+        x: parent.width - 29px - 120px; y: root.buttons-y;
+        width: 120px; height: 40px;
+        label: root.action;
+        primary: true;
+        focused: root.open && root.selected == 1;
+        enabled: root.open;
+        activated => { root.choose(1); }
+    }
+}

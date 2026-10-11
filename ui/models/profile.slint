@@ -4,3 +4,14 @@ export struct ProfileFrameData {
     image: image,
     delay-ms: int,
 }
+
+// One Steam friend on the Profile page (presentation/friends.rs). `kind`:
+// 0 in a game, 1 online, 2 away or busy, 3 offline.
+export struct FriendData {
+    name: string,
+    status: string,
+    kind: int,
+    avatar: image,
+    has-avatar: bool,
+    initial: string,
+}

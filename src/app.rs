@@ -321,9 +321,9 @@ pub fn run() -> Result<(), AppError> {
     }));
     let initial_preferences = settings.artwork_preferences();
     ui.set_settings_artwork_status(if initial_preferences.api_key.is_some() {
-        "Checking SteamGridDB artwork…".into()
+        "Checking covers".into()
     } else {
-        "Save an API key to enable SteamGridDB artwork.".into()
+        "No API key".into()
     });
     home.refresh_steamgriddb(initial_preferences);
     let artwork_home = Rc::clone(&home);
@@ -331,9 +331,9 @@ pub fn run() -> Result<(), AppError> {
     settings.set_artwork_changed(Rc::new(move |preferences| {
         if let Some(ui) = artwork_ui.upgrade() {
             ui.set_settings_artwork_status(if preferences.api_key.is_some() {
-                "Checking SteamGridDB artwork…".into()
+                "Checking covers".into()
             } else {
-                "SteamGridDB disabled (no API key).".into()
+                "No API key".into()
             });
         }
         artwork_home.refresh_steamgriddb(preferences);
@@ -447,8 +447,7 @@ pub fn run() -> Result<(), AppError> {
             ),
             (
                 ui.get_profile_focused(),
-                ui.get_profile_page_selection(),
-                ui.get_profile_picture_selection(),
+                ui.get_profile_edit_selection(),
                 ui.get_profile_editor_target(),
             ),
         );
@@ -480,8 +479,7 @@ pub fn run() -> Result<(), AppError> {
             ),
             (
                 ui.get_profile_focused(),
-                ui.get_profile_page_selection(),
-                ui.get_profile_picture_selection(),
+                ui.get_profile_edit_selection(),
                 ui.get_profile_editor_target(),
             ),
         );

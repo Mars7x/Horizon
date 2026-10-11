@@ -3,6 +3,7 @@ pub mod activity;
 pub mod album;
 pub mod appearance;
 pub mod clock;
+pub mod friends;
 pub mod home;
 pub mod library;
 pub mod navigation;

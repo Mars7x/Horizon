@@ -664,11 +664,6 @@ impl AlbumController {
                     .iter()
                     .any(|c| c.path() == path && !c.origin().is_horizon())
             });
-            let gone = if from_steam {
-                " deleted, from Steam too."
-            } else {
-                " deleted."
-            };
             match targets.as_slice() {
                 [one] => (
                     match kind(one) {
@@ -676,11 +671,21 @@ impl AlbumController {
                         _ => "Delete this screenshot?",
                     }
                     .to_owned(),
-                    format!("It will be permanently{gone}"),
+                    if from_steam {
+                        "It's deleted from Steam too"
+                    } else {
+                        ""
+                    }
+                    .to_owned(),
                 ),
                 many => (
                     format!("Delete {} captures?", many.len()),
-                    format!("They will be permanently{gone}"),
+                    if from_steam {
+                        "They're deleted from Steam too"
+                    } else {
+                        ""
+                    }
+                    .to_owned(),
                 ),
             }
         };
@@ -1373,8 +1378,7 @@ impl AlbumController {
         ui.set_album_collection_count(s.captures.len() as i32);
         ui.set_album_status(
             if s.scanned {
-                "No screenshots or videos yet. Steam screenshots appear here, as will captures \
-                 Horizon takes."
+                "No screenshots or videos yet"
             } else {
                 ""
             }

@@ -1,5 +1,7 @@
 # ADR 0177: The Profile page
 
+> **Extended by ADR 0178:** the page gained the Steam friends list on its right, the profile moved into a card on the left, and the Friends utility was removed, so the avatar now sits left of Album.
+
 **Status:** Implemented. The build, the gate and the new tests pass (avatar focus in the top row, the left edge, focus memory, the Profile route and its history, names and monograms, preferences). The page, the picture dialog, the name editor, Home's focused avatar and Settings were rendered offscreen, light and dark. Not yet used in the running app.
 
 ## Context

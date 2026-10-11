@@ -7,6 +7,7 @@ import { TransitionDriver, TransitionLayer } from "../components/transition.slin
 import { ActionButton as SettingsButton } from "../components/action-button.slint";
 import { ModalDialog } from "../components/modal-dialog.slint";
 import { SettingsRow } from "../components/settings-row.slint";
+import { ConfirmDialog } from "../components/confirm-dialog.slint";
 
 // Shared button component for dialog and back navigation.
 // A saved Theme preference is expressed by accent-coloured text, not an
@@ -98,7 +99,7 @@ export component SettingsPage inherits Rectangle {
     in property <string> appearance-feedback: "";
     in property <int> selection: 0;
     in property <bool> key-present: false;
-    in property <string> steam-identity: "Not configured";
+    in property <string> steam-identity: "Not set";
     in property <bool> steam-connected: false;
     in property <bool> steam-saved: false;
     in property <int> editor-kind: 0; // 0 SteamGridDB, 1 SteamID64, 2 Steam Web API key
@@ -130,6 +131,14 @@ export component SettingsPage inherits Rectangle {
     private property <length> caret-local-x: 0px;
 
     callback activate(int);
+    // A row's Remove / Disconnect button was clicked; the confirmation's
+    // answer (0 Cancel, 1 the action).
+    callback remove(int);
+    in property <bool> confirm-open: false;
+    in property <string> confirm-title: "";
+    in property <string> confirm-action: "";
+    in property <int> confirm-focus: 0;
+    callback confirm(int);
     callback go-back();
     callback save-key(string);
     callback cancel-key();
@@ -200,7 +209,7 @@ export component SettingsPage inherits Rectangle {
                 width: parent.width;
                
                 title: "Third-Party";
-                subtitle: "Artwork providers and external integrations";
+                subtitle: "Steam and SteamGridDB";
                 trailing: "Open  ›";
                 focused: root.view == 0 && root.selection == 1;
                 activated => { if (root.view == 0 && !root.editing-key && !root.refresh-open) { root.activate(1); } }
@@ -231,15 +240,9 @@ export component SettingsPage inherits Rectangle {
             font-size: Typography.heading-size;
             font-weight: Typography.heading-weight;
         }
-        Text {
-            x: 0px; y: 68px; width: parent.width; height: 23px;
-            text: "System follows your desktop's Light or Dark mode.";
-            color: Theme.secondary-foreground;
-            font-size: Typography.caption-size;
-        }
         // A compact three-way selector instead of full-width, double-outlined cards.
         theme-choices := Rectangle {
-            x: 0px; y: 102px;
+            x: 0px; y: 76px;
             width: min(parent.width, 780px); height: 66px;
             background: transparent;
             AppearanceChoice {
@@ -271,22 +274,16 @@ export component SettingsPage inherits Rectangle {
             }
         }
         Text {
-            x: 0px; y: 204px; width: parent.width; height: 31px;
+            x: 0px; y: 174px; width: parent.width; height: 31px;
             text: "Accent colour";
             color: Theme.foreground;
             font-size: Typography.heading-size;
             font-weight: Typography.heading-weight;
         }
-        Text {
-            x: 0px; y: 236px; width: parent.width; height: 23px;
-            text: "Follow the system colour or choose a custom accent.";
-            color: Theme.secondary-foreground;
-            font-size: Typography.caption-size;
-        }
         // GNOME-inspired small palette, using Horizon's own focus + radius tokens.
         // Keeps all nine colours named for accessibility without visible labels.
         accent-palette := Rectangle {
-            x: 0px; y: 278px;
+            x: 0px; y: 215px;
             width: min(parent.width, 710px); height: 72px;
             background: Theme.surface;
             border-radius: Metrics.radius-lg;
@@ -383,19 +380,18 @@ export component SettingsPage inherits Rectangle {
             }
         }
         Text {
-            x: 0px; y: 366px;
+            x: 0px; y: 403px;
             width: parent.width; height: 26px;
-            text: root.appearance-feedback != "" ? root.appearance-feedback
-                : "Accent colours adapt for readable contrast in both Light and Dark themes.";
+            text: root.appearance-feedback;
             color: root.appearance-feedback != "" ? Theme.foreground : Theme.secondary-foreground;
             font-size: Typography.caption-size;
             vertical-alignment: center;
         }
         SettingsRow {
-            x: 0px; y: 408px;
+            x: 0px; y: 311px;
             width: parent.width;
             title: "UI Sounds";
-            subtitle: "Play sounds when navigating, confirming, and going back";
+            subtitle: "Sounds when you move and select";
             toggle: true;
             checked: root.ui-sounds-enabled;
             focused: root.view == 1 && root.selection == 13;
@@ -425,7 +421,7 @@ export component SettingsPage inherits Rectangle {
             x: 0px; y: Metrics.breadcrumb-height + Metrics.spacing-sm;
             width: parent.width;
             title: "SteamGridDB";
-            subtitle: root.key-present ? "Square cover artwork · key saved" : "Square cover artwork · not configured";
+            subtitle: root.key-present ? "Cover art · Connected" : "Cover art · Not set up";
             trailing: "Open  ›";
             focused: root.view == 2 && root.selection == 0;
             activated => { if (root.view == 2 && !root.editing-key && !root.refresh-open) { root.activate(0); } }
@@ -434,7 +430,7 @@ export component SettingsPage inherits Rectangle {
             x: 0px; y: Metrics.breadcrumb-height + Metrics.spacing-sm + Metrics.list-row-height + Metrics.list-row-gap;
             width: parent.width;
             title: "Steam Account";
-            subtitle: root.steam-connected ? "Configured for achievements and future Steam services" : "Configure SteamID64 and Web API key";
+            subtitle: root.steam-connected ? "Connected" : "Not set up";
             trailing: "Open  ›";
             focused: root.view == 2 && root.selection == 1;
             activated => { if (root.view == 2 && !root.editing-key && !root.refresh-open) { root.activate(1); } }
@@ -465,28 +461,22 @@ export component SettingsPage inherits Rectangle {
             font-weight: Typography.heading-weight;
             vertical-alignment: center;
         }
-        Text {
-            x: 0px; y: 64px; width: parent.width; height: 28px;
-            text: root.key-present ? "Square cover artwork from SteamGridDB"
-                : "Add your personal API key to use SteamGridDB cover artwork.";
-            color: Theme.secondary-foreground;
-            font-size: Typography.caption-size;
-            vertical-alignment: center;
-        }
         SettingsRow {
-            x: 0px; y: 100px;
+            x: 0px; y: 76px;
             width: parent.width;
             title: "API key";
-            subtitle: root.key-present ? "Saved locally · key hidden" : "Not configured";
+            subtitle: root.key-present ? "Saved" : "Not set";
             trailing: root.key-present ? "Replace  ›" : "Add key  ›";
+            secondary: root.key-present ? "Remove" : "";
             focused: root.view == 4 && root.selection == 0;
             activated => { if (root.view == 4 && !root.editing-key && !root.refresh-open) { root.activate(0); } }
+            secondary-activated => { if (root.view == 4 && !root.editing-key && !root.refresh-open) { root.remove(0); } }
         }
         SettingsRow {
-            x: 0px; y: 188px;
+            x: 0px; y: 164px;
             width: parent.width;
             title: "Prefer SteamGridDB artwork";
-            subtitle: "Use SteamGridDB first; keep existing art as fallback";
+            subtitle: "Use it over each store's own art";
             toggle: true;
             accessible-role: switch;
             checked: root.prefer-artwork;
@@ -494,27 +484,17 @@ export component SettingsPage inherits Rectangle {
             activated => { if (root.view == 4 && !root.editing-key && !root.refresh-open) { root.activate(1); } }
         }
         SettingsRow {
-            x: 0px; y: 276px;
+            x: 0px; y: 252px;
             width: parent.width;
             title: "Refresh artwork";
-            subtitle: "Check SteamGridDB for updated square covers";
+            subtitle: "Check for new covers";
             trailing: root.key-present ? "Refresh  ›" : "Unavailable";
             enabled: root.key-present;
             focused: root.view == 4 && root.selection == 2;
             activated => { if (root.view == 4 && !root.editing-key && !root.refresh-open) { root.activate(2); } }
         }
-        SettingsRow {
-            x: 0px; y: 364px;
-            width: parent.width;
-            title: "Remove API key";
-            subtitle: root.key-present ? "Disconnect SteamGridDB and keep cached files" : "No key is currently saved";
-            trailing: root.key-present ? "Remove  ›" : "Unavailable";
-            enabled: root.key-present;
-            focused: root.view == 4 && root.selection == 3;
-            activated => { if (root.view == 4 && !root.editing-key && !root.refresh-open) { root.activate(3); } }
-        }
         Text {
-            x: 0px; y: 456px; width: parent.width; height: 30px;
+            x: 0px; y: 344px; width: parent.width; height: 30px;
             text: root.feedback;
             visible: root.view == 4 && root.feedback != "";
             color: Theme.accent;
@@ -540,54 +520,32 @@ export component SettingsPage inherits Rectangle {
         }
         Text {
             x: 0px; y: 32px; width: parent.width; height: 32px;
-            text: "Steam Web API";
+            text: "Steam Account";
             color: Theme.foreground;
             font-size: Typography.heading-size;
             font-weight: Typography.heading-weight;
             vertical-alignment: center;
         }
-        Text {
-            x: 0px; y: 64px; width: parent.width; height: 28px;
-            text: root.steam-connected ? "Configured for read-only achievements"
-                : "Set your SteamID64 and Web API key; this is not a Steam login.";
-            color: Theme.secondary-foreground;
-            font-size: Typography.caption-size;
-            vertical-alignment: center;
-        }
         SettingsRow {
-            x: 0px; y: 100px; width: parent.width;
-            title: "SteamID64";
+            x: 0px; y: 76px; width: parent.width;
+            title: "Steam ID";
             subtitle: root.steam-identity;
-            trailing: root.steam-identity == "Not configured" ? "Set ID  ›" : "Change  ›";
+            trailing: root.steam-identity == "Not set" ? "Set  ›" : "Change  ›";
+            secondary: root.steam-saved ? "Disconnect" : "";
             focused: root.view == 3 && root.selection == 0;
             activated => { if (root.view == 3 && !root.editing-key) { root.activate(0); } }
+            secondary-activated => { if (root.view == 3 && !root.editing-key) { root.remove(0); } }
         }
         SettingsRow {
-            x: 0px; y: 188px; width: parent.width;
+            x: 0px; y: 164px; width: parent.width;
             title: "Steam Web API key";
-            subtitle: root.steam-connected ? "Configured · key hidden" : "Required to retrieve achievements";
+            subtitle: root.steam-connected ? "Saved" : "Not set";
             trailing: root.steam-connected ? "Replace  ›" : "Add key  ›";
             focused: root.view == 3 && root.selection == 1;
             activated => { if (root.view == 3 && !root.editing-key) { root.activate(1); } }
         }
-        SettingsRow {
-            x: 0px; y: 276px; width: parent.width;
-            title: "Disconnect Steam";
-            subtitle: root.steam-saved ? "Delete Horizon's saved key and SteamID64" : "No locally saved account";
-            trailing: root.steam-saved ? "Remove  ›" : "Unavailable";
-            enabled: root.steam-saved;
-            focused: root.view == 3 && root.selection == 2;
-            activated => { if (root.view == 3 && !root.editing-key && root.steam-saved) { root.activate(2); } }
-        }
         Text {
-            x: 0px; y: 368px; width: parent.width; height: 72px;
-            text: "Stored locally with private file permissions; not encrypted. API keys are never shown after saving. Account connection does not grant Steam login access.";
-            color: Theme.secondary-foreground;
-            font-size: Typography.caption-size;
-            wrap: word-wrap;
-        }
-        Text {
-            x: 0px; y: 444px; width: parent.width; height: 30px;
+            x: 0px; y: 252px; width: parent.width; height: 30px;
             text: root.feedback;
             visible: root.view == 3 && root.feedback != "";
             color: Theme.accent;
@@ -607,9 +565,9 @@ export component SettingsPage inherits Rectangle {
         Text {
             x: 26px; y: 22px;
             width: parent.width - 52px; height: 34px;
-            text: root.editor-kind == 1 ? "SteamID64"
+            text: root.editor-kind == 1 ? "Steam ID"
                 : root.editor-kind == 2 ? "Steam Web API key"
-                : root.key-present ? "Replace SteamGridDB API key" : "Add SteamGridDB API key";
+                : "SteamGridDB API key";
             color: Theme.foreground;
             font-size: Typography.heading-size;
             font-weight: Typography.heading-weight;
@@ -620,10 +578,8 @@ export component SettingsPage inherits Rectangle {
             edge-color: Theme.surface-raised;
             x: 26px; y: 60px;
             width: parent.width - 52px; height: 24px;
-            text: root.editor-kind == 1 ? "Your 17-digit numeric Steam identity."
-                : root.editor-kind == 2 ? "Enter a Web API key; stored locally, never shown again."
-                : root.key-present ? "Saved keys stay hidden. Enter a new key to replace it."
-                : "Enter your personal key to enable SteamGridDB artwork.";
+            text: root.editor-kind == 1 ? "The 17-digit number from your Steam profile"
+                : "Stays hidden once saved";
             text-color: Theme.secondary-foreground;
             font-size: Typography.body-size;
         }
@@ -666,7 +622,7 @@ export component SettingsPage inherits Rectangle {
                     color: Theme.foreground;
                     selection-background-color: Theme.accent;
                     selection-foreground-color: Theme.accent-foreground;
-                    accessible-label: root.editor-kind == 1 ? "SteamID64" : root.editor-kind == 2 ? "Steam Web API key" : "SteamGridDB API key";
+                    accessible-label: root.editor-kind == 1 ? "Steam ID" : root.editor-kind == 2 ? "Steam Web API key" : "SteamGridDB API key";
                     // Disable the abrupt native blink; the clipped overlay
                     // below fades smoothly at Slint's own cursor position.
                     text-cursor-width: 0px;
@@ -787,7 +743,7 @@ export component SettingsPage inherits Rectangle {
                 border-width: reveal-touch.has-hover ? 1px : 0px;
                 border-color: Theme.divider;
                 accessible-role: button;
-                accessible-label: root.editor-kind == 1 ? "SteamID64 shown" : root.reveal-draft ? "Hide API key" : "Show API key";
+                accessible-label: root.editor-kind == 1 ? "Steam ID shown" : root.reveal-draft ? "Hide API key" : "Show API key";
                 animate background { duration: Motion.hover-duration; easing: ease-in-out; }
                 SelectionFocusSurface {
                     x: -2px; y: -2px;
@@ -852,7 +808,7 @@ export component SettingsPage inherits Rectangle {
             x: parent.width - 138px; y: 191px;
             width: 112px; height: 43px;
             primary: true;
-            label: root.editor-kind == 1 ? "Save ID" : "Save key";
+            label: "Save";
             focused: root.editor-target == 3;
             enabled: root.key-draft != "";
             activated => { root.save-key(root.key-draft); }
@@ -932,8 +888,8 @@ export component SettingsPage inherits Rectangle {
         Text {
             x: 89px; y: 30px;
             width: parent.width - 115px; height: 34px;
-            text: root.refresh-running ? "Refreshing artwork"
-                : (root.refresh-error == "" ? "Refresh complete" : "Refresh interrupted");
+            text: root.refresh-running ? "Checking covers"
+                : (root.refresh-error == "" ? "Done" : "Stopped");
             color: Theme.foreground;
             font-size: Typography.heading-size;
             font-weight: Typography.heading-weight;
@@ -943,8 +899,8 @@ export component SettingsPage inherits Rectangle {
             x: 29px; y: 86px;
             width: parent.width - 58px; height: 26px;
             text: root.refresh-total == 0
-                ? (root.refresh-running ? "Preparing game library…" : "0 / 0 games checked")
-                : (root.refresh-completed + " / " + root.refresh-total + " games checked");
+                ? (root.refresh-running ? "" : "No games to check")
+                : (root.refresh-completed + " of " + root.refresh-total + " games");
             color: Theme.secondary-foreground;
             font-size: Typography.body-size;
             vertical-alignment: center;
@@ -971,9 +927,7 @@ export component SettingsPage inherits Rectangle {
             edge-color: Theme.surface-raised;
             x: 29px; y: 145px;
             width: parent.width - 190px; height: 42px;
-            text: root.refresh-error != "" ? root.refresh-error
-                : (root.refresh-running ? "Checking for updated square covers"
-                    : (root.refresh-total == 0 ? "No eligible games to refresh" : "Existing artwork is preserved"));
+            text: root.refresh-error;
             text-color: Theme.secondary-foreground;
             font-size: Typography.caption-size;
         }
@@ -984,5 +938,16 @@ export component SettingsPage inherits Rectangle {
             focused: root.refresh-open;
             activated => { root.dismiss-refresh(); }
         }
+    }
+
+    // Removing a key or disconnecting asks first.
+    ConfirmDialog {
+        area-width: root.width; area-height: root.height;
+        z: 30;
+        open: root.confirm-open;
+        title: root.confirm-title;
+        action: root.confirm-action;
+        selected: root.confirm-focus;
+        choose(choice) => { root.confirm(choice); }
     }
 }

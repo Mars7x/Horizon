@@ -3,7 +3,7 @@ import { SelectionFocusSurface } from "selection-focus-surface.slint";
 import { ProfileAvatar } from "profile-avatar.slint";
 import { ProfileFrameData } from "../models/profile.slint";
 import { BatteryIndicator, NetworkIndicator } from "status-glyphs.slint";
-import { FriendsIcon, AlbumIcon, ActivityIcon, AchievementsIcon, SettingsIcon, ShopIcon } from "utility-icons.slint";
+import { AlbumIcon, ActivityIcon, AchievementsIcon, SettingsIcon, ShopIcon } from "utility-icons.slint";
 
 component Separator inherits Rectangle {
     width: 1px;
@@ -93,7 +93,7 @@ export component TopNavigation inherits Rectangle {
     in property <int> battery-percent: 0;
     in property <bool> battery-charging: false;
     in property <bool> utility-focus-visible: false;
-    in property <int> focused-utility-index: 2;
+    in property <int> focused-utility-index: 1;
     callback utility-activated(int);
 
     background: transparent;
@@ -147,7 +147,7 @@ export component TopNavigation inherits Rectangle {
         UtilityFocusSurface {
             width: 40px; height: 40px;
             focused: root.utility-focus-visible && root.focused-utility-index == 0;
-            FriendsIcon {
+            AlbumIcon {
                 render-scale: root.icon-render-scale;
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2 + parent.focus-lift;
@@ -160,7 +160,7 @@ export component TopNavigation inherits Rectangle {
         UtilityFocusSurface {
             width: 40px; height: 40px;
             focused: root.utility-focus-visible && root.focused-utility-index == 1;
-            AlbumIcon {
+            ActivityIcon {
                 render-scale: root.icon-render-scale;
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2 + parent.focus-lift;
@@ -173,7 +173,7 @@ export component TopNavigation inherits Rectangle {
         UtilityFocusSurface {
             width: 40px; height: 40px;
             focused: root.utility-focus-visible && root.focused-utility-index == 2;
-            ActivityIcon {
+            AchievementsIcon {
                 render-scale: root.icon-render-scale;
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2 + parent.focus-lift;
@@ -186,7 +186,7 @@ export component TopNavigation inherits Rectangle {
         UtilityFocusSurface {
             width: 40px; height: 40px;
             focused: root.utility-focus-visible && root.focused-utility-index == 3;
-            AchievementsIcon {
+            SettingsIcon {
                 render-scale: root.icon-render-scale;
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2 + parent.focus-lift;
@@ -199,19 +199,6 @@ export component TopNavigation inherits Rectangle {
         UtilityFocusSurface {
             width: 40px; height: 40px;
             focused: root.utility-focus-visible && root.focused-utility-index == 4;
-            SettingsIcon {
-                render-scale: root.icon-render-scale;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2 + parent.focus-lift;
-                width: Metrics.utility-cell-size;
-                height: Metrics.utility-cell-size;
-                animate y { duration: Motion.focus-duration; easing: ease-in-out; }
-            }
-            TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(4); } }
-        }
-        UtilityFocusSurface {
-            width: 40px; height: 40px;
-            focused: root.utility-focus-visible && root.focused-utility-index == 5;
             ShopIcon {
                 render-scale: root.icon-render-scale;
                 x: (parent.width - self.width) / 2;
@@ -220,7 +207,7 @@ export component TopNavigation inherits Rectangle {
                 height: Metrics.utility-cell-size;
                 animate y { duration: Motion.focus-duration; easing: ease-in-out; }
             }
-            TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(5); } }
+            TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(4); } }
         }
     }
 

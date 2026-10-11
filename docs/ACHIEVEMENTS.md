@@ -23,7 +23,7 @@
 ## Account configuration — not on the Achievements page
 
 - Use **Settings → Third-Party → Steam Account** to set/replace a 17-digit SteamID64 and personal Steam Web API key or disconnect the saved account. No Steam username/password is collected and this is not OAuth or Steam browser login.
-- `src/services/steam_account.rs` owns the shared `SteamAccountService` and `SteamWebApiClient` so a **future** Steam Friends implementation can reuse them. **Friends integration is not currently implemented**.
+- `src/services/steam_account.rs` owns the shared `SteamAccountService` and `SteamWebApiClient` shared with the profile and its Steam friends list ([PROFILE.md](PROFILE.md)).
 - Credentials are written as an atomic replacement to `config/steam-account.json` (see [Files on disk](STORAGE.md)), using `0600` file permissions inside a `0700` configuration directory. This is **not encrypted storage**; other processes under the same user may still read them. Never log, publish into Slint or commit the key.
 - As a developer fallback, if no saved account exists, both `HORIZON_STEAM_WEB_API_KEY` and `HORIZON_STEAM_ID64` may be inherited from the process environment. Removing a saved account does **not** unset inherited environment variables.
 - An account replacement/disconnect invalidates previously published achievement results; stale background imports for the previous account must not repopulate the UI.
@@ -32,7 +32,6 @@
 
 - Direct Steam sign-in/account linking without manually entering a Web API key.
 - Rarity metadata, and multi-provider aggregation. The source selector currently offers All sources and Steam only.
-- Steam Friends browsing and presence; that is intentionally deferred.
 
 ## Testing expectations
 

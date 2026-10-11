@@ -12,7 +12,7 @@ This page describes the **prepared source** assembled from the cleaned repositor
 - **Achievements:** fourth Home utility, after Activity; read-only Steam Web API achievement unlock states for eligible imported Steam games; list browsing and recent-unlocks preview. Now has source-aware game/achievement models, optional bounded Steam badge thumbnails, and a source selector; no other achievement provider, full offline cache, or comprehensive account sign-in flow yet.
 - **Settings:** appearance and third-party service configuration, including SteamGridDB and **Steam Account** under Third-Party. SteamID64 + personal Web API key can be stored in an app-private file with owner-only permissions; not encrypted or OAuth.
 - **Album:** Horizon's own captures (`data/album/`, written by the future screenshot/recording features) and the active Steam account's screenshots, newest first, in a grid with Game and Type filters. A full-screen viewer slides between captures and plays videos with FFmpeg, sound through PipeWire. See [Album](ALBUM.md).
-- **Friends, Shop:** retained utility routes; do **not** infer production social or commerce integrations from their presence. There is no Web utility, and none is planned (ADR 0174). Steam Friends is a **future intention**, not implemented.
+- **Shop:** retained utility route; do **not** infer a production commerce integration from its presence. There is no Web utility (ADR 0174) and no Friends utility: a read-only Steam friends list is on the Profile page (ADR 0178).
 
 ## Production source and data boundaries
 
@@ -27,7 +27,7 @@ This page describes the **prepared source** assembled from the cleaned repositor
 - Phase 10.4.1.1 fixes a reported 14-element Rust tuple comparison (`E0369`) and replaces the achievement utility SVG; confirmation requires a real rebuild.
 - Steam Web API key configuration is **manual** and should be treated as sensitive; saved credentials are protected by file permissions, not encryption. Environment variables can provide a fallback for developer runs.
 - Achievement data can be inaccessible due to privacy/API/network conditions; missing is **not** zero. The achievement browser uses an account-scoped disk cache. Phase 10.4.3.3 adds on-demand badge hydration for opened games; images unavailable from Steam/CDN still use a neutral fallback. Rich Steam sign-in is not implemented.
-- Future Steam Friends support should use the shared Steam account and HTTP client services. Do not implement it until expressly requested.
+- Steam friends (Profile page) use the shared Steam account and HTTP client services, read-only.
 - Existing historical guides/ADRs may refer to retired providers or superseded UI experiments. Read the code for the present behavior.
 
 ## Quick links

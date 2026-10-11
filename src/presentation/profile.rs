@@ -1,7 +1,7 @@
 //! The profile: the avatar in Home's top bar, and the Profile page (opened
-//! from it), which shows the avatar and name with two actions: "Change
+//! from it), which shows the avatar and name with two actions ("Change
 //! picture" opens a dialog of the picture's options, "Edit name" the name
-//! editor.
+//! editor) beside the Steam friends list (`presentation::friends`).
 //!
 //! Three sources (`services::profile::ProfileSource`): a picture the user
 //! chose, the Steam account's avatar, or a built-in avatar. Everything slow
@@ -28,7 +28,7 @@ use crate::{
     input::{UiAction, UiActionEvent},
     navigation::step_with_edge_wrap,
     platform::{data_paths, file_chooser},
-    presentation::wake::drain_notify,
+    presentation::{friends::FriendsController, wake::drain_notify},
     services::{
         profile::{self, Animation, ProfilePreferences, ProfileSource},
         steam_account::{ProfileItem, SteamAccountService, SteamWebApiClient},
@@ -112,15 +112,12 @@ pub enum ProfileFeedback {
     Back,
 }
 
-/// The Profile page's actions, left to right.
-const CHANGE_PICTURE: i32 = 0;
-const EDIT_NAME: i32 = 1;
-
-/// The picture dialog's options, top to bottom, then its Done button.
-const PICTURE_CHOOSE: i32 = 0;
-const PICTURE_STEAM: i32 = 1;
-const PICTURE_REMOVE: i32 = 2;
-const PICTURE_DONE: i32 = 3;
+/// The Edit profile dialog's options, top to bottom, then its Done button.
+/// X on Choose removes the chosen picture.
+const OPTION_NAME: i32 = 0;
+const OPTION_CHOOSE: i32 = 1;
+const OPTION_STEAM: i32 = 2;
+const OPTION_DONE: i32 = 3;
 
 /// The name editor's controls: the text, Cancel, Save.
 const EDITOR_TEXT: i32 = 0;
@@ -129,11 +126,14 @@ const EDITOR_SAVE: i32 = 2;
 
 #[derive(Default)]
 struct PageState {
-    selection: i32,
-    picture_open: bool,
-    picture_selection: i32,
+    edit_open: bool,
+    edit_selection: i32,
     editing_name: bool,
     editor_target: i32,
+    /// Removing the chosen picture awaits confirmation; the dialog's focus
+    /// (0 Cancel, 1 Remove).
+    confirm_remove: bool,
+    confirm_focus: i32,
 }
 
 pub struct ProfileController {
@@ -156,6 +156,8 @@ pub struct ProfileController {
     /// A pick or a Steam fetch is under way (one at a time).
     busy: Cell<bool>,
     feedback: RefCell<String>,
+    /// The page's Steam friends list.
+    friends: Rc<FriendsController>,
 }
 
 impl ProfileController {
@@ -180,7 +182,7 @@ impl ProfileController {
         let controller = Rc::new(Self {
             ui: ui.as_weak(),
             paths,
-            steam_account,
+            steam_account: Rc::clone(&steam_account),
             sender,
             receiver: RefCell::new(receiver),
             source: RefCell::new(preferences.source),
@@ -193,6 +195,7 @@ impl ProfileController {
             avatar: RefCell::new(None),
             busy: Cell::new(false),
             feedback: RefCell::new(String::new()),
+            friends: FriendsController::new(ui, Rc::clone(&steam_account)),
         });
         drain.bind(&controller);
         if let Some(paths) = &controller.paths {
@@ -225,17 +228,35 @@ impl ProfileController {
 
     fn bind_callbacks(self: &Rc<Self>, ui: &AppWindow) {
         let (weak, controller) = (ui.as_weak(), Rc::clone(self));
-        ui.on_profile_activate(move |action| {
+        ui.on_profile_edit(move || {
             if let Some(ui) = weak.upgrade() {
-                controller.page.borrow_mut().selection = action;
-                controller.activate(&ui, action);
+                controller.open_edit(&ui);
             }
         });
         let (weak, controller) = (ui.as_weak(), Rc::clone(self));
-        ui.on_profile_activate_picture(move |option| {
+        ui.on_profile_activate_option(move |option| {
             if let Some(ui) = weak.upgrade() {
-                controller.page.borrow_mut().picture_selection = option;
-                controller.activate_picture(&ui, option);
+                controller.page.borrow_mut().edit_selection = option;
+                controller.activate_option(&ui, option);
+            }
+        });
+        let (weak, controller) = (ui.as_weak(), Rc::clone(self));
+        ui.on_profile_remove_picture(move || {
+            if let Some(ui) = weak.upgrade() {
+                controller.page.borrow_mut().edit_selection = OPTION_CHOOSE;
+                controller.ask_remove(&ui);
+            }
+        });
+        let (weak, controller) = (ui.as_weak(), Rc::clone(self));
+        ui.on_profile_confirm(move |choice| {
+            if let Some(ui) = weak.upgrade() {
+                controller.choose_confirm(&ui, choice);
+            }
+        });
+        let (weak, controller) = (ui.as_weak(), Rc::clone(self));
+        ui.on_profile_scroll_friends(move |rows| {
+            if let Some(ui) = weak.upgrade() {
+                controller.friends.scroll(&ui, rows);
             }
         });
         let (weak, controller) = (ui.as_weak(), Rc::clone(self));
@@ -252,99 +273,78 @@ impl ProfileController {
         });
     }
 
-    /// A fresh visit to the Profile page: "Change picture", nothing open.
+    /// A fresh visit to the Profile page: nothing open.
     pub fn on_enter(&self, ui: &AppWindow) {
         *self.page.borrow_mut() = PageState::default();
         self.feedback.borrow_mut().clear();
+        self.friends.on_enter(ui);
         self.publish(ui);
     }
 
-    /// Input while the Profile page is shown. An open dialog takes everything
-    /// but global actions; Back closes it.
+    /// Input while the Profile page is shown. The page's one target is the
+    /// avatar: A opens the Edit profile dialog, and Up and Down scroll the
+    /// read-only friends list. An open dialog takes everything but global
+    /// actions; Back closes it.
     pub fn handle_action(&self, ui: &AppWindow, event: UiActionEvent) -> ProfileFeedback {
-        let (editing, picture_open) = {
+        let (confirming, editing, edit_open) = {
             let page = self.page.borrow();
-            (page.editing_name, page.picture_open)
+            (page.confirm_remove, page.editing_name, page.edit_open)
         };
+        if confirming {
+            return self.confirm_action(ui, event);
+        }
         if editing {
             return self.editor_action(ui, event);
         }
-        if picture_open {
-            return self.picture_action(ui, event);
+        if edit_open {
+            return self.edit_action(ui, event);
         }
         match event.action {
-            UiAction::Left | UiAction::Right => {
-                let delta = if event.action == UiAction::Left {
-                    -1
-                } else {
-                    1
-                };
-                let mut page = self.page.borrow_mut();
-                page.selection = step_with_edge_wrap(
-                    page.selection,
-                    CHANGE_PICTURE,
-                    EDIT_NAME,
-                    delta,
-                    event.repeated,
-                );
-                drop(page);
-                self.publish(ui);
+            UiAction::Left | UiAction::Right => ProfileFeedback::Handled,
+            UiAction::Up | UiAction::Down => {
+                let rows = if event.action == UiAction::Up { -1 } else { 1 };
+                self.friends.scroll(ui, rows);
                 ProfileFeedback::Handled
             }
-            // Nothing above or below the actions.
-            UiAction::Up | UiAction::Down => ProfileFeedback::Handled,
             UiAction::Accept if !event.repeated => {
-                let action = self.page.borrow().selection;
-                self.activate(ui, action);
+                self.open_edit(ui);
                 ProfileFeedback::Ok
             }
             _ => ProfileFeedback::Ignored,
         }
     }
 
-    /// Open what a page action opens.
-    fn activate(&self, ui: &AppWindow, action: i32) {
-        match action {
-            CHANGE_PICTURE => {
-                self.feedback.borrow_mut().clear();
-                // Start on the first option that can be used.
-                let first = self.picture_targets()[0];
-                let mut page = self.page.borrow_mut();
-                page.picture_open = true;
-                page.picture_selection = first;
-            }
-            EDIT_NAME => {
-                ui.set_profile_name_draft(self.name.borrow().clone().into());
-                let mut page = self.page.borrow_mut();
-                page.editing_name = true;
-                page.editor_target = EDITOR_TEXT;
-            }
-            _ => {}
-        }
+    /// Open the Edit profile dialog, on its first option.
+    fn open_edit(&self, ui: &AppWindow) {
+        self.feedback.borrow_mut().clear();
+        let mut page = self.page.borrow_mut();
+        page.edit_open = true;
+        page.edit_selection = OPTION_NAME;
+        drop(page);
         self.publish(ui);
     }
 
-    /// The picture dialog's options that can be used now, in order; Done
-    /// always can.
-    fn picture_targets(&self) -> Vec<i32> {
+    /// The Edit profile dialog's options that can be used now, in order; the
+    /// name and Done always can.
+    fn edit_targets(&self) -> Vec<i32> {
         let busy = self.busy.get();
         let steam = self.steam_account.borrow().connected() || self.uses_steam();
         [
-            (PICTURE_CHOOSE, !busy),
-            (PICTURE_STEAM, steam && !busy),
-            (PICTURE_REMOVE, self.has_chosen_picture() && !busy),
-            (PICTURE_DONE, true),
+            (OPTION_NAME, true),
+            (OPTION_CHOOSE, !busy),
+            (OPTION_STEAM, steam && !busy),
+            (OPTION_DONE, true),
         ]
         .into_iter()
         .filter_map(|(option, usable)| usable.then_some(option))
         .collect()
     }
 
-    fn picture_action(&self, ui: &AppWindow, event: UiActionEvent) -> ProfileFeedback {
+    fn edit_action(&self, ui: &AppWindow, event: UiActionEvent) -> ProfileFeedback {
         match event.action {
             UiAction::Up | UiAction::Down => {
-                let targets = self.picture_targets();
-                let current = self.page.borrow().picture_selection;
+                let targets = self.edit_targets();
+                let current = self.page.borrow().edit_selection;
                 // Where the selection is now among the usable options (or
                 // the nearest after it, if it just became unusable).
                 let at = targets
@@ -354,42 +354,54 @@ impl ProfileController {
                 let delta = if event.action == UiAction::Up { -1 } else { 1 };
                 let last = targets.len() as i32 - 1;
                 let next = step_with_edge_wrap(at, 0, last, delta, event.repeated);
-                self.page.borrow_mut().picture_selection = targets[next as usize];
+                self.page.borrow_mut().edit_selection = targets[next as usize];
                 self.publish(ui);
                 ProfileFeedback::Handled
             }
             UiAction::Left | UiAction::Right => ProfileFeedback::Handled,
+            UiAction::Secondary
+                if !event.repeated && self.page.borrow().edit_selection == OPTION_CHOOSE =>
+            {
+                if self.ask_remove(ui) {
+                    ProfileFeedback::Ok
+                } else {
+                    ProfileFeedback::Handled
+                }
+            }
             UiAction::Back => {
-                self.close_picture(ui);
+                self.close_edit(ui);
                 ProfileFeedback::Back
             }
             UiAction::Accept if !event.repeated => {
-                let option = self.page.borrow().picture_selection;
-                if option == PICTURE_DONE {
-                    self.close_picture(ui);
-                    ProfileFeedback::Ok
-                } else if self.activate_picture(ui, option) {
+                let option = self.page.borrow().edit_selection;
+                if self.activate_option(ui, option) {
                     ProfileFeedback::Ok
                 } else {
                     ProfileFeedback::Handled
                 }
             }
             UiAction::Home | UiAction::Menu | UiAction::Forward => {
-                self.close_picture(ui);
+                self.close_edit(ui);
                 ProfileFeedback::Ignored
             }
             _ => ProfileFeedback::Handled,
         }
     }
 
-    /// Do what a picture option does. Returns whether it did something.
-    fn activate_picture(&self, ui: &AppWindow, option: i32) -> bool {
+    /// Do what an Edit profile option does. Returns whether it did something.
+    fn activate_option(&self, ui: &AppWindow, option: i32) -> bool {
         let done = match option {
-            PICTURE_CHOOSE => self.choose(ui),
-            PICTURE_STEAM => self.set_use_steam(ui, !self.uses_steam()),
-            PICTURE_REMOVE => self.remove(ui),
-            PICTURE_DONE => {
-                self.close_picture(ui);
+            OPTION_NAME => {
+                ui.set_profile_name_draft(self.name.borrow().clone().into());
+                let mut page = self.page.borrow_mut();
+                page.editing_name = true;
+                page.editor_target = EDITOR_TEXT;
+                true
+            }
+            OPTION_CHOOSE => self.choose(ui),
+            OPTION_STEAM => self.set_use_steam(ui, !self.uses_steam()),
+            OPTION_DONE => {
+                self.close_edit(ui);
                 true
             }
             _ => false,
@@ -398,21 +410,72 @@ impl ProfileController {
         // turned off without an account) hands the selection on; one
         // that's only waiting on the work it started keeps it.
         if !self.busy.get() {
-            let targets = self.picture_targets();
+            let targets = self.edit_targets();
             let mut page = self.page.borrow_mut();
-            if page.picture_open && !targets.contains(&page.picture_selection) {
-                page.picture_selection = targets[0];
+            if page.edit_open && !targets.contains(&page.edit_selection) {
+                page.edit_selection = targets[0];
             }
         }
         self.publish(ui);
         done
     }
 
-    fn close_picture(&self, ui: &AppWindow) {
+    /// Ask before removing the chosen picture. Returns whether it asked.
+    fn ask_remove(&self, ui: &AppWindow) -> bool {
+        if !self.has_chosen_picture() || self.busy.get() {
+            return false;
+        }
         let mut page = self.page.borrow_mut();
-        page.picture_open = false;
-        page.selection = CHANGE_PICTURE;
+        page.confirm_remove = true;
+        page.confirm_focus = 0;
         drop(page);
+        self.publish(ui);
+        true
+    }
+
+    fn confirm_action(&self, ui: &AppWindow, event: UiActionEvent) -> ProfileFeedback {
+        match event.action {
+            UiAction::Left | UiAction::Up | UiAction::Right | UiAction::Down => {
+                self.page.borrow_mut().confirm_focus =
+                    i32::from(matches!(event.action, UiAction::Right | UiAction::Down));
+                self.publish(ui);
+                ProfileFeedback::Handled
+            }
+            UiAction::Accept if !event.repeated => {
+                let focus = self.page.borrow().confirm_focus;
+                self.choose_confirm(ui, focus);
+                if focus == 1 {
+                    ProfileFeedback::Ok
+                } else {
+                    ProfileFeedback::Back
+                }
+            }
+            UiAction::Back => {
+                self.choose_confirm(ui, 0);
+                ProfileFeedback::Back
+            }
+            UiAction::Home | UiAction::Menu | UiAction::Forward => {
+                self.page.borrow_mut().confirm_remove = false;
+                self.close_edit(ui);
+                ProfileFeedback::Ignored
+            }
+            _ => ProfileFeedback::Handled,
+        }
+    }
+
+    /// The confirmation's answer: 0 Cancel, 1 Remove.
+    fn choose_confirm(&self, ui: &AppWindow, choice: i32) {
+        if !std::mem::take(&mut self.page.borrow_mut().confirm_remove) {
+            return;
+        }
+        if choice == 1 {
+            self.remove(ui);
+        }
+        self.publish(ui);
+    }
+
+    fn close_edit(&self, ui: &AppWindow) {
+        self.page.borrow_mut().edit_open = false;
         self.feedback.borrow_mut().clear();
         self.publish(ui);
     }
@@ -456,11 +519,6 @@ impl ProfileController {
         *self.name.borrow_mut() = name;
         if changed {
             self.save_preferences();
-            *self.feedback.borrow_mut() = if self.name.borrow().is_empty() {
-                "Name removed.".into()
-            } else {
-                "Name saved.".into()
-            };
         }
         self.close_editor(ui);
     }
@@ -489,7 +547,7 @@ impl ProfileController {
             .as_ref()
             .map(|paths| (paths.chosen.clone(), paths.chosen_animated.clone()))
         else {
-            self.say(ui, "Profile pictures can't be saved here.");
+            self.say(ui, "Can't save pictures here");
             return false;
         };
         if self.busy.replace(true) {
@@ -540,12 +598,13 @@ impl ProfileController {
             Ok(()) => {
                 *self.chosen.borrow_mut() = None;
                 *self.chosen_animated.borrow_mut() = None;
-                self.say(ui, "Picture removed.");
+                self.feedback.borrow_mut().clear();
+                self.publish(ui);
                 true
             }
             Err(error) => {
                 warn!(%error, "the profile picture could not be removed");
-                self.say(ui, "Couldn't remove the picture.");
+                self.say(ui, "Couldn't remove the picture");
                 false
             }
         }
@@ -558,10 +617,7 @@ impl ProfileController {
             return false;
         }
         if on && !self.steam_account.borrow().connected() {
-            self.say(
-                ui,
-                "Set up your Steam Account in Settings → Third-Party first.",
-            );
+            self.say(ui, "Connect Steam in Settings first");
             return false;
         }
         self.set_source(if on {
@@ -582,6 +638,7 @@ impl ProfileController {
 
     /// The Steam account was saved or removed: a Steam picture follows it.
     pub fn steam_account_changed(&self, ui: &AppWindow) {
+        self.friends.account_changed(ui);
         if self.uses_steam() && self.steam_account.borrow().connected() && !self.busy.get() {
             self.busy.set(true);
             self.fetch_steam(false);
@@ -688,12 +745,12 @@ impl ProfileController {
                             *self.chosen_animated.borrow_mut() = animation.map(Moving::from);
                             // Choosing a picture is choosing to show it.
                             self.set_source(ProfileSource::Chosen);
-                            *self.feedback.borrow_mut() = "Picture updated.".into();
+                            self.feedback.borrow_mut().clear();
                         }
                         Ok(None) => {}
                         Err(error) => {
                             warn!(%error, "the profile picture was not set");
-                            *self.feedback.borrow_mut() = "Couldn't use that image.".into();
+                            *self.feedback.borrow_mut() = "Couldn't use that image".into();
                         }
                     }
                 }
@@ -704,18 +761,13 @@ impl ProfileController {
                             *self.steam.borrow_mut() = Some(slint_image(picture));
                             apply(&self.animated, animated);
                             if !quiet {
-                                *self.feedback.borrow_mut() = "Using your Steam picture.".into();
+                                self.feedback.borrow_mut().clear();
                             }
                         }
                         Err(error) => {
                             warn!(%error, "the Steam profile picture was not fetched");
                             if !quiet {
-                                *self.feedback.borrow_mut() = if self.steam.borrow().is_some() {
-                                    "Couldn't reach Steam; showing the last Steam picture."
-                                } else {
-                                    "Couldn't get your Steam picture."
-                                }
-                                .into();
+                                *self.feedback.borrow_mut() = "Can't reach Steam right now".into();
                             }
                         }
                     }
@@ -750,19 +802,8 @@ impl ProfileController {
         }
     }
 
-    /// Where the shown picture comes from, under the name.
-    fn picture_caption(&self, has_picture: bool) -> &'static str {
-        match &*self.source.borrow() {
-            ProfileSource::Steam => "Steam profile picture",
-            ProfileSource::Chosen if has_picture => "Picture from this device",
-            ProfileSource::Avatar { .. } if has_picture => "Horizon avatar",
-            _ => "No picture yet",
-        }
-    }
-
     fn publish(&self, ui: &AppWindow) {
         let current = self.current();
-        ui.set_profile_picture_caption(self.picture_caption(current.is_some()).into());
         ui.set_profile_has_picture(current.is_some());
         ui.set_profile_picture(current.unwrap_or_default());
         ui.set_profile_page_has_chosen(self.has_chosen_picture());
@@ -791,10 +832,11 @@ impl ProfileController {
         ui.set_profile_name(name.as_str().into());
         ui.set_profile_monogram(profile::monogram(&name).into());
         let page = self.page.borrow();
-        ui.set_profile_page_selection(page.selection);
-        ui.set_profile_picture_open(page.picture_open);
-        ui.set_profile_picture_selection(page.picture_selection);
+        ui.set_profile_edit_open(page.edit_open);
+        ui.set_profile_edit_selection(page.edit_selection);
         ui.set_profile_editing_name(page.editing_name);
+        ui.set_profile_confirm_open(page.confirm_remove);
+        ui.set_profile_confirm_focus(page.confirm_focus);
         ui.set_profile_editor_target(page.editor_target);
     }
 }
