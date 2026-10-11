@@ -12,7 +12,7 @@ Read this file **before** editing Horizon. It describes rules for the current re
 ## Non-negotiable project preferences
 
 - **Preserve Home** unless the requested change explicitly affects Home. Use its current focus frame, selected-cover scaling, motion, and marquee as reference when matching other pages; do not silently replace the Home implementation.
-- Seven top utilities in this order: **Friends, Album, Activity, Achievements, Web, Settings, Shop**. They have real `AppRoute::Utility` destinations. The **Library is full-shell**, not a shell-header page. `src/navigation/mod.rs` is the source of truth.
+- Six top utilities in this order: **Friends, Album, Activity, Achievements, Settings, Shop**. There is no Web utility and none is planned. They have real `AppRoute::Utility` destinations. The **Library is full-shell**, not a shell-header page. `src/navigation/mod.rs` is the source of truth.
 - The **Friends utility is unchanged for now**. Future Steam Friends support must reuse shared Steam account/API boundaries, but no speculative Friends UI or credential workflow should be added.
 - **Steam account settings belong in Settings → Third-Party → Steam Account**, not in Achievements. Never place credentials, secret values, or request URLs containing secrets in UI state, logs, docs, screenshots, or commits. Local file permissions are not encryption.
 - **Activity Milestones shows recent real Steam achievement unlocks**, not invented Horizon playtime challenges. Unavailable or private Steam data must not be represented as zero. Achievement lookup is read-only.

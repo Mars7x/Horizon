@@ -432,7 +432,7 @@ recent unlocked Steam achievements**, sorted by actual unlock timestamps from
 the read-only Steam achievements importer. An unconfigured or inaccessible
 Steam profile produces a truthful message instead of fake zero progress.
 
-The detailed achievements collection lives in the seventh top-level Home
+The detailed achievements collection lives in the fourth top-level Home
 utility, **Achievements**, not inside per-game Activity session details.
 Horizon-observed session history, provider lifetime totals, charts, cover
 focus, and controllers are unchanged. See `docs/ACHIEVEMENTS.md`.
