@@ -29,9 +29,13 @@ SDL3 / keyboard / pointer intent
 
 The current `AppRoute::uses_shell_chrome()` returns true for **Home only**. Do not copy older docs asserting that Library also displays Home chrome.
 
+## Profile
+
+`AppRoute::Profile` is the Profile page, opened from Home's avatar ([PROFILE.md](PROFILE.md)). The avatar is a focus position at the left end of the top row: `ShellFocus::profile` within the `TopUtilities` region, recorded in `FocusSnapshot`, so leaving and returning to Home restores it. It is not a `TopUtility`, and the six utilities keep their indices and geometry.
+
 ## Back, Home and route visits
 
-- Back applies page-local Back behavior where supported (e.g. game Activity details to its overview, Achievements entries to game list, Settings subpage to parent), otherwise pops route history. At the root, Back does nothing.
+- Back applies page-local Back behavior where supported (e.g. game Activity details to its overview, Achievements entries to game list, Settings subpage to parent, a Profile dialog to the Profile page), otherwise pops route history. At the root, Back does nothing.
 - Global Home clears navigation history (back and forward) and brings focus to the first Home game.
 - **Forward** (a mouse's forward button, `UiAction::Forward`) works like a browser's: it reopens the page that route Back last left, as a fresh visit, with the OK sound. Opening any page or going Home forgets the way forward. Page-local Back steps (closing the Album viewer, leaving a game's achievements) aren't recorded, so Forward never reopens them. A Settings pop-up blocks it, as it blocks Home.
 - The navigation controller snapshots eligible route-local focus before changing routes and restores valid focus on Back. Full-shell routes cannot retain a hidden utility-row focus.

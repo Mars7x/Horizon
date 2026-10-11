@@ -11,6 +11,7 @@ use crate::{
         AppRoute, Navigator, RouteFocusMemory, ShellFocus, ShellFocusRegion, TopUtility,
         UtilityPage, nearest_game_for_x, nearest_utility_for_x, utility_center_x,
     },
+    presentation::profile::{ProfileController, ProfileFeedback},
 };
 
 use super::{
@@ -39,6 +40,7 @@ pub struct NavigationController {
     activity_on_enter: CallbackSlot<dyn Fn(&AppWindow)>,
     activity_details: CallbackSlot<dyn ActivityDetailsActions>,
     achievements: RefCell<Option<Rc<AchievementsController>>>,
+    profile: RefCell<Option<Rc<ProfileController>>>,
     album: RefCell<Option<Rc<AlbumController>>>,
 }
 
@@ -60,6 +62,7 @@ impl NavigationController {
             activity_on_enter: RefCell::new(None),
             activity_details: RefCell::new(None),
             achievements: RefCell::new(None),
+            profile: RefCell::new(None),
             album: RefCell::new(None),
         });
         controller.publish_route(ui);
@@ -76,6 +79,26 @@ impl NavigationController {
     /// Refresh Activity's visible data before publishing the new page route.
     pub fn set_activity_on_enter(&self, callback: Rc<dyn Fn(&AppWindow)>) {
         *self.activity_on_enter.borrow_mut() = Some(callback);
+    }
+
+    /// The Profile page, opened by clicking Home's avatar (or A on it).
+    pub fn set_profile(self: &Rc<Self>, controller: Rc<ProfileController>, ui: &AppWindow) {
+        *self.profile.borrow_mut() = Some(controller);
+        let weak = ui.as_weak();
+        let navigation = Rc::clone(self);
+        ui.on_profile_open(move || {
+            if let Some(ui) = weak.upgrade() {
+                navigation.open_profile(&ui);
+            }
+        });
+    }
+
+    fn open_profile(&self, ui: &AppWindow) {
+        if self.current_route() == AppRoute::Profile {
+            return;
+        }
+        self.cue(UiSoundCue::Ok);
+        self.navigate_to(ui, AppRoute::Profile);
     }
 
     pub fn set_achievements(
@@ -334,6 +357,11 @@ impl NavigationController {
         if route == AppRoute::Utility(UtilityPage::Activity) {
             self.prepare_activity_visit(ui);
         }
+        if route == AppRoute::Profile
+            && let Some(profile) = self.profile.borrow().as_ref()
+        {
+            profile.on_enter(ui);
+        }
         self.publish_route_change(ui, from, route);
         self.restore_focus_for_route(ui, route);
     }
@@ -342,6 +370,27 @@ impl NavigationController {
         if event.repeated && event.action.is_global() {
             debug!(action = ?event.action, "repeated global action ignored by navigation layer");
             return;
+        }
+        if self.current_route() == AppRoute::Profile {
+            let feedback = self
+                .profile
+                .borrow()
+                .as_ref()
+                .map_or(ProfileFeedback::Ignored, |profile| {
+                    profile.handle_action(ui, event)
+                });
+            match feedback {
+                ProfileFeedback::Ignored => {}
+                ProfileFeedback::Handled => return,
+                ProfileFeedback::Ok => {
+                    self.cue(UiSoundCue::Ok);
+                    return;
+                }
+                ProfileFeedback::Back => {
+                    self.cue(UiSoundCue::Back);
+                    return;
+                }
+            }
         }
         if self.current_route() == AppRoute::Utility(UtilityPage::Achievements)
             && event.action == UiAction::Back
@@ -709,8 +758,12 @@ impl NavigationController {
                 }
             }
             UiAction::Accept if !event.repeated => {
-                let utility = self.focus.borrow().utility();
-                self.activate_utility(ui, utility);
+                if self.focus.borrow().profile() {
+                    self.open_profile(ui);
+                } else {
+                    let utility = self.focus.borrow().utility();
+                    self.activate_utility(ui, utility);
+                }
             }
             UiAction::Up
             | UiAction::Accept
@@ -902,7 +955,13 @@ impl NavigationController {
     fn publish_focus(&self, ui: &AppWindow) {
         let focus = *self.focus.borrow();
         ui.set_top_utilities_focused(focus.region() == ShellFocusRegion::TopUtilities);
-        ui.set_focused_utility_index(focus.utility().index());
+        // On the avatar, no utility shows focus.
+        ui.set_profile_focused(focus.profile());
+        ui.set_focused_utility_index(if focus.profile() {
+            -1
+        } else {
+            focus.utility().index()
+        });
     }
 }
 
@@ -916,6 +975,7 @@ fn route_view(route: AppRoute) -> AppRouteView {
         AppRoute::Utility(UtilityPage::Achievements) => AppRouteView::Achievements,
         AppRoute::Utility(UtilityPage::Settings) => AppRouteView::Settings,
         AppRoute::Utility(UtilityPage::Shop) => AppRouteView::Shop,
+        AppRoute::Profile => AppRouteView::Profile,
     }
 }
 

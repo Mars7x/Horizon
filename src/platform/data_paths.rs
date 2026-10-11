@@ -36,7 +36,6 @@ const ALBUM_DIR: &str = "album";
 const PROFILE_PICTURE_FILE: &str = "profile.png";
 const PROFILE_ANIMATED_FILE: &str = "profile-animated";
 const STEAM_PICTURE_FILE: &str = "profile-steam.png";
-const STEAM_FRAME_FILE: &str = "profile-steam-frame";
 const STEAM_ANIMATED_FILE: &str = "profile-steam-animated";
 
 #[derive(Debug, Error)]
@@ -138,7 +137,7 @@ pub fn album_dir() -> Result<PathBuf, DataPathError> {
     Ok(app_dir(BaseDir::Data)?.join(ALBUM_DIR))
 }
 
-/// The profile picture chosen in Settings: Horizon's own square copy, not
+/// The profile picture chosen on the Profile page: Horizon's own square copy, not
 /// a link to the original (which may be moved, or live behind the document
 /// portal only for a session). Data, not cache. Its folder is the data folder.
 pub fn profile_picture_path() -> Result<PathBuf, DataPathError> {
@@ -154,12 +153,6 @@ pub fn profile_animated_path() -> Result<PathBuf, DataPathError> {
 /// The last Steam profile picture fetched, kept so it shows offline.
 pub fn steam_profile_picture_path() -> Result<PathBuf, DataPathError> {
     Ok(app_dir(BaseDir::Data)?.join(STEAM_PICTURE_FILE))
-}
-
-/// The Steam avatar frame last fetched, as Steam's original file (often an
-/// animated PNG); absent when none is equipped.
-pub fn steam_profile_frame_path() -> Result<PathBuf, DataPathError> {
-    Ok(app_dir(BaseDir::Data)?.join(STEAM_FRAME_FILE))
 }
 
 /// The Steam animated avatar last fetched, as Steam's original file (a GIF);

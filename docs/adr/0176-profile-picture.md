@@ -1,5 +1,7 @@
 # ADR 0176: Profile picture
 
+> **Partly superseded by ADR 0177:** the controls moved from Settings → Profile to a Profile page opened from Home's avatar. The square Steam picture and the Steam avatar frame were then removed entirely (ADR 0177), so `ProfileSource::Steam` has no `square`, `profile-steam-frame` is no longer written, and animations decode at 184 px. The other picture sources, storage, Steam fetching and animation below still stand.
+
 **Status:** Implemented. The build, the gate and the new tests pass (centre-square crop, scaling, save, load and remove round trip, unreadable files, `file://` URIs to paths). Settings → Profile and Home were rendered offscreen. The FileChooser portal hasn't been exercised in the running app yet.
 
 ## Context

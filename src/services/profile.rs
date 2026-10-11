@@ -38,15 +38,11 @@ pub enum ProfileError {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(tag = "source", rename_all = "kebab-case")]
 pub enum ProfileSource {
-    /// The picture chosen in Settings, or the monogram without one.
+    /// The picture chosen on the Profile page, or the monogram without one.
     #[default]
     Chosen,
-    /// The Steam account's avatar. `square`: shown square, as Steam shows
-    /// it, with the account's avatar frame around it.
-    Steam {
-        #[serde(default)]
-        square: bool,
-    },
+    /// The Steam account's avatar (animated, when one is equipped).
+    Steam,
     /// A built-in avatar, by its [`Avatar::id`].
     Avatar { id: String },
 }
@@ -61,7 +57,7 @@ pub struct Avatar {
     pub picture: &'static [u8],
 }
 
-/// The built-in avatars, in the order Settings offers them. Empty until there
+/// The built-in avatars, in the order they are offered. Empty until there
 /// is art; an entry is added as, for example:
 /// `Avatar { id: "astronaut", name: "Astronaut",
 ///   picture: include_bytes!("../../ui/assets/avatars/astronaut.png") }`.
@@ -76,16 +72,50 @@ pub fn avatar_picture(avatar: &Avatar) -> Result<RgbaImage, ProfileError> {
     Ok(square(decoding::decode(avatar.picture, None)?))
 }
 
-/// The saved source; anything unreadable is the default.
-pub fn load_source(path: &Path) -> ProfileSource {
+/// Longest name kept, in characters.
+pub const NAME_LIMIT: usize = 32;
+
+/// What `profile.json` keeps: the name, and which picture is shown.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ProfilePreferences {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    #[serde(flatten)]
+    pub source: ProfileSource,
+}
+
+/// A name as kept: trimmed, single-line, at most [`NAME_LIMIT`] characters
+/// (empty is no name).
+pub fn clean_name(name: &str) -> String {
+    name.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(NAME_LIMIT)
+        .collect::<String>()
+        .trim_end()
+        .to_owned()
+}
+
+/// The letter the avatar shows without a picture: the name's first, else
+/// Horizon's "H".
+pub fn monogram(name: &str) -> String {
+    name.chars()
+        .find(|c| c.is_alphanumeric())
+        .map(|c| c.to_uppercase().collect())
+        .unwrap_or_else(|| "H".to_owned())
+}
+
+/// The saved preferences; anything unreadable is the default.
+pub fn load_preferences(path: &Path) -> ProfilePreferences {
     fs::read(path)
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap_or_default()
 }
 
-pub fn save_source(path: &Path, source: &ProfileSource) -> Result<(), ProfileError> {
-    let json = serde_json::to_vec_pretty(source).map_err(io::Error::other)?;
+pub fn save_preferences(path: &Path, preferences: &ProfilePreferences) -> Result<(), ProfileError> {
+    let json = serde_json::to_vec_pretty(preferences).map_err(io::Error::other)?;
     let partial = partial_path(path);
     fs::write(&partial, json)?;
     fs::rename(&partial, path)?;
@@ -97,11 +127,9 @@ pub fn prepare_bytes(bytes: &[u8]) -> Result<RgbaImage, ProfileError> {
     Ok(square(decoding::decode(bytes, None)?))
 }
 
-/// Side Steam's animated avatars are decoded at: sharp at 2x in the top
-/// bar and in the 96 px Settings preview.
-pub const ANIMATED_SIDE: u32 = 128;
-/// Side avatar frames are decoded at (they surround the picture, 1.22x).
-pub const FRAME_SIDE: u32 = 160;
+/// Side animated pictures are decoded at: Steam's own animated avatar size,
+/// sharp at 2x in the top bar and at 1x on the Profile page.
+pub const ANIMATED_SIDE: u32 = 184;
 /// Most frames kept of one animation (a minute and more at Steam's pace).
 pub const MAX_FRAMES: usize = 600;
 
@@ -112,7 +140,7 @@ pub struct Animation {
     pub frames: Vec<(RgbaImage, Duration)>,
 }
 
-/// Decode a Steam profile item (an avatar frame, an animated avatar) from
+/// Decode a Steam animated avatar from
 /// its file's bytes, everything fitted to `side`. A still image is an
 /// animation of no frames.
 pub fn decode_animation(bytes: &[u8], side: u32) -> Result<Animation, ProfileError> {
@@ -272,26 +300,52 @@ mod tests {
     }
 
     #[test]
-    fn the_source_round_trips_and_defaults_when_unreadable() {
+    fn preferences_round_trip_and_default_when_unreadable() {
         let dir = temp_dir("source");
         let path = dir.join("profile.json");
-        assert_eq!(load_source(&path), ProfileSource::Chosen);
-        for source in [
-            ProfileSource::Steam { square: false },
-            ProfileSource::Steam { square: true },
-            ProfileSource::Avatar {
-                id: "astronaut".into(),
+        assert_eq!(load_preferences(&path), ProfilePreferences::default());
+        for preferences in [
+            ProfilePreferences {
+                name: "Andrew".into(),
+                source: ProfileSource::Steam,
             },
-            ProfileSource::Chosen,
+            ProfilePreferences {
+                name: String::new(),
+                source: ProfileSource::Avatar {
+                    id: "astronaut".into(),
+                },
+            },
+            ProfilePreferences {
+                name: "Ana".into(),
+                source: ProfileSource::Chosen,
+            },
         ] {
-            save_source(&path, &source).unwrap();
-            assert_eq!(load_source(&path), source);
+            save_preferences(&path, &preferences).unwrap();
+            assert_eq!(load_preferences(&path), preferences);
         }
         fs::write(&path, b"{ not json").unwrap();
-        assert_eq!(load_source(&path), ProfileSource::Chosen);
-        fs::write(&path, br#"{"source":"steam"}"#).unwrap();
-        assert_eq!(load_source(&path), ProfileSource::Steam { square: false });
+        assert_eq!(load_preferences(&path), ProfilePreferences::default());
+        // Files from before names existed, and from when a Steam picture
+        // could be square, still read.
+        for old in [
+            &br#"{"source":"steam"}"#[..],
+            br#"{"name":"Ana","source":"steam","square":true}"#,
+        ] {
+            fs::write(&path, old).unwrap();
+            assert_eq!(load_preferences(&path).source, ProfileSource::Steam);
+        }
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn names_are_tidied_and_give_the_monogram() {
+        assert_eq!(clean_name("  Mars   7x \n"), "Mars 7x");
+        assert_eq!(clean_name(&"a".repeat(40)).chars().count(), NAME_LIMIT);
+        assert_eq!(clean_name("   "), "");
+        assert_eq!(monogram("andrew"), "A");
+        assert_eq!(monogram("  ébène"), "É");
+        assert_eq!(monogram("★ Star"), "S");
+        assert_eq!(monogram(""), "H");
     }
 
     #[test]
@@ -337,7 +391,7 @@ mod tests {
         RgbaImage::new(40, 40)
             .write_to(&mut io::Cursor::new(&mut png), ImageFormat::Png)
             .unwrap();
-        let still = decode_animation(&png, FRAME_SIDE).unwrap();
+        let still = decode_animation(&png, ANIMATED_SIDE).unwrap();
         assert_eq!(still.still.dimensions(), (40, 40));
         assert!(still.frames.is_empty());
 
@@ -361,7 +415,7 @@ mod tests {
             for red in [0u8, 120] {
                 encoder
                     .encode_frame(Frame::from_parts(
-                        RgbaImage::from_pixel(300, 150, image::Rgba([red, 0, 0, 255])),
+                        RgbaImage::from_pixel(400, 200, image::Rgba([red, 0, 0, 255])),
                         0,
                         0,
                         Delay::from_numer_denom_ms(40, 1),

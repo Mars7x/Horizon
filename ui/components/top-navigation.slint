@@ -80,12 +80,12 @@ export component TopNavigation inherits Rectangle {
     in property <float> icon-render-scale: 1.0;
     in property <image> profile-picture;
     in property <bool> profile-has-picture: false;
-    in property <bool> profile-square: false;
-    in property <image> profile-frame;
-    in property <bool> profile-has-frame: false;
     in property <[ProfileFrameData]> profile-picture-frames;
-    in property <[ProfileFrameData]> profile-frame-frames;
     in property <bool> profile-playing: false;
+    in property <string> profile-monogram: "H";
+    // The avatar has focus (left of the first utility); Rust owns it.
+    in property <bool> profile-focused: false;
+    callback profile-activated();
     in property <int> network-kind: 0;
     in property <int> wifi-strength: 0;
     in property <bool> network-limited: false;
@@ -99,17 +99,35 @@ export component TopNavigation inherits Rectangle {
     background: transparent;
     private property <length> content-center-y: root.height / 2;
 
-    avatar := ProfileAvatar {
-        picture: root.profile-picture;
-        has-picture: root.profile-has-picture;
-        square: root.profile-square;
-        frame: root.profile-frame;
-        has-frame: root.profile-has-frame;
-        picture-frames: root.profile-picture-frames;
-        frame-frames: root.profile-frame-frames;
-        playing: root.profile-playing;
+    // The avatar opens the Profile page. Like the utilities, it lifts 2px
+    // inside the same single-stroke focus ring.
+    private property <length> avatar-lift: root.profile-focused && !Motion.reduced-motion ? -2px : 0px;
+    animate avatar-lift { duration: Motion.focus-duration; easing: ease-in-out; }
+    avatar-slot := Rectangle {
         x: Metrics.top-edge-inset;
-        y: root.content-center-y - self.height / 2;
+        y: root.content-center-y - avatar.height / 2;
+        width: avatar.width; height: avatar.height;
+        background: transparent;
+        z: root.profile-focused ? 2 : 0;
+        SelectionFocusSurface {
+            x: -5px; y: -5px + root.avatar-lift;
+            width: parent.width + 10px; height: parent.height + 10px;
+            corner-radius: (parent.width + 10px) / 2;
+            focused: root.profile-focused;
+        }
+        avatar := ProfileAvatar {
+            y: root.avatar-lift;
+            picture: root.profile-picture;
+            has-picture: root.profile-has-picture;
+            monogram: root.profile-monogram;
+            picture-frames: root.profile-picture-frames;
+            playing: root.profile-playing;
+        }
+        TouchArea {
+            width: parent.width; height: parent.height;
+            mouse-cursor: pointer;
+            clicked => { root.profile-activated(); }
+        }
     }
 
     Separator {
