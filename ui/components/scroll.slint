@@ -26,6 +26,13 @@ export global Scroll {
             : pull >= 0px ? Scroll.overscroll-limit * pull / (pull + Scroll.overscroll-limit)
             : -Scroll.overscroll-limit * -pull / (-pull + Scroll.overscroll-limit)
     }
+    // The pull that stretches content by `stretch`: a new pull that starts
+    // while the content is still springing back continues from where it is.
+    public pure function unrubber(stretch: length) -> length {
+        let s = max(-Scroll.overscroll-limit + 0.5px, min(Scroll.overscroll-limit - 0.5px, stretch));
+        s >= 0px ? s * Scroll.overscroll-limit / (Scroll.overscroll-limit - s)
+            : s * Scroll.overscroll-limit / (Scroll.overscroll-limit + s)
+    }
     // Shadow strength for `hidden` pixels of content beyond an edge.
     public pure function edge(hidden: length) -> float {
         max(0.0, min(1.0, hidden / 24px))
@@ -70,8 +77,8 @@ export component CameraSettle {
 // - The owner can also move the camera itself by setting `rest-row` to a row
 //   it wasn't told (Up/Down in a read-only list), or reset it through
 //   `settle-key` (a fresh visit: instant, as does `instant`).
-// - A touchpad pulling past either end stretches the content (`Scroll.rubber`);
-//   when the fingers stop (no touchpad movement for a moment) it springs back.
+// - A touchpad pulling past either end stretches the content (`Scroll.rubber`)
+//   and springs back when the fingers lift (`Wheel.touching`).
 export component ScrollCamera {
     in property <int> rest-row: 0;
     in property <length> stride: 1px;
@@ -119,14 +126,23 @@ export component ScrollCamera {
     out property <length> camera: root.base + root.stretch;
 
     settle := CameraSettle { key: root.settle-key; }
-    release := Timer {
-        interval: 90ms;
-        running: false;
-        triggered => {
-            self.stop();
-            root.pulling = false;
-            root.pull = 0px;
+    function spring-back() {
+        release.stop();
+        root.pulling = false;
+        root.pull = 0px;
+    }
+    // Fingers lifting ends a pull. The timer only covers a touchpad whose
+    // gesture end never arrives (no winit, or a compositor without axis stop).
+    private property <bool> fingers-down: Wheel.touching;
+    changed fingers-down => {
+        if !root.fingers-down && root.pulling {
+            root.spring-back();
         }
+    }
+    release := Timer {
+        interval: 600ms;
+        running: false;
+        triggered => { root.spring-back(); }
     }
 
     // Tell the owner which row is now at the top.
@@ -162,7 +178,12 @@ export component ScrollCamera {
         root.follow = !Wheel.is-notch(delta-y);
         root.position = root.target;
         if root.follow {
-            // Past an end, the travel becomes pull rather than movement.
+            // Past an end, the travel becomes pull rather than movement. A
+            // pull that starts while the content springs back takes it from
+            // where it is.
+            if !root.pulling {
+                root.pull = Scroll.unrubber(root.stretch);
+            }
             let raw = root.position + root.pull + Wheel.distance(delta-y);
             root.position = max(0px, min(root.limit, raw));
             root.pull = raw - root.position;

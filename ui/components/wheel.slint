@@ -6,9 +6,20 @@
 // faithfully is what makes Horizon honour that setting. Do not invert it.
 //
 // Scrolling moves the camera by pixels, never by rows or items: a touchpad's
-// stream of small deltas follows the fingers, and a wheel notch (a whole
-// multiple of 60px, Slint's line height) glides a fixed distance.
+// stream of small deltas follows the fingers, and a wheel notch glides a
+// fixed distance.
+//
+// Slint's scroll events don't say which device sent them or when a touchpad
+// gesture ends, so Rust reads both from winit before each event reaches Slint
+// (`source`, `touching`). Without them (no winit, as offscreen) a whole
+// multiple of 60px, Slint's line height, counts as a notch.
 export global Wheel {
+    // 0 unknown, 1 a wheel, 2 a touchpad: the device of the event being
+    // handled.
+    in-out property <int> source: 0;
+    // Fingers are on the touchpad: from a touchpad gesture's first event
+    // until its end (Wayland's axis stop).
+    in-out property <bool> touching: false;
     out property <length> notch: 60px;
     // Camera travel per notch, and per pixel of touchpad travel.
     out property <float> notch-scale: 3.0;
@@ -16,7 +27,8 @@ export global Wheel {
 
     // A wheel notch (or several), rather than a touchpad's stream.
     public pure function is-notch(delta: length) -> bool {
-        delta != 0px && Math.round(delta / Wheel.notch) == delta / Wheel.notch
+        Wheel.source == 1 || (Wheel.source == 0 && delta != 0px
+            && Math.round(delta / Wheel.notch) == delta / Wheel.notch)
     }
     // How far a scroll event moves the camera: positive down (or right).
     public pure function distance(delta: length) -> length {
