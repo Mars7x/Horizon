@@ -17,6 +17,8 @@ pub enum UiAction {
     /// The X (west) face button, or Delete on a keyboard. Pages give it a
     /// meaning; the Album uses it to delete.
     Secondary,
+    /// A mouse's forward button: reopen the page Back last left.
+    Forward,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,9 +47,9 @@ impl UiAction {
     /// Actions interpreted by the application shell before page-local input.
     ///
     /// Accept remains contextual: the active focus region/page decides what it
-    /// activates. Back, Menu, and Home are always shell-level actions.
+    /// activates. Back, Forward, Menu, and Home are always shell-level actions.
     pub const fn is_global(self) -> bool {
-        matches!(self, Self::Back | Self::Menu | Self::Home)
+        matches!(self, Self::Back | Self::Forward | Self::Menu | Self::Home)
     }
 
     /// The button a clicked on-screen hint stands for (`HintBar` glyph names).
@@ -107,6 +109,7 @@ mod tests {
         assert!(UiAction::Back.is_global());
         assert!(UiAction::Menu.is_global());
         assert!(UiAction::Home.is_global());
+        assert!(UiAction::Forward.is_global());
         assert!(!UiAction::Accept.is_global());
         assert!(!UiAction::Left.is_global());
     }

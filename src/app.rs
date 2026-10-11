@@ -1,6 +1,9 @@
 use std::{cell::RefCell, rc::Rc, sync::Arc, time::Duration};
 
-use slint::{ComponentHandle, Timer, TimerMode};
+use slint::{
+    ComponentHandle, Timer, TimerMode,
+    winit_030::{EventResult, WinitWindowAccessor, winit},
+};
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
@@ -9,7 +12,7 @@ use crate::{
     appearance::store::AppearanceStore,
     audio::{UiSoundCue, UiSounds},
     error::AppError,
-    input::{ControllerStatus, InputManager, UiAction, UiActionEvent},
+    input::{ControllerStatus, InputManager, UiAction, UiActionEvent, mouse},
     persistence::{SqliteLibraryRepository, settings::SettingsStore},
     platform::{
         data_paths,
@@ -496,6 +499,25 @@ pub fn run() -> Result<(), AppError> {
         if let Some(action) = UiAction::from_hint(button.as_str()) {
             hint_sink(UiActionEvent::fresh(action));
         }
+    });
+
+    // A mouse's back and forward buttons are those presses, wherever the
+    // pointer is. Handled on the next turn of the event loop, outside winit's
+    // event dispatch.
+    let mouse_sink = Rc::clone(&action_sink);
+    ui.window().on_winit_window_event(move |_, event| {
+        if let winit::event::WindowEvent::MouseInput {
+            state: winit::event::ElementState::Pressed,
+            button,
+            ..
+        } = event
+            && let Some(action) = mouse::action_for_button(*button)
+        {
+            let sink = Rc::clone(&mouse_sink);
+            Timer::single_shot(Duration::ZERO, move || sink(UiActionEvent::fresh(action)));
+            return EventResult::PreventDefault;
+        }
+        EventResult::Propagate
     });
 
     let input = InputManager::new(action_sink, status_sink);

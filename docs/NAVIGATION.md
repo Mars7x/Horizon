@@ -32,7 +32,8 @@ The current `AppRoute::uses_shell_chrome()` returns true for **Home only**. Do n
 ## Back, Home and route visits
 
 - Back applies page-local Back behavior where supported (e.g. game Activity details to its overview, Achievements entries to game list, Settings subpage to parent), otherwise pops route history. At the root, Back does nothing.
-- Global Home clears navigation history and brings focus to the first Home game.
+- Global Home clears navigation history (back and forward) and brings focus to the first Home game.
+- **Forward** (a mouse's forward button, `UiAction::Forward`) works like a browser's: it reopens the page that route Back last left, as a fresh visit, with the OK sound. Opening any page or going Home forgets the way forward. Page-local Back steps (closing the Album viewer, leaving a game's achievements) aren't recorded, so Forward never reopens them. A Settings pop-up blocks it, as it blocks Home.
 - The navigation controller snapshots eligible route-local focus before changing routes and restores valid focus on Back. Full-shell routes cannot retain a hidden utility-row focus.
 - Every visit to **Library** is fresh: it opens on the first game, scrolled to the top (Source and Sort are kept; they are view choices, not focus). Within a visit, re-sorting keeps the selected game.
 - A **fresh** Activity visit starts on the first Most Played cover, but returning from an individual-game Activity details screen restores the same cover. Direct re-entry and route-history re-entry should agree; see Phase 10.3.3.

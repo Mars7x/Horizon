@@ -292,29 +292,50 @@ impl NavigationController {
         self.remember_focus_for_route(from);
         if self.navigator.borrow_mut().navigate_to(route) {
             debug!(?from, to = ?route, "route changed");
-            self.leave_route(ui, from);
-            if route == AppRoute::Utility(UtilityPage::Album)
-                && let Some(album) = self.album.borrow().as_ref()
-            {
-                album.start_new_visit(ui);
-            }
-            if route == AppRoute::Utility(UtilityPage::Settings) {
-                self.settings.on_enter(ui);
-            }
-            if route == AppRoute::Library {
-                self.library.on_enter(ui);
-            }
-            if route == AppRoute::Utility(UtilityPage::Achievements)
-                && let Some(controller) = self.achievements.borrow().as_ref()
-            {
-                controller.start_new_visit(ui);
-            }
-            if route == AppRoute::Utility(UtilityPage::Activity) {
-                self.prepare_activity_visit(ui);
-            }
-            self.publish_route_change(ui, from, route);
-            self.restore_focus_for_route(ui, route);
+            self.open_route(ui, from, route);
         }
+    }
+
+    /// Mouse forward button: reopen the page Back last left, as a fresh
+    /// visit, exactly as if it had been opened again.
+    fn handle_forward(&self, ui: &AppWindow) {
+        let from = self.current_route();
+        self.remember_focus_for_route(from);
+        if self.navigator.borrow_mut().go_forward() {
+            let to = self.current_route();
+            debug!(?from, ?to, "Forward reopened the route Back left");
+            self.cue(UiSoundCue::Ok);
+            self.open_route(ui, from, to);
+        } else {
+            debug!(route = ?from, "Forward ignored with nothing to reopen");
+        }
+    }
+
+    /// Leave `from` and enter `route` as a fresh visit (after the navigator
+    /// has already moved there).
+    fn open_route(&self, ui: &AppWindow, from: AppRoute, route: AppRoute) {
+        self.leave_route(ui, from);
+        if route == AppRoute::Utility(UtilityPage::Album)
+            && let Some(album) = self.album.borrow().as_ref()
+        {
+            album.start_new_visit(ui);
+        }
+        if route == AppRoute::Utility(UtilityPage::Settings) {
+            self.settings.on_enter(ui);
+        }
+        if route == AppRoute::Library {
+            self.library.on_enter(ui);
+        }
+        if route == AppRoute::Utility(UtilityPage::Achievements)
+            && let Some(controller) = self.achievements.borrow().as_ref()
+        {
+            controller.start_new_visit(ui);
+        }
+        if route == AppRoute::Utility(UtilityPage::Activity) {
+            self.prepare_activity_visit(ui);
+        }
+        self.publish_route_change(ui, from, route);
+        self.restore_focus_for_route(ui, route);
     }
 
     pub fn handle_action(&self, ui: &AppWindow, event: UiActionEvent) {
@@ -352,6 +373,7 @@ impl NavigationController {
         match event.action {
             UiAction::Back => self.handle_back(ui),
             UiAction::Home => self.handle_home(ui),
+            UiAction::Forward => self.handle_forward(ui),
             UiAction::Menu => self.handle_menu(ui),
             UiAction::Accept
                 if !event.repeated
@@ -701,7 +723,7 @@ impl NavigationController {
                     "action has no top-utility behavior"
                 );
             }
-            UiAction::Back | UiAction::Menu | UiAction::Home => {
+            UiAction::Back | UiAction::Forward | UiAction::Menu | UiAction::Home => {
                 unreachable!("global actions handled first")
             }
         }
