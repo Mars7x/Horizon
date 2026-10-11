@@ -73,7 +73,8 @@ export component ListRow inherits Rectangle {
         clicked => { root.activated(); }
         scroll-event(event) => {
             if event.delta-y != 0px {
-                root.wheel(Wheel.rows(event.delta-y));
+                let rows = Wheel.rows(event.delta-y);
+                if rows != 0 { root.wheel(rows); }
                 return accept;
             }
             reject

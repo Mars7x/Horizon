@@ -157,7 +157,8 @@ export component AchievementsPage inherits Rectangle {
                 enabled: !root.viewing-entries;
                 scroll-event(event) => {
                     if event.delta-y != 0px {
-                        root.pan-games(Wheel.rows(event.delta-y));
+                        let rows = Wheel.rows(event.delta-y);
+                        if rows != 0 { root.pan-games(rows); }
                         return accept;
                     }
                     reject
@@ -277,7 +278,8 @@ export component AchievementsPage inherits Rectangle {
                 enabled: root.viewing-entries;
                 scroll-event(event) => {
                     if event.delta-y != 0px {
-                        root.scroll-entries(Wheel.rows(event.delta-y));
+                        let rows = Wheel.rows(event.delta-y);
+                        if rows != 0 { root.scroll-entries(rows); }
                         return accept;
                     }
                     reject

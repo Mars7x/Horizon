@@ -193,7 +193,8 @@ export component LibraryPage inherits Rectangle {
             width: parent.width; height: parent.height;
             scroll-event(event) => {
                 if event.delta-y != 0px {
-                    root.scroll-rows(Wheel.rows(event.delta-y));
+                    let rows = Wheel.rows(event.delta-y);
+                    if rows != 0 { root.scroll-rows(rows); }
                     return accept;
                 }
                 reject
@@ -359,7 +360,8 @@ export component LibraryPage inherits Rectangle {
                     clicked => { root.choose-card(row.absolute-index); }
                     scroll-event(event) => {
                         if event.delta-y != 0px {
-                            root.scroll-rows(Wheel.rows(event.delta-y));
+                            let rows = Wheel.rows(event.delta-y);
+                            if rows != 0 { root.scroll-rows(rows); }
                             return accept;
                         }
                         reject

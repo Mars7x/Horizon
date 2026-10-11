@@ -1,12 +1,36 @@
-// Shared mouse-wheel mapping for camera-only scrolling.
+// Shared mouse-wheel and touchpad mapping for camera-only scrolling.
 //
 // Slint follows Winit: a positive `delta-y` moves content toward the TOP
 // (a Flickable adds it to `viewport-y`). The compositor has already applied
 // the user's natural/reverse scrolling setting, so mapping this sign
 // faithfully is what makes Horizon honour that setting. Do not invert it.
+//
+// A wheel notch arrives as a whole multiple of 60px (Slint's line height)
+// and moves one row per notch. A touchpad sends a stream of small pixel
+// deltas instead; they add up, and every `touchpad-row` of travel moves one
+// row, so a swipe scrolls in proportion to the finger rather than a row per
+// event. Reversing direction drops what had built up.
 export global Wheel {
-    // Row step for a wheel event: -1 moves the camera up, 1 down, 0 ignores.
-    public pure function rows(delta-y: length) -> int {
-        delta-y > 0px ? -1 : delta-y < 0px ? 1 : 0
+    out property <length> notch: 60px;
+    out property <length> touchpad-row: 100px;
+    // Touchpad travel not yet spent on a row (positive: toward the top).
+    out property <length> travel: 0px;
+
+    // Rows to move for a scroll event: negative moves the camera up,
+    // positive down, 0 not yet.
+    public function rows(delta-y: length) -> int {
+        let notches = delta-y / Wheel.notch;
+        if delta-y != 0px && Math.round(notches) == notches {
+            Wheel.travel = 0px;
+            return -notches;
+        }
+        if (delta-y > 0px && Wheel.travel < 0px) || (delta-y < 0px && Wheel.travel > 0px) {
+            Wheel.travel = 0px;
+        }
+        Wheel.travel += delta-y;
+        let steps = Wheel.travel > 0px ? Math.floor(Wheel.travel / Wheel.touchpad-row)
+            : -Math.floor(-Wheel.travel / Wheel.touchpad-row);
+        Wheel.travel -= steps * Wheel.touchpad-row;
+        -steps
     }
 }

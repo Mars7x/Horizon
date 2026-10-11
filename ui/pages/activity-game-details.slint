@@ -288,7 +288,8 @@ export component ActivityGameDetailsPage inherits TransitionLayer {
             enabled: root.active;
             scroll-event(event) => {
                 if event.delta-y != 0px {
-                    root.scroll-history(Wheel.rows(event.delta-y));
+                    let rows = Wheel.rows(event.delta-y);
+                    if rows != 0 { root.scroll-history(rows); }
                     return accept;
                 }
                 reject
