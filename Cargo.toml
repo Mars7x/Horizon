@@ -12,7 +12,7 @@ license = "GPL-3.0-or-later"
 ashpd = { version = "0.13", default-features = false, features = ["open_uri", "settings", "tokio"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 futures-util = "0.3"
-image = { version = "0.25", default-features = false, features = ["ico", "jpeg", "png"] }
+image = { version = "0.25", default-features = false, features = ["gif", "ico", "jpeg", "png"] }
 ico = "0.5"
 # `access()` for honest writability checks (a read-only sandbox mount keeps
 # its write permission bits). Already in the build through other crates.
@@ -31,6 +31,7 @@ thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt", "sync"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+jxl-oxide = { version = "0.12.6", default-features = false, features = ["image"] }
 
 [build-dependencies]
 cc = "1"

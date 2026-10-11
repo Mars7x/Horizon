@@ -10,6 +10,6 @@ pub mod media;
 pub use catalog::{HorizonAlbum, part_path, scan_all};
 pub use loader::{MediaLoader, MediaResult};
 pub use media::{
-    ALBUM_CACHE_VERSION, MediaError, NoVideo, THUMBNAIL_SIZE, ThumbnailCache, VideoBackend,
-    VideoFrame, VideoPlayback, VideoSink,
+    ALBUM_CACHE_VERSION, AnimationPlayback, MediaError, NoVideo, THUMBNAIL_SIZE, ThumbnailCache,
+    VideoBackend, VideoFrame, VideoPlayback, VideoSink, play_animation,
 };

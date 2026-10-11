@@ -4,8 +4,11 @@ use std::{
     fs,
     io::BufWriter,
     path::{Path, PathBuf},
-    sync::Arc,
-    time::{Duration, SystemTime},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::{Duration, Instant, SystemTime},
 };
 
 use image::{DynamicImage, RgbaImage, codecs::jpeg::JpegEncoder};
@@ -129,6 +132,102 @@ pub fn decode_photo(path: &Path, max: (u32, u32)) -> Result<RgbaImage, MediaErro
         message: error.to_string(),
     })?;
     Ok(fit(image, max))
+}
+
+/// An animated GIF playing on its own thread. Dropping it stops it.
+pub struct AnimationPlayback {
+    stop: Arc<AtomicBool>,
+    thread: Option<std::thread::Thread>,
+}
+
+impl Drop for AnimationPlayback {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(thread) = &self.thread {
+            thread.unpark();
+        }
+    }
+}
+
+/// Shortest frame delay honoured: shorter ones (often 0 or 10 ms, which
+/// browsers also treat as unset) play at 100 ms, as browsers do.
+const MIN_FRAME_DELAY: Duration = Duration::from_millis(20);
+const UNSET_FRAME_DELAY: Duration = Duration::from_millis(100);
+
+fn frame_delay(delay: Duration) -> Duration {
+    if delay < MIN_FRAME_DELAY {
+        UNSET_FRAME_DELAY
+    } else {
+        delay
+    }
+}
+
+/// Play an animated GIF, scaled to fit `max`, looping until dropped. The
+/// first frame is already on screen (it is the photo), so `frame` receives
+/// every later one, each at the file's own pace; frames are decoded as they
+/// are due, so memory stays at a frame or two whatever the GIF's length.
+/// Nothing is sent for a still or a file that isn't a GIF, and a decode
+/// error simply ends the animation.
+pub fn play_animation(
+    path: &Path,
+    max: (u32, u32),
+    frame: Box<dyn Fn(RgbaImage) + Send>,
+) -> AnimationPlayback {
+    let stop = Arc::new(AtomicBool::new(false));
+    let path = path.to_owned();
+    let thread = {
+        let stop = Arc::clone(&stop);
+        std::thread::Builder::new()
+            .name("album-animation".into())
+            .spawn(move || animate(&path, max, &*frame, &stop))
+            .ok()
+            .map(|handle| handle.thread().clone())
+    };
+    AnimationPlayback { stop, thread }
+}
+
+fn animate(path: &Path, max: (u32, u32), frame: &dyn Fn(RgbaImage), stop: &AtomicBool) {
+    let mut first_pass = true;
+    let mut due = Instant::now();
+    loop {
+        let Ok(Some(frames)) = decoding::gif_frames(path) else {
+            return;
+        };
+        let mut count = 0;
+        for decoded in frames {
+            if stop.load(Ordering::SeqCst) {
+                return;
+            }
+            let Ok(decoded) = decoded else {
+                return;
+            };
+            count += 1;
+            let delay = frame_delay(decoded.delay().into());
+            if !(first_pass && count == 1) {
+                // Far behind (a slow machine, a suspended system): start
+                // timing afresh rather than racing to catch up.
+                if Instant::now() > due + Duration::from_secs(1) {
+                    due = Instant::now();
+                }
+                while !stop.load(Ordering::SeqCst) {
+                    let now = Instant::now();
+                    if now >= due {
+                        break;
+                    }
+                    std::thread::park_timeout(due - now);
+                }
+                if stop.load(Ordering::SeqCst) {
+                    return;
+                }
+                frame(fit(DynamicImage::ImageRgba8(decoded.into_buffer()), max));
+            }
+            due += delay;
+        }
+        if first_pass && count <= 1 {
+            return;
+        }
+        first_pass = false;
+    }
 }
 
 pub struct Thumbnail {
@@ -306,6 +405,75 @@ fn cache_key(path: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn write_gif(path: &Path, frames: usize) {
+        use image::{Delay, Frame, codecs::gif::GifEncoder};
+        let mut encoder = GifEncoder::new(fs::File::create(path).unwrap());
+        for i in 0..frames {
+            encoder
+                .encode_frame(Frame::from_parts(
+                    RgbaImage::from_pixel(4, 4, image::Rgba([(i * 60) as u8, 0, 0, 255])),
+                    0,
+                    0,
+                    Delay::from_numer_denom_ms(20, 1),
+                ))
+                .unwrap();
+        }
+    }
+
+    fn collect_frames(path: &Path, wait: Duration) -> Vec<u8> {
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = Arc::clone(&seen);
+        let playback = play_animation(
+            path,
+            (100, 100),
+            Box::new(move |frame| sink.lock().unwrap().push(frame.get_pixel(0, 0).0[0])),
+        );
+        std::thread::sleep(wait);
+        drop(playback);
+        let mut frames = Vec::new();
+        frames.extend(seen.lock().unwrap().iter().copied());
+        frames
+    }
+
+    #[test]
+    fn an_animated_gif_plays_its_later_frames_and_loops() {
+        let dir = std::env::temp_dir().join(format!("horizon-anim-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let gif = dir.join("loop.gif");
+        write_gif(&gif, 3);
+        let reds = collect_frames(&gif, Duration::from_millis(400));
+        // Frame 0 is already on screen as the photo; then 1, 2, and around again.
+        assert!(reds.len() >= 4, "{reds:?}");
+        assert_eq!(&reds[..4], &[60, 120, 0, 60]);
+
+        let still = dir.join("still.gif");
+        write_gif(&still, 1);
+        assert!(collect_frames(&still, Duration::from_millis(150)).is_empty());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn dropping_an_animation_stops_it() {
+        let dir = std::env::temp_dir().join(format!("horizon-anim-stop-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let gif = dir.join("loop.gif");
+        write_gif(&gif, 3);
+        let seen = Arc::new(std::sync::Mutex::new(0));
+        let sink = Arc::clone(&seen);
+        let playback = play_animation(
+            &gif,
+            (100, 100),
+            Box::new(move |_| *sink.lock().unwrap() += 1),
+        );
+        std::thread::sleep(Duration::from_millis(150));
+        drop(playback);
+        std::thread::sleep(Duration::from_millis(50));
+        let stopped_at = *seen.lock().unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(*seen.lock().unwrap(), stopped_at);
+        fs::remove_dir_all(dir).unwrap();
+    }
     use crate::domain::album::CaptureOrigin;
 
     fn temp_dir(name: &str) -> PathBuf {

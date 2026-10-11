@@ -15,6 +15,7 @@ path = [
   "rustfmt.toml",
   "scripts/**",
   "src/**",
+  "tests/**",
   "ui/app.slint",
   "ui/models/**",
   "ui/pages/**",

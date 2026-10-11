@@ -184,6 +184,24 @@ artwork remains owned/licensed by its respective game publisher/developer.
 The existing MIT and Apache-2.0 license texts cover these dependencies. The exact
 resolved Cargo dependency-license inventory remains a release gate.
 
+### Album image formats (GIF, JPEG XL)
+
+- **image 0.25.x, `gif` feature** (the `gif` crate, MIT OR Apache-2.0):
+  decodes GIF captures in the Album, including animated GIFs frame by frame.
+- **jxl-oxide 0.12.x**
+  - Upstream: https://github.com/tirr-c/jxl-oxide
+  - License: MIT OR Apache-2.0 (its `jxl-*` crates likewise)
+  - Use in Horizon: decode JPEG XL captures in the Album through `image`'s
+    decoding hook, under the same size and memory limits as every other format.
+  - Modification: none; consumed as a Cargo dependency with only its `image`
+    integration enabled.
+  - Brings **brotli-decompressor 5.x** (BSD-3-Clause OR MIT, used under MIT) and
+    **alloc-no-stdlib / alloc-stdlib** (BSD-3-Clause).
+
+The existing MIT and Apache-2.0 license texts cover these dependencies; the
+BSD-3-Clause allocator crates carry their notice in their own sources. The exact
+resolved Cargo dependency-license inventory remains a release gate.
+
 ### Phase 9.5.37 multi-resolution ICO dependency
 
 - **ico 0.5.x**
