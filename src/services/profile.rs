@@ -14,6 +14,7 @@
 use std::{
     fs, io,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use image::{DynamicImage, ImageFormat, RgbaImage, imageops::FilterType};
@@ -96,20 +97,59 @@ pub fn prepare_bytes(bytes: &[u8]) -> Result<RgbaImage, ProfileError> {
     Ok(square(decoding::decode(bytes, None)?))
 }
 
-/// A Steam avatar frame from bytes: kept whole (frames are square, mostly
-/// transparent), shrunk to [`PICTURE_SIZE`] if larger. An animated frame
-/// uses its first frame.
-pub fn prepare_frame(bytes: &[u8]) -> Result<RgbaImage, ProfileError> {
-    let frame = decoding::decode(bytes, None)?;
-    Ok(
-        if frame.width() > PICTURE_SIZE || frame.height() > PICTURE_SIZE {
-            frame
-                .resize(PICTURE_SIZE, PICTURE_SIZE, FilterType::Lanczos3)
-                .into_rgba8()
-        } else {
-            frame.into_rgba8()
-        },
-    )
+/// Side Steam's animated avatars are decoded at: sharp at 2x in the top
+/// bar and in the 96 px Settings preview.
+pub const ANIMATED_SIDE: u32 = 128;
+/// Side avatar frames are decoded at (they surround the picture, 1.22x).
+pub const FRAME_SIDE: u32 = 160;
+/// Most frames kept of one animation (a minute and more at Steam's pace).
+pub const MAX_FRAMES: usize = 600;
+
+/// A small picture that may move: its first frame as a still, and, when it
+/// is animated, every frame with its delay.
+pub struct Animation {
+    pub still: RgbaImage,
+    pub frames: Vec<(RgbaImage, Duration)>,
+}
+
+/// Decode a Steam profile item (an avatar frame, an animated avatar) from
+/// its file's bytes, everything fitted to `side`. A still image is an
+/// animation of no frames.
+pub fn decode_animation(bytes: &[u8], side: u32) -> Result<Animation, ProfileError> {
+    let still = decoding::fit(decoding::decode(bytes, None)?, (side, side));
+    let frames =
+        decoding::small_animation(bytes, (side, side), MAX_FRAMES, false)?.unwrap_or_default();
+    Ok(Animation { still, frames })
+}
+
+/// A chosen animated picture (a GIF, an animated PNG) from its file's bytes:
+/// every frame cropped to its centre square like the still, at `side`.
+/// `None` when it doesn't move.
+pub fn decode_chosen_animation(bytes: &[u8], side: u32) -> Option<Animation> {
+    let frames = decoding::small_animation(bytes, (side, side), MAX_FRAMES, true)
+        .ok()
+        .flatten()?;
+    let still = frames.first()?.0.clone();
+    Some(Animation { still, frames })
+}
+
+/// Keep a file's bytes as they are (an animated original), replacing any
+/// earlier copy only once the new one is complete.
+pub fn save_bytes(path: &Path, bytes: &[u8]) -> Result<(), ProfileError> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let partial = partial_path(path);
+    let written = fs::write(&partial, bytes).and_then(|()| fs::rename(&partial, path));
+    if written.is_err() {
+        let _ = fs::remove_file(&partial);
+    }
+    Ok(written?)
+}
+
+/// A kept original, decoded; `None` when absent or unreadable.
+pub fn load_animation(path: &Path, side: u32) -> Option<Animation> {
+    decode_animation(&fs::read(path).ok()?, side).ok()
 }
 
 /// Decode `source` (by content, under the usual limits), crop its centre to a
@@ -269,6 +309,77 @@ mod tests {
             );
         }
         assert!(super::avatar("no-such-avatar").is_none());
+    }
+
+    #[test]
+    fn animations_keep_their_frames_and_stills_have_none() {
+        use image::{Delay, Frame, codecs::gif::GifEncoder};
+        let mut gif = Vec::new();
+        {
+            let mut encoder = GifEncoder::new(&mut gif);
+            for red in [0u8, 100, 200] {
+                encoder
+                    .encode_frame(Frame::from_parts(
+                        RgbaImage::from_pixel(300, 300, image::Rgba([red, 0, 0, 255])),
+                        0,
+                        0,
+                        Delay::from_numer_denom_ms(50, 1),
+                    ))
+                    .unwrap();
+            }
+        }
+        let animation = decode_animation(&gif, ANIMATED_SIDE).unwrap();
+        assert_eq!(animation.still.dimensions(), (ANIMATED_SIDE, ANIMATED_SIDE));
+        assert_eq!(animation.frames.len(), 3);
+        assert_eq!(animation.frames[2].1, Duration::from_millis(50));
+
+        let mut png = Vec::new();
+        RgbaImage::new(40, 40)
+            .write_to(&mut io::Cursor::new(&mut png), ImageFormat::Png)
+            .unwrap();
+        let still = decode_animation(&png, FRAME_SIDE).unwrap();
+        assert_eq!(still.still.dimensions(), (40, 40));
+        assert!(still.frames.is_empty());
+
+        let dir = temp_dir("animation");
+        let path = dir.join("item");
+        save_bytes(&path, &gif).unwrap();
+        assert_eq!(
+            load_animation(&path, ANIMATED_SIDE).unwrap().frames.len(),
+            3
+        );
+        assert!(load_animation(&dir.join("missing"), ANIMATED_SIDE).is_none());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_chosen_animation_is_squared_and_a_still_is_not_one() {
+        use image::{Delay, Frame, codecs::gif::GifEncoder};
+        let mut gif = Vec::new();
+        {
+            let mut encoder = GifEncoder::new(&mut gif);
+            for red in [0u8, 120] {
+                encoder
+                    .encode_frame(Frame::from_parts(
+                        RgbaImage::from_pixel(300, 150, image::Rgba([red, 0, 0, 255])),
+                        0,
+                        0,
+                        Delay::from_numer_denom_ms(40, 1),
+                    ))
+                    .unwrap();
+            }
+        }
+        let animation = decode_chosen_animation(&gif, ANIMATED_SIDE).unwrap();
+        assert_eq!(animation.frames.len(), 2);
+        assert_eq!(
+            animation.frames[0].0.dimensions(),
+            (ANIMATED_SIDE, ANIMATED_SIDE)
+        );
+        let mut png = Vec::new();
+        RgbaImage::new(40, 40)
+            .write_to(&mut io::Cursor::new(&mut png), ImageFormat::Png)
+            .unwrap();
+        assert!(decode_chosen_animation(&png, ANIMATED_SIDE).is_none());
     }
 
     #[test]

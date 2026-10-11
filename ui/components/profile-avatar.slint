@@ -1,4 +1,30 @@
-import { Theme } from "../theme/theme.slint";
+import { Theme, Motion } from "../theme/theme.slint";
+import { ProfileFrameData } from "../models/profile.slint";
+
+// A picture that may move: `frames` play in a loop at their own delays while
+// `playing`, and `still` shows otherwise, with Reduced Motion, and while
+// Horizon isn't the active window (`Motion.loops-paused`).
+component AnimatedPicture inherits Rectangle {
+    in property <image> still;
+    in property <[ProfileFrameData]> frames;
+    in property <bool> playing: false;
+    in property <ImageFit> image-fit: cover;
+    private property <int> index: 0;
+    private property <bool> moving: root.playing && root.frames.length > 1
+        && !Motion.reduced-motion && !Motion.loops-paused;
+    background: transparent;
+    changed frames => { root.index = 0; }
+    Image {
+        width: parent.width; height: parent.height;
+        source: root.moving ? root.frames[root.index].image : root.still;
+        image-fit: root.image-fit;
+    }
+    Timer {
+        interval: max(20ms, root.frames[root.index].delay-ms * 1ms);
+        running: root.moving;
+        triggered => { root.index = Math.mod(root.index + 1, root.frames.length); }
+    }
+}
 
 // The profile picture at the top left of Home, after the reference mockup.
 //
@@ -12,6 +38,9 @@ import { Theme } from "../theme/theme.slint";
 // Square (a Steam picture, as Steam shows it): the picture square, with the
 // account's avatar frame drawn around it at full size, or without a frame a
 // fine edge and the same shadow.
+//
+// A Steam animated avatar and an animated frame play (`picture-frames`,
+// `frame-frames`) while `playing`; see AnimatedPicture.
 export component ProfileAvatar inherits Rectangle {
     in property <image> picture;
     in property <bool> has-picture: false;
@@ -19,6 +48,10 @@ export component ProfileAvatar inherits Rectangle {
     in property <bool> square: false;
     in property <image> frame;
     in property <bool> has-frame: false;
+    in property <[ProfileFrameData]> picture-frames;
+    in property <[ProfileFrameData]> frame-frames;
+    // Whether anything animated may move: only while it's on screen.
+    in property <bool> playing: false;
     // 54px in the top bar; the ring, monogram and frame scale with it.
     in property <length> size: 54px;
     private property <length> ring: max(4px, root.size * 4 / 54);
@@ -78,10 +111,11 @@ export component ProfileAvatar inherits Rectangle {
                 width: parent.width; height: parent.height;
                 border-radius: root.inner / 2;
                 clip: true;
-                Image {
+                AnimatedPicture {
                     width: parent.width; height: parent.height;
-                    source: root.picture;
-                    image-fit: cover;
+                    still: root.picture;
+                    frames: root.picture-frames;
+                    playing: root.playing;
                 }
             }
             // The picture sits into the ring: a thin shaded rim at its edge.
@@ -106,10 +140,11 @@ export component ProfileAvatar inherits Rectangle {
             drop-shadow-offset-y: root.has-frame ? 0px : root.size * 3 / 54;
             drop-shadow-blur: root.has-frame ? 0px : root.size * 14 / 54;
             drop-shadow-color: root.shadow;
-            if root.has-picture : Image {
+            if root.has-picture : AnimatedPicture {
                 width: parent.width; height: parent.height;
-                source: root.picture;
-                image-fit: cover;
+                still: root.picture;
+                frames: root.picture-frames;
+                playing: root.playing;
             }
             if !root.has-picture : Text {
                 width: parent.width; height: parent.height;
@@ -128,9 +163,11 @@ export component ProfileAvatar inherits Rectangle {
                 background: transparent;
             }
         }
-        if root.has-frame : Image {
+        if root.has-frame : AnimatedPicture {
             width: root.size; height: root.size;
-            source: root.frame;
+            still: root.frame;
+            frames: root.frame-frames;
+            playing: root.playing;
             image-fit: contain;
         }
     }
