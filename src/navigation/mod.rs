@@ -6,6 +6,7 @@
 
 mod edge_step;
 pub mod grid;
+pub mod keyboard;
 pub use edge_step::step_with_edge_wrap;
 
 /// Full-shell submenu pages opened from the five top utility icons.

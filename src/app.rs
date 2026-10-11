@@ -1,4 +1,9 @@
-use std::{cell::RefCell, rc::Rc, sync::Arc, time::Duration};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+    sync::Arc,
+    time::Duration,
+};
 
 use slint::{
     ComponentHandle, Timer, TimerMode,
@@ -12,7 +17,7 @@ use crate::{
     appearance::store::AppearanceStore,
     audio::{UiSoundCue, UiSounds},
     error::AppError,
-    input::{ControllerStatus, InputManager, UiAction, UiActionEvent, mouse},
+    input::{ControllerStatus, InputDevice, InputManager, UiAction, UiActionEvent, mouse},
     persistence::{SqliteLibraryRepository, settings::SettingsStore},
     platform::{
         data_paths,
@@ -32,6 +37,7 @@ use crate::{
         appearance::AppearanceController,
         clock::ClockController,
         home::HomeController,
+        keyboard::KeyboardController,
         navigation::NavigationController,
         profile::ProfileController,
         settings::SettingsController,
@@ -367,6 +373,13 @@ pub fn run() -> Result<(), AppError> {
     );
     navigation.set_achievements(achievements, &ui);
     navigation.set_profile(Rc::clone(&profile_page), &ui);
+    // What the user last used decides whether a text field brings up the
+    // on-screen keyboard (a controller or a touch screen does).
+    let last_device = Rc::new(Cell::new(InputDevice::default()));
+    let keyboard = KeyboardController::new(&ui, Rc::clone(&last_device));
+    let keyboard_sound = Rc::clone(&navigation_sound);
+    keyboard.set_sound(Rc::new(move |cue| keyboard_sound.borrow_mut().play(cue)));
+    navigation.set_keyboard(keyboard);
     let video: Arc<dyn VideoBackend> = match FfmpegVideo::new() {
         Ok(video) => Arc::new(video),
         Err(error) => {
@@ -451,6 +464,7 @@ pub fn run() -> Result<(), AppError> {
             (
                 ui.get_profile_focused(),
                 ui.get_profile_edit_selection(),
+                ui.get_keyboard_focused(),
                 ui.get_profile_editor_target(),
             ),
         );
@@ -483,6 +497,7 @@ pub fn run() -> Result<(), AppError> {
             (
                 ui.get_profile_focused(),
                 ui.get_profile_edit_selection(),
+                ui.get_keyboard_focused(),
                 ui.get_profile_editor_target(),
             ),
         );
@@ -528,7 +543,15 @@ pub fn run() -> Result<(), AppError> {
     // still on the touchpad (the bounce springs back when they lift).
     let mouse_sink = Rc::clone(&action_sink);
     let wheel_ui = ui.as_weak();
+    let pointer_device = Rc::clone(&last_device);
     ui.window().on_winit_window_event(move |_, event| {
+        match event {
+            winit::event::WindowEvent::Touch(_) => pointer_device.set(InputDevice::Touch),
+            winit::event::WindowEvent::MouseInput { .. } => {
+                pointer_device.set(InputDevice::Pointer)
+            }
+            _ => {}
+        }
         if let winit::event::WindowEvent::MouseWheel { delta, phase, .. } = event
             && let Some(ui) = wheel_ui.upgrade()
         {
@@ -552,7 +575,7 @@ pub fn run() -> Result<(), AppError> {
         EventResult::Propagate
     });
 
-    let input = InputManager::new(action_sink, status_sink);
+    let input = InputManager::new(action_sink, status_sink, Rc::clone(&last_device));
 
     // Network and battery readings wake the UI thread when they arrive.
     let system_ui = ui.as_weak();

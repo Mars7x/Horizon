@@ -232,8 +232,9 @@ impl SettingsController {
                 UiAction::Accept if !event.repeated => {
                     let target = self.page.borrow().editor_target;
                     if target == 0 {
-                        // Accept on the field confirms the typed key.
-                        self.save_key(ui, ui.get_settings_key_draft().as_str());
+                        // A on the field brings up the on-screen keyboard
+                        // (Enter on a physical keyboard goes to the field).
+                        ui.invoke_keyboard_show(0);
                     } else {
                         ui.invoke_settings_activate_editor_target(target);
                     }

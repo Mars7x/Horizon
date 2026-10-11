@@ -3,7 +3,7 @@ use std::{cell::Cell, rc::Rc, time::Instant};
 use tracing::warn;
 
 use super::{
-    actions::{UiAction, UiActionEvent},
+    actions::{InputDevice, UiAction, UiActionEvent},
     keyboard,
     sdl::{
         ControllerStatus, DIGITAL_INITIAL_REPEAT_DELAY, DIGITAL_REPEAT_INTERVAL, SdlGamepadInput,
@@ -29,28 +29,39 @@ pub struct InputManager {
     gamepad_input: Option<SdlGamepadInput>,
     ui_input_enabled: Cell<bool>,
     keyboard_repeat: Cell<Option<KeyboardRepeat>>,
+    /// The device behind the last action, shared with the UI.
+    last_device: Rc<Cell<InputDevice>>,
 }
 
 impl InputManager {
     pub fn new(
         action_sink: Rc<dyn Fn(UiActionEvent)>,
         status_sink: Rc<dyn Fn(ControllerStatus)>,
+        last_device: Rc<Cell<InputDevice>>,
     ) -> Rc<Self> {
-        let gamepad_input =
-            match SdlGamepadInput::start(Rc::clone(&action_sink), Rc::clone(&status_sink)) {
-                Ok(input) => Some(input),
-                Err(error) => {
-                    warn!(%error, "SDL3 gamepad input unavailable; keyboard input remains active");
-                    status_sink(ControllerStatus::default());
-                    None
-                }
-            };
+        // Controller actions mark the controller as the device in use.
+        let gamepad_sink: Rc<dyn Fn(UiActionEvent)> = {
+            let (sink, device) = (Rc::clone(&action_sink), Rc::clone(&last_device));
+            Rc::new(move |event| {
+                device.set(InputDevice::Gamepad);
+                sink(event);
+            })
+        };
+        let gamepad_input = match SdlGamepadInput::start(gamepad_sink, Rc::clone(&status_sink)) {
+            Ok(input) => Some(input),
+            Err(error) => {
+                warn!(%error, "SDL3 gamepad input unavailable; keyboard input remains active");
+                status_sink(ControllerStatus::default());
+                None
+            }
+        };
 
         Rc::new(Self {
             action_sink,
             gamepad_input,
             ui_input_enabled: Cell::new(true),
             keyboard_repeat: Cell::new(None),
+            last_device,
         })
     }
 
@@ -108,6 +119,7 @@ impl InputManager {
                 self.keyboard_repeat.set(Some(state));
             }
         }
+        self.last_device.set(InputDevice::Keyboard);
         (self.action_sink)(UiActionEvent { action, repeated });
         true
     }
@@ -148,6 +160,7 @@ mod tests {
             gamepad_input: None,
             ui_input_enabled: Cell::new(true),
             keyboard_repeat: Cell::new(None),
+            last_device: Rc::default(),
         };
         let right: SharedString = Key::RightArrow.into();
         let t = Instant::now();
@@ -183,6 +196,7 @@ mod tests {
             gamepad_input: None,
             ui_input_enabled: Cell::new(true),
             keyboard_repeat: Cell::new(None),
+            last_device: Rc::default(),
         };
         let right: SharedString = Key::RightArrow.into();
 

@@ -35,7 +35,7 @@ field uses the placeholder “Enter an API key”, and its horizontal scroll is
 clamped to never push a short masked key to the right when the caret moves.
 The dialog has no keyboard-shortcut hint strip. An eye/eye-slash icon controls
 visibility of the unsaved draft.
-The saved key is never disclosed. Enter/controller confirm saves; Esc/Back cancels. The input
+The saved key is never disclosed. Enter saves; Esc/Back cancels. With a controller the on-screen keyboard comes up (A on the field brings it back, and the field's keyboard button brings it up by pointer); its Done saves. See [KEYBOARD.md](KEYBOARD.md). The input
 receives focus when the editor appears, and new sessions start empty. Saved
 values are never shown or read back into Slint. The current draft is cleared
 on save/cancel/navigation away. Remove/replace the key at any time.

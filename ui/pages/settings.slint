@@ -8,6 +8,7 @@ import { ActionButton as SettingsButton } from "../components/action-button.slin
 import { ModalDialog } from "../components/modal-dialog.slint";
 import { SettingsRow } from "../components/settings-row.slint";
 import { ConfirmDialog } from "../components/confirm-dialog.slint";
+import { KeyboardButton } from "../components/on-screen-keyboard.slint";
 
 // Shared button component for dialog and back navigation.
 // A saved Theme preference is expressed by accent-coloured text, not an
@@ -131,6 +132,18 @@ export component SettingsPage inherits Rectangle {
     private property <length> caret-local-x: 0px;
 
     callback activate(int);
+    // The on-screen keyboard covers this much of the bottom (dialogs stay
+    // above it); a field's keyboard button asks for it.
+    in property <length> keyboard-inset: 0px;
+    // Where the on-screen keyboard types: the caret follows it.
+    in property <int> keyboard-caret: 0;
+    in property <int> keyboard-edit: 0;
+    callback keyboard-show();
+    changed keyboard-edit => {
+        if (root.editing-key) {
+            api-input.set-selection-offsets(root.keyboard-caret, root.keyboard-caret);
+        }
+    }
     // A row's Remove / Disconnect button was clicked; the confirmation's
     // answer (0 Cancel, 1 the action).
     callback remove(int);
@@ -557,6 +570,7 @@ export component SettingsPage inherits Rectangle {
     // dismissed, and a delayed focus handoff avoids activation races with Slint.
     modal-layer := ModalDialog {
         area-width: root.width; area-height: root.height;
+        lift: root.keyboard-inset;
         z: 20;
         open: root.editing-key;
         card-width: 598px;
@@ -603,7 +617,7 @@ export component SettingsPage inherits Rectangle {
 
             input-viewport := Rectangle {
                 x: 14px; y: 6px;
-                width: parent.width - 69px; height: parent.height - 12px;
+                width: parent.width - (root.editor-kind != 1 ? 113px : 69px); height: parent.height - 12px;
                 background: transparent;
                 clip: true;
                 api-input := TextInput {
@@ -730,6 +744,11 @@ export component SettingsPage inherits Rectangle {
                         easing: ease-in-out;
                     }
                 }
+            }
+            KeyboardButton {
+                x: parent.width - (root.editor-kind != 1 ? 92px : 48px);
+                y: (parent.height - self.height) / 2;
+                activated => { root.keyboard-show(); }
             }
             // An accessible icon-only reveal control. The default is masked;
             // only the unsaved draft is ever revealed, never the saved key.

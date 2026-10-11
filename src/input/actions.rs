@@ -17,8 +17,25 @@ pub enum UiAction {
     /// The X (west) face button, or Delete on a keyboard. Pages give it a
     /// meaning; the Album uses it to delete.
     Secondary,
+    /// Pressing either stick (L3 or R3). The on-screen keyboard uses it as
+    /// Shift.
+    StickPress,
     /// A mouse's forward button: reopen the page Back last left.
     Forward,
+}
+
+/// What the user last used, so the UI can offer what suits it: the
+/// on-screen keyboard appears for a controller or a touch screen, not for a
+/// physical keyboard or a mouse.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum InputDevice {
+    #[default]
+    Keyboard,
+    Gamepad,
+    /// A mouse or touchpad. Under gamescope a touch screen can arrive as
+    /// this too, so nothing may depend on telling the two apart.
+    Pointer,
+    Touch,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,6 +78,8 @@ impl UiAction {
             "LB" => Self::LeftBumper,
             "RB" => Self::RightBumper,
             "X" => Self::Secondary,
+            "L3" | "R3" => Self::StickPress,
+            "+" => Self::Menu,
             _ => return None,
         })
     }

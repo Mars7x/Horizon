@@ -53,6 +53,7 @@ Home
 LeftBumper
 RightBumper
 Secondary   (gamepad X / west, keyboard Delete; Album: delete)
+StickPress  (gamepad L3 or R3; the on-screen keyboard's Shift)
 ```
 
 Directional keyboard actions may auto-repeat. Activation/navigation actions such as Accept and Back require a fresh press.
@@ -215,3 +216,8 @@ The Slint input scope forwards logical directional presses **and releases** to `
 On scrollable lists, pointer-wheel deltas pan the camera without emitting controller/keyboard Up or Down events or changing selection. The Achievements game catalog and Library grid now explicitly decouple viewport position from focus. Read-only Achievements and Activity session details wheel-scroll their existing history windows without focusing any rows. Directional keys and gamepad inputs continue using the established navigation actions and repeat caps. See [ADR 0162](adr/0162-achievement-input-and-lazy-badge-parity.md).
 
 Wheel direction follows the desktop's scrolling setting (natural/reverse or traditional). The compositor applies that setting before Horizon sees the event, so Horizon must map Slint's sign faithfully: a positive `delta-y` moves the camera **up**. Every wheel handler uses the shared `Wheel.rows()` helper in `ui/components/wheel.slint`; never hand-write the mapping.
+
+## Last input device
+
+`input::InputDevice` records what the user last used: `InputManager` sets Gamepad for SDL actions and Keyboard for keyboard actions, and the winit window hook in `app.rs` sets Touch for touch events and Pointer for mouse buttons. The on-screen keyboard reads it to appear for a controller or a touch screen (see [KEYBOARD.md](KEYBOARD.md)). Under gamescope a touch screen may arrive as Pointer, so nothing may depend on telling the two apart.
+

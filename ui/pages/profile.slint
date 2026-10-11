@@ -5,6 +5,7 @@ import { MarqueeText } from "../components/marquee-text.slint";
 import { ActionButton } from "../components/action-button.slint";
 import { ModalDialog } from "../components/modal-dialog.slint";
 import { ConfirmDialog } from "../components/confirm-dialog.slint";
+import { KeyboardButton } from "../components/on-screen-keyboard.slint";
 import { SettingsRow } from "../components/settings-row.slint";
 import { ProfileAvatar } from "../components/profile-avatar.slint";
 import { ProfileFrameData, FriendData } from "../models/profile.slint";
@@ -60,6 +61,13 @@ export component ProfilePage inherits Rectangle {
     callback confirm(int);
     callback scroll-friends(int);
     callback save-name(string);
+    // The on-screen keyboard covers this much of the bottom (the name
+    // editor stays above it); the field's keyboard button asks for it.
+    in property <length> keyboard-inset: 0px;
+    // Where the on-screen keyboard types: the caret follows it.
+    in property <int> keyboard-caret: 0;
+    in property <int> keyboard-edit: 0;
+    callback keyboard-show();
     callback cancel-name();
 
     background: Theme.background;
@@ -379,6 +387,7 @@ export component ProfilePage inherits Rectangle {
     // The name editor.
     ModalDialog {
         area-width: root.width; area-height: root.height;
+        lift: root.keyboard-inset;
         z: 20;
         open: root.editing-name;
         card-width: 520px;
@@ -409,7 +418,7 @@ export component ProfilePage inherits Rectangle {
                 soft-shadow: false;
             }
             Rectangle {
-                x: 14px; width: parent.width - 28px; height: parent.height;
+                x: 14px; width: parent.width - 28px - 40px; height: parent.height;
                 background: transparent;
                 clip: true;
                 name-input := TextInput {
@@ -436,6 +445,10 @@ export component ProfilePage inherits Rectangle {
             TouchArea {
                 width: parent.width; height: parent.height;
                 clicked => { name-input.focus(); }
+            }
+            KeyboardButton {
+                x: parent.width - self.width - 8px; y: (parent.height - self.height) / 2;
+                activated => { root.keyboard-show(); }
             }
         }
         ActionButton {
@@ -482,6 +495,11 @@ export component ProfilePage inherits Rectangle {
             focus-after-opening.start();
         } else {
             focus-after-opening.stop();
+        }
+    }
+    changed keyboard-edit => {
+        if (root.editing-name) {
+            name-input.set-selection-offsets(root.keyboard-caret, root.keyboard-caret);
         }
     }
     changed editor-target => {

@@ -30,7 +30,7 @@ The preview changes as soon as an option does, and only problems ("Couldn't use 
 
 ### The name editor
 
-A dialog with the text field, Cancel and Save, over Edit profile. The field takes focus with the name selected. Enter or Save keeps it; Escape, B or Cancel closes it, back to Edit profile. Names are tidied (single spaces, at most 32 characters); empty means no name. Down from the field goes to Save, Left and Right move between Cancel and Save, and Up returns to the field. Hints are Cancel/Select.
+A dialog with the text field, Cancel and Save, over Edit profile. With a controller or a touch screen the on-screen keyboard comes up with it ([KEYBOARD.md](KEYBOARD.md)); A on the field brings it back, and the field's keyboard button brings it up by pointer. The field takes focus with the name selected. Enter or Save keeps it; Escape, B or Cancel closes it, back to Edit profile. Names are tidied (single spaces, at most 32 characters); empty means no name. Down from the field goes to Save, Left and Right move between Cancel and Save, and Up returns to the field. Hints are Cancel/Select.
 
 ### Friends
 

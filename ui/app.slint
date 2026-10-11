@@ -25,6 +25,8 @@ import { TopNavigation } from "components/top-navigation.slint";
 import { TransitionDriver, TransitionLayer } from "components/transition.slint";
 import { Footer } from "components/footer.slint";
 import { HintBar } from "components/hint-bar.slint";
+import { OnScreenKeyboard } from "components/on-screen-keyboard.slint";
+import { KeyboardKeyData } from "models/keyboard.slint";
 import { HintData } from "models/hints.slint";
 import { HomePage } from "pages/home.slint";
 import { LibraryPage } from "pages/library.slint";
@@ -98,7 +100,9 @@ export component AppWindow inherits Window {
     private property <[HintData]> page-hints:
         // Bumper pickers are shown beside their header values, not here.
         // Order: X, then B, with A always rightmost.
-        root.current-route == AppRouteView.library ? (root.library-total-count > 0
+        // The on-screen keyboard needs no hints.
+        root.keyboard-open ? []
+        : root.current-route == AppRouteView.library ? (root.library-total-count > 0
             ? [{ button: "B", label: "Back" }, { button: "A", label: "Play" }]
             : [{ button: "B", label: "Back" }])
         : root.current-route == AppRouteView.activity ? (root.activity-details-visible
@@ -423,10 +427,32 @@ export component AppWindow inherits Window {
 
     changed settings-editing-key => {
         if (!root.settings-editing-key) { input-scope.focus(); }
+        root.text-entry-changed(0, root.settings-editing-key);
     }
     changed profile-editing-name => {
         if (!root.profile-editing-name) { input-scope.focus(); }
+        root.text-entry-changed(1, root.profile-editing-name);
     }
+
+    // The on-screen keyboard (presentation/keyboard.rs). Text targets: 0 the
+    // Settings key editor, 1 the Profile name editor.
+    in property <bool> keyboard-open: false;
+    in property <[KeyboardKeyData]> keyboard-keys;
+    in property <int> keyboard-focused: 0;
+    in property <int> keyboard-shift: 0;
+    // Where the field's caret goes (a byte offset), applied each time
+    // `keyboard-edit` changes (a key typed, LB or RB).
+    in property <int> keyboard-caret: 0;
+    in property <int> keyboard-edit: 0;
+    // A key was clicked or tapped; a text editor opened or closed; a field
+    // asked for the keyboard (its keyboard button).
+    callback keyboard-key(int);
+    callback text-entry-changed(int, bool);
+    callback keyboard-show(int);
+    // How much of the page's bottom the keyboard covers, for dialogs to
+    // stay above it.
+    private property <length> keyboard-inset: root.keyboard-open
+        ? Metrics.footer-height + keyboard.panel-height : 0px;
 
     design-surface := Rectangle {
         x: 0px;
@@ -736,6 +762,10 @@ export component AppWindow inherits Window {
 
                 profile-page := ProfilePage {
                     width: parent.width;
+                    keyboard-inset: root.keyboard-inset;
+                    keyboard-caret: root.keyboard-caret;
+                    keyboard-edit: root.keyboard-edit;
+                    keyboard-show => { root.keyboard-show(1); }
                     height: parent.height;
                     picture: root.profile-picture;
                     has-picture: root.profile-has-picture;
@@ -783,6 +813,10 @@ export component AppWindow inherits Window {
 
                 settings-page := SettingsPage {
                     width: parent.width;
+                    keyboard-inset: root.keyboard-inset;
+                    keyboard-caret: root.keyboard-caret;
+                    keyboard-edit: root.keyboard-edit;
+                    keyboard-show => { root.keyboard-show(0); }
                     height: parent.height;
                     view: root.settings-view;
                     selection: root.settings-selection;
@@ -867,6 +901,18 @@ export component AppWindow inherits Window {
                 activated(button) => { root.hint-activated(button); }
                 // Album's fullscreen viewer: hints sit on its dark overlay.
                 on-dark: root.current-route == AppRouteView.album && root.album-viewing;
+            }
+
+            // Above every page and its dialogs, docked over the hint bar's top.
+            keyboard := OnScreenKeyboard {
+                z: 40;
+                area-width: parent.width;
+                area-height: parent.height - Metrics.footer-height + 12px;
+                open: root.keyboard-open;
+                keys: root.keyboard-keys;
+                focused: root.keyboard-focused;
+                shift: root.keyboard-shift;
+                key-activated(index) => { root.keyboard-key(index); }
             }
 
             // Persistent top chrome lives outside every page. Later Phase 4
