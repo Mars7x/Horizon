@@ -24,15 +24,16 @@ export component SelectedGameLabel inherits Rectangle {
     private property <bool> marquee-opacity-animate: false;
     private property <length> right-fade-width: 30px;
     private property <length> left-fade-width: 30px;
-    // Each edge fade is exactly as strong as the text hidden behind it: it
-    // grows with the travelled distance (and shrinks as the end comes into
-    // view) in step with the moving title, so no glyph is ever caught at a
-    // clipping edge while its fade is still catching up.
+    // Each edge fade switches on with the moving title itself, reaching full
+    // strength within its first few pixels of travel (or the whole travel,
+    // if shorter), so a glyph crossing a clipping edge is always under a
+    // solid fade, and none pops in later.
     private property <length> travelled: max(0px, -title-text.x);
+    private property <length> fade-ramp: max(1px, min(6px, root.marquee-distance));
     private property <float> left-fade-strength: root.title-overflows
-        ? max(0.0, min(1.0, root.travelled / root.left-fade-width)) : 0.0;
+        ? max(0.0, min(1.0, root.travelled / root.fade-ramp)) : 0.0;
     private property <float> right-fade-strength: root.title-overflows
-        ? max(0.0, min(1.0, (root.marquee-distance - root.travelled) / root.right-fade-width)) : 0.0;
+        ? max(0.0, min(1.0, (root.marquee-distance - root.travelled) / root.fade-ramp)) : 0.0;
     private property <length> fade-y-inset: root.has-status ? 1px : 3px;
     private property <length> fade-height: root.has-status ? title-viewport.height - 2px : title-viewport.height - 6px;
 
