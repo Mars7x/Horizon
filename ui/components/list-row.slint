@@ -1,6 +1,5 @@
 import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { MarqueeText } from "marquee-text.slint";
-import { Wheel } from "wheel.slint";
 
 // The one card surface used by panels and read-only rows on every page.
 export component Surface inherits Rectangle {
@@ -24,8 +23,9 @@ export component ListRow inherits Rectangle {
     // Width kept free on the right for the trailing children.
     in property <length> trailing-width: 48px;
     callback activated();
-    // Mouse wheel over a row pans its list (camera only, never selection).
-    callback wheel(int);
+    // A scroll event over the row, passed on to its list's camera (which
+    // never moves selection).
+    callback wheel(length);
 
     height: Metrics.list-row-height;
     private property <color> surface-color: root.enabled && (touch.pressed || touch.has-hover)
@@ -73,8 +73,7 @@ export component ListRow inherits Rectangle {
         clicked => { root.activated(); }
         scroll-event(event) => {
             if event.delta-y != 0px {
-                let rows = Wheel.rows(event.delta-y);
-                if rows != 0 { root.wheel(rows); }
+                root.wheel(event.delta-y);
                 return accept;
             }
             reject

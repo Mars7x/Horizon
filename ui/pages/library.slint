@@ -1,11 +1,10 @@
-import { Wheel } from "../components/wheel.slint";
 import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { FallbackCover } from "../components/fallback-cover.slint";
 import { FocusFrame } from "../components/focus-frame.slint";
 import { LibraryCardData } from "../models/library.slint";
 import { PageHeader, HeaderValue, ScrollEdgeShadow } from "../components/page-header.slint";
 import { MarqueeText } from "../components/marquee-text.slint";
-import { Scroll, CameraSettle } from "../components/scroll.slint";
+import { Scroll, ScrollCamera } from "../components/scroll.slint";
 import { Stopwatch } from "../components/stopwatch.slint";
 import { GridRefresh } from "../components/grid-refresh.slint";
 
@@ -112,7 +111,6 @@ export component LibraryPage inherits Rectangle {
     // The shared scroll standard (components/scroll.slint): whole-row target,
     // never past the end, one linear glide. A fresh visit (the route
     // becoming active) jumps instead.
-    camera-settle := CameraSettle { key: root.focus-visible ? 1 : 0; }
     pure function content-height(count: int, columns: int) -> length {
         Math.floor((count + columns - 1) / columns) * root.row-stride
             - (root.row-stride - root.card-size) + 2 * root.grid-pad
@@ -129,12 +127,17 @@ export component LibraryPage inherits Rectangle {
         root.previous-scroll-row * root.row-stride,
         root.content-height(root.previous-total-count, root.previous-grid-columns),
         root.available-grid-height);
-    private property <length> camera: Scroll.camera(root.scroll-row * root.row-stride,
-        root.content, root.available-grid-height);
-    animate camera {
-        duration: root.grid-reordering || !camera-settle.settled ? 0ms : Motion.scroll-duration;
-        easing: linear;
+    scroll-camera := ScrollCamera {
+        rest-row: root.scroll-row;
+        stride: root.row-stride;
+        content: root.content;
+        viewport: root.available-grid-height;
+        settle-key: root.focus-visible ? 1 : 0;
+        focus-key: root.selected-index;
+        instant: root.grid-reordering;
+        scrolled(rows) => { root.scroll-rows(rows); }
     }
+    private property <length> camera: scroll-camera.camera;
 
     // Compact top chrome: title/count stay legible, but the collection gets
     // the recovered vertical room. Elevation is drawn at the boundary BELOW,
@@ -193,8 +196,7 @@ export component LibraryPage inherits Rectangle {
             width: parent.width; height: parent.height;
             scroll-event(event) => {
                 if event.delta-y != 0px {
-                    let rows = Wheel.rows(event.delta-y);
-                    if rows != 0 { root.scroll-rows(rows); }
+                    scroll-camera.scroll(event.delta-y);
                     return accept;
                 }
                 reject
@@ -360,8 +362,7 @@ export component LibraryPage inherits Rectangle {
                     clicked => { root.choose-card(row.absolute-index); }
                     scroll-event(event) => {
                         if event.delta-y != 0px {
-                            let rows = Wheel.rows(event.delta-y);
-                            if rows != 0 { root.scroll-rows(rows); }
+                            scroll-camera.scroll(event.delta-y);
                             return accept;
                         }
                         reject

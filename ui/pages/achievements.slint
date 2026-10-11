@@ -1,11 +1,10 @@
-import { Wheel } from "../components/wheel.slint";
 import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { AchievementGameData, AchievementEntryData } from "../models/achievements.slint";
 import { PageHeader, HeaderValue, Breadcrumb, ScrollEdgeShadow } from "../components/page-header.slint";
 import { ListRow, Surface, BadgeIcon } from "../components/list-row.slint";
 import { MarqueeText } from "../components/marquee-text.slint";
 import { TransitionDriver, TransitionLayer } from "../components/transition.slint";
-import { Scroll, CameraSettle } from "../components/scroll.slint";
+import { Scroll, ScrollCamera } from "../components/scroll.slint";
 import { Stopwatch } from "../components/stopwatch.slint";
 
 // One full-width games list, then one full-width, read-only achievement list.
@@ -68,16 +67,11 @@ export component AchievementsPage inherits Rectangle {
     // UP after scrolling down can leave the focused game offscreen entirely.
     private property <int> first-game: 0;
     // A fresh visit, or opening a game, jumps instead of scrolling there.
-    camera-settle := CameraSettle { key: root.visit-revision * 2 + (root.viewing-entries ? 1 : 0); }
     changed visit-revision => { root.first-game = 0; }
     // Keep a wheel-panned camera in bounds when the catalog shrinks.
     changed games => {
         root.first-game = min(root.first-game,
             max(0, root.games.length - root.visible-games));
-    }
-    // Mouse wheel pans the camera only; selection and controller focus stay put.
-    function pan-games(delta: int) {
-        root.first-game = max(0, min(root.games.length - root.visible-games, root.first-game + delta));
     }
     changed selected-index => {
         if (root.selected-index < root.first-game) {
@@ -97,14 +91,27 @@ export component AchievementsPage inherits Rectangle {
     // plus that inset on both ends.
     private property <length> game-content: root.games.length * root.row-stride - Metrics.list-row-gap + 4px;
     private property <length> entry-content: root.entries.length * root.entry-stride - Metrics.list-row-gap + 4px;
-    private property <length> game-camera: Scroll.camera(root.first-game * root.row-stride,
-        root.game-content, root.game-viewport-height);
-    private property <length> entry-camera: Scroll.camera(root.first-entry * root.entry-stride,
-        root.entry-content, root.detail-viewport-height);
-    animate game-camera, entry-camera {
-        duration: camera-settle.settled ? Motion.scroll-duration : 0ms;
-        easing: linear;
+    // Wheel and touchpad move these cameras by pixels; selection and
+    // controller focus stay put. A fresh visit, or opening a game, jumps.
+    games-camera := ScrollCamera {
+        rest-row: root.first-game;
+        stride: root.row-stride;
+        content: root.game-content;
+        viewport: root.game-viewport-height;
+        settle-key: root.visit-revision * 2 + (root.viewing-entries ? 1 : 0);
+        focus-key: root.selected-index;
+        scrolled(rows) => { root.first-game = max(0, root.first-game + rows); }
     }
+    entries-camera := ScrollCamera {
+        rest-row: root.first-entry;
+        stride: root.entry-stride;
+        content: root.entry-content;
+        viewport: root.detail-viewport-height;
+        settle-key: root.visit-revision * 2 + (root.viewing-entries ? 1 : 0);
+        scrolled(rows) => { root.scroll-entries(rows); }
+    }
+    private property <length> game-camera: games-camera.camera;
+    private property <length> entry-camera: entries-camera.camera;
 
     private property <float> detail-reveal: root.viewing-entries ? 1.0 : 0.0;
     animate detail-reveal { duration: Motion.page-duration; easing: ease-out; }
@@ -157,8 +164,7 @@ export component AchievementsPage inherits Rectangle {
                 enabled: !root.viewing-entries;
                 scroll-event(event) => {
                     if event.delta-y != 0px {
-                        let rows = Wheel.rows(event.delta-y);
-                        if rows != 0 { root.pan-games(rows); }
+                        games-camera.scroll(event.delta-y);
                         return accept;
                     }
                     reject
@@ -181,7 +187,7 @@ export component AchievementsPage inherits Rectangle {
                 enabled: !root.viewing-entries;
                 trailing-width: root.narrow ? 175px : 300px;
                 activated => { root.choose-game(i); }
-                wheel(rows) => { root.pan-games(rows); }
+                wheel(delta) => { games-camera.scroll(delta); }
 
                 Text {
                     x: parent.width - (root.narrow ? 158px : 273px); y: 12px;
@@ -278,8 +284,7 @@ export component AchievementsPage inherits Rectangle {
                 enabled: root.viewing-entries;
                 scroll-event(event) => {
                     if event.delta-y != 0px {
-                        let rows = Wheel.rows(event.delta-y);
-                        if rows != 0 { root.scroll-entries(rows); }
+                        entries-camera.scroll(event.delta-y);
                         return accept;
                     }
                     reject

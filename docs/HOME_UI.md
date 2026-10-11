@@ -49,6 +49,8 @@ Rust HomeController
 
 Clicking a tile emits selection intent. Rust validates the requested index and updates the presentation state. The Slint carousel reacts declaratively.
 
+A horizontal touchpad swipe or tilt-wheel step anywhere on Home pans the carousel's camera by pixels (`GameCarousel.pan`, see UI_STANDARDS "Mouse wheel and touchpad"), clamped to the shelf's ends: a touchpad follows the fingers, a notch glides. It never changes selection or focus, even when the selected game leaves the screen; the next selection change brings the camera back to it.
+
 Keyboard/controller navigation is intentionally deferred to Phase 3. Phase 2 only provides pointer selection so the carousel animation and state boundary can be exercised without pre-empting the input architecture.
 
 ## Demo artwork
