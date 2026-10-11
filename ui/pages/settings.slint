@@ -6,52 +6,7 @@ import { MarqueeText } from "../components/marquee-text.slint";
 import { TransitionDriver, TransitionLayer } from "../components/transition.slint";
 import { ActionButton as SettingsButton } from "../components/action-button.slint";
 import { ModalDialog } from "../components/modal-dialog.slint";
-import { ProfileAvatar } from "../components/profile-avatar.slint";
-import { ProfileFrameData } from "../models/profile.slint";
-
-// Settings rows are the shared ListRow plus a trailing action label or a
-// switch. Selection and persistence remain Rust-owned so mouse and controller agree.
-component SettingsRow inherits ListRow {
-    in property <string> trailing: "";
-    in property <bool> toggle: false;
-    in property <bool> checked: false;
-    trailing-width: root.toggle ? 130px : 230px;
-    accessible-checkable: root.toggle;
-    accessible-checked: root.checked;
-
-    Text {
-        visible: !root.toggle;
-        x: parent.width - 224px; y: 12px;
-        width: 196px; height: 30px;
-        text: root.trailing;
-        color: root.enabled ? (root.focused ? Theme.accent : Theme.secondary-foreground)
-            : Theme.secondary-foreground;
-        font-size: Typography.body-size;
-        font-weight: Typography.emphasis-weight;
-        horizontal-alignment: right;
-        vertical-alignment: center;
-    }
-    // The track's colour and the knob's travel change together, over the
-    // value-swap duration. No native-widget styling leaks into Horizon, and
-    // the whole row remains one controller/pointer target.
-    Rectangle {
-        visible: root.toggle;
-        x: parent.width - 94px; y: (parent.height - 34px) / 2;
-        width: 62px; height: 34px;
-        border-radius: 17px;
-        border-width: 1px;
-        border-color: root.checked ? Theme.accent : Theme.divider;
-        background: root.checked ? Theme.accent : Theme.divider;
-        animate background, border-color { duration: Motion.value-swap-duration; easing: ease-in-out; }
-        Rectangle {
-            x: root.checked ? parent.width - 30px : 4px;
-            y: 4px; width: 26px; height: 26px;
-            border-radius: 13px;
-            background: #ffffff; // Consistently white thumb in both states.
-            animate x { duration: Motion.value-swap-duration; easing: ease-out; }
-        }
-    }
-}
+import { SettingsRow } from "../components/settings-row.slint";
 
 // Shared button component for dialog and back navigation.
 // A saved Theme preference is expressed by accent-coloured text, not an
@@ -136,7 +91,7 @@ component AccentSwatch inherits Rectangle {
 }
 
 export component SettingsPage inherits Rectangle {
-    in property <int> view: 0; // 0 Settings, 1 Appearance, 2 Third-Party, 3 Steam Account, 4 SteamGridDB, 5 Profile
+    in property <int> view: 0; // 0 Settings, 1 Appearance, 2 Third-Party, 3 Steam Account
     in property <int> theme-index: 0; // System, Light, Dark
     in property <int> accent-index: 0; // System, nine spectrum colours
     in property <bool> ui-sounds-enabled: true;
@@ -159,22 +114,6 @@ export component SettingsPage inherits Rectangle {
         (root.physical-left-control ? 1 : 0) + (root.physical-right-control ? 2 : 0);
     in-out property <string> key-draft: "";
     in property <string> feedback: "";
-    in property <image> profile-picture;
-    in property <bool> profile-has-picture: false;
-    in property <bool> profile-choosing: false;
-    // A chosen picture exists (Remove), the Steam picture is on, and a Steam
-    // account is set up to provide one.
-    in property <bool> profile-has-chosen: false;
-    in property <bool> profile-uses-steam: false;
-    in property <bool> profile-steam-available: false;
-    in property <bool> profile-steam-square: false;
-    in property <bool> profile-square: false;
-    in property <image> profile-frame;
-    in property <bool> profile-has-frame: false;
-    in property <[ProfileFrameData]> profile-picture-frames;
-    in property <[ProfileFrameData]> profile-frame-frames;
-    in property <bool> profile-playing: false;
-    in property <string> profile-feedback: "";
     // Keep the Rust-owned artwork diagnostic property available to the backend,
     // but do not display worker telemetry in the Third-Party preferences view.
     in property <string> artwork-status: "";
@@ -225,11 +164,11 @@ export component SettingsPage inherits Rectangle {
     PageHeader { width: parent.width; title: "Settings"; }
 
     // Sub-views use the shared Zoom: going deeper zooms in, Back zooms out.
-    // Depth: Settings 0, Profile/Appearance/Third-Party 1, Steam Account/SteamGridDB 2.
+    // Depth: Settings 0, Appearance/Third-Party 1, Steam Account/SteamGridDB 2.
     view-transition := TransitionDriver { key: root.view; }
     private property <bool> view-back: root.view-depth(root.view) < root.view-depth(view-transition.from-key);
     pure function view-depth(view: int) -> int {
-        return view == 0 ? 0 : (view <= 2 || view == 5 ? 1 : 2);
+        return view == 0 ? 0 : (view <= 2 ? 1 : 2);
     }
 
     settings-home := TransitionLayer {
@@ -250,27 +189,21 @@ export component SettingsPage inherits Rectangle {
             spacing: Metrics.list-row-gap;
             SettingsRow {
                 width: parent.width;
-                title: "Profile";
-                subtitle: "Your picture on Home";
+               
+                title: "Appearance";
+                subtitle: "Theme, accent colour and UI sounds";
                 trailing: "Open  ›";
                 focused: root.view == 0 && root.selection == 0;
                 activated => { if (root.view == 0 && !root.editing-key && !root.refresh-open) { root.activate(0); } }
             }
             SettingsRow {
                 width: parent.width;
-                title: "Appearance";
-                subtitle: "Theme, accent colour and UI sounds";
-                trailing: "Open  ›";
-                focused: root.view == 0 && root.selection == 1;
-                activated => { if (root.view == 0 && !root.editing-key && !root.refresh-open) { root.activate(1); } }
-            }
-            SettingsRow {
-                width: parent.width;
+               
                 title: "Third-Party";
                 subtitle: "Artwork providers and external integrations";
                 trailing: "Open  ›";
-                focused: root.view == 0 && root.selection == 2;
-                activated => { if (root.view == 0 && !root.editing-key && !root.refresh-open) { root.activate(2); } }
+                focused: root.view == 0 && root.selection == 1;
+                activated => { if (root.view == 0 && !root.editing-key && !root.refresh-open) { root.activate(1); } }
             }
         }
     }
@@ -467,108 +400,6 @@ export component SettingsPage inherits Rectangle {
             checked: root.ui-sounds-enabled;
             focused: root.view == 1 && root.selection == 13;
             activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(13); } }
-        }
-    }
-
-    // The profile picture: a preview of Home's avatar, then choose or remove.
-    profile := TransitionLayer {
-        x: Metrics.page-margin;
-        rest-y: Metrics.page-header-height;
-        width: root.content-width;
-        height: root.height - Metrics.page-header-height;
-        opaque: true;
-        active: root.view == 5;
-        outgoing: view-transition.from-key == 5;
-        returning: root.view-back;
-        phase: view-transition.phase;
-
-        Breadcrumb {
-            x: 0px; y: 0px; width: parent.width;
-            section: "Settings"; page: "Profile";
-            back => { if (root.view == 5 && !root.editing-key && !root.refresh-open) { root.go-back(); } }
-        }
-        ProfileAvatar {
-            x: 0px; y: Metrics.breadcrumb-height + Metrics.spacing-sm;
-            size: 96px;
-            picture: root.profile-picture;
-            has-picture: root.profile-has-picture;
-            square: root.profile-square;
-            frame: root.profile-frame;
-            has-frame: root.profile-has-frame;
-            picture-frames: root.profile-picture-frames;
-            frame-frames: root.profile-frame-frames;
-            playing: root.profile-playing;
-        }
-        Text {
-            x: 96px + Metrics.spacing-lg; y: Metrics.breadcrumb-height + Metrics.spacing-sm + 18px;
-            width: parent.width - self.x; height: 31px;
-            text: "Profile picture";
-            color: Theme.foreground;
-            font-size: Typography.heading-size;
-            font-weight: Typography.heading-weight;
-        }
-        Text {
-            x: 96px + Metrics.spacing-lg; y: Metrics.breadcrumb-height + Metrics.spacing-sm + 52px;
-            width: parent.width - self.x; height: 23px;
-            text: "Shown at the top left of Home. Horizon keeps its own square copy.";
-            color: Theme.secondary-foreground;
-            font-size: Typography.caption-size;
-        }
-        SettingsRow {
-            x: 0px; y: Metrics.breadcrumb-height + Metrics.spacing-sm + 96px + Metrics.spacing-lg;
-            width: parent.width;
-            title: "Choose picture";
-            subtitle: "PNG, JPEG, GIF or JPEG XL, cropped to a square";
-            trailing: root.profile-choosing ? "Working…" : "Choose  ›";
-            enabled: !root.profile-choosing;
-            focused: root.view == 5 && root.selection == 0;
-            activated => { if (root.view == 5 && !root.editing-key && !root.refresh-open) { root.activate(0); } }
-        }
-        steam-picture := SettingsRow {
-            x: 0px; y: Metrics.breadcrumb-height + Metrics.spacing-sm + 96px + Metrics.spacing-lg + Metrics.list-row-height + Metrics.list-row-gap;
-            width: parent.width;
-            title: "Use Steam profile picture";
-            subtitle: root.profile-steam-available || root.profile-uses-steam
-                ? "Show your Steam avatar instead of a chosen picture"
-                : "Set up your Steam Account in Third-Party first";
-            toggle: true;
-            accessible-role: switch;
-            checked: root.profile-uses-steam;
-            enabled: (root.profile-steam-available || root.profile-uses-steam) && !root.profile-choosing;
-            focused: root.view == 5 && root.selection == 1;
-            activated => { if (root.view == 5 && !root.editing-key && !root.refresh-open) { root.activate(1); } }
-        }
-        steam-square := SettingsRow {
-            x: 0px; y: steam-picture.y + Metrics.list-row-height + Metrics.list-row-gap;
-            width: parent.width;
-            title: "Square, with Steam frame";
-            subtitle: root.profile-uses-steam
-                ? "Show the Steam picture square, as Steam does, inside your avatar frame"
-                : "Turn on the Steam profile picture first";
-            toggle: true;
-            accessible-role: switch;
-            checked: root.profile-steam-square;
-            enabled: root.profile-uses-steam;
-            focused: root.view == 5 && root.selection == 2;
-            activated => { if (root.view == 5 && !root.editing-key && !root.refresh-open) { root.activate(2); } }
-        }
-        remove-picture := SettingsRow {
-            x: 0px; y: steam-square.y + Metrics.list-row-height + Metrics.list-row-gap;
-            width: parent.width;
-            title: "Remove chosen picture";
-            subtitle: root.profile-has-chosen ? "Delete Horizon's copy of the picture you chose" : "No picture has been chosen";
-            trailing: root.profile-has-chosen ? "Remove  ›" : "Unavailable";
-            enabled: root.profile-has-chosen && !root.profile-choosing;
-            focused: root.view == 5 && root.selection == 3;
-            activated => { if (root.view == 5 && !root.editing-key && !root.refresh-open) { root.activate(3); } }
-        }
-        Text {
-            x: 0px; y: remove-picture.y + remove-picture.height + Metrics.spacing-md;
-            width: parent.width; height: 30px;
-            text: root.profile-feedback;
-            color: Theme.secondary-foreground;
-            font-size: Typography.caption-size;
-            vertical-alignment: center;
         }
     }
 

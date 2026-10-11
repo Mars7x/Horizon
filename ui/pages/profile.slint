@@ -1,0 +1,326 @@
+import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
+import { SelectionFocusSurface } from "../components/selection-focus-surface.slint";
+import { PageHeader } from "../components/page-header.slint";
+import { MarqueeText } from "../components/marquee-text.slint";
+import { ActionButton } from "../components/action-button.slint";
+import { ModalDialog } from "../components/modal-dialog.slint";
+import { SettingsRow } from "../components/settings-row.slint";
+import { ProfileAvatar } from "../components/profile-avatar.slint";
+import { ProfileFrameData } from "../models/profile.slint";
+
+// The user's profile, opened from the avatar at the top left of Home. The
+// page itself is the profile, not its options: the avatar large, the name
+// beneath it, and two actions. "Change picture" opens a dialog with the
+// picture's options beside a live preview; "Edit name" opens the name editor.
+// Selection, the open dialog, persistence and the editor's focus are
+// Rust-owned (presentation/profile.rs), so mouse, keyboard and controller
+// agree.
+export component ProfilePage inherits Rectangle {
+    // The avatar, as Home shows it.
+    in property <image> picture;
+    in property <bool> has-picture: false;
+    in property <string> monogram: "H";
+    in property <[ProfileFrameData]> picture-frames;
+    in property <bool> playing: false;
+    // The page: 0 Change picture, 1 Edit name.
+    in property <string> name: "";
+    in property <string> picture-caption: "";
+    in property <int> selection: 0;
+    in property <string> feedback: "";
+    // The picture dialog: 0 Choose, 1 Steam, 2 Remove, 3 Done.
+    in property <bool> picture-open: false;
+    in property <int> picture-selection: 0;
+    in property <bool> has-chosen: false;
+    in property <bool> uses-steam: false;
+    in property <bool> steam-available: false;
+    in property <bool> busy: false;
+    // The name editor: 0 the text, 1 Cancel, 2 Save.
+    in property <bool> editing-name: false;
+    in property <int> editor-target: 0;
+    in-out property <string> name-draft: "";
+    callback activate(int);
+    callback activate-picture(int);
+    callback save-name(string);
+    callback cancel-name();
+
+    background: Theme.background;
+    private property <bool> dialog-open: root.picture-open || root.editing-name;
+    private property <length> avatar-size: 184px;
+    private property <length> button-width: 200px;
+    private property <length> button-height: 50px;
+    // The picture dialog's rows, right of its preview.
+    private property <length> rows-x: 232px;
+    private property <length> row-step: Metrics.list-row-height + Metrics.list-row-gap;
+    // The hero: avatar, name, where the picture comes from, the actions and
+    // a line of feedback, centred in the page below the header.
+    private property <length> hero-height: root.avatar-size + 28px + 44px + 4px + 22px
+        + 36px + root.button-height + 18px + 22px;
+
+    PageHeader { width: parent.width; title: "Profile"; }
+
+    hero := Rectangle {
+        x: Metrics.page-margin;
+        width: root.width - Metrics.page-margin * 2;
+        height: root.hero-height;
+        y: Metrics.page-header-height
+            + max(0px, (root.height - Metrics.page-header-height - self.height) / 2 - 24px);
+        background: transparent;
+
+        avatar := ProfileAvatar {
+            x: (parent.width - self.width) / 2; y: 0px;
+            size: root.avatar-size;
+            picture: root.picture;
+            has-picture: root.has-picture;
+            monogram: root.monogram;
+            picture-frames: root.picture-frames;
+            playing: root.playing;
+            TouchArea {
+                width: parent.width; height: parent.height;
+                mouse-cursor: pointer;
+                clicked => { if (!root.dialog-open) { root.activate(0); } }
+            }
+        }
+        name-text := MarqueeText {
+            x: (parent.width - self.width) / 2;
+            y: avatar.y + avatar.height + 28px;
+            width: min(parent.width, 720px); height: 44px;
+            text: root.name != "" ? root.name : "No name yet";
+            text-color: root.name != "" ? Theme.foreground : Theme.secondary-foreground;
+            edge-color: Theme.background;
+            font-size: Typography.title-size;
+            font-weight: Typography.title-weight;
+            horizontal-alignment: center;
+            active: root.playing;
+            TouchArea {
+                width: parent.width; height: parent.height;
+                mouse-cursor: pointer;
+                clicked => { if (!root.dialog-open) { root.activate(1); } }
+            }
+        }
+        caption := Text {
+            x: 0px; y: name-text.y + name-text.height + 4px;
+            width: parent.width; height: 22px;
+            text: root.picture-caption;
+            color: Theme.secondary-foreground;
+            font-size: Typography.body-size;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        ActionButton {
+            x: parent.width / 2 - root.button-width - Metrics.spacing-sm;
+            y: caption.y + caption.height + 36px;
+            width: root.button-width; height: root.button-height;
+            label: "Change picture";
+            focused: root.selection == 0 && !root.dialog-open;
+            activated => { if (!root.dialog-open) { root.activate(0); } }
+        }
+        name-button := ActionButton {
+            x: parent.width / 2 + Metrics.spacing-sm;
+            y: caption.y + caption.height + 36px;
+            width: root.button-width; height: root.button-height;
+            label: "Edit name";
+            focused: root.selection == 1 && !root.dialog-open;
+            activated => { if (!root.dialog-open) { root.activate(1); } }
+        }
+        Text {
+            x: 0px; y: name-button.y + name-button.height + 18px;
+            width: parent.width; height: 22px;
+            text: root.picture-open ? "" : root.feedback;
+            color: Theme.secondary-foreground;
+            font-size: Typography.caption-size;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    // The picture's options, beside a preview of the avatar as it is now.
+    picture-dialog := ModalDialog {
+        area-width: root.width; area-height: root.height;
+        z: 20;
+        open: root.picture-open;
+        card-width: 860px;
+        card-height: 428px;
+
+        Text {
+            x: 28px; y: 22px;
+            width: parent.width - 56px; height: 34px;
+            text: "Profile picture";
+            color: Theme.foreground;
+            font-size: Typography.heading-size;
+            font-weight: Typography.heading-weight;
+            vertical-alignment: center;
+        }
+        ProfileAvatar {
+            x: 28px + (root.rows-x - 28px - Metrics.spacing-lg - self.width) / 2;
+            y: 76px + (root.row-step * 3 - Metrics.list-row-gap - self.height) / 2;
+            size: 140px;
+            picture: root.picture;
+            has-picture: root.has-picture;
+            monogram: root.monogram;
+            picture-frames: root.picture-frames;
+            playing: root.playing && root.picture-open;
+        }
+        SettingsRow {
+            x: root.rows-x; y: 76px;
+            width: parent.width - root.rows-x - 28px;
+            title: "Choose a picture";
+            subtitle: "PNG, JPEG, GIF or JPEG XL";
+            trailing: root.busy ? "Working…" : "Choose  ›";
+            enabled: !root.busy;
+            focused: root.picture-selection == 0;
+            activated => { root.activate-picture(0); }
+        }
+        SettingsRow {
+            x: root.rows-x; y: 76px + root.row-step;
+            width: parent.width - root.rows-x - 28px;
+            title: "Use Steam picture";
+            subtitle: root.steam-available || root.uses-steam
+                ? "Your Steam avatar; animated ones play"
+                : "Set up your Steam Account in Settings → Third-Party first";
+            toggle: true;
+            accessible-role: switch;
+            checked: root.uses-steam;
+            enabled: (root.steam-available || root.uses-steam) && !root.busy;
+            focused: root.picture-selection == 1;
+            activated => { root.activate-picture(1); }
+        }
+        SettingsRow {
+            x: root.rows-x; y: 76px + root.row-step * 2;
+            width: parent.width - root.rows-x - 28px;
+            title: "Remove chosen picture";
+            subtitle: root.has-chosen ? "Forget the picture you chose" : "No picture has been chosen";
+            trailing: root.has-chosen ? "Remove  ›" : "";
+            enabled: root.has-chosen && !root.busy;
+            focused: root.picture-selection == 2;
+            activated => { root.activate-picture(2); }
+        }
+        Text {
+            x: 28px; y: parent.height - 70px;
+            width: parent.width - 28px - 140px - Metrics.spacing-lg; height: 46px;
+            text: root.feedback;
+            color: Theme.secondary-foreground;
+            font-size: Typography.caption-size;
+            vertical-alignment: center;
+        }
+        ActionButton {
+            x: parent.width - 28px - self.width; y: parent.height - 70px;
+            width: 112px; height: 46px;
+            primary: true;
+            label: "Done";
+            focused: root.picture-selection == 3;
+            activated => { root.activate-picture(3); }
+        }
+    }
+
+    // The name editor.
+    ModalDialog {
+        area-width: root.width; area-height: root.height;
+        z: 20;
+        open: root.editing-name;
+        card-width: 520px;
+        card-height: 230px;
+
+        Text {
+            x: 26px; y: 22px;
+            width: parent.width - 52px; height: 34px;
+            text: "Your name";
+            color: Theme.foreground;
+            font-size: Typography.heading-size;
+            font-weight: Typography.heading-weight;
+            vertical-alignment: center;
+        }
+        Text {
+            x: 26px; y: 58px;
+            width: parent.width - 52px; height: 22px;
+            text: "Shown on Home. Up to 32 characters; leave it empty for none.";
+            color: Theme.secondary-foreground;
+            font-size: Typography.caption-size;
+            vertical-alignment: center;
+        }
+        Rectangle {
+            x: 26px; y: 92px;
+            width: parent.width - 52px; height: 52px;
+            background: Theme.surface;
+            border-radius: Metrics.radius-md;
+            border-width: 1px;
+            border-color: Theme.divider;
+            SelectionFocusSurface {
+                x: -3px; y: -3px;
+                width: parent.width + 6px; height: parent.height + 6px;
+                corner-radius: Metrics.radius-md + 3px;
+                focused: root.editor-target == 0;
+                filled: false;
+                soft-shadow: false;
+            }
+            Rectangle {
+                x: 14px; width: parent.width - 28px; height: parent.height;
+                background: transparent;
+                clip: true;
+                name-input := TextInput {
+                    width: parent.width; height: parent.height;
+                    text <=> root.name-draft;
+                    font-family: Typography.family;
+                    font-size: Typography.body-size;
+                    color: Theme.foreground;
+                    selection-background-color: Theme.accent;
+                    selection-foreground-color: Theme.accent-foreground;
+                    accessible-label: "Name";
+                    vertical-alignment: center;
+                    single-line: true;
+                    accepted => { root.save-name(root.name-draft); }
+                    key-pressed(event) => {
+                        if (event.text == Key.Escape) {
+                            root.cancel-name();
+                            return accept;
+                        }
+                        reject
+                    }
+                }
+            }
+            TouchArea {
+                width: parent.width; height: parent.height;
+                clicked => { name-input.focus(); }
+            }
+        }
+        ActionButton {
+            x: parent.width - 253px; y: 166px;
+            width: 105px; height: 43px;
+            label: "Cancel";
+            focused: root.editor-target == 1;
+            activated => { root.cancel-name(); }
+        }
+        ActionButton {
+            x: parent.width - 138px; y: 166px;
+            width: 112px; height: 43px;
+            primary: true;
+            label: "Save";
+            focused: root.editor-target == 2;
+            activated => { root.save-name(root.name-draft); }
+        }
+    }
+
+    // Typing goes straight to the field once the editor has opened.
+    focus-after-opening := Timer {
+        interval: 16ms;
+        running: false;
+        triggered => {
+            self.stop();
+            if (root.editing-name) {
+                name-input.focus();
+                name-input.select-all();
+            }
+        }
+    }
+    changed editing-name => {
+        if (root.editing-name) {
+            focus-after-opening.start();
+        } else {
+            focus-after-opening.stop();
+        }
+    }
+    changed editor-target => {
+        if (root.editing-name && root.editor-target == 0) {
+            name-input.focus();
+        }
+    }
+}

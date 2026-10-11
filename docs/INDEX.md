@@ -17,6 +17,7 @@
 | Steam achievements and recent unlocks? | [Achievements](ACHIEVEMENTS.md) | `src/services/achievements.rs`, `src/presentation/achievements.rs` |
 | Screenshots, clips, video playback? | [Album](ALBUM.md) | `src/services/album/`, `src/presentation/album.rs`, `src/platform/video.rs`, `ui/pages/album.slint` |
 | External credentials or appearance? | [Settings](SETTINGS.md), [Appearance](APPEARANCE.md) | `src/services/steam_account.rs`, `src/presentation/settings.rs` |
+| Profile name and picture? | [Profile](PROFILE.md) | `src/services/profile.rs`, `src/presentation/profile.rs`, `ui/pages/profile.slint` |
 | Imports and provider capabilities? | [Sources](SOURCES.md), [Steam](STEAM.md), [Heroic](HEROIC.md) | `src/sources/`, `src/services/import.rs` |
 | Database or migrations? | [Database](DATABASE.md), [Domain](DOMAIN.md) | `src/persistence/`, `src/domain/` |
 | Where are files kept on disk? | [Files on disk](STORAGE.md) | `src/platform/data_paths.rs` |

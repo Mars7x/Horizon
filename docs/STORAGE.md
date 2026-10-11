@@ -16,12 +16,11 @@ go directly inside them, with no extra `io.github.Mars7x.Horizon` folder:
 │   ├── profile.png                  chosen profile picture: Horizon's own 256 px square copy
 │   ├── profile-animated             its original file, when it is animated (a GIF, an animated PNG)
 │   ├── profile-steam.png            last Steam avatar fetched (shown offline)
-│   ├── profile-steam-frame          last Steam avatar frame fetched, Steam's original file (absent when none)
 │   ├── profile-steam-animated       last Steam animated avatar fetched, Steam's original file (absent when none)
 │   └── album/                       Horizon's own screenshots and clips (see ALBUM.md)
 ├── config/                          0700; files 0600 (not encryption)
 │   ├── appearance.json              theme, accent, UI sounds
-│   ├── profile.json                 which profile picture is shown (chosen, Steam, avatar)
+│   ├── profile.json                 profile name, and which picture is shown (chosen, Steam, avatar)
 │   ├── steamgriddb.json             SteamGridDB API key, artwork preference
 │   └── steam-account.json           SteamID64 and Steam Web API key
 └── cache/                           disposable; safe to delete

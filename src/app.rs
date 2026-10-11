@@ -299,12 +299,12 @@ pub fn run() -> Result<(), AppError> {
             .map_err(|message| AppError::SteamAccount(message.to_owned()))?,
     ));
     let profile = ProfileController::new(&ui, Rc::clone(&steam_account));
+    let profile_page = Rc::clone(&profile);
     let settings = SettingsController::new(
         &ui,
         settings_service,
         appearance.clone(),
         Rc::clone(&steam_account),
-        Rc::clone(&profile),
     );
     let navigation_sound = Rc::new(RefCell::new(UiSounds::new(
         appearance.preferences().ui_sounds_enabled,
@@ -363,6 +363,7 @@ pub fn run() -> Result<(), AppError> {
         settings,
     );
     navigation.set_achievements(achievements, &ui);
+    navigation.set_profile(Rc::clone(&profile_page), &ui);
     let video: Arc<dyn VideoBackend> = match FfmpegVideo::new() {
         Ok(video) => Arc::new(video),
         Err(error) => {
@@ -444,6 +445,12 @@ pub fn run() -> Result<(), AppError> {
                 ui.get_album_viewing(),
                 ui.get_album_dialog_focus(),
             ),
+            (
+                ui.get_profile_focused(),
+                ui.get_profile_page_selection(),
+                ui.get_profile_picture_selection(),
+                ui.get_profile_editor_target(),
+            ),
         );
         action_navigation.handle_action(&ui, event);
         let after = (
@@ -470,6 +477,12 @@ pub fn run() -> Result<(), AppError> {
                 ui.get_album_slide_key(),
                 ui.get_album_viewing(),
                 ui.get_album_dialog_focus(),
+            ),
+            (
+                ui.get_profile_focused(),
+                ui.get_profile_page_selection(),
+                ui.get_profile_picture_selection(),
+                ui.get_profile_editor_target(),
             ),
         );
         if matches!(

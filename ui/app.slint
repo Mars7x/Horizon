@@ -34,6 +34,7 @@ import { AlbumPage } from "pages/album.slint";
 import { ActivityGameDetailsPage } from "pages/activity-game-details.slint";
 import { SettingsPage } from "pages/settings.slint";
 import { UtilitySubmenuPage } from "pages/utility.slint";
+import { ProfilePage } from "pages/profile.slint";
 
 export component AppWindow inherits Window {
     title: "Horizon";
@@ -88,7 +89,7 @@ export component AppWindow inherits Window {
         return route == AppRouteView.home ? 0 : route == AppRouteView.library ? 1
             : route == AppRouteView.friends ? 2 : route == AppRouteView.album ? 3
             : route == AppRouteView.activity ? 4 : route == AppRouteView.achievements ? 5
-            : route == AppRouteView.settings ? 6 : 7;
+            : route == AppRouteView.settings ? 6 : route == AppRouteView.shop ? 7 : 8;
     }
     private property <int> route-phase: route-transition.phase;
     private property <bool> route-back: root.current-route == AppRouteView.home
@@ -112,6 +113,11 @@ export component AppWindow inherits Window {
         : root.current-route == AppRouteView.album ? root.album-hints
         : root.current-route == AppRouteView.settings
             ? [{ button: "B", label: "Back" }, { button: "A", label: "Select" }]
+        : root.current-route == AppRouteView.profile ? (root.profile-editing-name
+            ? [{ button: "B", label: "Cancel" }, { button: "A", label: "Select" }]
+            : root.profile-picture-open
+            ? [{ button: "B", label: "Close" }, { button: "A", label: "Select" }]
+            : [{ button: "B", label: "Back" }, { button: "A", label: "Select" }])
         : [{ button: "B", label: "Back" }];
     in property <bool> top-utilities-focused: false;
     in property <int> focused-utility-index: 2;
@@ -307,23 +313,37 @@ export component AppWindow inherits Window {
     in property <bool> settings-synthetic-key-insertion: false;
     in-out property <string> settings-key-draft: "";
     in property <string> settings-feedback: "";
-    // The profile picture (presentation/profile.rs): Home's avatar, and
-    // Settings → Profile.
+    // The profile picture (presentation/profile.rs): Home's avatar, and the
+    // Profile page's.
     in property <image> profile-picture;
     in property <bool> profile-has-picture: false;
-    // A Steam picture shown square, with its avatar frame (if one is equipped).
-    in property <bool> profile-square: false;
-    in property <image> profile-frame;
-    in property <bool> profile-has-frame: false;
-    // A Steam animated avatar's and avatar frame's frames (empty when still).
+    // An animated picture's frames (empty when still).
     in property <[ProfileFrameData]> profile-picture-frames;
-    in property <[ProfileFrameData]> profile-frame-frames;
-    in property <bool> settings-profile-steam-square: false;
-    in property <bool> settings-profile-choosing: false;
-    in property <bool> settings-profile-has-chosen: false;
-    in property <bool> settings-profile-uses-steam: false;
-    in property <bool> settings-profile-steam-available: false;
-    in property <string> settings-profile-feedback: "";
+    // The avatar's letter without a picture, and its focus in the top row.
+    in property <string> profile-monogram: "H";
+    in property <bool> profile-focused: false;
+    // The Profile page (presentation/profile.rs): its actions, the picture
+    // dialog and the name editor.
+    in property <string> profile-name: "";
+    in property <string> profile-picture-caption: "";
+    in property <int> profile-page-selection: 0;
+    in property <string> profile-page-feedback: "";
+    in property <bool> profile-picture-open: false;
+    in property <int> profile-picture-selection: 0;
+    in property <bool> profile-page-busy: false;
+    in property <bool> profile-page-has-chosen: false;
+    in property <bool> profile-page-uses-steam: false;
+    in property <bool> profile-page-steam-available: false;
+    in property <bool> profile-editing-name: false;
+    in property <int> profile-editor-target: 0;
+    in-out property <string> profile-name-draft: "";
+    // The avatar was clicked; a Profile page action or a picture dialog
+    // option was clicked; the name editor saved or cancelled.
+    callback profile-open();
+    callback profile-activate(int);
+    callback profile-activate-picture(int);
+    callback profile-save-name(string);
+    callback profile-cancel-name();
     in property <string> settings-appearance-feedback: "";
     in property <string> settings-artwork-status: "";
     in property <bool> settings-refresh-open: false;
@@ -379,6 +399,9 @@ export component AppWindow inherits Window {
 
     changed settings-editing-key => {
         if (!root.settings-editing-key) { input-scope.focus(); }
+    }
+    changed profile-editing-name => {
+        if (!root.profile-editing-name) { input-scope.focus(); }
     }
 
     design-surface := Rectangle {
@@ -699,6 +722,44 @@ export component AppWindow inherits Window {
                 x: 0px;
                 width: parent.width;
                 height: parent.height;
+                active: root.current-route == AppRouteView.profile;
+                phase: root.route-phase;
+                returning: root.route-back;
+                outgoing: root.current-route != AppRouteView.profile
+                    && root.transition-from-route == AppRouteView.profile;
+
+                ProfilePage {
+                    width: parent.width;
+                    height: parent.height;
+                    picture: root.profile-picture;
+                    has-picture: root.profile-has-picture;
+                    monogram: root.profile-monogram;
+                    picture-frames: root.profile-picture-frames;
+                    playing: root.current-route == AppRouteView.profile;
+                    name: root.profile-name;
+                    picture-caption: root.profile-picture-caption;
+                    selection: root.profile-page-selection;
+                    feedback: root.profile-page-feedback;
+                    picture-open: root.profile-picture-open;
+                    picture-selection: root.profile-picture-selection;
+                    has-chosen: root.profile-page-has-chosen;
+                    uses-steam: root.profile-page-uses-steam;
+                    steam-available: root.profile-page-steam-available;
+                    busy: root.profile-page-busy;
+                    editing-name: root.profile-editing-name;
+                    editor-target: root.profile-editor-target;
+                    name-draft <=> root.profile-name-draft;
+                    activate(row) => { if (root.current-route == AppRouteView.profile) { root.profile-activate(row); } }
+                    activate-picture(row) => { if (root.current-route == AppRouteView.profile) { root.profile-activate-picture(row); } }
+                    save-name(name) => { root.profile-save-name(name); }
+                    cancel-name => { root.profile-cancel-name(); }
+                }
+            }
+
+            TransitionLayer {
+                x: 0px;
+                width: parent.width;
+                height: parent.height;
                 active: root.current-route == AppRouteView.settings;
                 phase: root.route-phase;
                 returning: root.route-back;
@@ -725,20 +786,6 @@ export component AppWindow inherits Window {
                     synthetic-key-insertion: root.settings-synthetic-key-insertion;
                     key-draft <=> root.settings-key-draft;
                     feedback: root.settings-feedback;
-                    profile-picture: root.profile-picture;
-                    profile-has-picture: root.profile-has-picture;
-                    profile-choosing: root.settings-profile-choosing;
-                    profile-has-chosen: root.settings-profile-has-chosen;
-                    profile-uses-steam: root.settings-profile-uses-steam;
-                    profile-steam-available: root.settings-profile-steam-available;
-                    profile-steam-square: root.settings-profile-steam-square;
-                    profile-square: root.profile-square;
-                    profile-frame: root.profile-frame;
-                    profile-has-frame: root.profile-has-frame;
-                    profile-picture-frames: root.profile-picture-frames;
-                    profile-frame-frames: root.profile-frame-frames;
-                    profile-playing: root.current-route == AppRouteView.settings && root.settings-view == 5;
-                    profile-feedback: root.settings-profile-feedback;
                     artwork-status: root.settings-artwork-status;
                     refresh-open: root.settings-refresh-open;
                     refresh-running: root.settings-refresh-running;
@@ -834,12 +881,11 @@ export component AppWindow inherits Window {
                 icon-render-scale: root.ui-scale;
                 profile-picture: root.profile-picture;
                 profile-has-picture: root.profile-has-picture;
-                profile-square: root.profile-square;
-                profile-frame: root.profile-frame;
-                profile-has-frame: root.profile-has-frame;
                 profile-picture-frames: root.profile-picture-frames;
-                profile-frame-frames: root.profile-frame-frames;
                 profile-playing: root.shell-chrome-visible;
+                profile-monogram: root.profile-monogram;
+                profile-focused: root.profile-focused;
+                profile-activated => { if (root.current-route == AppRouteView.home) { root.profile-open(); } }
                 visible: root.shell-chrome-visible;
                 // Above the page layers (z 1-2): a leaving page shrinks to
                 // 94% and must not cover the chrome unevenly while it fades.

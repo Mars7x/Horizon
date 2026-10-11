@@ -1,0 +1,47 @@
+import { Theme, Typography, Motion } from "../theme/theme.slint";
+import { ListRow } from "list-row.slint";
+
+// An option row (Settings, Profile): the shared ListRow plus a trailing
+// action label or a switch. Selection and persistence remain Rust-owned so
+// mouse and controller agree.
+export component SettingsRow inherits ListRow {
+    in property <string> trailing: "";
+    in property <bool> toggle: false;
+    in property <bool> checked: false;
+    trailing-width: root.toggle ? 130px : 230px;
+    accessible-checkable: root.toggle;
+    accessible-checked: root.checked;
+
+    Text {
+        visible: !root.toggle;
+        x: parent.width - 224px; y: 12px;
+        width: 196px; height: 30px;
+        text: root.trailing;
+        color: root.enabled ? (root.focused ? Theme.accent : Theme.secondary-foreground)
+            : Theme.secondary-foreground;
+        font-size: Typography.body-size;
+        font-weight: Typography.emphasis-weight;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+    }
+    // The track's colour and the knob's travel change together, over the
+    // value-swap duration. No native-widget styling leaks into Horizon, and
+    // the whole row remains one controller/pointer target.
+    Rectangle {
+        visible: root.toggle;
+        x: parent.width - 94px; y: (parent.height - 34px) / 2;
+        width: 62px; height: 34px;
+        border-radius: 17px;
+        border-width: 1px;
+        border-color: root.checked ? Theme.accent : Theme.divider;
+        background: root.checked ? Theme.accent : Theme.divider;
+        animate background, border-color { duration: Motion.value-swap-duration; easing: ease-in-out; }
+        Rectangle {
+            x: root.checked ? parent.width - 30px : 4px;
+            y: 4px; width: 26px; height: 26px;
+            border-radius: 13px;
+            background: #ffffff; // Consistently white thumb in both states.
+            animate x { duration: Motion.value-swap-duration; easing: ease-out; }
+        }
+    }
+}

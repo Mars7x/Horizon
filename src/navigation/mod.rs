@@ -49,16 +49,20 @@ pub enum AppRoute {
     Home,
     Library,
     Utility(UtilityPage),
+    /// The user's profile (name and picture), opened from the avatar at the
+    /// top left of Home.
+    Profile,
 }
 
 impl AppRoute {
-    const COUNT: usize = 2 + UtilityPage::COUNT;
+    const COUNT: usize = 3 + UtilityPage::COUNT;
 
     const fn index(self) -> usize {
         match self {
             Self::Home => 0,
             Self::Library => 1,
             Self::Utility(page) => 2 + page.index(),
+            Self::Profile => 2 + UtilityPage::COUNT,
         }
     }
 
@@ -70,7 +74,7 @@ impl AppRoute {
     pub const fn utility_page(self) -> Option<UtilityPage> {
         match self {
             Self::Utility(page) => Some(page),
-            Self::Home | Self::Library => None,
+            Self::Home | Self::Library | Self::Profile => None,
         }
     }
 }
@@ -159,18 +163,21 @@ impl UtilityPage {
 pub struct FocusSnapshot {
     region: ShellFocusRegion,
     utility: TopUtility,
+    /// The avatar, left of the utilities, has focus (in the top row).
+    profile: bool,
 }
 
 impl FocusSnapshot {
     pub const fn for_route(route: AppRoute) -> Self {
         let utility = match route {
-            AppRoute::Home | AppRoute::Library => TopUtility::Activity,
+            AppRoute::Home | AppRoute::Library | AppRoute::Profile => TopUtility::Activity,
             AppRoute::Utility(page) => page.top_utility(),
         };
 
         Self {
             region: ShellFocusRegion::Content,
             utility,
+            profile: false,
         }
     }
 
@@ -182,10 +189,15 @@ impl FocusSnapshot {
         self.utility
     }
 
+    pub const fn profile(self) -> bool {
+        self.profile
+    }
+
     pub const fn as_content(self) -> Self {
         Self {
             region: ShellFocusRegion::Content,
             utility: self.utility,
+            profile: false,
         }
     }
 
@@ -225,6 +237,7 @@ impl Default for RouteFocusMemory {
                 FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Achievements)),
                 FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Settings)),
                 FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Shop)),
+                FocusSnapshot::for_route(AppRoute::Profile),
             ],
         }
     }
@@ -255,6 +268,8 @@ pub struct ShellFocus {
     utility_moved_since_entry: bool,
     content_return_utility: Option<TopUtility>,
     content_return_game_index: Option<i32>,
+    /// In the top row, the avatar (left of the first utility) has focus.
+    profile: bool,
 }
 
 impl ShellFocus {
@@ -266,10 +281,16 @@ impl ShellFocus {
         self.utility
     }
 
+    /// The avatar has focus: the top row is focused, on its leftmost item.
+    pub const fn profile(self) -> bool {
+        self.profile && matches!(self.region, ShellFocusRegion::TopUtilities)
+    }
+
     pub const fn snapshot(self) -> FocusSnapshot {
         FocusSnapshot {
             region: self.region,
             utility: self.utility,
+            profile: self.profile(),
         }
     }
 
@@ -277,6 +298,7 @@ impl ShellFocus {
     pub fn restore(&mut self, snapshot: FocusSnapshot) {
         self.region = snapshot.region();
         self.utility = snapshot.utility();
+        self.profile = snapshot.profile();
         self.content_anchor_index = None;
         self.utility_moved_since_entry = false;
         self.content_return_utility = None;
@@ -296,6 +318,7 @@ impl ShellFocus {
             return false;
         }
         self.region = ShellFocusRegion::TopUtilities;
+        self.profile = false;
         self.content_anchor_index = None;
         self.utility_moved_since_entry = false;
         self.content_return_utility = None;
@@ -308,8 +331,11 @@ impl ShellFocus {
         utility: TopUtility,
         content_anchor_index: i32,
     ) -> bool {
-        let changed = self.region != ShellFocusRegion::TopUtilities || self.utility != utility;
+        let changed = self.region != ShellFocusRegion::TopUtilities
+            || self.utility != utility
+            || self.profile;
         self.region = ShellFocusRegion::TopUtilities;
+        self.profile = false;
         self.utility = utility;
         self.content_anchor_index = Some(content_anchor_index);
         self.utility_moved_since_entry = false;
@@ -346,7 +372,13 @@ impl ShellFocus {
         self.region = ShellFocusRegion::Content;
         self.content_anchor_index = None;
         self.utility_moved_since_entry = false;
-        self.content_return_utility = Some(self.utility);
+        // From the avatar, Up returns to the first utility.
+        self.content_return_utility = Some(if self.profile {
+            TopUtility::Friends
+        } else {
+            self.utility
+        });
+        self.profile = false;
         self.content_return_game_index = Some(content_index);
         true
     }
@@ -356,6 +388,7 @@ impl ShellFocus {
             return false;
         }
         self.region = ShellFocusRegion::Content;
+        self.profile = false;
         self.content_anchor_index = None;
         self.utility_moved_since_entry = false;
         self.content_return_utility = None;
@@ -364,9 +397,12 @@ impl ShellFocus {
     }
 
     pub fn select_utility(&mut self, utility: TopUtility) -> bool {
-        let changed = self.utility != utility || self.region != ShellFocusRegion::TopUtilities;
+        let changed = self.utility != utility
+            || self.region != ShellFocusRegion::TopUtilities
+            || self.profile;
         self.utility = utility;
         self.region = ShellFocusRegion::TopUtilities;
+        self.profile = false;
         self.content_anchor_index = None;
         self.utility_moved_since_entry = false;
         self.content_return_utility = None;
@@ -377,9 +413,27 @@ impl ShellFocus {
     /// Move horizontally inside the utility strip with the same boundary
     /// policy as Home and Settings. A held direction clamps; a fresh press
     /// already at the edge wraps. A real move clears the return anchor.
+    ///
+    /// The avatar sits left of the first utility: Left from it is the end
+    /// of the row (no wrap), Right from it is the first utility, and Left
+    /// from the first utility reaches it, held or not.
     pub fn move_utility(&mut self, delta: i32, repeated: bool) -> bool {
         if self.region != ShellFocusRegion::TopUtilities || delta == 0 {
             return false;
+        }
+        if self.profile {
+            if delta < 0 {
+                return false;
+            }
+            self.profile = false;
+            self.utility = TopUtility::Friends;
+            self.utility_moved_since_entry = true;
+            return true;
+        }
+        if delta < 0 && self.utility.index() == 0 {
+            self.profile = true;
+            self.utility_moved_since_entry = true;
+            return true;
         }
 
         let index = step_with_edge_wrap(
@@ -585,6 +639,58 @@ mod tests {
     }
 
     #[test]
+    fn the_avatar_sits_left_of_the_first_utility() {
+        let mut focus = ShellFocus::default();
+        assert!(focus.enter_utilities_from_content(TopUtility::Album, 3));
+        assert!(focus.move_utility(-1, false));
+        assert_eq!(focus.utility(), TopUtility::Friends);
+        assert!(!focus.profile());
+        // Left from Friends reaches the avatar, fresh or held, and stops there.
+        assert!(focus.move_utility(-1, true));
+        assert!(focus.profile());
+        assert!(!focus.move_utility(-1, false));
+        assert!(focus.profile());
+        // Right goes back to Friends.
+        assert!(focus.move_utility(1, false));
+        assert!(!focus.profile());
+        assert_eq!(focus.utility(), TopUtility::Friends);
+        // Remembered with the route, forgotten on leaving the row.
+        focus.move_utility(-1, false);
+        let snapshot = focus.snapshot();
+        assert!(snapshot.profile());
+        let mut restored = ShellFocus::default();
+        restored.restore(snapshot);
+        assert!(restored.profile());
+        assert!(focus.leave_utilities_to_content(0));
+        assert!(!focus.profile());
+        assert_eq!(
+            focus.anchored_utility_for_content(0),
+            Some(TopUtility::Friends)
+        );
+        // Other routes never keep header focus.
+        assert!(!snapshot.normalized_for_route(AppRoute::Profile).profile());
+    }
+
+    #[test]
+    fn the_profile_page_is_a_full_shell_route_with_history() {
+        assert!(!AppRoute::Profile.uses_shell_chrome());
+        assert_eq!(AppRoute::Profile.utility_page(), None);
+        let mut navigator = Navigator::default();
+        assert!(navigator.navigate_to(AppRoute::Profile));
+        assert!(navigator.go_back());
+        assert_eq!(navigator.current(), AppRoute::Home);
+        let mut memory = RouteFocusMemory::default();
+        memory.remember(
+            AppRoute::Profile,
+            FocusSnapshot::for_route(AppRoute::Profile),
+        );
+        assert_eq!(
+            memory.recall(AppRoute::Profile).region(),
+            ShellFocusRegion::Content
+        );
+    }
+
+    #[test]
     fn starts_on_home_with_empty_history() {
         let navigator = Navigator::default();
         assert_eq!(navigator.current(), AppRoute::Home);
@@ -675,8 +781,15 @@ mod tests {
 
         assert!(focus.move_utility(-2, true));
         assert_eq!(focus.utility(), TopUtility::Friends);
-        assert!(!focus.move_utility(-1, true));
-        assert!(focus.move_utility(-1, false));
+        // The row's left end is the avatar, not a wrap to Shop.
+        assert!(focus.move_utility(-1, true));
+        assert!(focus.profile());
+        assert!(!focus.move_utility(-1, false));
+        assert!(focus.move_utility(1, false));
+        // The right end clamps when held and wraps to Friends when fresh.
+        for _ in 0..5 {
+            focus.move_utility(1, true);
+        }
         assert_eq!(focus.utility(), TopUtility::Shop);
         assert!(!focus.move_utility(1, true));
         assert!(focus.move_utility(1, false));
