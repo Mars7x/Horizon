@@ -1,4 +1,3 @@
-import { Wheel } from "../components/wheel.slint";
 import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { AlbumTileData } from "../models/album.slint";
 import { PageHeader, HeaderValue, ScrollEdgeShadow } from "../components/page-header.slint";
@@ -9,7 +8,7 @@ import { ActionButton } from "../components/action-button.slint";
 import { ModalDialog } from "../components/modal-dialog.slint";
 import { Stopwatch } from "../components/stopwatch.slint";
 import { GridRefresh } from "../components/grid-refresh.slint";
-import { Scroll, CameraSettle } from "../components/scroll.slint";
+import { Scroll, ScrollCamera } from "../components/scroll.slint";
 
 // A white tick (fonts may lack ✓).
 component TickGlyph inherits Path {
@@ -39,7 +38,8 @@ component AlbumTile inherits Rectangle {
     // The grid's multi-select is on: tick boxes show, others dim.
     in property <bool> selecting: false;
     callback clicked();
-    callback wheel(int);
+    // A scroll event over the tile, passed on to the grid's camera.
+    callback wheel(length);
     width: root.tile-width;
     height: root.tile-height;
     background: transparent;
@@ -121,8 +121,7 @@ component AlbumTile inherits Rectangle {
         clicked => { root.clicked(); }
         scroll-event(event) => {
             if event.delta-y != 0px {
-                let rows = Wheel.rows(event.delta-y);
-                if rows != 0 { root.wheel(rows); }
+                root.wheel(event.delta-y);
                 return accept;
             }
             reject
@@ -264,21 +263,25 @@ export component AlbumPage inherits Rectangle {
 
     // The shared scroll standard (components/scroll.slint). A fresh visit
     // jumps to the top instead of scrolling there.
-    camera-settle := CameraSettle { key: root.visit-revision; }
     pure function content-height-for(count: int) -> length {
         Math.floor((count + root.grid-columns - 1) / root.grid-columns) * root.row-stride
             - root.gap + root.grid-pad * 2
     }
     private property <length> content-height: root.content-height-for(root.total-count);
-    // Where the camera is going (the viewer lands on the tile there).
-    private property <length> target-camera: Scroll.camera(root.scroll-row * root.row-stride,
-        root.content-height, root.viewport-height);
-    private property <length> camera: root.target-camera;
-    animate camera {
-        // A grid refresh jumps: the new grid arrives in place.
-        duration: camera-settle.settled && !root.refreshing ? Motion.scroll-duration : 0ms;
-        easing: linear;
+    // A grid refresh jumps: the new grid arrives in place.
+    scroll-camera := ScrollCamera {
+        rest-row: root.scroll-row;
+        stride: root.row-stride;
+        content: root.content-height;
+        viewport: root.viewport-height;
+        settle-key: root.visit-revision;
+        focus-key: root.selected-index;
+        instant: root.refreshing;
+        scrolled(rows) => { root.scroll-rows(rows); }
     }
+    // Where the camera is going (the viewer lands on the tile there).
+    private property <length> target-camera: scroll-camera.target;
+    private property <length> camera: scroll-camera.camera;
 
     refresh-clock := Stopwatch {
         key: root.refresh-sequence;
@@ -342,8 +345,7 @@ export component AlbumPage inherits Rectangle {
             enabled: !root.viewing;
             scroll-event(event) => {
                 if event.delta-y != 0px {
-                    let rows = Wheel.rows(event.delta-y);
-                    if rows != 0 { root.scroll-rows(rows); }
+                    scroll-camera.scroll(event.delta-y);
                     return accept;
                 }
                 reject
@@ -392,7 +394,7 @@ export component AlbumPage inherits Rectangle {
             selecting: root.selecting;
             selected: root.active && !root.viewing && root.selected-index == tile.absolute-index;
             clicked => { root.choose(tile.absolute-index); }
-            wheel(rows) => { root.scroll-rows(rows); }
+            wheel(delta) => { scroll-camera.scroll(delta); }
         }
     }
     if root.total-count > 0 : ScrollEdgeShadow {

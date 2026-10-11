@@ -1,4 +1,5 @@
 import { Motion } from "../theme/theme.slint";
+import { Wheel } from "wheel.slint";
 
 // One scrolling standard for every vertical list and grid (Library, Album,
 // Achievements, Activity history). See docs/UI_STANDARDS.md, "Scrolling".
@@ -41,6 +42,73 @@ export component CameraSettle {
         triggered => {
             self.stop();
             root.settled-key = root.key;
+        }
+    }
+}
+
+// A camera for a vertical list or grid that focus places on whole rows and
+// that the wheel and touchpad move freely, pixel by pixel.
+//
+// - At rest it follows `rest-row` (set by focus or the controller) like any
+//   `Scroll.camera`, gliding linearly; `settle-key` and `instant` make it jump.
+// - `scroll(delta-y)` (from a `scroll-event`) moves it by pixels instead: a
+//   touchpad directly, a wheel notch with the standard glide. The camera
+//   never moves focus. Whenever its top edge crosses into another row it
+//   reports the change through `scrolled(rows)`, so the owner (Rust, or the
+//   page) can keep `rest-row` and its mounted rows in step.
+// - It settles back onto whole rows when focus moves (`focus-key`) or when
+//   `rest-row` changes to something it didn't report (keys stepping a read-only
+//   list).
+export component ScrollCamera {
+    in property <int> rest-row: 0;
+    in property <length> stride: 1px;
+    in property <length> content: 0px;
+    in property <length> viewport: 0px;
+    in property <int> settle-key: 0;
+    in property <int> focus-key: 0;
+    in property <bool> instant: false;
+    callback scrolled(int);
+
+    private property <bool> free: false;
+    // Touchpad input follows directly, without a glide.
+    private property <bool> follow: false;
+    private property <length> free-camera: 0px;
+    private property <int> reported: 0;
+    private property <length> limit: max(0px, root.content - root.viewport);
+    // Where the camera is going.
+    out property <length> target: root.free ? max(0px, min(root.free-camera, root.limit))
+        : Scroll.camera(root.rest-row * root.stride, root.content, root.viewport);
+    // Where it is: draw with this.
+    out property <length> camera: root.target;
+    animate camera {
+        duration: !settle.settled || root.instant || (root.free && root.follow)
+            ? 0ms : Motion.scroll-duration;
+        easing: linear;
+    }
+
+    settle := CameraSettle { key: root.settle-key; }
+
+    public function scroll(delta-y: length) {
+        if !root.free {
+            root.free-camera = root.target;
+            root.reported = root.rest-row;
+            root.free = true;
+        }
+        root.follow = !Wheel.is-notch(delta-y);
+        root.free-camera = max(0px, min(root.limit, root.free-camera + Wheel.distance(delta-y)));
+        let top = Math.floor(root.free-camera / root.stride);
+        if top != root.reported {
+            let rows = top - root.reported;
+            root.reported = top;
+            root.scrolled(rows);
+        }
+    }
+
+    changed focus-key => { root.free = false; }
+    changed settle-key => { root.free = false; }
+    changed rest-row => {
+        if root.free && root.rest-row != root.reported {
+            root.free = false;
         }
     }
 }

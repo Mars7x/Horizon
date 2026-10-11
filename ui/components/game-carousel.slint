@@ -3,6 +3,7 @@ import { GameCardData } from "../models/game-card.slint";
 import { GameTile } from "game-tile.slint";
 import { LibraryTile } from "library-tile.slint";
 import { SelectedGameLabel } from "selected-game-label.slint";
+import { Wheel } from "wheel.slint";
 
 // The home carousel is modeled as a camera looking onto one larger scene.
 // The rounded shelf, title/connector, game row, and focus frame all share the
@@ -58,8 +59,12 @@ export component GameCarousel inherits Rectangle {
             root.camera-offset += selected-screen-x - right-bound;
         }
 
-        // At the start, the shelf's left rounded end sits at the standard
-        // inset. At the end, the right rounded end resolves to the same inset.
+        root.clamp-camera();
+    }
+
+    // At the start, the shelf's left rounded end sits at the standard
+    // inset. At the end, the right rounded end resolves to the same inset.
+    function clamp-camera() {
         let maximum-camera = root.shelf-right-world-x
             - (root.width - Metrics.carousel-shelf-left);
 
@@ -75,11 +80,22 @@ export component GameCarousel inherits Rectangle {
         }
     }
 
+    // A swipe or tilt-wheel step pans the camera by pixels (a touchpad
+    // directly, a notch with the usual glide) and never moves the selection,
+    // even off screen; the next selection change brings the camera back to it.
+    private property <bool> following-pointer: false;
+    public function pan(delta-x: length) {
+        root.following-pointer = !Wheel.is-notch(delta-x);
+        root.camera-offset += Wheel.distance(delta-x);
+        root.clamp-camera();
+    }
+
     init => {
         root.ensure-selection-in-camera-zone();
         root.geometry-changed(root.first-game-center-x-px);
     }
     changed selected-index => {
+        root.following-pointer = false;
         root.ensure-selection-in-camera-zone();
         root.geometry-changed(root.first-game-center-x-px);
     }
@@ -103,7 +119,7 @@ export component GameCarousel inherits Rectangle {
         background: transparent;
 
         animate x {
-            duration: Motion.carousel-duration;
+            duration: root.following-pointer ? 0ms : Motion.carousel-duration;
             easing: ease-out;
         }
 

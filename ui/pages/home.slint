@@ -19,7 +19,21 @@ export component HomePage inherits Rectangle {
 
     background: Theme.background;
 
-    GameCarousel {
+    // Beneath the carousel, so tiles keep their clicks; scroll events they
+    // don't take land here. Horizontal scrolling pans the carousel's camera
+    // only, never the selection.
+    TouchArea {
+        width: parent.width; height: parent.height;
+        scroll-event(event) => {
+            if event.delta-x != 0px {
+                carousel.pan(event.delta-x);
+                return accept;
+            }
+            reject
+        }
+    }
+
+    carousel := GameCarousel {
         x: 0px;
         y: Metrics.selected-label-y - Metrics.top-chrome-height;
         width: parent.width;

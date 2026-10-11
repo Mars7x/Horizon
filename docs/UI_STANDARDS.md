@@ -161,12 +161,12 @@ timer after `visit-revision` changes).
 ## Scrolling
 
 Every vertical list and grid (Library, Album, Achievements' two lists,
-Activity's session history) scrolls the same way, through
-`ui/components/scroll.slint`:
+Activity's session history) scrolls the same way, through one
+`ScrollCamera` (`ui/components/scroll.slint`):
 
 - **Target:** the first whole row in view. Moving focus past an edge moves
   the camera the least distance that brings the focused row fully into view.
-  The wheel steps it a row at a time.
+  The wheel and touchpad move it freely instead (below).
 - **Never past the end:** `Scroll.camera` clamps the camera to
   `[0, content − viewport]`. At the end, the last row rests on the
   viewport's bottom edge; there is never empty space under it. A short list
@@ -186,11 +186,23 @@ own camera.
 ## Mouse wheel and touchpad
 
 Wheel and touchpad input move the camera only, never selection or focus, and
-always go through `Wheel.rows()` (`ui/components/wheel.slint`), which follows
-the desktop's natural/traditional scrolling setting. A wheel notch (a whole
-multiple of 60px) moves one row. Touchpad deltas add up, and every 100px of
-travel moves one row; reversing direction drops what had built up. A result
-of 0 means "not yet", and callers send nothing.
+move it by **pixels, never from row to row or item to item**. Every
+`scroll-event` goes to `ScrollCamera.scroll()` (Home's carousel:
+`GameCarousel.pan()`), which uses `Wheel` (`ui/components/wheel.slint`) and
+so follows the desktop's natural/traditional scrolling setting:
+
+- **Touchpad:** the camera follows the fingers directly, 2.5 px per pixel of
+  travel, with no glide.
+- **Wheel notch** (a whole multiple of 60px): 180 px with the standard
+  110 ms linear glide.
+- The camera stays where it was scrolled, between rows if need be, clamped
+  to the content. Whenever its top edge crosses into another row it tells
+  the owner (`scrolled(rows)`), so Rust can keep the mounted rows around it.
+- It settles back onto whole rows when focus moves, or when the owner
+  changes the row itself (Up/Down in a read-only list).
+
+Horizontal scrolling is used by Home only: it pans the carousel's camera the
+same way, clamped to the shelf's ends.
 
 ## Checking a change
 
