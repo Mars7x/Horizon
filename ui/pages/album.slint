@@ -47,16 +47,10 @@ component AlbumTile inherits Rectangle {
     in property <float> selected-scale: 1.06;
     private property <float> lift: root.selected ? root.selected-scale : 1.0;
     animate lift { duration: Motion.focus-duration; easing: ease-out; }
-    // The grid refresh: 0 while waiting to arrive, 1 in place.
-    in property <float> arrival: 1.0;
-    private property <float> arrival-scale: GridRefresh.start-scale
-        + (1.0 - GridRefresh.start-scale) * root.arrival;
-    opacity: root.arrival;
-
     shell := Rectangle {
-        width: root.tile-width * root.lift * root.arrival-scale;
-        height: root.tile-height * root.lift * root.arrival-scale;
-        y: (parent.height - self.height) / 2 + GridRefresh.rise * (1.0 - root.arrival);
+        width: root.tile-width * root.lift;
+        height: root.tile-height * root.lift;
+        y: (parent.height - self.height) / 2;
         x: (parent.width - self.width) / 2;
         border-radius: Metrics.radius-md;
         background: Theme.surface;
@@ -287,11 +281,15 @@ export component AlbumPage inherits Rectangle {
 
     refresh-clock := Stopwatch {
         key: root.refresh-sequence;
-        length: root.active && root.refresh-sequence != 0 ? GridRefresh.length(root.grid-columns) : 0ms;
+        length: root.active && root.refresh-sequence != 0 ? GridRefresh.length() : 0ms;
     }
     private property <bool> refreshing: refresh-clock.running;
     private property <float> outgoing-opacity: root.refreshing
         ? GridRefresh.outgoing(refresh-clock.elapsed) : 0.0;
+    private property <float> moved: root.refreshing ? GridRefresh.moved(refresh-clock.elapsed) : 1.0;
+    private property <float> arrival: root.refreshing ? GridRefresh.arrival(refresh-clock.elapsed) : 1.0;
+    private property <length> previous-camera: Scroll.camera(root.previous-scroll-row * root.row-stride,
+        root.content-height-for(root.previous-total-count), root.viewport-height);
 
     // The viewer grows out of the selected tile and shrinks back into it.
     private property <float> reveal: root.viewing ? 1.0 : 0.0;
@@ -351,8 +349,7 @@ export component AlbumPage inherits Rectangle {
         }
         // The grid before a refresh, at its old camera; it never takes input.
         if root.outgoing-opacity > 0.0 : Rectangle {
-            y: -Scroll.camera(root.previous-scroll-row * root.row-stride,
-                root.content-height-for(root.previous-total-count), root.viewport-height);
+            y: -root.previous-camera;
             width: parent.width;
             height: root.content-height-for(root.previous-total-count);
             opacity: root.outgoing-opacity;
@@ -360,6 +357,8 @@ export component AlbumPage inherits Rectangle {
                 x: root.grid-pad + Math.mod(tile.absolute-index, root.grid-columns)
                     * (root.tile-width + root.gap);
                 y: root.grid-pad + Math.floor(tile.absolute-index / root.grid-columns) * root.row-stride;
+                // Staying tiles glide in the new grid instead.
+                visible: !tile.stays;
                 tile: tile;
                 tile-width: root.tile-width;
                 tile-height: root.tile-height;
@@ -369,12 +368,21 @@ export component AlbumPage inherits Rectangle {
             TouchArea { width: parent.width; height: parent.height; }
         }
         for tile in root.tiles : AlbumTile {
-            arrival: !root.refreshing ? 1.0
-                : GridRefresh.arrival(refresh-clock.elapsed, Math.mod(tile.absolute-index, root.grid-columns));
-            x: root.grid-pad + Math.mod(tile.absolute-index, root.grid-columns)
+            // The grid refresh: a tile that was on screen glides from its old
+            // place (both measured in the viewport); a new one fades in.
+            private property <bool> glides: root.refreshing && tile.from-index >= 0;
+            private property <length> home-x: root.grid-pad + Math.mod(tile.absolute-index, root.grid-columns)
                 * (root.tile-width + root.gap);
-            y: root.grid-pad + Math.floor(tile.absolute-index / root.grid-columns)
+            private property <length> home-y: root.grid-pad + Math.floor(tile.absolute-index / root.grid-columns)
                 * root.row-stride - root.camera;
+            private property <length> from-x: root.grid-pad + Math.mod(tile.from-index, root.grid-columns)
+                * (root.tile-width + root.gap);
+            private property <length> from-y: root.grid-pad + Math.floor(tile.from-index / root.grid-columns)
+                * root.row-stride - root.previous-camera;
+            x: self.glides ? self.from-x + (self.home-x - self.from-x) * root.moved : self.home-x;
+            y: self.glides ? self.from-y + (self.home-y - self.from-y) * root.moved : self.home-y;
+            z: self.glides ? 1 : 0;
+            opacity: !root.refreshing || self.glides ? 1.0 : root.arrival;
             tile: tile;
             tile-width: root.tile-width;
             tile-height: root.tile-height;

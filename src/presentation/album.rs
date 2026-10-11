@@ -132,6 +132,17 @@ struct State {
     notice: Option<String>,
     slide_key: i32,
     visit_revision: i32,
+    /// A Game/Type change waiting for its first publish: the grid refresh
+    /// glides tiles that stay and fades the rest.
+    glide: Option<Glide>,
+}
+
+/// The grid as it was before a Game or Type change.
+struct Glide {
+    /// The mounted captures, in `previous_tiles` order.
+    previous: Vec<PathBuf>,
+    /// Each of those captures' place in the old order.
+    from: HashMap<PathBuf, i32>,
 }
 
 impl State {
@@ -867,12 +878,22 @@ impl AlbumController {
         self.publish(ui);
     }
 
-    /// Freeze the grid as shown and start the shared grid refresh: the old
-    /// grid fades while the next publish's tiles arrive column by column.
+    /// Freeze the grid as shown and start the shared grid refresh: tiles in
+    /// both grids glide to their new places, the rest fade out or in.
     fn freeze_grid(&self, ui: &AppWindow) {
-        let s = self.state.borrow();
+        let mut s = self.state.borrow_mut();
         self.previous_tiles
             .set_vec(self.tiles.iter().collect::<Vec<_>>());
+        let from = s
+            .mounted
+            .iter()
+            .enumerate()
+            .map(|(row, path)| (path.clone(), (s.mounted_start + row) as i32))
+            .collect();
+        // The next publish remounts even an unchanged window, so every tile
+        // learns where it came from.
+        let previous = std::mem::take(&mut s.mounted);
+        s.glide = Some(Glide { previous, from });
         ui.set_album_previous_scroll_row(s.scroll_top as i32);
         ui.set_album_previous_total_count(s.order.len() as i32);
         ui.set_album_previous_selected_index(s.selection as i32);
@@ -1260,14 +1281,31 @@ impl AlbumController {
             .map(|index| s.captures[*index].path().to_owned())
             .collect();
         if mounted != s.mounted || start != s.mounted_start {
+            let glide = s.glide.take();
             let tiles: Vec<AlbumTileData> = s.order[start..end]
                 .iter()
                 .enumerate()
                 .map(|(offset, index)| {
                     let capture = &s.captures[*index];
-                    self.tile(capture, start + offset, s.checked.contains(capture.path()))
+                    let mut tile =
+                        self.tile(capture, start + offset, s.checked.contains(capture.path()));
+                    tile.from_index = glide
+                        .as_ref()
+                        .and_then(|glide| glide.from.get(capture.path()))
+                        .copied()
+                        .unwrap_or(-1);
+                    tile
                 })
                 .collect();
+            if let Some(glide) = glide {
+                // Old tiles still mounted glide instead of fading.
+                for (row, path) in glide.previous.iter().enumerate() {
+                    if let Some(mut tile) = self.previous_tiles.row_data(row) {
+                        tile.stays = mounted.contains(path);
+                        self.previous_tiles.set_row_data(row, tile);
+                    }
+                }
+            }
             self.tiles.set_vec(tiles);
             s.mounted = mounted;
             s.mounted_start = start;
@@ -1334,6 +1372,8 @@ impl AlbumController {
             is_video: capture.kind() == MediaKind::Video,
             deletable: capture.deletable(),
             checked,
+            from_index: -1,
+            stays: false,
             duration: self
                 .durations
                 .borrow()
@@ -1352,14 +1392,14 @@ impl AlbumController {
                 && let Some(index) = s.order.get(s.mounted_start + row)
             {
                 let capture = &s.captures[*index];
-                self.tiles.set_row_data(
-                    row,
-                    self.tile(
-                        capture,
-                        s.mounted_start + row,
-                        s.checked.contains(capture.path()),
-                    ),
+                let mut tile = self.tile(
+                    capture,
+                    s.mounted_start + row,
+                    s.checked.contains(capture.path()),
                 );
+                // A refresh in progress keeps gliding this tile.
+                tile.from_index = self.tiles.row_data(row).map_or(-1, |old| old.from_index);
+                self.tiles.set_row_data(row, tile);
             }
         }
     }

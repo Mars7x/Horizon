@@ -1,30 +1,36 @@
 import { Motion } from "../theme/theme.slint";
 
 // The one animation for a grid whose contents change in place (Library's
-// Source and Sort, Album's Game and Type). The old grid fades out quickly,
-// then the new covers rise and fade in, one column after another, left to
-// right. The two grids never overlap. Run it on a `Stopwatch` whose length
-// is `GridRefresh.length(columns)`; Reduced Motion makes it instant.
+// Source and Sort, Album's Game and Type). Covers in both the old and the new
+// grid glide from where they were to where they now belong; covers that
+// leave fade out where they stood; covers that are new fade in at their
+// place once the leavers have mostly gone. Rust says which is which: a new
+// cover's `from-index` is its old place (-1 when it is new), an old cover's
+// `stays` hides it from the fading grid because it glides instead. Run it on
+// a `Stopwatch` whose length is `GridRefresh.length()`; Reduced Motion makes
+// it instant.
 export global GridRefresh {
-    out property <duration> clear: 85ms;
-    out property <duration> reveal: 145ms;
-    out property <duration> stagger: 7ms;
-    out property <length> rise: 6px;
-    out property <float> start-scale: 0.97;
+    out property <duration> glide: 260ms;
+    out property <duration> leave: 120ms;
+    out property <duration> enter-delay: 90ms;
+    out property <duration> enter: 170ms;
 
-    // The whole refresh for a grid this many columns wide.
-    public pure function length(columns: int) -> duration {
-        Motion.reduced-motion ? 0ms
-            : GridRefresh.clear + GridRefresh.reveal + GridRefresh.stagger * max(0, columns - 1)
+    public pure function length() -> duration {
+        Motion.reduced-motion ? 0ms : GridRefresh.glide
     }
-    // The old grid's opacity at `elapsed`.
+    // A leaving cover's opacity at `elapsed`.
     public pure function outgoing(elapsed: duration) -> float {
-        max(0.0, 1.0 - elapsed / GridRefresh.clear)
+        max(0.0, 1.0 - elapsed / GridRefresh.leave)
     }
-    // A new cover's arrival at `elapsed` (0 hidden, 1 in place), eased out.
-    public pure function arrival(elapsed: duration, column: int) -> float {
-        let t = max(0.0, min(1.0,
-            (elapsed - GridRefresh.clear - GridRefresh.stagger * column) / GridRefresh.reveal));
+    // How far a staying cover is along its glide (0 old place, 1 new),
+    // eased out like every move.
+    public pure function moved(elapsed: duration) -> float {
+        let t = max(0.0, min(1.0, elapsed / GridRefresh.glide));
         1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t)
+    }
+    // A new cover's opacity at `elapsed`, eased in and out like every fade.
+    public pure function arrival(elapsed: duration) -> float {
+        let t = max(0.0, min(1.0, (elapsed - GridRefresh.enter-delay) / GridRefresh.enter));
+        t * t * (3.0 - 2.0 * t)
     }
 }

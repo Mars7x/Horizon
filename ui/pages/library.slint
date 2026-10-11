@@ -41,11 +41,13 @@ export component LibraryPage inherits Rectangle {
     private property <bool> reorder-enabled: root.focus-visible && root.browse-sequence != 0;
     browse-clock := Stopwatch {
         key: root.browse-sequence;
-        length: root.reorder-enabled ? GridRefresh.length(root.grid-columns) : 0ms;
+        length: root.reorder-enabled ? GridRefresh.length() : 0ms;
     }
     private property <bool> grid-reordering: browse-clock.running;
     private property <float> outgoing-opacity: root.grid-reordering && root.has-previous-grid
         ? GridRefresh.outgoing(browse-clock.elapsed) : 0.0;
+    private property <float> moved: root.grid-reordering ? GridRefresh.moved(browse-clock.elapsed) : 1.0;
+    private property <float> arrival: root.grid-reordering ? GridRefresh.arrival(browse-clock.elapsed) : 1.0;
 
     // Snapshot the old/new metadata only when Rust publishes a NEW game ID.
     // A sequence signal arrives after both current text properties are updated.
@@ -116,6 +118,17 @@ export component LibraryPage inherits Rectangle {
             - (root.row-stride - root.card-size) + 2 * root.grid-pad
     }
     private property <length> content: root.content-height(root.total-count, root.grid-columns);
+    pure function gallery-width(columns: int) -> length {
+        columns * root.card-stride - (root.card-stride - root.card-size) + 2 * root.grid-pad
+    }
+    // Where the new and the old gallery sit in the viewport.
+    private property <length> gallery-x: max(0px, (grid-viewport.width - root.gallery-width(root.grid-columns)) / 2);
+    private property <length> previous-gallery-x:
+        max(0px, (grid-viewport.width - root.gallery-width(root.previous-grid-columns)) / 2);
+    private property <length> previous-gallery-y: root.rows-top - Scroll.camera(
+        root.previous-scroll-row * root.row-stride,
+        root.content-height(root.previous-total-count, root.previous-grid-columns),
+        root.available-grid-height);
     private property <length> camera: Scroll.camera(root.scroll-row * root.row-stride,
         root.content, root.available-grid-height);
     animate camera {
@@ -192,12 +205,9 @@ export component LibraryPage inherits Rectangle {
         // after the transition begins. It disappears automatically as the
         // timeline reaches its end (or immediately for Reduced Motion).
         if root.outgoing-opacity > 0.0 : Rectangle {
-            width: root.previous-grid-columns * root.card-stride
-                - (root.card-stride - root.card-size) + 2 * root.grid-pad;
-            x: max(0px, (parent.width - self.width) / 2);
-            y: root.rows-top - Scroll.camera(root.previous-scroll-row * root.row-stride,
-                root.content-height(root.previous-total-count, root.previous-grid-columns),
-                root.available-grid-height);
+            x: root.previous-gallery-x;
+            y: root.previous-gallery-y;
+            width: root.gallery-width(root.previous-grid-columns);
             height: parent.height;
             opacity: root.outgoing-opacity;
             background: transparent;
@@ -206,6 +216,8 @@ export component LibraryPage inherits Rectangle {
                 y: root.grid-pad + Math.floor(old.absolute-index / root.previous-grid-columns) * root.row-stride;
                 width: root.card-size; height: root.card-size;
                 background: transparent;
+                // Staying cards glide in the new grid instead.
+                visible: !old.stays;
                 private property <bool> was-selected:
                     root.previous-selected-index == old.absolute-index;
                 old-shell := Rectangle {
@@ -251,8 +263,8 @@ export component LibraryPage inherits Rectangle {
         }
 
         gallery := Rectangle {
-            width: root.grid-columns * root.card-stride - (root.card-stride - root.card-size) + 2 * root.grid-pad;
-            x: max(0px, (parent.width - self.width) / 2);
+            width: root.gallery-width(root.grid-columns);
+            x: root.gallery-x;
             y: root.rows-top - root.camera;
             height: max(1, Math.floor((root.total-count + root.grid-columns - 1) / root.grid-columns))
                 * root.row-stride + 2 * root.grid-pad;
@@ -261,17 +273,25 @@ export component LibraryPage inherits Rectangle {
             // model at once; the camera above carries row-to-row motion.
 
             for row[index] in root.cards : Rectangle {
-                // Covers arrive column by column, irrespective of virtualized rows.
-                private property <float> reveal-eased: !root.grid-reordering ? 1.0
-                    : GridRefresh.arrival(browse-clock.elapsed, Math.mod(row.absolute-index, root.grid-columns));
-                private property <float> reveal-size: GridRefresh.start-scale
-                    + (1.0 - GridRefresh.start-scale) * self.reveal-eased;
-                x: root.grid-pad + Math.mod(row.absolute-index, root.grid-columns) * root.card-stride;
-                y: root.grid-pad + Math.floor(row.absolute-index / root.grid-columns) * root.row-stride
-                    + GridRefresh.rise * (1.0 - self.reveal-eased);
+                // The grid refresh: a card that was on screen glides from its
+                // old place (both measured in the viewport); a new one fades in.
+                private property <bool> glides: root.grid-reordering && row.from-index >= 0;
+                private property <length> home-x: root.grid-pad
+                    + Math.mod(row.absolute-index, root.grid-columns) * root.card-stride;
+                private property <length> home-y: root.grid-pad
+                    + Math.floor(row.absolute-index / root.grid-columns) * root.row-stride;
+                private property <length> from-x: root.previous-gallery-x + root.grid-pad
+                    + Math.mod(row.from-index, root.previous-grid-columns) * root.card-stride
+                    - root.gallery-x;
+                private property <length> from-y: root.previous-gallery-y + root.grid-pad
+                    + Math.floor(row.from-index / root.previous-grid-columns) * root.row-stride
+                    - (root.rows-top - root.camera);
+                x: self.glides ? self.from-x + (self.home-x - self.from-x) * root.moved : self.home-x;
+                y: self.glides ? self.from-y + (self.home-y - self.from-y) * root.moved : self.home-y;
+                z: self.glides ? 1 : 0;
                 width: root.card-size; height: root.card-size;
                 background: transparent;
-                opacity: self.reveal-eased;
+                opacity: !root.grid-reordering || self.glides ? 1.0 : root.arrival;
                 clip: false;
                 private property <bool> selected: root.focus-visible
                     && root.selected-index == row.absolute-index;
@@ -284,8 +304,8 @@ export component LibraryPage inherits Rectangle {
                 shell := Rectangle {
                     x: (parent.width - self.width) / 2;
                     y: (parent.height - self.height) / 2;
-                    width: root.card-size * parent.card-scale * parent.reveal-size;
-                    height: root.card-size * parent.card-scale * parent.reveal-size;
+                    width: root.card-size * parent.card-scale;
+                    height: root.card-size * parent.card-scale;
                     border-radius: root.card-size * (20.0 / 148.0);
                     background: Theme.surface-raised;
                     border-width: Theme.high-contrast ? 2px : 1px;
@@ -293,11 +313,8 @@ export component LibraryPage inherits Rectangle {
                     drop-shadow-offset-y: parent.selected ? 5px : 3px;
                     drop-shadow-blur: parent.selected ? 16px : 11px;
                     drop-shadow-color: Theme.shadow.with-alpha(parent.selected ? 0.90 : 0.68);
-                    // Per-card reveal already drives width/height. Disabling
-                    // implicit animation during a reorder avoids double easing;
-                    // normal Home-style focus lifting remains animated.
                     animate width, height {
-                        duration: root.grid-reordering ? 0ms : Motion.focus-duration;
+                        duration: Motion.focus-duration;
                         easing: ease-out;
                     }
 

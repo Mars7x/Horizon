@@ -22,7 +22,8 @@ screenshots). See [ADR 0166](adr/0166-album-captures-and-media-pipeline.md).
 | Viewer | B | Back to the grid, on the capture that was open |
 
 Changing Game or Type runs the shared grid refresh (as Library's Source and
-Sort do): the old grid fades and the new captures arrive column by column.
+Sort do): captures in both grids glide to their new places, the rest fade out
+or in (ADR 0172).
 
 **Fullscreen viewer.** Opening a capture grows its tile to fill the whole
 window, on black. Back shrinks it into its place in the grid (the tile of

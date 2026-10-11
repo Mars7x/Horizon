@@ -118,7 +118,7 @@ literal duration. Pick the token by **what happened**, and the easing by
 | Pointer hover | `hover-duration` (100 ms) | Row and button hover fills, hint hover, viewer edge arrows |
 | Selection moved | `focus-duration` (140 ms) | Tile lift, focus ring in and out, tick boxes, dimming while selecting |
 | A value changed | `value-swap-duration` (180 ms) | Header values, toggles, swatches, progress bars, chart bars, list rows arriving |
-| A grid's contents changed | `GridRefresh` (`components/grid-refresh.slint`) | Library Source and Sort, Album Game and Type: the old grid fades out (85 ms), then covers rise in column by column (145 ms each, 7 ms apart) |
+| A grid's contents changed | `GridRefresh` (`components/grid-refresh.slint`) | Library Source and Sort, Album Game and Type: covers in both grids glide to their new places (260 ms, ease-out), leavers fade out (120 ms), newcomers fade in (170 ms after 90 ms); see ADR 0172 |
 | Carousel moved | `carousel-duration` (190 ms) | Home and Activity carousels |
 | Page or view changed | `page-duration` (220 ms) | Zoom, Album slide and grow, hint bar and viewer overlay fades |
 | Dialog opened or closed | `dialog-duration` (180 ms), `dialog-rise` | Every modal (`ModalDialog`) |
