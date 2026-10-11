@@ -205,10 +205,18 @@ so follows the desktop's natural/traditional scrolling setting:
   is fully in view. Only the owner changing the row itself (Up/Down in a
   read-only list, a fresh visit) puts the camera back on a row.
 - **Overscroll:** a touchpad pulling past either end stretches the content
-  with growing resistance (`Scroll.rubber`, at most 80 px), and once the
-  fingers stop (no touchpad movement for 90 ms) it springs back over
+  with growing resistance (`Scroll.rubber`, at most 80 px), and when the
+  fingers lift (`Wheel.touching`, below) it springs back over
   `Motion.overscroll-return-duration` (340 ms, ease-out). A wheel just stops
   at the end. Reduced Motion turns it off. Home's carousel does the same.
+  A pull that starts while content is still springing back continues from
+  where it is.
+- **Which device, and when fingers lift:** Slint's scroll events carry
+  neither, so `app.rs` reads each winit scroll event first
+  (`input::mouse::scroll_input`) and sets `Wheel.source` (wheel or touchpad)
+  and `Wheel.touching` (false on Wayland's axis stop, which ends a touchpad
+  gesture). Without them (offscreen) a whole multiple of 60 px counts as a
+  notch, and a 600 ms timer ends a pull whose gesture end never arrives.
 
 Horizontal scrolling is used by Home only: it pans the carousel's camera the
 same way, clamped to the shelf's ends.

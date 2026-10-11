@@ -8,7 +8,7 @@ use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 use crate::{
-    AppWindow,
+    AppWindow, Wheel,
     appearance::store::AppearanceStore,
     audio::{UiSoundCue, UiSounds},
     error::AppError,
@@ -504,8 +504,22 @@ pub fn run() -> Result<(), AppError> {
     // A mouse's back and forward buttons are those presses, wherever the
     // pointer is. Handled on the next turn of the event loop, outside winit's
     // event dispatch.
+    //
+    // Scroll events pass through, but first tell Slint what Slint's own
+    // events leave out: which device sent this one, and whether fingers are
+    // still on the touchpad (the bounce springs back when they lift).
     let mouse_sink = Rc::clone(&action_sink);
+    let wheel_ui = ui.as_weak();
     ui.window().on_winit_window_event(move |_, event| {
+        if let winit::event::WindowEvent::MouseWheel { delta, phase, .. } = event
+            && let Some(ui) = wheel_ui.upgrade()
+        {
+            let input = mouse::scroll_input(*delta, *phase);
+            let wheel = ui.global::<Wheel>();
+            wheel.set_source(input.source);
+            wheel.set_touching(input.touching);
+            return EventResult::Propagate;
+        }
         if let winit::event::WindowEvent::MouseInput {
             state: winit::event::ElementState::Pressed,
             button,
