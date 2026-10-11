@@ -5,7 +5,7 @@
 The battery and network glyphs are drawn natively in one style
 (`ui/components/status-glyphs.slint`, ADR 0171): a 1.8px stroked outline with
 round caps in the foreground ink, solid parts for what is filled, a faint ink
-for what isn't, discrete steps only, on one 24x20 grid at the battery's scale.
+for what isn't, discrete steps only, on one 24x20 grid drawn 22px wide, so the network glyphs stand about as tall as the battery (16px against 14px) instead of towering over it.
 
 | State | Glyph |
 | --- | --- |
