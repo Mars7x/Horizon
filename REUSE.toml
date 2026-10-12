@@ -46,10 +46,28 @@ SPDX-FileCopyrightText = "Horizon contributors"
 SPDX-License-Identifier = "GPL-3.0-or-later"
 
 [[annotations]]
-path = "ui/assets/controllers/*.svg"
+path = [
+  "ui/assets/controllers/controller_xbox360.svg",
+  "ui/assets/controllers/controller_xboxseries.svg",
+  "ui/assets/controllers/controller_playstation3.svg",
+  "ui/assets/controllers/controller_playstation4.svg",
+  "ui/assets/controllers/controller_playstation5.svg",
+  "ui/assets/controllers/controller_switch_pro.svg",
+  "ui/assets/controllers/switch_joycon_left.svg",
+  "ui/assets/controllers/switch_joycon_right.svg",
+  "ui/assets/controllers/switch_joycon.svg",
+  "ui/assets/controllers/controller_steamdeck.svg",
+  "ui/assets/controllers/controller_generic.svg"
+]
 precedence = "override"
 SPDX-FileCopyrightText = "Kenney (www.kenney.nl)"
 SPDX-License-Identifier = "CC0-1.0"
+
+[[annotations]]
+path = "ui/assets/controllers/horizon_odin3.svg"
+precedence = "override"
+SPDX-FileCopyrightText = "Horizon contributors"
+SPDX-License-Identifier = "GPL-3.0-or-later"
 
 [[annotations]]
 path = "LICENSES/OFL-1.1.txt"

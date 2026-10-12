@@ -19,6 +19,25 @@ use super::actions::{ControllerFamily, UiAction, UiActionEvent};
 /// Valve's USB vendor, and the Steam Deck's built-in controller.
 const VALVE_VENDOR: u16 = 0x28de;
 const STEAM_DECK_PRODUCT: u16 = 0x1205;
+/// Steam Input's virtual gamepad, as SDL reports it only when it can't read
+/// which real controller is behind it (Steam's `SteamVirtualGamepadInfo`
+/// file, under Steam's config). When it can, SDL reports the real one's IDs,
+/// name and type instead.
+const STEAM_VIRTUAL_GAMEPAD: u16 = 0x11ff;
+/// The Odin 3's own controls as its kernel driver reports them (the device
+/// tree's `gamepad-vid`/`gamepad-pid`), and the Xbox Elite 2 pad InputPlumber
+/// presents them as on SteamOS-style systems (ArmadaOS).
+const ODIN3_GAMEPAD: (u16, u16) = (0x2020, 0x3001);
+const XBOX_ELITE_2: (u16, u16) = (0x045e, 0x0b00);
+
+/// A handheld whose built-in controls get their own glyphs and drawing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Handheld {
+    #[default]
+    None,
+    SteamDeck,
+    Odin3,
+}
 
 /// A controller action, with the family of the controller that made it.
 pub type GamepadActionSink = Rc<dyn Fn(UiActionEvent, ControllerFamily)>;
@@ -71,14 +90,48 @@ pub enum ControllerShape {
     JoyConRight,
     JoyConPair,
     SteamDeck,
+    Odin3,
 }
 
-/// An open controller's identity, read once when it connects.
+/// An open controller: what it is, read when it connects, and what Horizon
+/// makes of it, decided again whenever the set of controllers changes.
 #[derive(Debug, Clone, Copy)]
 struct PadKind {
     id: JoystickId,
+    facts: PadFacts,
     family: ControllerFamily,
     shape: ControllerShape,
+    /// A second view of a controller another pad already gives (the Odin 3's
+    /// raw pad beside InputPlumber's): its input is dropped.
+    ignored: bool,
+}
+
+/// What SDL and sysfs say about a controller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PadFacts {
+    pub kind: GamepadType,
+    /// As SDL reports them: behind Steam Input, the real controller's.
+    pub ids: Option<(u16, u16)>,
+    /// Made in software (uinput), as InputPlumber's and Steam's pads are.
+    pub virtual_device: bool,
+    /// Steam Input's slot, for one of Steam's virtual pads.
+    pub steam_slot: Option<u16>,
+}
+
+/// Which Xbox Elite 2 pads exist on the system, Steam's view aside: real
+/// ones and InputPlumber's (virtual). Steam hides them from SDL, not sysfs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EliteDevices {
+    pub real: bool,
+    pub inputplumber: bool,
+}
+
+/// How Horizon treats one controller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PadRole {
+    pub family: ControllerFamily,
+    pub shape: ControllerShape,
+    pub ignored: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -131,7 +184,7 @@ impl SdlGamepadInput {
             pads: Vec::new(),
             last_family: ControllerFamily::default(),
             last_used: None,
-            on_steam_deck: running_on_steam_deck(),
+            handheld: detect_handheld(),
             last_power_poll: Instant::now(),
             enabled: true,
             analog_navigation: AnalogNavigation::default(),
@@ -158,6 +211,9 @@ impl SdlGamepadInput {
 
         debug!(
             poll_interval_ms = POLL_INTERVAL.as_millis(),
+            // Steam sets it for what it launches; SDL reads it to name the
+            // real controllers behind Steam Input's virtual pads.
+            steam_virtual_gamepad_info = std::env::var_os("SteamVirtualGamepadInfo").is_some(),
             "gamepad input started"
         );
 
@@ -171,7 +227,12 @@ impl SdlGamepadInput {
 
     /// The family of the first connected controller, if any.
     pub fn first_family(&self) -> Option<ControllerFamily> {
-        self.state.borrow().pads.first().map(|pad| pad.family)
+        self.state
+            .borrow()
+            .pads
+            .iter()
+            .find(|pad| !pad.ignored)
+            .map(|pad| pad.family)
     }
 }
 
@@ -194,7 +255,7 @@ struct SdlState {
     last_family: ControllerFamily,
     /// Which controller that was, for the footer's icon.
     last_used: Option<JoystickId>,
-    on_steam_deck: bool,
+    handheld: Handheld,
     last_power_poll: Instant,
     enabled: bool,
     analog_navigation: AnalogNavigation,
@@ -395,17 +456,24 @@ impl SdlState {
                 let name = gamepad
                     .name()
                     .unwrap_or_else(|| "Unknown gamepad".to_owned());
-                let kind = self.gamepad_subsystem.type_for_id(id);
-                let family = controller_family(
-                    kind,
-                    gamepad.vendor_id(),
-                    gamepad.product_id(),
-                    self.on_steam_deck,
-                );
-                let shape = controller_shape(kind, family);
-                info!(controller = %name, ?family, ?shape, "gamepad connected");
-                self.pads.push(PadKind { id, family, shape });
+                let path = gamepad.path();
+                let node = path.as_deref().and_then(input_node);
+                let facts = PadFacts {
+                    kind: self.gamepad_subsystem.type_for_id(id),
+                    ids: gamepad.vendor_id().zip(gamepad.product_id()),
+                    virtual_device: node.as_ref().is_some_and(|node| node.virtual_device),
+                    steam_slot: node.as_ref().and_then(|node| node.steam_slot),
+                };
+                info!(controller = %name, ?path, ?facts, "gamepad connected");
+                self.pads.push(PadKind {
+                    id,
+                    facts,
+                    family: ControllerFamily::default(),
+                    shape: ControllerShape::Generic,
+                    ignored: false,
+                });
                 self.open_gamepads.push(gamepad);
+                self.assign_roles();
                 true
             }
             Err(error) => {
@@ -430,8 +498,42 @@ impl SdlState {
         let removed = before.saturating_sub(self.open_gamepads.len());
         if removed > 0 {
             info!(removed, "gamepad disconnected");
+            self.assign_roles();
         }
         removed > 0
+    }
+
+    /// Decide every open controller's family, drawing and whether it's a
+    /// duplicate, from all of them together: which pad is a handheld's own
+    /// can depend on the others.
+    fn assign_roles(&mut self) {
+        let facts: Vec<PadFacts> = self.pads.iter().map(|pad| pad.facts).collect();
+        let elites = if self.handheld == Handheld::Odin3 {
+            elite_devices()
+        } else {
+            EliteDevices::default()
+        };
+        for (pad, role) in self
+            .pads
+            .iter_mut()
+            .zip(pad_roles(&facts, self.handheld, elites))
+        {
+            if (pad.family, pad.shape, pad.ignored) != (role.family, role.shape, role.ignored) {
+                info!(
+                    family = ?role.family,
+                    shape = ?role.shape,
+                    ignored = role.ignored,
+                    "gamepad role"
+                );
+            }
+            pad.family = role.family;
+            pad.shape = role.shape;
+            pad.ignored = role.ignored;
+        }
+    }
+
+    fn ignores(&self, id: JoystickId) -> bool {
+        self.pads.iter().any(|pad| pad.id == id && pad.ignored)
     }
 
     fn poll_interval(&self) -> Duration {
@@ -466,7 +568,7 @@ impl SdlState {
 
     fn status(&self) -> ControllerStatus {
         ControllerStatus {
-            connected_gamepads: self.open_gamepads.len(),
+            connected_gamepads: self.pads.iter().filter(|pad| !pad.ignored).count(),
             // Prefer player one; otherwise use the first physical controller
             // which actually reports a meaningful battery level.
             battery: self.open_gamepads.iter().find_map(|pad| {
@@ -477,7 +579,7 @@ impl SdlState {
                 .pads
                 .iter()
                 .find(|pad| Some(pad.id) == self.last_used)
-                .or(self.pads.first())
+                .or(self.pads.iter().find(|pad| !pad.ignored))
                 .map(|pad| pad.shape),
         }
     }
@@ -542,6 +644,11 @@ fn poll_gamepad_events(
             // remains current, but background controller activity must never
             // become Horizon UI navigation.
             _ if !state.enabled => {}
+            // The other view of the same controller gives this input.
+            Event::GamepadAxisMotion { which, .. }
+            | Event::GamepadButtonDown { which, .. }
+            | Event::GamepadButtonUp { which, .. }
+                if state.ignores(which) => {}
             Event::GamepadAxisMotion {
                 which, axis, value, ..
             } => {
@@ -618,7 +725,8 @@ pub const fn direction_for_button(button: &Button) -> Option<UiAction> {
 /// with the bottom (B) and use the top (X) for the secondary action, so the
 /// labels on the pad match the hints.
 pub const fn action_for_button(button: Button, family: ControllerFamily) -> Option<UiAction> {
-    let nintendo = matches!(family, ControllerFamily::Nintendo);
+    // The Odin 3 wears Nintendo's labels too.
+    let nintendo = matches!(family, ControllerFamily::Nintendo | ControllerFamily::Odin);
     match button {
         Button::DPadUp => Some(UiAction::Up),
         Button::DPadDown => Some(UiAction::Down),
@@ -640,35 +748,51 @@ pub const fn action_for_button(button: Button, family: ControllerFamily) -> Opti
     }
 }
 
-/// Which glyphs a controller's buttons wear.
+/// Which glyphs a controller's buttons wear. `virtual_device`: the pad was
+/// made in software (uinput), as InputPlumber's are.
 pub fn controller_family(
     kind: GamepadType,
     vendor: Option<u16>,
     product: Option<u16>,
-    on_steam_deck: bool,
+    virtual_device: bool,
+    handheld: Handheld,
 ) -> ControllerFamily {
+    let ids = vendor.zip(product);
+    // A handheld's own controls: directly, through InputPlumber, or behind
+    // Steam Input (Game Mode). Behind Steam, SDL reports the real controller
+    // when Steam says which it is; a virtual pad it can't resolve is taken for
+    // the handheld's own, the likeliest on a handheld.
+    let unresolved_steam = ids == Some((VALVE_VENDOR, STEAM_VIRTUAL_GAMEPAD));
+    if ids == Some((VALVE_VENDOR, STEAM_DECK_PRODUCT))
+        || (handheld == Handheld::SteamDeck && unresolved_steam)
+    {
+        return ControllerFamily::SteamDeck;
+    }
+    // InputPlumber's Elite 2 has a real one's name and IDs; only a real one
+    // is a USB device. (Over Bluetooth an Elite 2 has other IDs.)
+    let inputplumber = ids == Some(XBOX_ELITE_2) && virtual_device;
+    if handheld == Handheld::Odin3
+        && (ids == Some(ODIN3_GAMEPAD) || inputplumber || unresolved_steam)
+    {
+        return ControllerFamily::Odin;
+    }
     match kind {
         GamepadType::PS3 | GamepadType::PS4 | GamepadType::PS5 => ControllerFamily::PlayStation,
         GamepadType::NintendoSwitchPro
         | GamepadType::NintendoSwitchJoyconLeft
         | GamepadType::NintendoSwitchJoyconRight
         | GamepadType::NintendoSwitchJoyconPair => ControllerFamily::Nintendo,
-        // The Deck's own controls: directly, or as Steam's virtual gamepad
-        // while Steam runs on a Deck (Game Mode).
-        _ if vendor == Some(VALVE_VENDOR)
-            && (product == Some(STEAM_DECK_PRODUCT) || on_steam_deck) =>
-        {
-            ControllerFamily::SteamDeck
-        }
         _ => ControllerFamily::Xbox,
     }
 }
 
-/// The drawing for a pad: the Deck's for the Deck's own controls, else the
-/// model SDL reports, else a generic gamepad.
+/// The drawing for a pad: the handheld's for a handheld's own controls, else
+/// the model SDL reports, else a generic gamepad.
 pub fn controller_shape(kind: GamepadType, family: ControllerFamily) -> ControllerShape {
-    if family == ControllerFamily::SteamDeck {
-        return ControllerShape::SteamDeck;
+    match family {
+        ControllerFamily::SteamDeck => return ControllerShape::SteamDeck,
+        ControllerFamily::Odin => return ControllerShape::Odin3,
+        _ => {}
     }
     match kind {
         GamepadType::Xbox360 => ControllerShape::Xbox360,
@@ -684,15 +808,174 @@ pub fn controller_shape(kind: GamepadType, family: ControllerFamily) -> Controll
     }
 }
 
-/// Whether this machine is a Steam Deck (LCD "Jupiter" or OLED "Galileo"),
-/// from the firmware's board name. Readable inside Flatpak (sysfs).
-fn running_on_steam_deck() -> bool {
-    let read = |name: &str| {
-        std::fs::read_to_string(format!("/sys/class/dmi/id/{name}"))
+/// Which handheld this is, if one with its own controls. Readable inside
+/// Flatpak: the Deck from its firmware's board name (LCD "Jupiter", OLED
+/// "Galileo"); the Odin 3 from its device tree's model, which sysfs shows as
+/// the SoC's machine (Flatpak hides /sys/firmware; the device tree itself is
+/// read too, for a build outside the sandbox).
+fn detect_handheld() -> Handheld {
+    let read = |path: &str| {
+        std::fs::read_to_string(path)
             .map(|value| value.trim().to_owned())
             .unwrap_or_default()
     };
-    read("board_vendor") == "Valve" && matches!(read("board_name").as_str(), "Jupiter" | "Galileo")
+    if read("/sys/class/dmi/id/board_vendor") == "Valve"
+        && matches!(
+            read("/sys/class/dmi/id/board_name").as_str(),
+            "Jupiter" | "Galileo"
+        )
+    {
+        return Handheld::SteamDeck;
+    }
+    if is_odin3(
+        &read("/sys/devices/soc0/machine"),
+        &read("/sys/firmware/devicetree/base/compatible"),
+    ) {
+        return Handheld::Odin3;
+    }
+    Handheld::None
+}
+
+/// Each controller's role, from all of them together. Mostly
+/// `controller_family` per pad; on an Odin 3 two things need the others:
+///
+/// - Behind Steam Input, SDL reports each pad as the real controller behind
+///   it, so the Odin's own controls (InputPlumber's Elite 2) and a real
+///   Elite 2 look the same: both virtual with Elite 2 IDs. Sysfs, which Steam
+///   doesn't hide, says which exist. With no real Elite 2 it's the Odin's;
+///   with no InputPlumber pad it's the real one; with both, the Odin's has
+///   Steam's first slot, as its controls are there from boot.
+/// - The raw pad and InputPlumber's (or Steam's) can both be open when
+///   InputPlumber shares raw input (ArmadaOS); the raw one is then ignored so
+///   a press counts once.
+pub fn pad_roles(pads: &[PadFacts], handheld: Handheld, elites: EliteDevices) -> Vec<PadRole> {
+    let first_steam_elite = pads
+        .iter()
+        .filter(|pad| pad.ids == Some(XBOX_ELITE_2))
+        .filter_map(|pad| pad.steam_slot)
+        .min();
+    let families: Vec<ControllerFamily> = pads
+        .iter()
+        .map(|pad| {
+            let family = controller_family(
+                pad.kind,
+                pad.ids.map(|ids| ids.0),
+                pad.ids.map(|ids| ids.1),
+                pad.virtual_device,
+                handheld,
+            );
+            let steam_elite = pad.ids == Some(XBOX_ELITE_2) && pad.steam_slot.is_some();
+            if handheld != Handheld::Odin3 || !steam_elite {
+                return family;
+            }
+            let odin = !elites.real || (elites.inputplumber && pad.steam_slot == first_steam_elite);
+            if odin {
+                ControllerFamily::Odin
+            } else {
+                ControllerFamily::Xbox
+            }
+        })
+        .collect();
+    let odin_elsewhere = |index: usize| {
+        families.iter().enumerate().any(|(other, family)| {
+            other != index
+                && *family == ControllerFamily::Odin
+                && pads[other].ids != Some(ODIN3_GAMEPAD)
+        })
+    };
+    pads.iter()
+        .zip(&families)
+        .enumerate()
+        .map(|(index, (pad, &family))| PadRole {
+            family,
+            shape: controller_shape(pad.kind, family),
+            ignored: handheld == Handheld::Odin3
+                && pad.ids == Some(ODIN3_GAMEPAD)
+                && odin_elsewhere(index),
+        })
+        .collect()
+}
+
+/// What sysfs says about an SDL device path's evdev node.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct InputNode {
+    virtual_device: bool,
+    steam_slot: Option<u16>,
+}
+
+/// Readable inside Flatpak. `None` for a path that isn't an evdev node (a
+/// HIDAPI device).
+fn input_node(path: &str) -> Option<InputNode> {
+    let node = path.strip_prefix("/dev/input/")?;
+    let class = std::path::PathBuf::from(format!("/sys/class/input/{node}"));
+    let device = std::fs::canonicalize(&class).ok()?;
+    let ids = sysfs_ids(&class);
+    let name = std::fs::read_to_string(class.join("device/name")).unwrap_or_default();
+    Some(InputNode {
+        virtual_device: is_uinput_sysfs(&device.to_string_lossy()),
+        steam_slot: steam_slot(ids, name.trim()),
+    })
+}
+
+fn is_uinput_sysfs(device: &str) -> bool {
+    device.starts_with("/sys/devices/virtual/input/")
+}
+
+/// A Steam virtual pad's slot, from its evdev name ("… pad 2"), as SDL reads
+/// it. Steam's pads keep Valve's IDs in sysfs even when SDL reports the real
+/// controller's.
+fn steam_slot(ids: Option<(u16, u16)>, name: &str) -> Option<u16> {
+    if ids != Some((VALVE_VENDOR, STEAM_VIRTUAL_GAMEPAD)) {
+        return None;
+    }
+    let digits = &name[name.rfind("pad ")? + 4..];
+    let end = digits
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(digits.len());
+    digits[..end].parse().ok()
+}
+
+/// An evdev node's vendor and product, from `device/id/` (hex).
+fn sysfs_ids(class: &std::path::Path) -> Option<(u16, u16)> {
+    let read = |name: &str| {
+        let text = std::fs::read_to_string(class.join("device/id").join(name)).ok()?;
+        u16::from_str_radix(text.trim(), 16).ok()
+    };
+    read("vendor").zip(read("product"))
+}
+
+/// Which Elite 2 pads exist, from every evdev node in sysfs.
+fn elite_devices() -> EliteDevices {
+    let mut elites = EliteDevices::default();
+    let Ok(entries) = std::fs::read_dir("/sys/class/input") else {
+        return elites;
+    };
+    for entry in entries.flatten() {
+        if !entry.file_name().to_string_lossy().starts_with("event") {
+            continue;
+        }
+        let class = entry.path();
+        if sysfs_ids(&class) != Some(XBOX_ELITE_2) {
+            continue;
+        }
+        let virtual_device = std::fs::canonicalize(&class)
+            .is_ok_and(|device| is_uinput_sysfs(&device.to_string_lossy()));
+        if virtual_device {
+            elites.inputplumber = true;
+        } else {
+            elites.real = true;
+        }
+    }
+    elites
+}
+
+/// The Odin 3 by its device tree: model "AYN Odin 3", compatible "ayn,odin3"
+/// (a NUL-separated list).
+fn is_odin3(machine: &str, compatible: &str) -> bool {
+    machine.eq_ignore_ascii_case("AYN Odin 3")
+        || compatible
+            .split('\0')
+            .any(|entry| entry.trim() == "ayn,odin3")
 }
 
 #[cfg(test)]
@@ -704,7 +987,8 @@ mod tests {
     use super::ControllerShape;
     use super::{
         ANALOG_INITIAL_REPEAT_DELAY, AnalogNavigation, DIGITAL_INITIAL_REPEAT_DELAY,
-        DigitalNavigation, action_for_button, controller_family, controller_shape,
+        DigitalNavigation, EliteDevices, Handheld, PadFacts, action_for_button, controller_family,
+        controller_shape, input_node, is_odin3, is_uinput_sysfs, pad_roles, steam_slot,
     };
     use crate::input::actions::{ControllerFamily, UiAction};
 
@@ -768,28 +1052,58 @@ mod tests {
     fn controllers_are_told_apart_by_type_and_valve_ids() {
         use sdl3::gamepad::GamepadType;
         assert_eq!(
-            controller_family(GamepadType::PS5, None, None, false),
+            controller_family(GamepadType::PS5, None, None, false, Handheld::None),
             ControllerFamily::PlayStation
         );
         assert_eq!(
-            controller_family(GamepadType::NintendoSwitchJoyconPair, None, None, false),
+            controller_family(
+                GamepadType::NintendoSwitchJoyconPair,
+                None,
+                None,
+                false,
+                Handheld::None
+            ),
             ControllerFamily::Nintendo
         );
         assert_eq!(
-            controller_family(GamepadType::Standard, Some(0x28de), Some(0x1205), false),
+            controller_family(
+                GamepadType::Standard,
+                Some(0x28de),
+                Some(0x1205),
+                false,
+                Handheld::None
+            ),
             ControllerFamily::SteamDeck
         );
         // Steam's virtual gamepad is a Deck only on a Deck.
         assert_eq!(
-            controller_family(GamepadType::Xbox360, Some(0x28de), Some(0x11ff), true),
+            controller_family(
+                GamepadType::Xbox360,
+                Some(0x28de),
+                Some(0x11ff),
+                false,
+                Handheld::SteamDeck
+            ),
             ControllerFamily::SteamDeck
         );
         assert_eq!(
-            controller_family(GamepadType::Xbox360, Some(0x28de), Some(0x11ff), false),
+            controller_family(
+                GamepadType::Xbox360,
+                Some(0x28de),
+                Some(0x11ff),
+                false,
+                Handheld::None
+            ),
             ControllerFamily::Xbox
         );
         assert_eq!(
-            controller_family(GamepadType::Unknown, Some(0x045e), None, false),
+            controller_family(
+                GamepadType::Unknown,
+                Some(0x045e),
+                None,
+                false,
+                Handheld::None
+            ),
             ControllerFamily::Xbox
         );
     }
@@ -905,7 +1219,12 @@ mod tests {
     #[test]
     fn each_pad_gets_its_own_drawing() {
         use sdl3::gamepad::GamepadType;
-        let shape = |kind| controller_shape(kind, controller_family(kind, None, None, false));
+        let shape = |kind| {
+            controller_shape(
+                kind,
+                controller_family(kind, None, None, false, Handheld::None),
+            )
+        };
         assert_eq!(shape(GamepadType::PS5), ControllerShape::PlayStation5);
         assert_eq!(shape(GamepadType::PS4), ControllerShape::PlayStation4);
         assert_eq!(shape(GamepadType::Xbox360), ControllerShape::Xbox360);
@@ -927,6 +1246,177 @@ mod tests {
             controller_shape(GamepadType::XboxOne, ControllerFamily::SteamDeck),
             ControllerShape::SteamDeck
         );
+    }
+
+    #[test]
+    fn the_odin_3s_own_controls_are_recognised_on_an_odin_3() {
+        use sdl3::gamepad::GamepadType;
+        let odin = |vendor, product, virtual_device| {
+            controller_family(
+                GamepadType::XboxOne,
+                Some(vendor),
+                Some(product),
+                virtual_device,
+                Handheld::Odin3,
+            )
+        };
+        // Raw, through InputPlumber's Xbox Elite 2, and through Steam Input.
+        assert_eq!(odin(0x2020, 0x3001, false), ControllerFamily::Odin);
+        assert_eq!(odin(0x045e, 0x0b00, true), ControllerFamily::Odin);
+        assert_eq!(odin(0x28de, 0x11ff, true), ControllerFamily::Odin);
+        // Behind Steam Input, resolved by SDL: the Odin's own controls are
+        // InputPlumber's Elite 2 (still virtual); other pads are themselves.
+        assert_eq!(
+            controller_family(
+                GamepadType::PS5,
+                Some(0x054c),
+                Some(0x0ce6),
+                true,
+                Handheld::Odin3
+            ),
+            ControllerFamily::PlayStation
+        );
+        // A real Steam Controller isn't the Odin's.
+        assert_eq!(odin(0x28de, 0x1102, true), ControllerFamily::Xbox);
+        // A real Elite 2 plugged into an Odin is an Xbox pad.
+        assert_eq!(odin(0x045e, 0x0b00, false), ControllerFamily::Xbox);
+        // Another pad on an Odin keeps its own family.
+        assert_eq!(odin(0x045e, 0x0b12, false), ControllerFamily::Xbox);
+        // An Elite 2 elsewhere is an Xbox pad.
+        assert_eq!(
+            controller_family(
+                GamepadType::XboxOne,
+                Some(0x045e),
+                Some(0x0b00),
+                false,
+                Handheld::None
+            ),
+            ControllerFamily::Xbox
+        );
+        assert_eq!(
+            controller_shape(GamepadType::XboxOne, ControllerFamily::Odin),
+            ControllerShape::Odin3
+        );
+    }
+
+    #[test]
+    fn odin_3_confirms_with_a_on_the_right() {
+        assert_eq!(
+            action_for_button(Button::East, ControllerFamily::Odin),
+            Some(UiAction::Accept)
+        );
+        assert_eq!(
+            action_for_button(Button::South, ControllerFamily::Odin),
+            Some(UiAction::Back)
+        );
+    }
+
+    #[test]
+    fn uinput_pads_are_told_from_bus_pads() {
+        assert!(is_uinput_sysfs(
+            "/sys/devices/virtual/input/input42/event21"
+        ));
+        assert!(!is_uinput_sysfs(
+            "/sys/devices/platform/soc@0/a600000.usb/usb1/1-1/1-1:1.0/input/input7/event5"
+        ));
+        assert!(!is_uinput_sysfs(
+            "/sys/devices/virtual/misc/uhid/0005:045E:0B22.0003/input/input9/event6"
+        ));
+        assert_eq!(input_node("/dev/hidraw3"), None);
+    }
+
+    #[test]
+    fn steam_pads_are_told_by_their_ids_and_numbered_by_name() {
+        let valve = Some((0x28de, 0x11ff));
+        assert_eq!(steam_slot(valve, "Microsoft X-Box 360 pad 0"), Some(0));
+        assert_eq!(steam_slot(valve, "Steam Virtual Gamepad pad 12"), Some(12));
+        assert_eq!(
+            steam_slot(Some((0x045e, 0x0b00)), "Microsoft X-Box One Elite 2 pad"),
+            None
+        );
+        assert_eq!(steam_slot(valve, "Steam Deck"), None);
+    }
+
+    #[test]
+    fn behind_steam_the_odins_elite_2_is_told_from_a_real_one() {
+        use sdl3::gamepad::GamepadType;
+        let steam_elite = |slot| PadFacts {
+            kind: GamepadType::XboxOne,
+            ids: Some((0x045e, 0x0b00)),
+            virtual_device: true,
+            steam_slot: Some(slot),
+        };
+        let families = |pads: &[PadFacts], elites| {
+            pad_roles(pads, Handheld::Odin3, elites)
+                .into_iter()
+                .map(|role| role.family)
+                .collect::<Vec<_>>()
+        };
+        let only_inputplumber = EliteDevices {
+            real: false,
+            inputplumber: true,
+        };
+        let only_real = EliteDevices {
+            real: true,
+            inputplumber: false,
+        };
+        let both = EliteDevices {
+            real: true,
+            inputplumber: true,
+        };
+        assert_eq!(
+            families(&[steam_elite(0)], only_inputplumber),
+            [ControllerFamily::Odin]
+        );
+        assert_eq!(
+            families(&[steam_elite(0)], only_real),
+            [ControllerFamily::Xbox]
+        );
+        assert_eq!(
+            families(&[steam_elite(1), steam_elite(0)], both),
+            [ControllerFamily::Xbox, ControllerFamily::Odin]
+        );
+        // Off an Odin nothing changes.
+        assert_eq!(
+            pad_roles(&[steam_elite(0)], Handheld::None, both)[0].family,
+            ControllerFamily::Xbox
+        );
+    }
+
+    #[test]
+    fn the_odins_raw_pad_is_ignored_beside_inputplumbers() {
+        use sdl3::gamepad::GamepadType;
+        let raw = PadFacts {
+            kind: GamepadType::Unknown,
+            ids: Some((0x2020, 0x3001)),
+            virtual_device: false,
+            steam_slot: None,
+        };
+        let inputplumber = PadFacts {
+            kind: GamepadType::XboxOne,
+            ids: Some((0x045e, 0x0b00)),
+            virtual_device: true,
+            steam_slot: None,
+        };
+        let roles = pad_roles(
+            &[raw, inputplumber],
+            Handheld::Odin3,
+            EliteDevices::default(),
+        );
+        assert!(roles[0].ignored && !roles[1].ignored);
+        assert_eq!(roles[1].family, ControllerFamily::Odin);
+        // Alone, the raw pad is the Odin's controls.
+        let roles = pad_roles(&[raw], Handheld::Odin3, EliteDevices::default());
+        assert!(!roles[0].ignored);
+        assert_eq!(roles[0].family, ControllerFamily::Odin);
+    }
+
+    #[test]
+    fn the_odin_3_is_found_by_its_device_tree() {
+        assert!(is_odin3("AYN Odin 3", ""));
+        assert!(is_odin3("", "ayn,odin3\0qcom,cq8725s\0qcom,sm8750\0"));
+        assert!(!is_odin3("SM8750", "ayn,odin2\0qcom,qcs8550\0"));
+        assert!(!is_odin3("", ""));
     }
 }
 

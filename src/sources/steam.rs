@@ -1030,6 +1030,21 @@ fn looks_like_steam_root(root: &Path) -> bool {
     root.join("steamapps").is_dir() || root.join("appcache/appinfo.vdf").is_file()
 }
 
+/// Steam's list of the real controllers behind Steam Input's virtual pads
+/// (`config/virtualgamepadinfo.txt`), the newest in any Steam root. Steam
+/// names it in `SteamVirtualGamepadInfo` for what it launches; SDL reads it.
+pub fn virtual_gamepad_info_file() -> Option<PathBuf> {
+    default_steam_roots()
+        .into_iter()
+        .map(|root| root.join("config/virtualgamepadinfo.txt"))
+        .filter_map(|file| {
+            let modified = fs::metadata(&file).and_then(|meta| meta.modified()).ok()?;
+            Some((modified, file))
+        })
+        .max_by_key(|(modified, _)| *modified)
+        .map(|(_, file)| file)
+}
+
 fn default_steam_roots() -> Vec<PathBuf> {
     let Some(home) = env::var_os("HOME").map(PathBuf::from) else {
         return vec![];

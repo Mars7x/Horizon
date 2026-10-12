@@ -29,8 +29,8 @@ export component SymbolicSvgIcon inherits Rectangle {
 }
 
 // The connected controller's model: Kenney's Input Prompts drawings (CC0,
-// ui/assets/controllers/, unmodified).
-export enum ControllerArt { generic, xbox-360, xbox-series, playstation-3, playstation-4, playstation-5, switch-pro, joycon-left, joycon-right, joycon-pair, steam-deck }
+// ui/assets/controllers/, unmodified), and Horizon's own Odin 3 in their style.
+export enum ControllerArt { generic, xbox-360, xbox-series, playstation-3, playstation-4, playstation-5, switch-pro, joycon-left, joycon-right, joycon-pair, steam-deck, odin-3 }
 
 export component ControllerIcon inherits SymbolicSvgIcon {
     in property <ControllerArt> art: ControllerArt.generic;
@@ -44,5 +44,6 @@ export component ControllerIcon inherits SymbolicSvgIcon {
         : root.art == ControllerArt.joycon-right ? @image-url("../assets/controllers/switch_joycon_right.svg")
         : root.art == ControllerArt.joycon-pair ? @image-url("../assets/controllers/switch_joycon.svg")
         : root.art == ControllerArt.steam-deck ? @image-url("../assets/controllers/controller_steamdeck.svg")
+        : root.art == ControllerArt.odin-3 ? @image-url("../assets/controllers/horizon_odin3.svg")
         : @image-url("../assets/controllers/controller_generic.svg");
 }
