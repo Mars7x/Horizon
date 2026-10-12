@@ -140,6 +140,28 @@ Slint's X11 backend in the session.
 6. **The power key.** Does it reach Horizon as an input device on the Deck
    and the Odin 3, and does the inhibitor stop logind's own suspend?
 
+### Where the spikes run
+
+Until a Bazzite handheld is available, the spikes run on the development
+laptop: a Lenovo Yoga Slim 7x (Snapdragon X, aarch64) with Fedora 44
+Workstation (GNOME, Wayland, 4K pages).
+
+- **Gamescope** comes from Fedora (`gamescope` 3.16.29, aarch64).
+  gamescope-session-plus isn't packaged for Fedora, so a test script starts
+  gamescope and Horizon the way the session file would. Session-plus itself
+  is checked once Bazzite is available.
+- **Nested** (gamescope as a window on GNOME): quick tries of spikes 1, 2
+  and 5. GNOME's portals are still reachable from here, so it says nothing
+  about spike 4.
+- **Embedded** (gamescope on a text console, with nothing of GNOME behind
+  it): the real check for spikes 1, 2 and 4, and for 6 with the laptop's
+  power key and backlight.
+- **Steam** has no ARM build. It can run through FEX (installed), so spike 3
+  is tried that way, but it may behave differently from x86 Steam and is
+  checked again on a handheld.
+- Handheld-only details (the Deck's and Odin's power keys, their screens'
+  rotation) wait for real devices.
+
 ## Phases
 
 1. **Boot and play:** the host files; Horizon as the main app; launch and
