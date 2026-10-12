@@ -1,6 +1,7 @@
 import { Theme, Metrics } from "../theme/theme.slint";
 import { GameCardData } from "../models/game-card.slint";
 import { GameCarousel } from "../components/game-carousel.slint";
+import { DragScroll } from "../components/scroll.slint";
 
 
 // Home is now a routed content page. Persistent header/footer chrome lives in
@@ -36,25 +37,19 @@ export component HomePage inherits Rectangle {
     // A finger (or mouse) dragging sideways pans the shelf, even starting on
     // a game: once the drag is clearly sideways the handler takes it from the
     // tile, so a tap still selects. Focus never moves.
-    swipe := SwipeGestureHandler {
+    swipe := DragScroll {
         x: 0px;
         y: Metrics.selected-label-y - Metrics.top-chrome-height;
         width: parent.width;
         height: Metrics.carousel-shelf-y
             + Metrics.carousel-shelf-height
             - Metrics.selected-label-y;
-        handle-swipe-left: true;
-        handle-swipe-right: true;
-        property <bool> dragging: false;
-        moved => {
-            if !self.dragging {
-                self.dragging = true;
-                carousel.drag-begin(self.current-position.x - self.pressed-position.x);
-            }
-            carousel.drag-to(self.current-position.x - self.pressed-position.x);
-        }
-        swiped => { self.dragging = false; carousel.drag-end(); }
-        cancelled => { self.dragging = false; carousel.drag-end(); }
+        vertical: false;
+        catching: carousel.gliding;
+        drag-begin(moved) => { carousel.drag-begin(moved); }
+        drag-to(moved) => { carousel.drag-to(moved); }
+        drag-end => { carousel.drag-end(); }
+        caught => { carousel.catch(); }
 
         carousel := GameCarousel {
             width: parent.width;

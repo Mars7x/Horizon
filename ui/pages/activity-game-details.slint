@@ -66,12 +66,20 @@ export component ActivityGameDetailsPage inherits TransitionLayer {
     // jumps to its top instead of scrolling from the last game's place.
     private property <length> content-height: root.session-count * root.row-height - Metrics.list-row-gap;
     // Wheel and touchpad move it by pixels; Up/Down step whole rows.
+    // Each arrival resets the camera (instantly); leaving doesn't, so a list
+    // scrolled between rows stays put while the page fades out.
+    private property <int> visits: 0;
+    changed active => {
+        if root.active {
+            root.visits += 1;
+        }
+    }
     history-camera := ScrollCamera {
         rest-row: root.first-row;
         stride: root.row-height;
         content: root.content-height;
         viewport: root.list-height;
-        settle-key: root.active ? 1 : 0;
+        settle-key: root.visits;
         scrolled(rows) => { root.scroll-history(rows); }
     }
     private property <length> camera: history-camera.camera;
@@ -292,6 +300,8 @@ export component ActivityGameDetailsPage inherits TransitionLayer {
             drag-begin(moved) => { history-camera.drag-begin(moved); }
             drag-to(moved) => { history-camera.drag-to(moved); }
             drag-end => { history-camera.drag-end(); }
+            catching: history-camera.gliding;
+            caught => { history-camera.catch(); }
             TouchArea {
                 width: parent.width; height: parent.height;
                 enabled: root.active;

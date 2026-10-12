@@ -49,7 +49,7 @@ Rust HomeController
 
 Clicking a tile emits selection intent. Rust validates the requested index and updates the presentation state. The Slint carousel reacts declaratively.
 
-A horizontal touchpad swipe or tilt-wheel step anywhere on Home pans the carousel's camera by pixels (`GameCarousel.pan`, see UI_STANDARDS "Mouse wheel and touchpad"), clamped to the shelf's ends: a touchpad follows the fingers and glides on after a moving swipe (`Momentum`), a notch glides. A finger or mouse drag on the shelf pans it the same way (`SwipeGestureHandler` in `pages/home.slint`, which takes the drag from a game once it is clearly sideways, so a tap still selects). It never changes selection or focus, even when the selected game leaves the screen; after a swipe, a selection change moves the camera only if the newly selected game isn't fully on screen, and only as far as needed, except that selecting the first game or the Library tile always brings that end of the shelf (its rounded end and padding) into view. The usual camera zone applies again once the carousel loses focus (another page, the top icons) or the games are republished.
+A horizontal touchpad swipe or tilt-wheel step anywhere on Home pans the carousel's camera by pixels (`GameCarousel.pan`, see UI_STANDARDS "Mouse wheel and touchpad"), clamped to the shelf's ends: a touchpad follows the fingers and glides on after a moving swipe (`Momentum`), a notch glides. A finger or mouse drag on the shelf pans it the same way (`DragScroll`, as every list uses, which takes the drag from a game once it is clearly sideways, so a tap still selects; a touch on the gliding shelf catches it). It never changes selection or focus, even when the selected game leaves the screen; after a swipe, a selection change moves the camera only if the newly selected game isn't fully on screen, and only as far as needed, except that selecting the first game or the Library tile always brings that end of the shelf (its rounded end and padding) into view. The usual camera zone applies again once the carousel loses focus (another page, the top icons) or the games are republished.
 
 Keyboard/controller navigation is intentionally deferred to Phase 3. Phase 2 only provides pointer selection so the carousel animation and state boundary can be exercised without pre-empting the input architecture.
 
@@ -79,6 +79,16 @@ The components do not independently tune these values.
 - carousel translation: `Motion.carousel-duration`
 
 All three resolve to zero when the desktop requests reduced motion.
+
+The shelf camera is a `CameraGlide` (`components/camera-glide.slint`),
+stepped every frame by the time since the previous one rather than a Slint
+`animate`: a selection change reaches the camera just before a frame is
+drawn, and an animation started there stood still for that frame. One step
+from rest eases out over `carousel-duration`; steps that arrive while it
+moves (a held direction) ease to one cruising speed and brake only over the
+last quarter of the way, so held input runs at a steady speed with no pulse
+per cover. A finger or touchpad pan, and Reduced Motion, draw the target
+directly.
 
 ## Phase 2 non-goals
 

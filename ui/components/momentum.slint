@@ -1,14 +1,19 @@
 import { Motion } from "../theme/theme.slint";
 
 // A touchpad swipe or a finger drag carries on after it ends, slowing to a
-// stop, as a flick does on a phone.
+// stop, as a flick does on a phone. Every glide in Horizon is this one.
 //
 // While the gesture lasts, `add` each movement (camera travel). At its end,
 // `release`: if it was still moving, `glide(travel)` arrives every frame
 // until it stops, then `ended()`. The owner applies the travel; past an end
 // it turns the travel into stretch and calls `brake`, so the glide runs into
 // the stretch and stops quickly, and springs back on `ended`. `stop` cancels
-// a glide (new input, a focus change) without `ended`.
+// a glide (new input, a touch, a focus change) without `ended`.
+//
+// The release speed is the gesture's average over its last frames (about
+// 70 ms; up to 100 ms when frames are sparse), not one event's: input
+// arrives in uneven batches, and one batch alone would make some flicks
+// throw hard and others not at all. Fingers that had stopped don't throw.
 //
 // The glide steps on every frame by the real time since the last one
 // (`animation-tick`), so it is as smooth as the display, and a list mounting
@@ -22,13 +27,51 @@ export component Momentum {
     // Camera travel per millisecond, and how fast it fades.
     private property <float> velocity: 0;
     private property <float> half-life: 160;
-    // The last movement, and the stretch of movement being measured.
-    private property <duration> last: 0ms;
-    private property <duration> sample-start: 0ms;
-    private property <length> sample-travel: 0px;
+
+    // The gesture's travel so far, and where it had got to on its last six
+    // frames (a ring: `head` is the newest, `count` how many are filled).
+    private property <length> travel: 0px;
+    private property <int> head: 0;
+    private property <int> count: 0;
+    private property <duration> t0: 0ms;
+    private property <duration> t1: 0ms;
+    private property <duration> t2: 0ms;
+    private property <duration> t3: 0ms;
+    private property <duration> t4: 0ms;
+    private property <duration> t5: 0ms;
+    private property <length> p0: 0px;
+    private property <length> p1: 0px;
+    private property <length> p2: 0px;
+    private property <length> p3: 0px;
+    private property <length> p4: 0px;
+    private property <length> p5: 0px;
+
     // The frame clock, read only while gliding.
     private property <duration> clock: root.running ? animation-tick() : 0ms;
     private property <duration> previous: 0ms;
+
+    pure function time-at(slot: int) -> duration {
+        slot == 0 ? root.t0 : slot == 1 ? root.t1 : slot == 2 ? root.t2
+            : slot == 3 ? root.t3 : slot == 4 ? root.t4 : root.t5
+    }
+    pure function travel-at(slot: int) -> length {
+        slot == 0 ? root.p0 : slot == 1 ? root.p1 : slot == 2 ? root.p2
+            : slot == 3 ? root.p3 : slot == 4 ? root.p4 : root.p5
+    }
+    // How long before the newest sample the one `back` steps older was
+    // (a long time when there is none).
+    pure function age(back: int) -> duration {
+        back >= root.count ? 1000ms
+            : root.time-at(root.head) - root.time-at(Math.mod(root.head - back + 6, 6))
+    }
+    function record(slot: int, at: duration, travel: length) {
+        if slot == 0 { root.t0 = at; root.p0 = travel; }
+        else if slot == 1 { root.t1 = at; root.p1 = travel; }
+        else if slot == 2 { root.t2 = at; root.p2 = travel; }
+        else if slot == 3 { root.t3 = at; root.p3 = travel; }
+        else if slot == 4 { root.t4 = at; root.p4 = travel; }
+        else { root.t5 = at; root.p5 = travel; }
+    }
 
     public function stop() {
         root.running = false;
@@ -42,45 +85,52 @@ export component Momentum {
 
     public function add(travel: length) {
         let now = animation-tick();
-        // A pause this long starts a new measurement.
-        if now - root.last > 100ms {
-            root.velocity = 0;
-            root.sample-start = now;
-            root.sample-travel = 0px;
+        // A pause this long starts a new gesture.
+        if root.count == 0 || now - root.time-at(root.head) > 100ms {
+            root.travel = 0px;
+            root.count = 0;
         }
-        root.last = now;
-        root.sample-travel += travel;
-        root.measure(now, 24);
-    }
-
-    // The speed over the travel since the last measurement, once that spans
-    // `least` ms, blended into the speed so far.
-    function measure(now: duration, least: float) {
-        let span = (now - root.sample-start) / 1ms;
-        if span >= least && root.sample-travel != 0px {
-            let speed = root.sample-travel / 1px / max(span, 8);
-            root.velocity = root.velocity == 0 ? speed : root.velocity * 0.3 + speed * 0.7;
-            root.sample-start = now;
-            root.sample-travel = 0px;
+        root.travel += travel;
+        // Movements on one frame share its time: they make one sample.
+        if root.count > 0 && root.time-at(root.head) == now {
+            root.record(root.head, now, root.travel);
+        } else {
+            root.head = root.count == 0 ? 0 : Math.mod(root.head + 1, 6);
+            root.count = min(6, root.count + 1);
+            root.record(root.head, now, root.travel);
         }
     }
 
     public function release() {
         let now = animation-tick();
-        // Fingers that stopped before lifting don't throw.
-        if Motion.reduced-motion || now - root.last > 80ms {
+        let newest = root.time-at(root.head);
+        // Reduced Motion, no movement, or fingers that stopped before lifting.
+        if Motion.reduced-motion || root.count < 2 || now - newest > 80ms {
+            root.count = 0;
             root.stop();
             return;
         }
-        // The speed while moving: up to the last movement, not the lift.
-        root.measure(root.last, 0);
-        root.velocity = max(-6, min(6, root.velocity));
+        // The oldest sample within 70 ms of the newest; failing that, the
+        // one before the newest, up to 100 ms.
+        let back = root.age(5) <= 70ms ? 5 : root.age(4) <= 70ms ? 4
+            : root.age(3) <= 70ms ? 3 : root.age(2) <= 70ms ? 2
+            : root.age(1) <= 100ms ? 1 : 0;
+        let span = back > 0 ? root.age(back) : 0ms;
+        let moved = root.travel-at(root.head) - root.travel-at(Math.mod(root.head - back + 6, 6));
+        root.count = 0;
+        if span < 8ms {
+            root.stop();
+            return;
+        }
+        root.velocity = max(-6, min(6, moved / 1px / (span / 1ms)));
         if abs(root.velocity) < 0.08 {
             root.stop();
             return;
         }
         root.half-life = 160;
-        root.previous = now;
+        // It carries on from the last movement, not from the lift: the
+        // fingers lift a little after it, and that pause would show.
+        root.previous = newest;
         root.running = true;
     }
 
@@ -97,7 +147,8 @@ export component Momentum {
         // Halves every 160 ms, so a flick travels on about as far as it
         // would in a quarter of a second at its release speed.
         root.velocity *= Math.pow(0.5, elapsed / root.half-life);
-        if root.running && abs(root.velocity) < 0.03 {
+        // Stops once it moves under about a quarter pixel a frame.
+        if root.running && abs(root.velocity) < 0.015 {
             root.stop();
             root.ended();
         }

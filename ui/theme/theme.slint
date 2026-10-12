@@ -1,7 +1,5 @@
 export global Theme {
     in-out property <bool> is-dark: false;
-    // The Black (OLED) theme: also dark, with chrome on the black page.
-    in-out property <bool> is-black: false;
     in-out property <bool> high-contrast: false;
 
     in-out property <color> background: #ffffff;
@@ -194,13 +192,14 @@ export global Motion {
     // Changing values (picker labels, counts, the selected game's name) slide
     // and crossfade over this one duration on every page.
     out property <duration> value-swap-duration: reduced-motion ? 0ms : 180ms;
-    // Every list and grid camera (components/scroll.slint): linear and
-    // slightly under the 115ms input repeat, so held steps join into one
-    // continuous movement.
-    out property <duration> scroll-duration: reduced-motion ? 0ms : 110ms;
+    // Every list and grid camera (components/scroll.slint): linear, and a
+    // little longer than the 115 ms input repeat. Each held step retargets
+    // the glide before it ends, so a linear glide runs at one constant speed
+    // with no stop between rows (shorter, it stood still a frame per row).
+    out property <duration> scroll-duration: reduced-motion ? 0ms : 130ms;
     // A touchpad pulling past a list's end stretches it (components/scroll.slint);
-    // once the fingers stop, it springs back over this, eased out.
-    out property <duration> overscroll-return-duration: reduced-motion ? 0ms : 340ms;
+    // once the fingers stop, it springs back over this, from rest.
+    out property <duration> overscroll-return-duration: reduced-motion ? 0ms : 380ms;
     // Modal dialogs (components/modal-dialog.slint): the backdrop fades and
     // the card lifts into place together.
     out property <duration> dialog-duration: reduced-motion ? 0ms : 180ms;

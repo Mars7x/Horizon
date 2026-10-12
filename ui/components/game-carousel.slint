@@ -6,6 +6,8 @@ import { SelectedGameLabel } from "selected-game-label.slint";
 import { Wheel } from "wheel.slint";
 import { Scroll } from "scroll.slint";
 import { Momentum } from "momentum.slint";
+import { CameraGlide } from "camera-glide.slint";
+import { InputResample } from "input-resample.slint";
 
 // The home carousel is modeled as a camera looking onto one larger scene.
 // The rounded shelf, title/connector, game row, and focus frame all share the
@@ -114,17 +116,19 @@ export component GameCarousel inherits Rectangle {
             momentum.stop();
         }
         if root.following-pointer {
+            let before = root.placed;
             if was-springing {
                 // Still springing back: continue from where the shelf is.
-                root.pull = Scroll.unrubber(-scene.x - root.camera-offset);
+                root.pull = Scroll.unrubber(Scroll.past(-scene.x, root.camera-offset));
             }
             momentum.add(Wheel.distance(delta-x));
             let raw = root.camera-offset + root.pull + Wheel.distance(delta-x);
             root.camera-offset = raw;
             root.clamp-camera();
-            root.pull = raw - root.camera-offset;
+            root.pull = Scroll.past(raw, root.camera-offset);
             release.stop();
             release.start();
+            resample.mark(before);
         } else {
             root.pull = 0px;
             root.camera-offset += Wheel.distance(delta-x);
@@ -151,18 +155,17 @@ export component GameCarousel inherits Rectangle {
     // braking hard, and springs back once it stops.
     momentum := Momentum {
         glide(travel) => {
+            let before = root.placed;
             root.following-pointer = true;
             root.springing = false;
             let raw = root.camera-offset + root.pull + travel;
             root.camera-offset = raw;
             root.clamp-camera();
-            root.pull = raw - root.camera-offset;
-            // Stored lengths round, so a glide short of the end isn't exact.
-            if abs(root.pull) > 0.5px {
+            root.pull = Scroll.past(raw, root.camera-offset);
+            if root.pull != 0px {
                 momentum.brake();
-            } else {
-                root.pull = 0px;
             }
+            resample.mark(before);
         }
         ended => {
             if root.pull != 0px {
@@ -178,6 +181,25 @@ export component GameCarousel inherits Rectangle {
     changed fingers-down => {
         if !root.fingers-down && root.following-pointer && !momentum.gliding && !root.dragging {
             root.let-go();
+        }
+    }
+
+    // Gliding after a swipe: a touch catches it (`catch`).
+    out property <bool> gliding: momentum.gliding;
+    // A touch on the gliding shelf stops it where it is (a glide braking
+    // into the stretch springs back).
+    public function catch() {
+        if momentum.gliding {
+            momentum.stop();
+            if root.pull != 0px {
+                root.spring-back();
+            } else {
+                // Stop where it is drawn (a moment behind the glide), still
+                // following the touch.
+                root.camera-offset = resample.shown;
+                root.clamp-camera();
+                resample.stop();
+            }
         }
     }
 
@@ -201,19 +223,21 @@ export component GameCarousel inherits Rectangle {
         root.springing = false;
         root.camera-offset = drawn;
         root.clamp-camera();
-        root.pull = Scroll.unrubber(drawn - root.camera-offset);
+        root.pull = Scroll.unrubber(Scroll.past(drawn, root.camera-offset));
         root.drag-start = root.camera-offset + root.pull + moved;
         root.drag-last = root.camera-offset + root.pull;
     }
     // `moved`: how far the finger is from where it went down.
     public function drag-to(moved: length) {
         // The shelf follows the finger: moving right shows what's to the left.
+        let before = root.placed;
         let raw = root.drag-start - moved;
         momentum.add(raw - root.drag-last);
         root.drag-last = raw;
         root.camera-offset = raw;
         root.clamp-camera();
-        root.pull = raw - root.camera-offset;
+        root.pull = Scroll.past(raw, root.camera-offset);
+        resample.mark(before);
     }
     public function drag-end() {
         if root.dragging {
@@ -263,8 +287,27 @@ export component GameCarousel inherits Rectangle {
     }
     changed camera-offset => { root.geometry-changed(root.first-game-center-x-px); }
 
+    // The camera glides to a new selection (`CameraGlide`: one step eases
+    // out, a held direction cruises at a steady speed); the stretch past an
+    // end springs back from rest, like a critically damped spring (as in
+    // ScrollCamera).
+    camera-glide := CameraGlide {
+        target: root.camera-offset;
+        snap: root.following-pointer;
+        duration: Motion.carousel-duration;
+    }
+    private property <length> shown-camera: camera-glide.shown;
+    private property <length> stretch: Scroll.rubber(root.pull);
+    animate stretch {
+        duration: root.following-pointer ? 0ms : Motion.overscroll-return-duration;
+        easing: cubic-bezier(0.3, 0.0, 0.2, 1.0);
+    }
+    // Touchpad and finger movement is drawn where it was 4 ms before each
+    // frame, so it moves evenly (`InputResample`).
+    private property <length> placed: root.shown-camera + root.stretch;
+    resample := InputResample { value: root.placed; }
     scene := Rectangle {
-        x: -root.camera-offset - Scroll.rubber(root.pull);
+        x: -resample.shown;
         y: 0px;
         width: Metrics.carousel-shelf-left
             + root.shelf-width
@@ -272,11 +315,6 @@ export component GameCarousel inherits Rectangle {
         height: root.height;
         background: transparent;
 
-        animate x {
-            duration: root.following-pointer ? 0ms
-                : root.springing ? Motion.overscroll-return-duration : Motion.carousel-duration;
-            easing: ease-out;
-        }
 
         // The backdrop is world geometry, not a fixed viewport. Render it
         // before the connector so the connector color stays visually constant

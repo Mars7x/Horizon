@@ -138,10 +138,10 @@ literal duration. Pick the token by **what happened**, and the easing by
 | Selection moved | `focus-duration` (140 ms) | Tile lift, focus ring in and out, tick boxes, dimming while selecting |
 | A value changed | `value-swap-duration` (180 ms) | Header values, toggles, swatches, progress bars, chart bars, list rows arriving |
 | A grid's contents changed | `GridRefresh` (`components/grid-refresh.slint`) | Library Source and Sort, Album Game and Type: covers in both grids glide to their new places (260 ms, ease-out), leavers fade out (120 ms), newcomers fade in (170 ms after 90 ms); see ADR 0172 |
-| Carousel moved | `carousel-duration` (190 ms) | Home and Activity carousels |
+| Carousel moved | `carousel-duration` (190 ms) | Home and Activity carousels; Home's shelf steps it per frame (`CameraGlide`, see HOME_UI) |
 | Page or view changed | `page-duration` (220 ms) | Zoom, Album slide and grow, hint bar and viewer overlay fades |
 | Dialog opened or closed | `dialog-duration` (180 ms), `dialog-rise` | Every modal (`ModalDialog`) |
-| Camera moved | `scroll-duration` (110 ms) | Every list and grid camera, the key field's text scroll |
+| Camera moved | `scroll-duration` (130 ms) | Every list and grid camera, the key field's text scroll |
 | Status appeared or left | `status-enter/exit-duration` | Battery, controller |
 
 Easing: **moves and resizes ease-out** (they answer input, so they start fast);
@@ -177,6 +177,10 @@ instant (a fresh visit resetting a list to the top), keep the duration at 0
 until that change has been drawn, then restore it (Achievements uses a short
 timer after `visit-revision` changes).
 
+A list camera's `settle-key` changes only when the page is arrived at (a
+visit counter), never when it is left: a reset while leaving snaps a list
+scrolled between rows back onto a row as the page fades out.
+
 ## Scrolling
 
 Every vertical list and grid (Library, Album, Achievements' two lists,
@@ -193,8 +197,15 @@ Activity's session history) scrolls the same way, through one
   `[0, content − viewport]`. At the end, the last row rests on the
   viewport's bottom edge; there is never empty space under it. A short list
   doesn't scroll at all.
-- **Motion:** `Motion.scroll-duration` (110 ms), linear, just under the
-  115 ms held-input repeat, so held steps glide at a steady speed.
+- **Motion:** `Motion.scroll-duration` (130 ms), linear, a little longer
+  than the 115 ms held-input repeat: each step retargets the glide before
+  it ends, and a retargeted linear glide settles to one constant speed, so
+  held steps never pause between rows. (At 110 ms it finished early and
+  stood still for a frame per row.) The glide steps every frame by the time
+  since the previous one (`ScrollCamera.step`), not as a Slint `animate`: a
+  focus move reaches the camera in a `changed` handler just before a frame
+  is drawn, and an animation started there doesn't move on that frame, so
+  every step began with a still frame.
 - **Fresh visits jump:** a `CameraSettle` keyed on the visit (or on opening
   a sub-view) makes the reset instant instead of scrolling back.
 - **Peeking rows** are part of the content: clicking one selects it and
@@ -215,14 +226,37 @@ so follows the desktop's natural/traditional scrolling setting:
 
 - **Touchpad:** the camera follows the fingers directly, 2.5 px per pixel of
   travel. A swipe still moving when the fingers lift glides on and slows to a
-  stop (`Momentum`, `ui/components/momentum.slint`): it starts at the swipe's
-  speed and halves every 160 ms. Fingers that stopped before lifting don't
-  glide. The glide runs frame by frame, so a list keeps mounting rows around
-  it. A glide that reaches an end runs on into the stretch, brakes hard and
-  springs back, as a pull does. New input or a focus change stops it. Reduced
-  Motion never glides.
+  stop (`Momentum`, `ui/components/momentum.slint`, the one glide every
+  touchpad and finger gesture uses): it starts at the swipe's speed,
+  averaged over its last frames (about 70 ms, so uneven input batches don't
+  make one flick throw hard and the next not at all), and halves every
+  160 ms. Fingers that stopped before lifting don't glide. The glide runs
+  frame by frame, so a list keeps mounting rows around it. A glide that
+  reaches an end runs on into the stretch, brakes hard and springs back, as
+  a pull does. New input, a touch (it catches the glide, and isn't a tap on
+  what's beneath) or a focus change stops it, where it is drawn. The glide
+  carries on from the last movement, not from the lift, so there is no
+  pause between them. Reduced Motion never glides.
+- **Even motion, no added delay** (`InputResample`,
+  `ui/components/input-resample.slint`, in `ScrollCamera` and Home's
+  carousel): touchpad and finger events come at their own rate (often
+  100–125 Hz), not the display's, so drawing the newest one moved the
+  camera unevenly (20, 20, 10 px a frame). Each frame instead draws where
+  the input was 4 ms before it, about the average age of the newest event,
+  so responsiveness is unchanged and every frame moves the same amount.
+  Between events it interpolates; when the next event hasn't arrived yet it
+  carries on at the last speed for no longer than the next event could
+  still be due (at most 6 ms), so fingers that stop dead overshoot by only a
+  few pixels and ease back. Event times are when each event reaches Horizon:
+  events read together are one sample and aren't predicted from, which
+  draws as evenly as before resampling or better. The glide that follows a
+  swipe is drawn the same way, so the handover doesn't jump.
+- **At an end, only a real stretch counts** (`Scroll.past`): stored lengths
+  round, so a camera clamped at an end can sit a fraction of a pixel off
+  it. Anything under half a pixel is no stretch; otherwise lifting the
+  fingers would spring back by nothing instead of gliding.
 - **Wheel notch** (a whole multiple of 60px): 180 px with the standard
-  110 ms linear glide. Spun fast, notches never put the destination more
+  130 ms linear glide. Spun fast, notches never put the destination more
   than a row ahead of where the gliding camera is drawn, since the owner
   mounts rows around the destination; otherwise rows on screen would
   already be let go (blank rows near the bottom bar when scrolling up).
@@ -235,7 +269,9 @@ so follows the desktop's natural/traditional scrolling setting:
 - **Overscroll:** a touchpad pulling past either end stretches the content
   with growing resistance (`Scroll.rubber`, at most 80 px), and when the
   fingers lift (`Wheel.touching`, below) it springs back over
-  `Motion.overscroll-return-duration` (340 ms, ease-out). A wheel just stops
+  `Motion.overscroll-return-duration` (380 ms) from rest, like a critically
+  damped spring (`cubic-bezier(0.3, 0, 0.2, 1)`), so it doesn't jolt when a
+  glide braked into it. A wheel just stops
   at the end. Reduced Motion turns it off. Home's carousel does the same.
   A pull that starts while content is still springing back continues from
   where it is.
@@ -247,16 +283,18 @@ so follows the desktop's natural/traditional scrolling setting:
   notch, and a 600 ms timer ends a pull whose gesture end never arrives.
 
 Horizontal scrolling is used by Home only: it pans the carousel's camera the
-same way, clamped to the shelf's ends. On Home a finger (or mouse) drag pans
-it too (`SwipeGestureHandler`): the shelf follows the finger, stretches past
-an end, and glides or springs back on release. A tap still selects.
+same way, clamped to the shelf's ends.
 
-Every vertical list and grid scrolls under a finger (or mouse) drag the same
-way: wrap the viewport's contents in `DragScroll` (`components/scroll.slint`)
-and pass its movement to the `ScrollCamera`'s `drag-begin`, `drag-to` and
-`drag-end`. It takes the drag from a row or tile only once it is clearly
-vertical, so a tap still selects, and it never moves focus. The content moves
-from where the drag was recognised, so it doesn't jump.
+A finger (or mouse) drag scrolls Home's shelf and every list and grid, all
+through `DragScroll` (`components/scroll.slint`, `vertical: false` on Home):
+wrap the viewport's contents in it, pass its movement to the camera's
+`drag-begin`, `drag-to` and `drag-end`, and bind `catching` to the camera's
+`gliding` and `caught` to its `catch`. The content follows the finger,
+stretches past an end, and glides or springs back on release. It takes the
+drag from a row or tile only once Slint recognises a swipe along its axis,
+so a tap still selects and sideways movement doesn't scroll a list; the
+content moves from that point, so it doesn't jump. A touch on gliding
+content stops it at once. It never moves focus.
 
 ## Checking a change
 

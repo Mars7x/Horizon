@@ -348,6 +348,8 @@ export component AlbumPage inherits Rectangle {
             drag-begin(moved) => { scroll-camera.drag-begin(moved); }
             drag-to(moved) => { scroll-camera.drag-to(moved); }
             drag-end => { scroll-camera.drag-end(); }
+            catching: scroll-camera.gliding;
+            caught => { scroll-camera.catch(); }
             TouchArea {
                 width: parent.width; height: parent.height;
                 enabled: !root.viewing;

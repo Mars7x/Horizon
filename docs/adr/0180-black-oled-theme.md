@@ -26,7 +26,8 @@ Settings → Appearance → Theme gains a fourth choice, **Black**, after Dark.
   palette, which is already true black.
 - Home's top bar sits on the black page in Black, with no grey band and no
   divider line, the same way the footer has none: the icons float on black. `Theme.is-black` exists for this; pages
-  otherwise use the shared tokens.
+  otherwise use the shared tokens. *(2026-10-12: every theme now does this,
+  so `Theme.is-black` was removed; Black needs no handling of its own.)*
 - **System never picks Black.** The portal only reports light or dark.
 - Stored as `"black"` in `config/appearance.json`; older files are unaffected.
 - Appearance focus indices: Theme 0–3, accent 4–13, UI Sounds 14. Up from an

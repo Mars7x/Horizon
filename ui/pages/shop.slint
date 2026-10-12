@@ -434,6 +434,8 @@ export component ShopPage inherits Rectangle {
                 drag-begin(moved) => { camera.drag-begin(moved); }
                 drag-to(moved) => { camera.drag-to(moved); }
                 drag-end => { camera.drag-end(); }
+                catching: camera.gliding;
+                caught => { camera.catch(); }
                 TouchArea {
                     width: parent.width; height: parent.height;
                     enabled: !root.details-open;
