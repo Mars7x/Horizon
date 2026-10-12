@@ -1,0 +1,20 @@
+// One app in the Shop's grid (presentation/shop.rs).
+export struct ShopAppData {
+    name: string,
+    developer: string,
+    summary: string,
+    verified: bool,
+    icon: image,
+    has-icon: bool,
+    // "Installed", "Update", or what's happening ("Installing", "Waiting").
+    status: string,
+    busy: bool,
+    // 0 to 1; -1 while flatpak doesn't say.
+    progress: float,
+}
+
+// One screenshot on an app's page; `loaded` once downloaded.
+export struct ShopShotData {
+    image: image,
+    loaded: bool,
+}

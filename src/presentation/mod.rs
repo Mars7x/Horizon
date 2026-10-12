@@ -11,6 +11,7 @@ pub mod navigation;
 pub mod profile;
 
 pub mod settings;
+pub mod shop;
 pub mod status;
 pub mod wake;
 

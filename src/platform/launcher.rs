@@ -7,7 +7,7 @@ use crate::{
 };
 
 #[derive(Debug, Error)]
-enum PortalLaunchError {
+pub enum PortalLaunchError {
     #[error("launch URI is invalid: {0}")]
     InvalidUri(String),
     #[error("could not create portal runtime: {0}")]
@@ -28,7 +28,10 @@ impl LaunchExecutor for PortalLaunchExecutor {
     }
 }
 
-fn open_uri(value: &str) -> Result<(), PortalLaunchError> {
+/// Open a link with the app the desktop chooses for it (a browser, the
+/// software store), through the OpenURI portal. Blocks until the portal
+/// answers, so call it off the UI thread.
+pub fn open_uri(value: &str) -> Result<(), PortalLaunchError> {
     let uri =
         Uri::parse(value).map_err(|error| PortalLaunchError::InvalidUri(error.to_string()))?;
     let runtime = tokio::runtime::Builder::new_current_thread()

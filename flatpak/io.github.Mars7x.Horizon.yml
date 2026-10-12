@@ -16,7 +16,8 @@ build-options:
 finish-args:
   - --require-version=1.16.0
   - --share=ipc
-  # Optional SteamGridDB API metadata and artwork downloads.
+  # Optional SteamGridDB API metadata and artwork downloads, Steam Web API
+  # requests, and the Shop's Flathub catalogue (flathub.org, dl.flathub.org).
   # Flatpak cannot restrict --share=network to a single host.
   - --share=network
   - --socket=wayland
@@ -34,6 +35,11 @@ finish-args:
   # Horizon's narrow session D-Bus API; it does not expose flatpak-spawn or
   # arbitrary host command execution.
   - --talk-name=io.github.Mars7x.Horizon.Session1
+  # The Shop installs, updates, uninstalls and opens Flathub apps with the
+  # host's `flatpak` through `flatpak-spawn --host` (ADR 0181). This is host
+  # command execution: Horizon only ever runs the fixed `flatpak`
+  # subcommands in src/platform/flatpak_host.rs, with a checked app ID.
+  - --talk-name=org.freedesktop.Flatpak
   # Read-only status queries over the host system bus: active Ethernet/Wi-Fi
   # connection and signal strength, plus host laptop/handheld battery level.
   # NetworkManager/UPower retain their usual polkit restrictions for writes.

@@ -14,6 +14,7 @@ use crate::{
     presentation::{
         keyboard::{KeyboardController, KeyboardFeedback},
         profile::{ProfileController, ProfileFeedback},
+        shop::{ShopController, ShopFeedback},
     },
 };
 
@@ -46,6 +47,7 @@ pub struct NavigationController {
     profile: RefCell<Option<Rc<ProfileController>>>,
     album: RefCell<Option<Rc<AlbumController>>>,
     keyboard: RefCell<Option<Rc<KeyboardController>>>,
+    shop: RefCell<Option<Rc<ShopController>>>,
 }
 
 impl NavigationController {
@@ -69,6 +71,7 @@ impl NavigationController {
             profile: RefCell::new(None),
             album: RefCell::new(None),
             keyboard: RefCell::new(None),
+            shop: RefCell::new(None),
         });
         controller.publish_route(ui);
         controller.publish_focus(ui);
@@ -92,6 +95,10 @@ impl NavigationController {
     }
 
     /// The Profile page, opened by clicking Home's avatar (or A on it).
+    pub fn set_shop(&self, controller: Rc<ShopController>) {
+        *self.shop.borrow_mut() = Some(controller);
+    }
+
     pub fn set_profile(self: &Rc<Self>, controller: Rc<ProfileController>, ui: &AppWindow) {
         *self.profile.borrow_mut() = Some(controller);
         let weak = ui.as_weak();
@@ -260,6 +267,11 @@ impl NavigationController {
         if from == AppRoute::Utility(UtilityPage::Settings) {
             self.settings.on_leave(ui);
         }
+        if from == AppRoute::Utility(UtilityPage::Shop)
+            && let Some(shop) = self.shop.borrow().as_ref()
+        {
+            shop.on_leave(ui);
+        }
         if from == AppRoute::Utility(UtilityPage::Album)
             && let Some(album) = self.album.borrow().as_ref()
         {
@@ -367,6 +379,11 @@ impl NavigationController {
         if route == AppRoute::Utility(UtilityPage::Activity) {
             self.prepare_activity_visit(ui);
         }
+        if route == AppRoute::Utility(UtilityPage::Shop)
+            && let Some(shop) = self.shop.borrow().as_ref()
+        {
+            shop.start_new_visit(ui);
+        }
         if route == AppRoute::Profile
             && let Some(profile) = self.profile.borrow().as_ref()
         {
@@ -407,6 +424,25 @@ impl NavigationController {
                     return;
                 }
                 ProfileFeedback::Back => {
+                    self.cue(UiSoundCue::Back);
+                    return;
+                }
+            }
+        }
+        if self.current_route() == AppRoute::Utility(UtilityPage::Shop) {
+            let feedback = self
+                .shop
+                .borrow()
+                .as_ref()
+                .map_or(ShopFeedback::Ignored, |shop| shop.handle_action(ui, event));
+            match feedback {
+                ShopFeedback::Ignored => {}
+                ShopFeedback::Handled => return,
+                ShopFeedback::Ok => {
+                    self.cue(UiSoundCue::Ok);
+                    return;
+                }
+                ShopFeedback::Back => {
                     self.cue(UiSoundCue::Back);
                     return;
                 }
@@ -686,6 +722,11 @@ impl NavigationController {
             }
             if to == AppRoute::Utility(UtilityPage::Activity) {
                 self.prepare_activity_visit(ui);
+            }
+            if to == AppRoute::Utility(UtilityPage::Shop)
+                && let Some(shop) = self.shop.borrow().as_ref()
+            {
+                shop.start_new_visit(ui);
             }
             // Queue feedback before potentially expensive route redraws.
             self.cue(UiSoundCue::Back);
