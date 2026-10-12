@@ -1,4 +1,4 @@
-use tracing::info;
+use tracing::debug;
 
 /// Select Horizon's Slint platform explicitly before any Slint API that needs
 /// access to the windowing system is called.
@@ -13,10 +13,6 @@ pub fn initialize() -> Result<(), slint::PlatformError> {
         .renderer_name("skia".into())
         .select()?;
 
-    info!(
-        backend = "winit",
-        renderer = "skia",
-        "Slint platform initialized"
-    );
+    debug!(backend = "winit", renderer = "skia", "Slint platform ready");
     Ok(())
 }

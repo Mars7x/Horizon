@@ -60,11 +60,17 @@ in headers). A shared action can show two glyphs (`button2`). While a dialog is 
   `radius-lg`, 1px divider border, hover to `surface-raised`, and the Settings
   focus outline that fades in and out over `Motion.focus-duration`. Titles use
   `heading-size`, subtitles `body-size`. Page-specific trailing content is passed
-  as children.
+  as children; it sits above the row's click area, so a trailing button (the
+  row's Remove) takes its own clicks.
 - **Panels and read-only rows** (Activity panels, session history, achievement
   entries) are `Surface`: same colour, radius and border, never focusable.
 - **Game covers and media tiles** (Album captures) get the Home corner-bracket
   `FocusFrame`; rows and buttons get the outline. Never mix them.
+- **No hand cursor.** Nothing sets `mouse-cursor: pointer`; hover colour shows
+  what's clickable. A text field keeps the text cursor.
+- **Clicks sound like presses.** A click plays the cue the same choice plays
+  from a controller (see [Appearance](APPEARANCE.md)); add one with any new
+  click handler.
 
 ## Text
 

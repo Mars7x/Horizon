@@ -125,7 +125,11 @@ audio immediately; failure to initialize a playback device is non-fatal.
 For this initial sound phase, Horizon plays the user-provided
 `ui/assets/horizon-navigation.wav` **only when keyboard/gamepad directional
 navigation changes the selected item or region**. There is no sound on ignored
-keys, pointer clicks, initial page load, launching games or opening dialogs.
+keys, initial page load or launching games. A click (or tap) plays what the
+same choice plays from a controller: OK, Back, or the navigation sound when it
+moves the selection (a game on Home or in the Library, Album's viewer, the
+Shop's screenshots). Profile, the Shop and Home take the cue callback from
+navigation (`set_action_sound`) for their own click handlers.
 A newer cue replaces the one playing instead of layering. **Current playback
 (ADR 0169):** a native PipeWire stream (`platform::pipewire`), 48 kHz mono, asking
 the graph for 256-frame (about 5 ms) cycles. Playing a cue is one atomic store

@@ -164,7 +164,10 @@ media extension, so a half-written file never appears. Pass the game's
   neighbours come first, then thumbnails for visible rows, then for the
   overscan rows.
 - **Bounded memory.** Only rows near the camera are mounted (two overscan rows
-  each side). Up to 96 thumbnails (480×270) and 4 full-screen photos stay
+  each side). Scrolling shifts that window in place (rows that leave are
+  removed, rows that arrive added), so the tiles that stay keep their
+  elements and the focus frame and lift still animate; only a grid refresh
+  rebuilds every tile. Up to 96 thumbnails (480×270) and 4 full-screen photos stay
   decoded. Thumbnails are released a second after leaving the Album.
 - **Thumbnail cache.** `cache/album/<key>.jpg` (and `<key>.json` with a
   video's duration), keyed by path, size and modified time, so a changed file

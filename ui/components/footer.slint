@@ -63,29 +63,11 @@ export component Footer inherits Rectangle {
         }
     }
 
-    Rectangle {
-        x: Metrics.page-margin + 56px;
-        y: (parent.height - 30px) / 2;
-        width: 1px;
-        height: 30px;
-        opacity: root.connected-controller-count > 0 ? 1.0 : 0.0;
-        animate opacity { duration: Motion.status-enter-duration; easing: ease-in-out; }
-        background: Theme.divider;
-    }
-
     ClockReadout {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
         clock-time: root.clock-time;
         clock-suffix: root.clock-suffix;
-    }
-
-    Rectangle {
-        x: parent.width - Metrics.page-margin - 96px;
-        y: (parent.height - 30px) / 2;
-        width: 1px;
-        height: 30px;
-        background: Theme.divider;
     }
 
     // Same component and line as every other page's hints, so "A OK" sits

@@ -79,8 +79,17 @@ impl NavigationController {
         controller
     }
 
+    /// Also given to the pages whose clicks play their own sounds; call it
+    /// after they are installed.
     pub fn set_action_sound(&self, callback: Rc<dyn Fn(UiSoundCue)>) {
         self.settings.set_action_sound(Rc::clone(&callback));
+        self.home.set_sound(Rc::clone(&callback));
+        if let Some(profile) = self.profile.borrow().as_ref() {
+            profile.set_sound(Rc::clone(&callback));
+        }
+        if let Some(shop) = self.shop.borrow().as_ref() {
+            shop.set_sound(Rc::clone(&callback));
+        }
         *self.action_sound.borrow_mut() = Some(callback);
     }
 
@@ -140,9 +149,12 @@ impl NavigationController {
             .cloned()
             .expect("Achievements controller is installed");
         let weak = ui.as_weak();
+        let navigation = Rc::clone(self);
         ui.on_achievements_back(move || {
-            if let Some(ui) = weak.upgrade() {
-                controller.exit_entries(&ui);
+            if let Some(ui) = weak.upgrade()
+                && controller.exit_entries(&ui)
+            {
+                navigation.cue(UiSoundCue::Back);
             }
         });
         let controller = self
@@ -164,8 +176,10 @@ impl NavigationController {
             .cloned()
             .expect("Achievements controller is installed");
         let weak = ui.as_weak();
+        let navigation = Rc::clone(self);
         ui.on_achievements_cycle_source(move |direction| {
             if let Some(ui) = weak.upgrade() {
+                navigation.cue(UiSoundCue::Ok);
                 controller.cycle_source(&ui, direction);
             }
         });
@@ -218,7 +232,11 @@ impl NavigationController {
             if let Some(ui) = weak.upgrade()
                 && on_album(&navigation)
             {
+                let before = ui.get_album_slide_key();
                 album.step(&ui, direction);
+                if ui.get_album_slide_key() != before {
+                    navigation.cue(UiSoundCue::Navigation);
+                }
             }
         });
         let (weak, album, navigation) = (ui.as_weak(), Rc::clone(&controller), Rc::clone(self));
@@ -565,7 +583,11 @@ impl NavigationController {
             {
                 controller.focus.borrow_mut().leave_utilities();
                 controller.publish_focus(&ui);
+                let before = ui.get_library_selected_index();
                 controller.library.select_on_page(&ui, index);
+                if ui.get_library_selected_index() != before {
+                    controller.cue(UiSoundCue::Navigation);
+                }
             }
         });
         let weak = ui.as_weak();

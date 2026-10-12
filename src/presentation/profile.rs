@@ -25,10 +25,11 @@ use tracing::warn;
 
 use crate::{
     AppWindow, ProfileFrameData,
+    audio::UiSoundCue,
     input::{UiAction, UiActionEvent},
     navigation::step_with_edge_wrap,
     platform::{data_paths, file_chooser},
-    presentation::{friends::FriendsController, wake::drain_notify},
+    presentation::{CallbackSlot, friends::FriendsController, wake::drain_notify},
     services::{
         profile::{self, Animation, ProfilePreferences, ProfileSource},
         steam_account::{ProfileItem, SteamAccountService, SteamWebApiClient},
@@ -158,6 +159,8 @@ pub struct ProfileController {
     feedback: RefCell<String>,
     /// The page's Steam friends list.
     friends: Rc<FriendsController>,
+    /// UI sounds for clicks (a controller's are played by navigation).
+    sound: CallbackSlot<dyn Fn(UiSoundCue)>,
 }
 
 impl ProfileController {
@@ -196,6 +199,7 @@ impl ProfileController {
             busy: Cell::new(false),
             feedback: RefCell::new(String::new()),
             friends: FriendsController::new(ui, Rc::clone(&steam_account)),
+            sound: RefCell::new(None),
         });
         drain.bind(&controller);
         if let Some(paths) = &controller.paths {
@@ -226,31 +230,56 @@ impl ProfileController {
         controller
     }
 
+    /// Clicks play what the same choice plays from a controller.
+    pub fn set_sound(&self, callback: Rc<dyn Fn(UiSoundCue)>) {
+        *self.sound.borrow_mut() = Some(callback);
+    }
+
+    fn cue(&self, cue: UiSoundCue) {
+        if let Some(callback) = self.sound.borrow().as_ref() {
+            callback(cue);
+        }
+    }
+
     fn bind_callbacks(self: &Rc<Self>, ui: &AppWindow) {
         let (weak, controller) = (ui.as_weak(), Rc::clone(self));
         ui.on_profile_edit(move || {
-            if let Some(ui) = weak.upgrade() {
+            if let Some(ui) = weak.upgrade()
+                && !controller.page.borrow().edit_open
+            {
                 controller.open_edit(&ui);
+                controller.cue(UiSoundCue::Ok);
             }
         });
         let (weak, controller) = (ui.as_weak(), Rc::clone(self));
         ui.on_profile_activate_option(move |option| {
             if let Some(ui) = weak.upgrade() {
                 controller.page.borrow_mut().edit_selection = option;
-                controller.activate_option(&ui, option);
+                if controller.activate_option(&ui, option) {
+                    controller.cue(UiSoundCue::Ok);
+                }
             }
         });
         let (weak, controller) = (ui.as_weak(), Rc::clone(self));
         ui.on_profile_remove_picture(move || {
             if let Some(ui) = weak.upgrade() {
                 controller.page.borrow_mut().edit_selection = OPTION_CHOOSE;
-                controller.ask_remove(&ui);
+                if controller.ask_remove(&ui) {
+                    controller.cue(UiSoundCue::Ok);
+                }
             }
         });
         let (weak, controller) = (ui.as_weak(), Rc::clone(self));
         ui.on_profile_confirm(move |choice| {
-            if let Some(ui) = weak.upgrade() {
+            if let Some(ui) = weak.upgrade()
+                && controller.page.borrow().confirm_remove
+            {
                 controller.choose_confirm(&ui, choice);
+                controller.cue(if choice == 1 {
+                    UiSoundCue::Ok
+                } else {
+                    UiSoundCue::Back
+                });
             }
         });
         let (weak, controller) = (ui.as_weak(), Rc::clone(self));
@@ -261,14 +290,20 @@ impl ProfileController {
         });
         let (weak, controller) = (ui.as_weak(), Rc::clone(self));
         ui.on_profile_save_name(move |name| {
-            if let Some(ui) = weak.upgrade() {
+            if let Some(ui) = weak.upgrade()
+                && controller.page.borrow().editing_name
+            {
                 controller.save_name(&ui, &name);
+                controller.cue(UiSoundCue::Ok);
             }
         });
         let (weak, controller) = (ui.as_weak(), Rc::clone(self));
         ui.on_profile_cancel_name(move || {
-            if let Some(ui) = weak.upgrade() {
+            if let Some(ui) = weak.upgrade()
+                && controller.page.borrow().editing_name
+            {
                 controller.close_editor(&ui);
+                controller.cue(UiSoundCue::Back);
             }
         });
     }

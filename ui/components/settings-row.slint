@@ -75,7 +75,6 @@ export component SettingsRow inherits ListRow {
         }
         secondary-touch := TouchArea {
             width: parent.width; height: parent.height;
-            mouse-cursor: pointer;
             clicked => { root.secondary-activated(); }
         }
     }

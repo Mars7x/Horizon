@@ -1327,6 +1327,8 @@ impl AlbumController {
             .collect();
         if mounted != s.mounted || start != s.mounted_start {
             let glide = s.glide.take();
+            // A grid refresh rebuilds every tile (its glide needs that).
+            let refresh = glide.is_some();
             let tiles: Vec<AlbumTileData> = s.order[start..end]
                 .iter()
                 .enumerate()
@@ -1351,7 +1353,12 @@ impl AlbumController {
                     }
                 }
             }
-            self.tiles.set_vec(tiles);
+            let shifted = !refresh && window_shift(&s.mounted, s.mounted_start, &mounted, start);
+            if shifted {
+                shift_window(&self.tiles, s.mounted_start, start, tiles);
+            } else {
+                self.tiles.set_vec(tiles);
+            }
             s.mounted = mounted;
             s.mounted_start = start;
         }
@@ -1720,10 +1727,92 @@ impl VideoSink for UiVideoSink {
     }
 }
 
+/// The mounted window only scrolled: the captures in both windows' overlap
+/// are the same ones, in the same places.
+fn window_shift(old: &[PathBuf], old_start: usize, new: &[PathBuf], new_start: usize) -> bool {
+    let from = old_start.max(new_start);
+    let to = (old_start + old.len()).min(new_start + new.len());
+    from < to && (from..to).all(|at| old[at - old_start] == new[at - new_start])
+}
+
+/// Scroll the mounted tiles in place: drop the rows that left, add the ones
+/// that arrived, and update the rest. The tiles that stay keep their
+/// elements, so their focus and lift keep animating.
+fn shift_window(
+    model: &VecModel<AlbumTileData>,
+    old_start: usize,
+    new_start: usize,
+    tiles: Vec<AlbumTileData>,
+) {
+    let new_end = new_start + tiles.len();
+    // Leading rows that left, then trailing ones.
+    for _ in old_start..new_start.max(old_start) {
+        model.remove(0);
+    }
+    let kept_start = old_start.max(new_start);
+    while kept_start + model.row_count() > new_end {
+        model.remove(model.row_count() - 1);
+    }
+    // Leading rows that arrived (inserted last first), then trailing ones.
+    for at in (new_start..kept_start).rev() {
+        model.insert(0, tiles[at - new_start].clone());
+    }
+    let kept = model.row_count();
+    for tile in tiles.iter().skip(kept) {
+        model.push(tile.clone());
+    }
+    for (row, tile) in tiles.into_iter().enumerate() {
+        if model.row_data(row).as_ref() != Some(&tile) {
+            model.set_row_data(row, tile);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::{ExternalGameId, SourceId, album::CaptureOrigin};
+
+    fn tile_at(index: usize) -> AlbumTileData {
+        AlbumTileData {
+            absolute_index: index as i32,
+            ..Default::default()
+        }
+    }
+
+    fn indexes(model: &VecModel<AlbumTileData>) -> Vec<i32> {
+        model.iter().map(|tile| tile.absolute_index).collect()
+    }
+
+    #[test]
+    fn a_scrolled_window_is_one_that_overlaps_in_place() {
+        let paths = |range: std::ops::Range<usize>| -> Vec<PathBuf> {
+            range.map(|at| PathBuf::from(format!("{at}.png"))).collect()
+        };
+        assert!(window_shift(&paths(0..12), 0, &paths(4..16), 4));
+        assert!(window_shift(&paths(4..16), 4, &paths(0..12), 0));
+        // No overlap, or the captures moved: rebuild.
+        assert!(!window_shift(&paths(0..4), 0, &paths(8..12), 8));
+        assert!(!window_shift(&paths(0..12), 0, &paths(1..13), 0));
+    }
+
+    #[test]
+    fn scrolling_keeps_the_tiles_that_stay() {
+        for (old, new) in [(0..12, 4..16), (4..16, 0..12), (0..12, 0..8), (0..8, 0..12)] {
+            let model = VecModel::from(old.clone().map(tile_at).collect::<Vec<_>>());
+            shift_window(
+                &model,
+                old.start,
+                new.start,
+                new.clone().map(tile_at).collect(),
+            );
+            assert_eq!(
+                indexes(&model),
+                new.map(|at| at as i32).collect::<Vec<_>>(),
+                "{old:?} to the new window"
+            );
+        }
+    }
 
     fn game(id: &str) -> SourceGameRef {
         SourceGameRef::new(
