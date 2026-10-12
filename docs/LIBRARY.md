@@ -27,7 +27,7 @@ An empty collection shows an import/install hint. An empty filter shows a distin
 
 ## Phase 10.1.0 — Home recent-games entry
 
-Home intentionally shows **at most 15 distinct, currently imported games with Horizon-observed play history**. The order is descending by the latest recorded play-session start. An older title with many hours does not outrank a game played yesterday. Games without observed play sessions remain in the full Library (Heroic's imported lifetime minutes are not a known last-played timestamp).
+Home intentionally shows **at most 15 distinct, currently imported games with Horizon-observed play history**. The order is descending by the latest recorded play-session start. *(Since ADR 0184, like a console home row: a game added to the library after its first import — a Shop install — also counts from the moment it arrived, so it leads until something is played after it; the row glides to make room.)* An older title with many hours does not outrank a game played yesterday. Games without observed play sessions remain in the full Library (Heroic's imported lifetime minutes are not a known last-played timestamp).
 
 The permanent final Home tile is **Library**. It lives in the same world-space carousel track as normal games and uses the original Home focus frame, selected scale, and camera. Press Accept on the tile or click it to open Library directly. Home always shows this tile, even without activity history or installed games. The full Library catalogue and source-backed launch identifiers are never truncated to 15.
 

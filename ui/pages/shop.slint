@@ -69,17 +69,24 @@ component AppIcon inherits Rectangle {
     }
 }
 
-// Flathub's verified mark: a small accent tick before the developer.
-component VerifiedMark inherits Path {
-    width: 14px; height: 14px;
-    viewbox-width: 14; viewbox-height: 14;
-    commands: "M 7 0.5 A 6.5 6.5 0 1 1 6.99 0.5 Z M 3.8 7.2 L 6.1 9.4 L 10.3 4.8";
-    fill: Theme.accent;
-    stroke: Theme.accent-foreground;
-    stroke-width: 1.6px;
-    stroke-line-cap: round;
-    stroke-line-join: round;
+// Flathub's verified mark before the developer: a solid accent disc with a
+// tick drawn on it. Two shapes, so the disc's edge is the rectangle's own
+// round (no stroke to clip) and the tick is a line only (nothing to fill).
+component VerifiedMark inherits Rectangle {
+    width: 16px; height: 16px;
+    border-radius: self.width / 2;
+    background: Theme.accent;
     accessible-role: none;
+    Path {
+        width: parent.width; height: parent.height;
+        viewbox-width: 16; viewbox-height: 16;
+        commands: "M 4.75 8.25 L 7 10.5 L 11.25 5.75";
+        fill: transparent;
+        stroke: Theme.accent-foreground;
+        stroke-width: 1.75px;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+    }
 }
 
 // One app in the grid: the shared row surface and focus outline (ListRow's),
@@ -120,10 +127,10 @@ component AppCard inherits Rectangle {
         font-weight: Typography.emphasis-weight;
     }
     if root.app.verified : VerifiedMark {
-        x: 98px; y: 45px;
+        x: 98px; y: 44px;
     }
     MarqueeText {
-        x: root.app.verified ? 118px : 98px; y: 41px;
+        x: root.app.verified ? 120px : 98px; y: 41px;
         width: parent.width - self.x - 16px; height: 22px;
         text: root.app.developer;
         active: root.focused;
@@ -523,11 +530,11 @@ export component ShopPage inherits Rectangle {
             font-weight: Typography.heading-weight;
         }
         if root.detail-verified : VerifiedMark {
-            x: root.margin + 116px; y: parent.top + 56px;
+            x: root.margin + 116px; y: parent.top + 55px;
         }
         MarqueeText {
-            x: root.margin + 116px + (root.detail-verified ? 20px : 0px); y: parent.top + 52px;
-            width: parent.left-width - 116px - (root.detail-verified ? 20px : 0px); height: 22px;
+            x: root.margin + 116px + (root.detail-verified ? 22px : 0px); y: parent.top + 52px;
+            width: parent.left-width - 116px - (root.detail-verified ? 22px : 0px); height: 22px;
             text: root.detail-developer;
             active: root.details-open;
             text-color: Theme.secondary-foreground;

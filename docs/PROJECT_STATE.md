@@ -6,7 +6,7 @@ This page describes the **prepared source** assembled from the cleaned repositor
 
 ## Implemented surfaces
 
-- **Home:** game covers, controller/pointer navigation, game launching, utility row, original focus geometry, title marquee and shell status.
+- **Home:** game covers, controller/pointer navigation, game launching, utility row, original focus geometry, title marquee and shell status. The row leads with the latest played or newly added games and glides when it changes (ADR 0184).
 - **Library:** browse imported titles with source/sort controls, responsive artwork grid and Home-matched selected scaling/focus geometry. Library is a full-shell route; Home's original presentation is not replaced.
 - **Activity:** Horizon-observed totals, most-played imported games, recent playtime chart, and a per-game read-only session history; per-game screen Up/Down scrolls without focusing rows. The **Milestones** preview shows up to three recent *real Steam achievements*, not synthetic playtime goals.
 - **Achievements:** fourth Home utility, after Activity; read-only Steam Web API achievement unlock states for eligible imported Steam games; list browsing and recent-unlocks preview. Now has source-aware game/achievement models, optional bounded Steam badge thumbnails, and a source selector; no other achievement provider, full offline cache, or comprehensive account sign-in flow yet.

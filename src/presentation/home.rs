@@ -156,6 +156,12 @@ impl PlayingState {
 pub struct HomeController {
     cards: Rc<VecModel<GameCardData>>,
     home_cards: Rc<VecModel<GameCardData>>,
+    /// Where each Home card was before the row last changed (-1: new to the
+    /// row), so the carousel can glide them there (`home-from-indices`).
+    home_from: Rc<VecModel<i32>>,
+    /// The row as it was last seen on screen. A change made while Home is
+    /// hidden (a Shop install) plays when Home is next shown.
+    seen_order: RefCell<Vec<usize>>,
     home_order: RefCell<Vec<usize>>,
     /// Provider-owned fallbacks, never replaced by downloaded art (a library
     /// reload adds or rereads them).
@@ -225,10 +231,14 @@ impl HomeController {
                 .collect::<Vec<_>>(),
         ));
         ui.set_games(ModelRc::from(Rc::clone(&home_cards)));
+        let home_from = Rc::new(VecModel::from(vec![-1; home_cards.row_count()]));
+        ui.set_home_from_indices(ModelRc::from(Rc::clone(&home_from)));
 
         let controller = Rc::new(Self {
             cards,
             home_cards,
+            home_from,
+            seen_order: RefCell::new(home_order.clone()),
             home_order: RefCell::new(home_order),
             source_cards: RefCell::new(card_data_for_fallback),
             artwork_lookup_jobs: RefCell::new(artwork_lookup_jobs),
@@ -452,6 +462,10 @@ impl HomeController {
                     0
                 }
             });
+        // The old places go in before the cards, so the first frame of the
+        // new row already glides (and a new game fades in at the front).
+        self.home_from
+            .set_vec(home_from_indices(&self.seen_order.borrow(), &order));
         self.home_cards.set_vec(
             order
                 .iter()
@@ -459,10 +473,32 @@ impl HomeController {
                 .collect::<Vec<_>>(),
         );
         *self.home_order.borrow_mut() = order;
+        if ui.get_current_route() == crate::AppRouteView::Home {
+            self.play_reorder(ui, false);
+        }
         self.state
             .borrow_mut()
             .select(next_selection as i32, self.home_item_count());
         self.publish_selection(ui, self.state.borrow().selected_index);
+    }
+
+    /// Home is being shown again: play what changed in the row meanwhile,
+    /// once the page has arrived.
+    pub fn reveal_row_changes(&self, ui: &AppWindow) {
+        if *self.seen_order.borrow() != *self.home_order.borrow() {
+            self.play_reorder(ui, true);
+        }
+    }
+
+    /// Glide the row from how it was last seen to how it is now.
+    fn play_reorder(&self, ui: &AppWindow, after_page_transition: bool) {
+        let order = self.home_order.borrow().clone();
+        self.home_from
+            .set_vec(home_from_indices(&self.seen_order.borrow(), &order));
+        ui.set_home_previous_count(self.seen_order.borrow().len() as i32);
+        ui.set_home_reorder_delayed(after_page_transition);
+        ui.set_home_reorder_sequence(ui.get_home_reorder_sequence().wrapping_add(1));
+        *self.seen_order.borrow_mut() = order;
     }
 
     fn home_item_count(&self) -> usize {
@@ -858,6 +894,18 @@ fn ordered_home_indices(catalog: &Catalog, ids: &[GameId]) -> Vec<usize> {
     order
 }
 
+/// Each game's place in the previous row, or -1 for a game new to it.
+fn home_from_indices(previous: &[usize], next: &[usize]) -> Vec<i32> {
+    next.iter()
+        .map(|index| {
+            previous
+                .iter()
+                .position(|old| old == index)
+                .map_or(-1, |position| position as i32)
+        })
+        .collect()
+}
+
 fn lookup_job(
     index: usize,
     game: &LibraryGame,
@@ -965,9 +1013,16 @@ fn rgb((red, green, blue): (u8, u8, u8)) -> Color {
 #[cfg(test)]
 mod tests {
     use super::{
-        HOME_RECENT_LIMIT, HomeState, LaunchFeedbackState, PlayingState, monogram,
-        needs_external_artwork,
+        HOME_RECENT_LIMIT, HomeState, LaunchFeedbackState, PlayingState, home_from_indices,
+        monogram, needs_external_artwork,
     };
+
+    #[test]
+    fn a_new_game_at_the_front_pushes_the_row_along() {
+        // Game 7 arrives first; 3 falls off the end.
+        assert_eq!(home_from_indices(&[1, 2, 3], &[7, 1, 2]), vec![-1, 0, 1]);
+        assert_eq!(home_from_indices(&[], &[4]), vec![-1]);
+    }
     use crate::presentation::catalog::Catalog;
 
     fn ordered_home_indices(games: &[LibraryGame], ids: &[GameId]) -> Vec<usize> {

@@ -19,6 +19,10 @@ use crate::{
 
 use super::{PersistenceError, migrations};
 
+/// Games created this soon after the library's first one came with the
+/// first import (a startup scan takes seconds), not a later install.
+const FIRST_IMPORT_WINDOW_SECONDS: i64 = 60;
+
 pub struct SqliteLibraryRepository {
     connection: Connection,
 }
@@ -254,20 +258,30 @@ impl LibraryRepository for SqliteLibraryRepository {
 impl ActivityRepository for SqliteLibraryRepository {
     fn recent_game_ids(&self, limit: usize) -> Result<Vec<GameId>, Self::Error> {
         let limit = i64::try_from(limit).map_err(|_| PersistenceError::InvalidCount(i64::MAX))?;
-        // Restrict to installed/source-backed games and use the latest real
-        // session start, never a source lifetime-total import timestamp.
+        // Installed/source-backed games, latest first by their latest real
+        // session start (never a source lifetime-total import timestamp) or,
+        // like a console's home row, when they joined the library. The first
+        // import fills the library rather than adding to it: games that
+        // arrived within a minute of the earliest one count only once played.
         let mut statement = self.connection.prepare(
-            "SELECT ps.game_id FROM play_sessions AS ps \
-             WHERE EXISTS (SELECT 1 FROM game_sources AS gs WHERE gs.game_id = ps.game_id) \
-             GROUP BY ps.game_id ORDER BY MAX(ps.started_at) DESC, ps.game_id ASC LIMIT ?1",
+            "WITH first_import AS (SELECT MIN(created_at) AS at FROM games), \
+             recency AS ( \
+               SELECT g.id AS game_id, MAX( \
+                 COALESCE((SELECT MAX(ps.started_at) FROM play_sessions AS ps \
+                           WHERE ps.game_id = g.id), -1), \
+                 CASE WHEN g.created_at > (SELECT at FROM first_import) + ?2 \
+                      THEN g.created_at ELSE -1 END) AS at \
+               FROM games AS g \
+               WHERE EXISTS (SELECT 1 FROM game_sources AS gs WHERE gs.game_id = g.id)) \
+             SELECT game_id FROM recency WHERE at >= 0 \
+             ORDER BY at DESC, game_id ASC LIMIT ?1",
         )?;
-        let rows = statement.query_map([limit], |row| row.get::<_, i64>(0))?;
+        let rows = statement.query_map(params![limit, FIRST_IMPORT_WINDOW_SECONDS], |row| {
+            row.get::<_, i64>(0)
+        })?;
         let mut ids = Vec::new();
         for row in rows {
-            ids.push(Self::domain_value(
-                "play_sessions.game_id",
-                GameId::new(row?),
-            )?);
+            ids.push(Self::domain_value("games.id", GameId::new(row?))?);
         }
         Ok(ids)
     }
@@ -978,6 +992,48 @@ mod tests {
             .map(|entry| entry.game().title().as_str())
             .collect::<Vec<_>>();
         assert_eq!(titles, vec!["zeta", "Alpha"]);
+    }
+
+    #[test]
+    fn home_recents_put_games_added_after_the_first_import_with_the_played() {
+        let mut repository = SqliteLibraryRepository::open_in_memory().expect("repository");
+        let played = seed_game(&mut repository, "Played", "steam", "101");
+        let unplayed = seed_game(&mut repository, "Unplayed", "steam", "102");
+        let installed = seed_game(&mut repository, "Installed", "flatpak", "org.example.Game");
+        let source = SourceId::new("steam").expect("source");
+        repository
+            .connection
+            .execute("UPDATE games SET created_at = 1000", [])
+            .expect("first import");
+        // Installed later, after the game played at 2000.
+        repository
+            .connection
+            .execute(
+                "UPDATE games SET created_at = 3000 WHERE id = ?1",
+                [installed.get()],
+            )
+            .expect("later install");
+        let session = repository
+            .begin_play_session(played, &source, 2000, SessionTrackingMethod::SourceRuntime)
+            .expect("begin");
+        repository
+            .complete_play_session(session, 2010)
+            .expect("complete");
+
+        assert_eq!(
+            repository.recent_game_ids(15).expect("recents"),
+            vec![installed, played]
+        );
+        // Played after the install: the played game leads again.
+        let session = repository
+            .begin_play_session(played, &source, 4000, SessionTrackingMethod::SourceRuntime)
+            .expect("begin");
+        repository
+            .complete_play_session(session, 4010)
+            .expect("complete");
+        let recents = repository.recent_game_ids(15).expect("recents");
+        assert_eq!(recents, vec![played, installed]);
+        assert!(!recents.contains(&unplayed));
     }
 
     #[test]

@@ -614,3 +614,22 @@ Each edge fade's strength now comes from the title's animated position rather th
 ## Profile avatar
 
 The top-left profile (`components/profile-avatar.slint`) is a plain 54 px circle with a soft shadow; it has no frame or ring. The old notification dot is gone. The picture comes from the Profile page, opened by clicking the avatar or pressing A on it (ADR 0177, [PROFILE.md](PROFILE.md)): a chosen picture, the Steam avatar, or (once there is art) a built-in avatar; without one, the name's first letter (else "H") on the flat accent fills the circle. It takes the utilities' focus ring and lift when focused. An animated picture plays: a chosen GIF or animated PNG, or the Steam animated avatar. Rust decodes it whole and small (184 px, at most 600 frames), and `AnimatedPicture` steps through the frames on a Slint `Timer` at the file's own delays. It moves only while on screen (Home's bar, or the Profile page), never while Horizon isn't the active window (`Motion.loops-paused`), and shows the still first frame with Reduced Motion.
+
+### Recently added games lead, and the row glides (ADR 0184)
+
+Home's row is ordered by each game's latest moment: its latest play session,
+or when it joined the library if that came after the first import (the
+first startup scan fills the library; it doesn't "add" to it). A newly
+installed game is first until something is played after it, as on a
+console's home row. Unplayed games from the first import still fill the
+remaining slots A–Z.
+
+When the row changes, Rust publishes each card's previous place
+(`home-from-indices`, -1 for a game new to the row) and bumps
+`home-reorder-sequence`. `GameCarousel` runs the shared grid-refresh timing
+(`GridRefresh`, `Stopwatch`): cards glide to their new slots, a new game
+rises 18 px and fades in, and the Library tile slides to the end. A change
+made while Home was hidden (the Shop) is measured from the row as it was
+last seen and plays when Home is shown again, after the page transition.
+Reduced Motion makes it instant. Home's focus frame, scaling and marquee
+are unchanged.
