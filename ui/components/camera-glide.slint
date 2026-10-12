@@ -1,0 +1,86 @@
+import { Motion } from "../theme/theme.slint";
+
+// A camera that glides to `target`, stepped every frame by the time since
+// the previous one (Home's shelf). `shown` is where to draw it.
+//
+// - One step from rest starts quick and slows evenly to a stop over
+//   `duration`, as an ease-out does.
+// - Steps that arrive while it moves (a held direction) don't start that
+//   curve again: it eases to one cruising speed, the speed that covers what
+//   is left in a little more than an input repeat, and brakes only over the
+//   last quarter of the way. Held input runs at a steady speed and stops
+//   smoothly, with no pulse per step and no still frame.
+// - Speed changes ease in over about 60 ms; nothing jumps.
+// - `snap` (following a finger, Reduced Motion) draws the target directly.
+//
+// Stepped rather than animated: a selection change reaches the camera in a
+// `changed` handler just before a frame is drawn, and a Slint animation
+// started there doesn't move on that frame.
+export component CameraGlide {
+    in property <length> target: 0px;
+    in property <bool> snap: false;
+    // How long a single step takes from rest.
+    in property <duration> duration: Motion.carousel-duration;
+    out property <length> shown: root.snap || root.duration == 0ms ? root.target : root.glided;
+    out property <bool> moving: root.glided != root.target;
+
+    private property <length> glided: 0px;
+    // The target the motion was planned for, its direction, the cruising
+    // speed (px per ms), the braking rate, and the current speed.
+    private property <length> aimed: 0px;
+    private property <float> direction: 0;
+    private property <float> cruise: 0;
+    private property <float> braking: 0;
+    private property <float> speed: 0;
+    private property <duration> stepped: 0ms;
+    private property <duration> clock: root.moving ? animation-tick() : 0ms;
+
+    init => {
+        root.glided = root.target;
+        root.aimed = root.target;
+    }
+    changed clock => { root.step(); }
+
+    function step() {
+        let now = animation-tick();
+        if !root.moving {
+            return;
+        }
+        // Starting from rest, the first step is half a frame's worth: the
+        // change came some time since the last frame, often only noticed now.
+        let elapsed = (now > root.stepped && now - root.stepped <= 50ms ? now - root.stepped : 8ms) / 1ms;
+        root.stepped = now;
+        if root.snap || root.duration == 0ms {
+            root.glided = root.target;
+            root.speed = 0;
+            return;
+        }
+        let left = root.target - root.glided;
+        let distance = abs(left) / 1px;
+        let toward = left > 0px ? 1 : -1;
+        if root.aimed != root.target {
+            root.aimed = root.target;
+            if root.speed < 0.001 || toward != root.direction {
+                // From rest (or turning back): the ease-out step.
+                root.direction = toward;
+                root.cruise = 2 * distance / (root.duration / 1ms);
+                root.braking = root.cruise * root.cruise / (2 * distance);
+                root.speed = root.cruise;
+            } else {
+                // Already moving: cruise, braking only near the end.
+                root.cruise = distance / (root.duration / 1ms - 20);
+                root.braking = max(root.braking, root.cruise * root.cruise / (2 * 0.25 * distance));
+            }
+        }
+        let limit = Math.sqrt(2 * root.braking * distance);
+        root.speed = root.speed > limit ? limit
+            : min(limit, root.speed + (root.cruise - root.speed) * min(1, elapsed / 60));
+        let travel = min(distance, root.speed * elapsed);
+        if distance - travel < 0.25 {
+            root.glided = root.target;
+            root.speed = 0;
+        } else {
+            root.glided += toward * travel * 1px;
+        }
+    }
+}

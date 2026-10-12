@@ -127,12 +127,20 @@ export component LibraryPage inherits Rectangle {
         root.previous-scroll-row * root.row-stride,
         root.content-height(root.previous-total-count, root.previous-grid-columns),
         root.available-grid-height);
+    // Each arrival resets the camera (instantly); leaving doesn't, so a list
+    // scrolled between rows stays put while the page fades out.
+    private property <int> visits: 0;
+    changed focus-visible => {
+        if root.focus-visible {
+            root.visits += 1;
+        }
+    }
     scroll-camera := ScrollCamera {
         rest-row: root.scroll-row;
         stride: root.row-stride;
         content: root.content;
         viewport: root.available-grid-height;
-        settle-key: root.focus-visible ? 1 : 0;
+        settle-key: root.visits;
         focus-key: root.selected-index;
         // A cover, with the grid's padding around it (room for the lift and
         // focus frame).
@@ -201,6 +209,8 @@ export component LibraryPage inherits Rectangle {
             drag-begin(moved) => { scroll-camera.drag-begin(moved); }
             drag-to(moved) => { scroll-camera.drag-to(moved); }
             drag-end => { scroll-camera.drag-end(); }
+            catching: scroll-camera.gliding;
+            caught => { scroll-camera.catch(); }
             TouchArea {
                 width: parent.width; height: parent.height;
                 scroll-event(event) => {

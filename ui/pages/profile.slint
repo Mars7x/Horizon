@@ -177,12 +177,20 @@ export component ProfilePage inherits Rectangle {
     out property <int> friends-visible-rows: max(1, Math.floor(
         (root.list-height + Metrics.list-row-gap) / root.friend-step));
     private property <length> friends-content: root.friends-count * root.friend-step - Metrics.list-row-gap;
+    // Each arrival resets the camera (instantly); leaving doesn't, so a list
+    // scrolled between rows stays put while the page fades out.
+    private property <int> visits: 0;
+    changed playing => {
+        if root.playing {
+            root.visits += 1;
+        }
+    }
     friends-camera := ScrollCamera {
         rest-row: root.friends-row;
         stride: root.friend-step;
         content: root.friends-content;
         viewport: root.list-height;
-        settle-key: root.playing ? 1 : 0;
+        settle-key: root.visits;
         scrolled(rows) => { root.scroll-friends(rows); }
     }
 
@@ -199,6 +207,8 @@ export component ProfilePage inherits Rectangle {
             drag-begin(moved) => { friends-camera.drag-begin(moved); }
             drag-to(moved) => { friends-camera.drag-to(moved); }
             drag-end => { friends-camera.drag-end(); }
+            catching: friends-camera.gliding;
+            caught => { friends-camera.catch(); }
             TouchArea {
                 width: parent.width; height: parent.height;
                 enabled: root.playing && !root.dialog-open;

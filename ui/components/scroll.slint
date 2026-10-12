@@ -1,6 +1,7 @@
 import { Motion } from "../theme/theme.slint";
 import { Wheel } from "wheel.slint";
 import { Momentum } from "momentum.slint";
+import { InputResample } from "input-resample.slint";
 
 // One scrolling standard for every vertical list and grid (Library, Album,
 // Achievements, Activity history). See docs/UI_STANDARDS.md, "Scrolling".
@@ -33,6 +34,12 @@ export global Scroll {
         let s = max(-Scroll.overscroll-limit + 0.5px, min(Scroll.overscroll-limit - 0.5px, stretch));
         s >= 0px ? s * Scroll.overscroll-limit / (Scroll.overscroll-limit - s)
             : s * Scroll.overscroll-limit / (Scroll.overscroll-limit + s)
+    }
+    // How far `raw` is past `clamped` (a camera held at an end): none within
+    // half a pixel. Stored lengths round, so a camera that only reached an
+    // end can be a fraction off it, and that must not count as a stretch.
+    public pure function past(raw: length, clamped: length) -> length {
+        abs(raw - clamped) < 0.5px ? 0px : raw - clamped
     }
     // Shadow strength for `hidden` pixels of content beyond an edge.
     public pure function edge(hidden: length) -> float {
@@ -107,6 +114,8 @@ export component ScrollCamera {
     init => {
         root.agreed-row = root.rest-row;
         root.seen-focus = root.focus-key;
+        root.glided = root.target;
+        root.aimed = root.target;
     }
     // Touchpad input follows directly, without a glide.
     private property <bool> follow: false;
@@ -117,18 +126,68 @@ export component ScrollCamera {
     private property <length> limit: max(0px, root.content - root.viewport);
     // Where the camera is going.
     out property <length> target: max(0px, min(root.limit, root.position));
-    private property <length> base: root.target;
-    animate base {
-        duration: !settle.settled || root.instant || root.follow ? 0ms : Motion.scroll-duration;
-        easing: linear;
+    // Where the camera is drawn, before any stretch: on the target while it
+    // jumps (a fresh visit, `instant`) or follows a touchpad or finger;
+    // otherwise gliding to it (`glided`).
+    private property <bool> snap: !settle.settled || root.instant || root.follow
+        || Motion.scroll-duration == 0ms;
+    private property <length> base: root.snap ? root.target : root.glided;
+
+    // The glide: linear, over `Motion.scroll-duration` from wherever it is
+    // when the target changes. It steps every frame by the time since the
+    // previous one, rather than as a Slint animation timed from the change:
+    // a focus move reaches the camera in a `changed` handler just before the
+    // frame is drawn, so an animation started there showed no movement on
+    // its first frame, a stall on every step. Retargeted before it ends (held
+    // input), it runs at one constant speed.
+    private property <length> glided: 0px;
+    // The target the speed was set for, and the speed (px per ms).
+    private property <length> aimed: 0px;
+    private property <float> speed: 0;
+    private property <duration> stepped: 0ms;
+    private property <bool> moving: root.glided != root.target;
+    private property <duration> clock: root.moving ? animation-tick() : 0ms;
+    changed clock => { root.step(); }
+    function step() {
+        let now = animation-tick();
+        if !root.moving {
+            return;
+        }
+        // Starting from rest, the first step is half a frame's worth: the
+        // change came some time since the last frame, often only noticed now.
+        let elapsed = now > root.stepped && now - root.stepped <= 50ms ? now - root.stepped : 8ms;
+        root.stepped = now;
+        if root.snap {
+            root.glided = root.target;
+            return;
+        }
+        if root.aimed != root.target {
+            root.aimed = root.target;
+            root.speed = abs(root.target - root.glided) / 1px / (Motion.scroll-duration / 1ms);
+        }
+        let left = root.target - root.glided;
+        let travel = min(abs(left), root.speed * (elapsed / 1ms) * 1px);
+        root.glided = abs(left) - travel < 0.25px ? root.target
+            : root.glided + (left > 0px ? travel : -travel);
+    }
+    // Moving the camera another way: the glide carries on from where the
+    // camera is drawn.
+    function hold() {
+        root.glided = root.base;
+        root.aimed = root.base;
     }
     private property <length> stretch: Scroll.rubber(root.pull);
+    // The spring back starts from rest and settles slowly, like a
+    // critically damped spring: no jolt when a glide braked into the stretch.
     animate stretch {
         duration: root.pulling ? 0ms : Motion.overscroll-return-duration;
-        easing: ease-out;
+        easing: cubic-bezier(0.3, 0.0, 0.2, 1.0);
     }
-    // Where it is: draw with this.
-    out property <length> camera: root.base + root.stretch;
+    // Where it is, and where to draw it: touchpad and finger movement is
+    // drawn where it was 4 ms before each frame, so it moves evenly.
+    private property <length> placed: root.base + root.stretch;
+    resample := InputResample { value: root.placed; }
+    out property <length> camera: resample.shown;
 
     settle := CameraSettle { key: root.settle-key; }
     function spring-back() {
@@ -153,17 +212,16 @@ export component ScrollCamera {
     // braking hard, and springs back once it stops.
     momentum := Momentum {
         glide(travel) => {
+            let before = root.placed;
             root.follow = true;
             root.pulling = true;
             let raw = root.target + root.pull + travel;
             root.position = max(0px, min(root.limit, raw));
-            root.pull = raw - root.position;
-            // Stored lengths round, so a glide short of the end isn't exact.
-            if abs(root.pull) > 0.5px {
+            root.pull = Scroll.past(raw, root.position);
+            if root.pull != 0px {
                 momentum.brake();
-            } else {
-                root.pull = 0px;
             }
+            resample.mark(before);
             root.report();
         }
         ended => { root.spring-back(); }
@@ -184,6 +242,7 @@ export component ScrollCamera {
     }
     // Show the focused item, moving no further than needed.
     function reveal-focus() {
+        root.hold();
         momentum.stop();
         root.seen-focus = root.focus-key;
         root.follow = false;
@@ -198,6 +257,7 @@ export component ScrollCamera {
     }
     // Go where the owner says.
     function rest-on-row() {
+        root.hold();
         momentum.stop();
         root.follow = false;
         root.pull = 0px;
@@ -206,6 +266,8 @@ export component ScrollCamera {
     }
 
     public function scroll(delta-y: length) {
+        let before = root.placed;
+        root.hold();
         root.follow = !Wheel.is-notch(delta-y);
         root.position = root.target;
         // New input catches a glide (the speed being measured stays).
@@ -218,14 +280,15 @@ export component ScrollCamera {
             // pull that starts while the content springs back takes it from
             // where it is.
             if !root.pulling {
-                root.pull = Scroll.unrubber(root.stretch);
+                root.pull = Scroll.unrubber(Scroll.past(root.stretch, 0px));
             }
             let raw = root.position + root.pull + Wheel.distance(delta-y);
             root.position = max(0px, min(root.limit, raw));
-            root.pull = raw - root.position;
+            root.pull = Scroll.past(raw, root.position);
             root.pulling = true;
             release.stop();
             release.start();
+            resample.mark(before);
         } else {
             // A wheel notch glides. Spun fast, notches would run the
             // destination (which the owner mounts rows around, with three
@@ -241,6 +304,25 @@ export component ScrollCamera {
         root.report();
     }
 
+    // Gliding after a swipe: a touch catches it (`catch`).
+    out property <bool> gliding: momentum.gliding;
+    // A touch on gliding content stops it where it is, as on a phone (a
+    // glide braking into the stretch springs back).
+    public function catch() {
+        if momentum.gliding {
+            momentum.stop();
+            if root.pull != 0px {
+                root.spring-back();
+            } else {
+                // Stop where it is drawn (a moment behind the glide).
+                root.hold();
+                root.position = max(0px, min(root.limit, root.camera));
+                resample.stop();
+                root.report();
+            }
+        }
+    }
+
     // A finger drag: the content follows it, stretching past an end, then
     // glides on or springs back.
     private property <bool> dragging: false;
@@ -251,6 +333,7 @@ export component ScrollCamera {
     // swipe is recognised a little way in); the content moves from here, so
     // it doesn't jump by that much.
     public function drag-begin(moved: length) {
+        root.hold();
         momentum.stop();
         release.stop();
         root.dragging = true;
@@ -259,7 +342,7 @@ export component ScrollCamera {
         root.follow = true;
         root.pulling = true;
         root.position = max(0px, min(root.limit, drawn));
-        root.pull = Scroll.unrubber(drawn - root.position);
+        root.pull = Scroll.unrubber(Scroll.past(drawn, root.position));
         root.drag-start = root.position + root.pull + moved;
         root.drag-last = root.position + root.pull;
         root.report();
@@ -267,17 +350,19 @@ export component ScrollCamera {
     // `moved`: how far the finger is from where it went down.
     public function drag-to(moved: length) {
         // The content follows the finger: moving down shows what's above.
+        let before = root.placed;
         let raw = root.drag-start - moved;
         momentum.add(raw - root.drag-last);
         root.drag-last = raw;
         root.position = max(0px, min(root.limit, raw));
-        root.pull = raw - root.position;
+        root.pull = Scroll.past(raw, root.position);
+        resample.mark(before);
         root.report();
     }
     public function drag-end() {
         if root.dragging {
             root.dragging = false;
-            let pulled = abs(root.pull) > 0.5px;
+            let pulled = root.pull != 0px;
             root.spring-back();
             if !pulled {
                 momentum.release();
@@ -305,18 +390,23 @@ export component ScrollCamera {
     }
 }
 
-// A finger (or mouse) dragging the content it wraps scrolls it: once the drag
-// is clearly along `vertical` (or sideways), it takes the drag from whatever
-// it started on, so a tap still selects. Pass the movement to a
-// `ScrollCamera`'s `drag-begin`, `drag-to` and `drag-end`. Focus never moves.
+// A finger (or mouse) dragging the content it wraps scrolls it: Home's
+// shelf, and every list and grid. Once the drag is clearly along `vertical`
+// (or sideways), it takes the drag from whatever it started on, so a tap
+// still selects; the content moves from that point, so it doesn't jump.
+// Pass the movement to the camera's `drag-begin`, `drag-to` and `drag-end`,
+// and bind `catching` to its `gliding`: while it glides, a touch catches it
+// (`caught`) instead of reaching what's beneath. Focus never moves.
 export component DragScroll {
     in property <bool> enabled: true;
     in property <bool> vertical: true;
+    in property <bool> catching: false;
     callback drag-begin(length);
     callback drag-to(length);
     callback drag-end();
+    callback caught();
 
-    SwipeGestureHandler {
+    swipe := SwipeGestureHandler {
         width: root.width;
         height: root.height;
         enabled: root.enabled;
@@ -329,20 +419,48 @@ export component DragScroll {
             ? self.current-position.y - self.pressed-position.y
             : self.current-position.x - self.pressed-position.x;
         moved => {
+            // Slint reports movement before it decides on a swipe too.
+            if !self.swiping {
+                return;
+            }
             if !self.dragging {
                 self.dragging = true;
                 root.drag-begin(self.travel);
             }
             root.drag-to(self.travel);
         }
-        swiped => {
-            self.dragging = false;
-            root.drag-end();
+        // A touch lands: catch a glide at once (what's beneath only hears of
+        // the touch a moment later).
+        changed pressed-position => {
+            if root.catching {
+                root.holding = true;
+                root.caught();
+            }
         }
-        cancelled => {
-            self.dragging = false;
-            root.drag-end();
+        swiped => { swipe.finish(); }
+        cancelled => { swipe.finish(); }
+        function finish() {
+            root.holding = false;
+            if self.dragging {
+                self.dragging = false;
+                root.drag-end();
+            }
         }
         @children
+        // Over the content while it glides, and for the rest of a touch that
+        // caught it: the touch is the catch, not a tap on what's beneath.
+        if root.catching || root.holding : TouchArea {
+            width: parent.width;
+            height: parent.height;
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down {
+                    root.holding = true;
+                    root.caught();
+                } else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {
+                    root.holding = false;
+                }
+            }
+        }
     }
+    private property <bool> holding: false;
 }

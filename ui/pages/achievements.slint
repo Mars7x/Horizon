@@ -156,6 +156,8 @@ export component AchievementsPage inherits Rectangle {
                 drag-begin(moved) => { games-camera.drag-begin(moved); }
                 drag-to(moved) => { games-camera.drag-to(moved); }
                 drag-end => { games-camera.drag-end(); }
+                catching: games-camera.gliding;
+                caught => { games-camera.catch(); }
                 TouchArea {
                     width: parent.width; height: parent.height;
                     enabled: !root.viewing-entries;
@@ -283,6 +285,8 @@ export component AchievementsPage inherits Rectangle {
                 drag-begin(moved) => { entries-camera.drag-begin(moved); }
                 drag-to(moved) => { entries-camera.drag-to(moved); }
                 drag-end => { entries-camera.drag-end(); }
+                catching: entries-camera.gliding;
+                caught => { entries-camera.catch(); }
                 TouchArea {
                     width: parent.width; height: parent.height;
                     enabled: root.viewing-entries;

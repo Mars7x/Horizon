@@ -139,7 +139,6 @@ fn apply_resolved(ui: &AppWindow, appearance: crate::appearance::ResolvedAppeara
     let theme = ui.global::<Theme>();
 
     theme.set_is_dark(appearance.theme.is_dark());
-    theme.set_is_black(appearance.theme == crate::appearance::EffectiveTheme::Black);
     theme.set_high_contrast(appearance.high_contrast);
     theme.set_appearance_white_swatch(to_slint_color(Palette::preview_accent(
         appearance.theme,

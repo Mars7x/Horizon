@@ -1,0 +1,164 @@
+// Draws a camera that follows touchpad or finger input where the input was a
+// fixed 4 ms before each frame, rather than wherever its newest event left it.
+//
+// Input events arrive at their own rate, not the display's: one frame gets
+// two, the next one, so drawing the newest position moves the camera unevenly
+// (19, 19, 29, 19 px a frame for a steady swipe). The newest event is between
+// 0 and 8 ms old when a frame is drawn, about 4 ms on average; sampling the
+// input at a steady 4 ms keeps that average delay and makes it the same on
+// every frame, so the motion is even. It only interpolates between real
+// positions, never predicts, so it can't overshoot when the fingers stop.
+//
+// The owner calls `mark(before)` after each input event moves `value`, with
+// the value from before the event. Until the input settles, other movement
+// (a glide that carries a swipe on, a spring back) is sampled the same way at
+// each frame's time, so handing over from input to glide doesn't jump. Once
+// nothing has moved for 50 ms, `shown` is `value` again.
+//
+// Event times are when each event reached Horizon (`animation-tick`); events
+// read together share one time and count as one sample, which draws the same
+// as without resampling.
+export component InputResample {
+    in property <length> value: 0px;
+    out property <length> shown: root.engaged ? root.sampled : root.value;
+
+    private property <bool> engaged: false;
+    // The newest sample merged events read at one time: their timing says
+    // nothing about the speed, so it isn't predicted from.
+    private property <bool> clumped: false;
+    private property <length> sampled: 0px;
+    // The last six positions and their times (a ring: `head` is the newest).
+    private property <int> head: 0;
+    private property <int> count: 0;
+    private property <duration> t0: 0ms;
+    private property <duration> t1: 0ms;
+    private property <duration> t2: 0ms;
+    private property <duration> t3: 0ms;
+    private property <duration> t4: 0ms;
+    private property <duration> t5: 0ms;
+    private property <length> v0: 0px;
+    private property <length> v1: 0px;
+    private property <length> v2: 0px;
+    private property <length> v3: 0px;
+    private property <length> v4: 0px;
+    private property <length> v5: 0px;
+    private property <duration> stepped: 0ms;
+    private property <duration> clock: root.engaged ? animation-tick() : 0ms;
+    changed clock => { root.step(); }
+
+    pure function time-at(slot: int) -> duration {
+        slot == 0 ? root.t0 : slot == 1 ? root.t1 : slot == 2 ? root.t2
+            : slot == 3 ? root.t3 : slot == 4 ? root.t4 : root.t5
+    }
+    pure function value-at(slot: int) -> length {
+        slot == 0 ? root.v0 : slot == 1 ? root.v1 : slot == 2 ? root.v2
+            : slot == 3 ? root.v3 : slot == 4 ? root.v4 : root.v5
+    }
+    // The slot `back` samples older than the newest.
+    pure function older(back: int) -> int {
+        Math.mod(root.head - back + 6, 6)
+    }
+    function write(slot: int, at: duration, value: length) {
+        if slot == 0 { root.t0 = at; root.v0 = value; }
+        else if slot == 1 { root.t1 = at; root.v1 = value; }
+        else if slot == 2 { root.t2 = at; root.v2 = value; }
+        else if slot == 3 { root.t3 = at; root.v3 = value; }
+        else if slot == 4 { root.t4 = at; root.v4 = value; }
+        else { root.t5 = at; root.v5 = value; }
+    }
+    function record(at: duration, value: length) {
+        // Samples read at the same time are one sample.
+        if root.count > 0 && root.time-at(root.head) >= at {
+            root.write(root.head, root.time-at(root.head), value);
+            root.clumped = true;
+            return;
+        }
+        root.clumped = false;
+        root.head = root.count == 0 ? 0 : Math.mod(root.head + 1, 6);
+        root.count = min(6, root.count + 1);
+        root.write(root.head, at, value);
+    }
+
+    public function mark(before: length) {
+        let now = animation-tick();
+        if !root.engaged {
+            // Starting from rest: where it was, one event interval ago.
+            root.count = 0;
+            root.record(now - 8ms, before);
+            root.sampled = before;
+            root.engaged = true;
+        }
+        root.record(now, root.value);
+        // A glide marks its move on the frame it is drawn, perhaps after this
+        // frame's step: sample again with it.
+        root.sample(now, 0ms);
+    }
+
+    // Stop resampling: draw `value` directly.
+    public function stop() {
+        root.engaged = false;
+        root.count = 0;
+    }
+
+    function step() {
+        if !root.engaged {
+            return;
+        }
+        let now = animation-tick();
+        let elapsed = now > root.stepped && now - root.stepped <= 50ms ? now - root.stepped : 16ms;
+        root.stepped = now;
+        // Movement that wasn't marked (a glide, a spring back): this frame's.
+        if root.value != root.value-at(root.head) {
+            root.record(now, root.value);
+        }
+        root.sample(now, elapsed);
+    }
+
+    // Where the input was 4 ms before `now`.
+    function sample(now: duration, elapsed: duration) {
+        let at = now - 4ms;
+        let newest = root.time-at(root.head);
+        if at >= newest {
+            // No sample after `at` yet: carry on at the speed between the
+            // last two, as far as the next sample could still be due (the
+            // time between them, less the 4 ms; at most 6 ms). Any further
+            // would only overshoot fingers that stopped dead. Once nothing has come for a frame longer than
+            // that (a glide taking over moves on the next frame), the input
+            // has stopped: ease onto its last position.
+            let interval = root.count > 1 ? newest - root.time-at(root.older(1)) : 0ms;
+            let overdue = interval == 0ms || now - newest > max(interval, 17ms) + 8ms;
+            if root.clumped && !overdue {
+                root.sampled = root.value-at(root.head);
+                return;
+            }
+            if overdue {
+                let last = root.value-at(root.head);
+                root.sampled = abs(last - root.sampled) < 0.25px ? last
+                    : root.sampled + (last - root.sampled) * min(1, elapsed / 40ms);
+                if now - newest > 50ms {
+                    root.stop();
+                }
+            } else {
+                let ahead = max(0ms, min(at - newest, min(interval - 4ms, 6ms)));
+                root.sampled = root.value-at(root.head)
+                    + (root.value-at(root.head) - root.value-at(root.older(1))) * (ahead / interval);
+            }
+            return;
+        }
+        // The newest sample at or before `at`, and the one after it.
+        let back = root.count > 1 && root.time-at(root.older(1)) <= at ? 1
+            : root.count > 2 && root.time-at(root.older(2)) <= at ? 2
+            : root.count > 3 && root.time-at(root.older(3)) <= at ? 3
+            : root.count > 4 && root.time-at(root.older(4)) <= at ? 4
+            : root.count > 5 && root.time-at(root.older(5)) <= at ? 5 : -1;
+        if back < 0 {
+            root.sampled = root.value-at(root.older(root.count - 1));
+            return;
+        }
+        let from = root.older(back);
+        let to = root.older(back - 1);
+        let span = root.time-at(to) - root.time-at(from);
+        root.sampled = root.value-at(from)
+            + (root.value-at(to) - root.value-at(from)) * ((at - root.time-at(from)) / span);
+    }
+}
