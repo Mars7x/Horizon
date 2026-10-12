@@ -56,6 +56,14 @@ Wayland window leaves gamescope with no focus while it is open; X11 windows
 work in every mode. The Wayland/X11 decision above is revised accordingly.
 See [GAMESCOPE_SESSION.md](../GAMESCOPE_SESSION.md).
 
+## Spike 2 result (2026-10-12)
+
+Untagged non-Steam windows (Dolphin, Azahar, Highscore, Heroic) are never
+shown in Steam mode; tagged by another X11 client, they are. Horizon will
+tag game windows itself. With no Wayland display exposed, Wayland-capable
+apps use X11 on their own. `flatpak-spawn --host` gives games the desktop's
+display, so in the session `platform::flatpak_host` must pass gamescope's.
+
 ## Consequences
 
 - One codebase gives the desktop and the session the same pages.

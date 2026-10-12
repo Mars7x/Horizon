@@ -144,8 +144,8 @@ build it:
 | --- | --- | --- |
 | Home, Library, Activity, Achievements, Album, Shop, Profile | ✓ | ✓ same code |
 | Steam games | `steam://` to the desktop's Steam | `steam://` to the hidden Steam (Spike 3) |
-| Heroic games | `heroic://` | same; Heroic's own window may show (Spike 2) |
-| Flatpak games | `flatpak run` via `flatpak_host` | same; window tagging (Spike 2) |
+| Heroic games | `heroic://` | same; Horizon tags the game's window (Heroic's own stays hidden) |
+| Flatpak games | `flatpak run` via `flatpak_host` | same, passing gamescope's display; Horizon tags the window |
 | Playtime | as today | as today; the session can also see what's in front |
 | Controllers, glyphs, swap | SDL | same (SDL reads devices, not windows) |
 | On-screen keyboard | Horizon's own | same (a touch screen may arrive as a mouse; the field's keyboard button covers it) |
@@ -170,6 +170,21 @@ build it:
 2. **Non-Steam windows.** Does gamescope show a Heroic or Flatpak game whose
    window has no `STEAM_GAME`? If not, Horizon tags new game windows itself.
    Does Heroic's own window appear when a game starts?
+   **Result (main PC, nested and embedded, 2026-10-12):** no. In Steam mode
+   an untagged window is never shown: Dolphin, Azahar, Highscore and Heroic
+   all stayed hidden until another X11 client set `STEAM_GAME` on their
+   window and the base layer named it; then each was shown, and nothing
+   after it closed. So Horizon tags new game windows itself, and Heroic's own
+   window shows only if tagged. Heroic detects gamescope by itself and goes
+   fullscreen. With no Wayland display exposed, the Wayland-capable apps
+   (Azahar, Highscore) fell back to X11 by themselves. **Launch route:**
+   `flatpak-spawn --host` (today's `flatpak_host`) runs the game with the
+   Flatpak session helper's environment (`DISPLAY=:0`,
+   `WAYLAND_DISPLAY=wayland-0` from the desktop), not Horizon's, so a game
+   launched that way never reached gamescope. In the session, `flatpak_host`
+   must pass gamescope's display along. Not yet tried: a game launched
+   through Heroic (`HEROIC_GAME=<appName>`). Script:
+   `scripts/spikes/gamescope-spike2.sh [session|expose]`.
 3. **Hidden Steam.** Does `steam -silent` stay hidden in embedded gamescope
    (login, updates, crash dialogs)? Does it write
    `GAMESCOPECTRL_BASELAYER_APPID` itself and fight Horizon? Who gets the
