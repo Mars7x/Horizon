@@ -41,4 +41,5 @@ optional host session helper (narrow, but not installed for most users).
 - Horizon can run commands on the host. Flathub review usually questions
   this permission; publishing there would need to justify it or drop it.
 - Installed apps don't join the Library yet; that would be a Flatpak game
-  source of its own.
+  source of its own. *(Superseded: ADR 0183 adds that source, and
+  `flatpak run`/`flatpak ps` to `flatpak_host`.)*

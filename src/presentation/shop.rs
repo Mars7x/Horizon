@@ -306,6 +306,9 @@ pub struct ShopController {
     /// UI sounds for clicks and swipes (a controller's are played by
     /// navigation).
     sound: CallbackSlot<dyn Fn(UiSoundCue)>,
+    /// Told when an install, update or uninstall finishes, so the library
+    /// can pick up (or drop) Flatpak games.
+    apps_changed: CallbackSlot<dyn Fn()>,
 }
 
 impl ShopController {
@@ -351,6 +354,7 @@ impl ShopController {
             action_focus: Cell::new(0),
             confirm: Cell::new(None),
             sound: RefCell::new(None),
+            apps_changed: RefCell::new(None),
         });
         drain.bind(&controller);
         controller.bind_callbacks(ui);
@@ -361,6 +365,10 @@ impl ShopController {
     /// Clicks play what the same choice plays from a controller.
     pub fn set_sound(&self, callback: Rc<dyn Fn(UiSoundCue)>) {
         *self.sound.borrow_mut() = Some(callback);
+    }
+
+    pub fn set_apps_changed(&self, callback: Rc<dyn Fn()>) {
+        *self.apps_changed.borrow_mut() = Some(callback);
     }
 
     fn cue(&self, cue: UiSoundCue) {
@@ -1355,10 +1363,17 @@ impl ShopController {
                     result,
                 } => {
                     *self.running.borrow_mut() = None;
-                    if let Err(error) = result {
-                        warn!(%error, ?job, "Flatpak job failed");
-                        if self.current_app_id().as_deref() == Some(app_id.as_str()) {
-                            ui.set_shop_feedback(job.failure().into());
+                    match result {
+                        Err(error) => {
+                            warn!(%error, ?job, "Flatpak job failed");
+                            if self.current_app_id().as_deref() == Some(app_id.as_str()) {
+                                ui.set_shop_feedback(job.failure().into());
+                            }
+                        }
+                        Ok(()) => {
+                            if let Some(callback) = self.apps_changed.borrow().as_ref() {
+                                callback();
+                            }
                         }
                     }
                     // Uninstalled apps' buttons start over at Install.

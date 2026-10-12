@@ -1,6 +1,6 @@
 # Source framework
 
-Phase 6 defined the provider boundary that launcher adapters plug into. Phase 7 exercised it with Steam; Phase 9 expanded the same unchanged generic contracts to additional providers. The current production set is Steam and Heroic. Historical Bottles support was retired in Phase 9.5.44.43.
+Phase 6 defined the provider boundary that launcher adapters plug into. Phase 7 exercised it with Steam; Phase 9 expanded the same unchanged generic contracts to additional providers. The current production set is Steam, Heroic and Flatpak ([Flatpak games](FLATPAK_GAMES.md)). Historical Bottles support was retired in Phase 9.5.44.43.
 
 ## Boundary
 
@@ -72,7 +72,7 @@ Snapshots are conservative by default. A source must opt into authoritative memb
 
 ## Import coordination
 
-`SourceImportService` scans every registered source and produces one report per source. Successful source snapshots are converted to Phase 5 `DiscoveredGame` values and sent through `LibraryService`.
+`SourceImportService` scans every registered source and produces one report per source. `discover_all` (reads only, safe on a worker thread) and `save_all` (the database writes) are separate so the live library reload (`presentation::library_reload`, ADR 0183) can discover off the UI thread and save on it; `import_all` is both, for startup. Successful source snapshots are converted to Phase 5 `DiscoveredGame` values and sent through `LibraryService`.
 
 Source discovery failures are isolated. Persistence failures are different: the import pass stops and returns the failing `SourceId`, because continuing after a database write failure could hide a broken durable state assumption.
 

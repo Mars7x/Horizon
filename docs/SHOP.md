@@ -62,11 +62,15 @@ one argument, never through a shell:
 | Install | `flatpak install --system --noninteractive -y flathub <id>` when the system has Flathub (as GNOME Software does); if that's refused or there's none, `flatpak remote-add --user --if-not-exists flathub …` then `flatpak install --user …` |
 | Update | `flatpak update --<installation> --noninteractive -y <id>` |
 | Uninstall | `flatpak uninstall --<installation> --noninteractive -y <id>` |
+| Run a game (Flatpak source) | `flatpak run <id>` |
+| What's running (Flatpak source) | `flatpak ps --columns=application` |
 
 Jobs run one at a time; others wait in a queue (*Waiting*). Progress is the
 last percentage flatpak prints, or a sliding bar while it prints none.
 After each job the installed list and updates are read again. What's
-installed is read on every visit.
+installed is read on every visit. A job that succeeds also reloads the
+library, so an installed game appears in Home and the Library and an
+uninstalled one leaves ([Flatpak games](FLATPAK_GAMES.md), ADR 0183).
 
 Without host Flatpak access (a development run without the permission),
 Install falls back to opening the software store on the app
@@ -98,8 +102,8 @@ minutes. Nothing is written to disk.
 
 ## Known limits
 
-- Apps installed here don't appear in the Library; Steam and Heroic are
-  the only game sources.
+- Install handed to the software store (no host Flatpak) joins the library
+  only on the next reload or restart.
 - A system install on a machine whose polkit asks for a password shows the
   desktop's password prompt; under gamescope there may be none, so it falls
   back to installing for the user.

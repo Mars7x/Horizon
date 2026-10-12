@@ -253,7 +253,7 @@ pub struct AlbumController {
     cache: ThumbnailCache,
     video: Arc<dyn VideoBackend>,
     loader: MediaLoader,
-    titles: HashMap<SourceGameRef, String>,
+    titles: RefCell<HashMap<SourceGameRef, String>>,
     /// The hints last published, so the bar only changes when they do.
     hints: RefCell<Vec<(&'static str, String)>>,
     sender: WorkerSender<AlbumEvent>,
@@ -323,7 +323,7 @@ impl AlbumController {
             cache,
             video,
             loader,
-            titles,
+            titles: RefCell::new(titles),
             hints: RefCell::new(Vec::new()),
             sender,
             receiver,
@@ -351,6 +351,17 @@ impl AlbumController {
     /// Every Album visit is fresh: the newest capture, scrolled to the top.
     /// The Game and Type filters are view choices and are kept. The folder
     /// is rescanned so new captures appear.
+    /// Name captures of games a library reload found. Names of games that
+    /// left the library stay: their captures are still theirs.
+    pub fn add_titles<'a>(&self, games: impl IntoIterator<Item = &'a LibraryGame>) {
+        let mut titles = self.titles.borrow_mut();
+        for game in games {
+            for source in game.sources() {
+                titles.insert(source.clone(), game.game().title().as_str().to_owned());
+            }
+        }
+    }
+
     pub fn start_new_visit(&self, ui: &AppWindow) {
         if !self.warmed_up.replace(true) {
             self.video.warm_up();
@@ -529,7 +540,7 @@ impl AlbumController {
             .checked_sub(1)
             .and_then(|index| s.games.get(index))
             .map(|choice| choice.game.clone());
-        s.games = game_choices(&captures, &self.titles);
+        s.games = game_choices(&captures, &self.titles.borrow());
         s.game_index = filter
             .and_then(|game| s.games.iter().position(|choice| choice.game == game))
             .map_or(0, |index| index + 1);
@@ -783,7 +794,7 @@ impl AlbumController {
                 .checked_sub(1)
                 .and_then(|index| s.games.get(index))
                 .map(|choice| choice.game.clone());
-            s.games = game_choices(&s.captures, &self.titles);
+            s.games = game_choices(&s.captures, &self.titles.borrow());
             s.game_index = filter
                 .and_then(|game| s.games.iter().position(|choice| choice.game == game))
                 .map_or(0, |index| index + 1);
