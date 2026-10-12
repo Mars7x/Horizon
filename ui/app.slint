@@ -131,7 +131,7 @@ export component AppWindow inherits Window {
             : root.shop-search-focused ? (root.shop-query != ""
                 ? [{ button: "X", label: "Clear" }, { button: "B", label: "Back" }, { button: "A", label: "Search" }]
                 : [{ button: "B", label: "Back" }, { button: "A", label: "Search" }])
-            : root.shop-apps.length > 0 ? [{ button: "B", label: "Back" }, { button: "A", label: "Open" }]
+            : root.shop-app-count > 0 ? [{ button: "B", label: "Back" }, { button: "A", label: "Open" }]
             : [{ button: "B", label: "Back" }])
         : root.current-route == AppRouteView.profile ? (root.profile-editing-name || root.profile-confirm-open
             ? [{ button: "B", label: "Cancel" }, { button: "A", label: "Select" }]
@@ -379,6 +379,7 @@ export component AppWindow inherits Window {
     // Shop: Flathub, browsed in a grid (presentation/shop.rs). Selection,
     // paging and loading are Rust-owned.
     in property <[ShopAppData]> shop-apps;
+    in property <int> shop-app-count: 0;
     in property <int> shop-selected: 0;
     in property <int> shop-first-row: 0;
     in property <int> shop-visit: 0;
@@ -941,6 +942,7 @@ export component AppWindow inherits Window {
                     keyboard-edit: root.keyboard-edit;
                     keyboard-show => { root.keyboard-show(2); }
                     apps: root.shop-apps;
+                    app-count: root.shop-app-count;
                     selected: root.shop-selected;
                     first-row: root.shop-first-row;
                     visit: root.shop-visit;

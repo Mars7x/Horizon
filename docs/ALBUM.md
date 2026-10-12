@@ -14,7 +14,7 @@ screenshots). See [ADR 0166](adr/0166-album-captures-and-media-pipeline.md).
 | Grid | LB / click "Game" | Next game filter: All games, then each game with captures, most recent first |
 | Grid | RB / click "Type" | All → Screenshots → Videos |
 | Grid | Mouse wheel | Moves the camera only, never the selection |
-| Viewer | Left / Right, or click the screen edges | Previous / next capture, sliding in from that side; stops at either end |
+| Viewer | Left / Right, click the screen edges, or swipe sideways | Previous / next capture, sliding in from that side; stops at either end |
 | Viewer (video) | A, or click the video | Play / pause; at the end, A plays it again |
 | Viewer (video) | LB / RB | Back / forward 10 seconds |
 | Viewer | X | Asks to delete this capture (Cancel is focused first) |

@@ -1,0 +1,105 @@
+import { Motion } from "../theme/theme.slint";
+
+// A touchpad swipe or a finger drag carries on after it ends, slowing to a
+// stop, as a flick does on a phone.
+//
+// While the gesture lasts, `add` each movement (camera travel). At its end,
+// `release`: if it was still moving, `glide(travel)` arrives every frame
+// until it stops, then `ended()`. The owner applies the travel; past an end
+// it turns the travel into stretch and calls `brake`, so the glide runs into
+// the stretch and stops quickly, and springs back on `ended`. `stop` cancels
+// a glide (new input, a focus change) without `ended`.
+//
+// The glide steps on every frame by the real time since the last one
+// (`animation-tick`), so it is as smooth as the display, and a list mounting
+// rows around its camera keeps up with it. Reduced Motion never glides.
+export component Momentum {
+    callback glide(length);
+    callback ended();
+    out property <bool> gliding: root.running;
+
+    private property <bool> running: false;
+    // Camera travel per millisecond, and how fast it fades.
+    private property <float> velocity: 0;
+    private property <float> half-life: 160;
+    // The last movement, and the stretch of movement being measured.
+    private property <duration> last: 0ms;
+    private property <duration> sample-start: 0ms;
+    private property <length> sample-travel: 0px;
+    // The frame clock, read only while gliding.
+    private property <duration> clock: root.running ? animation-tick() : 0ms;
+    private property <duration> previous: 0ms;
+
+    public function stop() {
+        root.running = false;
+        root.velocity = 0;
+    }
+
+    // Past an end: fade fast, into the stretch.
+    public function brake() {
+        root.half-life = 24;
+    }
+
+    public function add(travel: length) {
+        let now = animation-tick();
+        // A pause this long starts a new measurement.
+        if now - root.last > 100ms {
+            root.velocity = 0;
+            root.sample-start = now;
+            root.sample-travel = 0px;
+        }
+        root.last = now;
+        root.sample-travel += travel;
+        root.measure(now, 24);
+    }
+
+    // The speed over the travel since the last measurement, once that spans
+    // `least` ms, blended into the speed so far.
+    function measure(now: duration, least: float) {
+        let span = (now - root.sample-start) / 1ms;
+        if span >= least && root.sample-travel != 0px {
+            let speed = root.sample-travel / 1px / max(span, 8);
+            root.velocity = root.velocity == 0 ? speed : root.velocity * 0.3 + speed * 0.7;
+            root.sample-start = now;
+            root.sample-travel = 0px;
+        }
+    }
+
+    public function release() {
+        let now = animation-tick();
+        // Fingers that stopped before lifting don't throw.
+        if Motion.reduced-motion || now - root.last > 80ms {
+            root.stop();
+            return;
+        }
+        // The speed while moving: up to the last movement, not the lift.
+        root.measure(root.last, 0);
+        root.velocity = max(-6, min(6, root.velocity));
+        if abs(root.velocity) < 0.08 {
+            root.stop();
+            return;
+        }
+        root.half-life = 160;
+        root.previous = now;
+        root.running = true;
+    }
+
+    changed clock => {
+        if !root.running {
+            return;
+        }
+        let elapsed = max(0, min(50, (root.clock - root.previous) / 1ms));
+        root.previous = root.clock;
+        if elapsed == 0 {
+            return;
+        }
+        root.glide(root.velocity * elapsed * 1px);
+        // Halves every 160 ms, so a flick travels on about as far as it
+        // would in a quarter of a second at its release speed.
+        root.velocity *= Math.pow(0.5, elapsed / root.half-life);
+        if root.running && abs(root.velocity) < 0.03 {
+            root.stop();
+            root.ended();
+        }
+    }
+}

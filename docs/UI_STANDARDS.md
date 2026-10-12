@@ -214,7 +214,13 @@ move it by **pixels, never from row to row or item to item**. Every
 so follows the desktop's natural/traditional scrolling setting:
 
 - **Touchpad:** the camera follows the fingers directly, 2.5 px per pixel of
-  travel, with no glide.
+  travel. A swipe still moving when the fingers lift glides on and slows to a
+  stop (`Momentum`, `ui/components/momentum.slint`): it starts at the swipe's
+  speed and halves every 160 ms. Fingers that stopped before lifting don't
+  glide. The glide runs frame by frame, so a list keeps mounting rows around
+  it. A glide that reaches an end runs on into the stretch, brakes hard and
+  springs back, as a pull does. New input or a focus change stops it. Reduced
+  Motion never glides.
 - **Wheel notch** (a whole multiple of 60px): 180 px with the standard
   110 ms linear glide. Spun fast, notches never put the destination more
   than a row ahead of where the gliding camera is drawn, since the owner
@@ -241,7 +247,16 @@ so follows the desktop's natural/traditional scrolling setting:
   notch, and a 600 ms timer ends a pull whose gesture end never arrives.
 
 Horizontal scrolling is used by Home only: it pans the carousel's camera the
-same way, clamped to the shelf's ends.
+same way, clamped to the shelf's ends. On Home a finger (or mouse) drag pans
+it too (`SwipeGestureHandler`): the shelf follows the finger, stretches past
+an end, and glides or springs back on release. A tap still selects.
+
+Every vertical list and grid scrolls under a finger (or mouse) drag the same
+way: wrap the viewport's contents in `DragScroll` (`components/scroll.slint`)
+and pass its movement to the `ScrollCamera`'s `drag-begin`, `drag-to` and
+`drag-end`. It takes the drag from a row or tile only once it is clearly
+vertical, so a tap still selects, and it never moves focus. The content moves
+from where the drag was recognised, so it doesn't jump.
 
 ## Checking a change
 

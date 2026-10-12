@@ -1,12 +1,15 @@
 //! Flathub's catalogue, for the Shop: browse and search apps, read one app's
 //! page, and download their icons and screenshots.
 //!
-//! Read-only. Horizon never installs anything itself: Install hands the app
-//! to the system's software store through the OpenURI portal
-//! ([`store_uri`]), which shows it ready to install. Only apps built for this
-//! machine's architecture are listed.
+//! Read-only: installing goes through the host's Flatpak
+//! (`platform::flatpak_host`), or the system's software store ([`store_uri`])
+//! without it. Only apps built for this machine's architecture are listed.
 
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::HashMap,
+    sync::{Mutex, PoisonError},
+    time::Duration,
+};
 
 use serde::Deserialize;
 use thiserror::Error;
@@ -165,12 +168,28 @@ fn arch() -> &'static str {
     std::env::consts::ARCH
 }
 
+/// One connection pool for every request: a blocking client runs its own
+/// thread, and a kept connection skips the TLS handshake.
+static SHARED: Mutex<Option<FlathubClient>> = Mutex::new(None);
+
+#[derive(Clone)]
 pub struct FlathubClient {
     client: reqwest::blocking::Client,
 }
 
 impl FlathubClient {
-    pub fn new() -> Result<Self, FlathubError> {
+    /// The client every request shares, made on first use.
+    pub fn shared() -> Result<Self, FlathubError> {
+        let mut shared = SHARED.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(client) = shared.as_ref() {
+            return Ok(client.clone());
+        }
+        let client = Self::new()?;
+        *shared = Some(client.clone());
+        Ok(client)
+    }
+
+    fn new() -> Result<Self, FlathubError> {
         let client = reqwest::blocking::Client::builder()
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(15))

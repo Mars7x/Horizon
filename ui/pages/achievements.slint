@@ -4,7 +4,7 @@ import { PageHeader, HeaderValue, Breadcrumb, ScrollEdgeShadow } from "../compon
 import { ListRow, Surface, BadgeIcon } from "../components/list-row.slint";
 import { MarqueeText } from "../components/marquee-text.slint";
 import { TransitionDriver, TransitionLayer } from "../components/transition.slint";
-import { Scroll, ScrollCamera } from "../components/scroll.slint";
+import { DragScroll, Scroll, ScrollCamera } from "../components/scroll.slint";
 import { Stopwatch } from "../components/stopwatch.slint";
 
 // One full-width games list, then one full-width, read-only achievement list.
@@ -150,68 +150,75 @@ export component AchievementsPage inherits Rectangle {
             width: root.width - root.margin * 2;
             height: root.game-viewport-height;
             background: transparent; clip: true;
-            TouchArea {
+            DragScroll {
                 width: parent.width; height: parent.height;
                 enabled: !root.viewing-entries;
-                scroll-event(event) => {
-                    if event.delta-y != 0px {
-                        games-camera.scroll(event.delta-y);
-                        return accept;
+                drag-begin(moved) => { games-camera.drag-begin(moved); }
+                drag-to(moved) => { games-camera.drag-to(moved); }
+                drag-end => { games-camera.drag-end(); }
+                TouchArea {
+                    width: parent.width; height: parent.height;
+                    enabled: !root.viewing-entries;
+                    scroll-event(event) => {
+                        if event.delta-y != 0px {
+                            games-camera.scroll(event.delta-y);
+                            return accept;
+                        }
+                        reject
                     }
-                    reject
                 }
-            }
-            for game[i] in root.games : ListRow {
-                private property <float> entrance: i < root.previous-catalog-count
-                    ? 1.0 : 1.0 - (1.0 - arrival-clock.progress) * (1.0 - arrival-clock.progress);
-                opacity: self.entrance;
-                x: 1px + (1.0 - self.entrance) * 8px;
-                y: i * root.row-stride - root.game-camera + 2px;
-                width: parent.width - 2px - (1.0 - self.entrance) * 8px;
-                // Culling follows the ANIMATED camera, not the target index:
-                // never disappear while a rapid key/analog sequence is panning.
-                visible: i * root.row-stride >= root.game-camera - 4 * root.row-stride
-                    && i * root.row-stride <= root.game-camera + root.game-viewport-height + 4 * root.row-stride;
-                title: game.title;
-                subtitle: game.provider;
-                focused: root.selected-index == i;
-                enabled: !root.viewing-entries;
-                trailing-width: root.narrow ? 175px : 300px;
-                activated => { root.choose-game(i); }
-                wheel(delta) => { games-camera.scroll(delta); }
+                for game[i] in root.games : ListRow {
+                    private property <float> entrance: i < root.previous-catalog-count
+                        ? 1.0 : 1.0 - (1.0 - arrival-clock.progress) * (1.0 - arrival-clock.progress);
+                    opacity: self.entrance;
+                    x: 1px + (1.0 - self.entrance) * 8px;
+                    y: i * root.row-stride - root.game-camera + 2px;
+                    width: parent.width - 2px - (1.0 - self.entrance) * 8px;
+                    // Culling follows the ANIMATED camera, not the target index:
+                    // never disappear while a rapid key/analog sequence is panning.
+                    visible: i * root.row-stride >= root.game-camera - 4 * root.row-stride
+                        && i * root.row-stride <= root.game-camera + root.game-viewport-height + 4 * root.row-stride;
+                    title: game.title;
+                    subtitle: game.provider;
+                    focused: root.selected-index == i;
+                    enabled: !root.viewing-entries;
+                    trailing-width: root.narrow ? 175px : 300px;
+                    activated => { root.choose-game(i); }
+                    wheel(delta) => { games-camera.scroll(delta); }
 
-                Text {
-                    x: parent.width - (root.narrow ? 158px : 273px); y: 12px;
-                    width: root.narrow ? 119px : 231px; height: 29px;
-                    text: root.narrow ? game.compact-progress : game.progress;
-                    color: Theme.foreground; font-size: Typography.body-size;
-                    font-weight: Typography.emphasis-weight;
-                    horizontal-alignment: right; vertical-alignment: center;
-                }
-                Rectangle {
-                    x: parent.width - (root.narrow ? 153px : 233px); y: 52px;
-                    width: root.narrow ? 112px : 192px;
-                    height: 4px; border-radius: 2px;
-                    background: Theme.divider.with-alpha(0.76);
+                    Text {
+                        x: parent.width - (root.narrow ? 158px : 273px); y: 12px;
+                        width: root.narrow ? 119px : 231px; height: 29px;
+                        text: root.narrow ? game.compact-progress : game.progress;
+                        color: Theme.foreground; font-size: Typography.body-size;
+                        font-weight: Typography.emphasis-weight;
+                        horizontal-alignment: right; vertical-alignment: center;
+                    }
                     Rectangle {
-                        x: 0px; y: 0px; height: parent.height;
-                        width: parent.width * max(0.0, min(1.0, game.fraction));
-                        border-radius: 2px; background: Theme.accent;
-                        animate width { duration: Motion.value-swap-duration; easing: ease-out; }
+                        x: parent.width - (root.narrow ? 153px : 233px); y: 52px;
+                        width: root.narrow ? 112px : 192px;
+                        height: 4px; border-radius: 2px;
+                        background: Theme.divider.with-alpha(0.76);
+                        Rectangle {
+                            x: 0px; y: 0px; height: parent.height;
+                            width: parent.width * max(0.0, min(1.0, game.fraction));
+                            border-radius: 2px; background: Theme.accent;
+                            animate width { duration: Motion.value-swap-duration; easing: ease-out; }
+                        }
+                    }
+                    Text {
+                        x: parent.width - 28px; y: 0px; height: parent.height;
+                        text: "›"; color: Theme.secondary-foreground;
+                        font-size: Typography.heading-size;
+                        vertical-alignment: center;
                     }
                 }
-                Text {
-                    x: parent.width - 28px; y: 0px; height: parent.height;
-                    text: "›"; color: Theme.secondary-foreground;
-                    font-size: Typography.heading-size;
-                    vertical-alignment: center;
+                if root.games.length == 0 : Text {
+                    x: 0px; y: Metrics.spacing-lg; width: parent.width;
+                    text: root.status;
+                    color: Theme.secondary-foreground; font-size: Typography.body-size;
+                    wrap: word-wrap;
                 }
-            }
-            if root.games.length == 0 : Text {
-                x: 0px; y: Metrics.spacing-lg; width: parent.width;
-                text: root.status;
-                color: Theme.secondary-foreground; font-size: Typography.body-size;
-                wrap: word-wrap;
             }
         }
         if root.games.length > 0 : ScrollEdgeShadow {
@@ -270,54 +277,61 @@ export component AchievementsPage inherits Rectangle {
             width: root.width - root.margin * 2;
             height: root.detail-viewport-height;
             background: transparent; clip: true;
-            TouchArea {
+            DragScroll {
                 width: parent.width; height: parent.height;
                 enabled: root.viewing-entries;
-                scroll-event(event) => {
-                    if event.delta-y != 0px {
-                        entries-camera.scroll(event.delta-y);
-                        return accept;
+                drag-begin(moved) => { entries-camera.drag-begin(moved); }
+                drag-to(moved) => { entries-camera.drag-to(moved); }
+                drag-end => { entries-camera.drag-end(); }
+                TouchArea {
+                    width: parent.width; height: parent.height;
+                    enabled: root.viewing-entries;
+                    scroll-event(event) => {
+                        if event.delta-y != 0px {
+                            entries-camera.scroll(event.delta-y);
+                            return accept;
+                        }
+                        reject
                     }
-                    reject
                 }
-            }
-            // Read-only and unfocusable: the shared surface, no focus ring.
-            for achievement[i] in root.entries : Surface {
-                x: 1px; y: i * root.entry-stride - root.entry-camera + 2px;
-                width: parent.width - 2px; height: Metrics.list-row-height;
-                visible: i * root.entry-stride >= root.entry-camera - 4 * root.entry-stride
-                    && i * root.entry-stride <= root.entry-camera + root.detail-viewport-height + 4 * root.entry-stride;
-                BadgeIcon {
-                    x: 11px; y: 11px; width: 58px; height: 58px;
-                    badge: achievement.badge;
-                    has-badge: achievement.has-badge;
-                    unlocked: achievement.unlocked;
+                // Read-only and unfocusable: the shared surface, no focus ring.
+                for achievement[i] in root.entries : Surface {
+                    x: 1px; y: i * root.entry-stride - root.entry-camera + 2px;
+                    width: parent.width - 2px; height: Metrics.list-row-height;
+                    visible: i * root.entry-stride >= root.entry-camera - 4 * root.entry-stride
+                        && i * root.entry-stride <= root.entry-camera + root.detail-viewport-height + 4 * root.entry-stride;
+                    BadgeIcon {
+                        x: 11px; y: 11px; width: 58px; height: 58px;
+                        badge: achievement.badge;
+                        has-badge: achievement.has-badge;
+                        unlocked: achievement.unlocked;
+                    }
+                    MarqueeText {
+                        x: 87px; y: 6px; width: parent.width - 106px; height: 25px;
+                        text: achievement.title;
+                        edge-color: Theme.surface;
+                        font-weight: Typography.emphasis-weight;
+                    }
+                    MarqueeText {
+                        x: 87px; y: 30px; width: parent.width - 106px; height: 22px;
+                        text: achievement.description != "" ? achievement.description : achievement.when;
+                        edge-color: Theme.surface;
+                        text-color: Theme.secondary-foreground;
+                        font-size: Typography.caption-size;
+                    }
+                    MarqueeText {
+                        x: 87px; y: 52px; width: parent.width - 106px; height: 22px;
+                        text: achievement.description != "" ? achievement.when : "";
+                        edge-color: Theme.surface;
+                        text-color: Theme.secondary-foreground;
+                        font-size: Typography.caption-size;
+                    }
                 }
-                MarqueeText {
-                    x: 87px; y: 6px; width: parent.width - 106px; height: 25px;
-                    text: achievement.title;
-                    edge-color: Theme.surface;
-                    font-weight: Typography.emphasis-weight;
+                if root.entries.length == 0 : Text {
+                    x: 0px; y: Metrics.spacing-lg; width: parent.width;
+                    text: "No achievements for this game";
+                    color: Theme.secondary-foreground; font-size: Typography.body-size;
                 }
-                MarqueeText {
-                    x: 87px; y: 30px; width: parent.width - 106px; height: 22px;
-                    text: achievement.description != "" ? achievement.description : achievement.when;
-                    edge-color: Theme.surface;
-                    text-color: Theme.secondary-foreground;
-                    font-size: Typography.caption-size;
-                }
-                MarqueeText {
-                    x: 87px; y: 52px; width: parent.width - 106px; height: 22px;
-                    text: achievement.description != "" ? achievement.when : "";
-                    edge-color: Theme.surface;
-                    text-color: Theme.secondary-foreground;
-                    font-size: Typography.caption-size;
-                }
-            }
-            if root.entries.length == 0 : Text {
-                x: 0px; y: Metrics.spacing-lg; width: parent.width;
-                text: "No achievements for this game";
-                color: Theme.secondary-foreground; font-size: Typography.body-size;
             }
         }
         if root.entries.length > 0 : ScrollEdgeShadow {

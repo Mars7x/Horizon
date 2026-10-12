@@ -4,7 +4,7 @@ import { FocusFrame } from "../components/focus-frame.slint";
 import { LibraryCardData } from "../models/library.slint";
 import { PageHeader, HeaderValue, ScrollEdgeShadow } from "../components/page-header.slint";
 import { MarqueeText } from "../components/marquee-text.slint";
-import { Scroll, ScrollCamera } from "../components/scroll.slint";
+import { DragScroll, Scroll, ScrollCamera } from "../components/scroll.slint";
 import { Stopwatch } from "../components/stopwatch.slint";
 import { GridRefresh } from "../components/grid-refresh.slint";
 
@@ -196,186 +196,192 @@ export component LibraryPage inherits Rectangle {
         background: transparent;
         clip: true;
 
-        TouchArea {
+        DragScroll {
             width: parent.width; height: parent.height;
-            scroll-event(event) => {
-                if event.delta-y != 0px {
-                    scroll-camera.scroll(event.delta-y);
-                    return accept;
+            drag-begin(moved) => { scroll-camera.drag-begin(moved); }
+            drag-to(moved) => { scroll-camera.drag-to(moved); }
+            drag-end => { scroll-camera.drag-end(); }
+            TouchArea {
+                width: parent.width; height: parent.height;
+                scroll-event(event) => {
+                    if event.delta-y != 0px {
+                        scroll-camera.scroll(event.delta-y);
+                        return accept;
+                    }
+                    reject
                 }
-                reject
             }
-        }
 
-        // Outgoing grid: one frozen overscan window at the previous scroll
-        // offset. No pointer targets, no sliding brackets, and no model updates
-        // after the transition begins. It disappears automatically as the
-        // timeline reaches its end (or immediately for Reduced Motion).
-        if root.outgoing-opacity > 0.0 : Rectangle {
-            x: root.previous-gallery-x;
-            y: root.previous-gallery-y;
-            width: root.gallery-width(root.previous-grid-columns);
-            height: parent.height;
-            opacity: root.outgoing-opacity;
-            background: transparent;
-            for old[index] in root.previous-cards : Rectangle {
-                x: root.grid-pad + Math.mod(old.absolute-index, root.previous-grid-columns) * root.card-stride;
-                y: root.grid-pad + Math.floor(old.absolute-index / root.previous-grid-columns) * root.row-stride;
-                width: root.card-size; height: root.card-size;
+            // Outgoing grid: one frozen overscan window at the previous scroll
+            // offset. No pointer targets, no sliding brackets, and no model updates
+            // after the transition begins. It disappears automatically as the
+            // timeline reaches its end (or immediately for Reduced Motion).
+            if root.outgoing-opacity > 0.0 : Rectangle {
+                x: root.previous-gallery-x;
+                y: root.previous-gallery-y;
+                width: root.gallery-width(root.previous-grid-columns);
+                height: parent.height;
+                opacity: root.outgoing-opacity;
                 background: transparent;
-                // Staying cards glide in the new grid instead.
-                visible: !old.stays;
-                private property <bool> was-selected:
-                    root.previous-selected-index == old.absolute-index;
-                old-shell := Rectangle {
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
-                    width: root.card-size * (parent.was-selected ? Metrics.game-selected-scale : 1.0);
-                    height: root.card-size * (parent.was-selected ? Metrics.game-selected-scale : 1.0);
-                    border-radius: root.card-size * (20.0 / 148.0);
-                    background: Theme.surface-raised;
-                    border-width: Theme.high-contrast ? 2px : 1px;
-                    border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.42);
-                    drop-shadow-offset-y: parent.was-selected ? 5px : 3px;
-                    drop-shadow-blur: parent.was-selected ? 16px : 11px;
-                    drop-shadow-color: Theme.shadow.with-alpha(parent.was-selected ? 0.90 : 0.68);
-                    Rectangle {
-                        x: root.art-inset; y: root.art-inset;
-                        width: parent.width - 2 * root.art-inset;
-                        height: parent.height - 2 * root.art-inset;
-                        border-radius: root.card-size * (12.0 / 148.0);
-                        clip: true; background: transparent;
-                        if old.game.has-artwork : Image {
-                            width: parent.width; height: parent.height;
-                            source: old.game.artwork;
-                            image-fit: contain;
-                            image-rendering: old.game.pixelated-artwork ? pixelated : smooth;
-                        }
-                        if !old.game.has-artwork : FallbackCover {
-                            width: parent.width; height: parent.height;
-                            game: old.game;
+                for old[index] in root.previous-cards : Rectangle {
+                    x: root.grid-pad + Math.mod(old.absolute-index, root.previous-grid-columns) * root.card-stride;
+                    y: root.grid-pad + Math.floor(old.absolute-index / root.previous-grid-columns) * root.row-stride;
+                    width: root.card-size; height: root.card-size;
+                    background: transparent;
+                    // Staying cards glide in the new grid instead.
+                    visible: !old.stays;
+                    private property <bool> was-selected:
+                        root.previous-selected-index == old.absolute-index;
+                    old-shell := Rectangle {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        width: root.card-size * (parent.was-selected ? Metrics.game-selected-scale : 1.0);
+                        height: root.card-size * (parent.was-selected ? Metrics.game-selected-scale : 1.0);
+                        border-radius: root.card-size * (20.0 / 148.0);
+                        background: Theme.surface-raised;
+                        border-width: Theme.high-contrast ? 2px : 1px;
+                        border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.42);
+                        drop-shadow-offset-y: parent.was-selected ? 5px : 3px;
+                        drop-shadow-blur: parent.was-selected ? 16px : 11px;
+                        drop-shadow-color: Theme.shadow.with-alpha(parent.was-selected ? 0.90 : 0.68);
+                        Rectangle {
+                            x: root.art-inset; y: root.art-inset;
+                            width: parent.width - 2 * root.art-inset;
+                            height: parent.height - 2 * root.art-inset;
+                            border-radius: root.card-size * (12.0 / 148.0);
+                            clip: true; background: transparent;
+                            if old.game.has-artwork : Image {
+                                width: parent.width; height: parent.height;
+                                source: old.game.artwork;
+                                image-fit: contain;
+                                image-rendering: old.game.pixelated-artwork ? pixelated : smooth;
+                            }
+                            if !old.game.has-artwork : FallbackCover {
+                                width: parent.width; height: parent.height;
+                                game: old.game;
+                            }
                         }
                     }
-                }
-                // The outgoing focus outline follows the outgoing shell too.
-                FocusFrame {
-                    x: old-shell.x - Metrics.focus-offset;
-                    y: old-shell.y - Metrics.focus-offset;
-                    width: old-shell.width + Metrics.focus-offset * 2;
-                    height: old-shell.height + Metrics.focus-offset * 2;
-                    active: root.focus-visible && parent.was-selected;
-                    opacity: parent.was-selected ? 1.0 : 0.0;
+                    // The outgoing focus outline follows the outgoing shell too.
+                    FocusFrame {
+                        x: old-shell.x - Metrics.focus-offset;
+                        y: old-shell.y - Metrics.focus-offset;
+                        width: old-shell.width + Metrics.focus-offset * 2;
+                        height: old-shell.height + Metrics.focus-offset * 2;
+                        active: root.focus-visible && parent.was-selected;
+                        opacity: parent.was-selected ? 1.0 : 0.0;
+                    }
                 }
             }
-        }
 
-        gallery := Rectangle {
-            width: root.gallery-width(root.grid-columns);
-            x: root.gallery-x;
-            y: root.rows-top - root.camera;
-            height: max(1, Math.floor((root.total-count + root.grid-columns - 1) / root.grid-columns))
-                * root.row-stride + 2 * root.grid-pad;
-            background: transparent;
-            // Incoming artwork animates per cover instead of fading an entire
-            // model at once; the camera above carries row-to-row motion.
-
-            for row[index] in root.cards : Rectangle {
-                // The grid refresh: a card that was on screen glides from its
-                // old place (both measured in the viewport); a new one fades in.
-                private property <bool> glides: root.grid-reordering && row.from-index >= 0;
-                private property <length> home-x: root.grid-pad
-                    + Math.mod(row.absolute-index, root.grid-columns) * root.card-stride;
-                private property <length> home-y: root.grid-pad
-                    + Math.floor(row.absolute-index / root.grid-columns) * root.row-stride;
-                private property <length> from-x: root.previous-gallery-x + root.grid-pad
-                    + Math.mod(row.from-index, root.previous-grid-columns) * root.card-stride
-                    - root.gallery-x;
-                private property <length> from-y: root.previous-gallery-y + root.grid-pad
-                    + Math.floor(row.from-index / root.previous-grid-columns) * root.row-stride
-                    - (root.rows-top - root.camera);
-                x: self.glides ? self.from-x + (self.home-x - self.from-x) * root.moved : self.home-x;
-                y: self.glides ? self.from-y + (self.home-y - self.from-y) * root.moved : self.home-y;
-                z: self.glides ? 1 : 0;
-                width: root.card-size; height: root.card-size;
+            gallery := Rectangle {
+                width: root.gallery-width(root.grid-columns);
+                x: root.gallery-x;
+                y: root.rows-top - root.camera;
+                height: max(1, Math.floor((root.total-count + root.grid-columns - 1) / root.grid-columns))
+                    * root.row-stride + 2 * root.grid-pad;
                 background: transparent;
-                opacity: !root.grid-reordering || self.glides ? 1.0 : root.arrival;
-                clip: false;
-                private property <bool> selected: root.focus-visible
-                    && root.selected-index == row.absolute-index;
-                private property <float> card-scale: self.selected ? Metrics.game-selected-scale : 1.0;
+                // Incoming artwork animates per cover instead of fading an entire
+                // model at once; the camera above carries row-to-row motion.
 
-                // Selection size and focus outline now both follow Home's
-                // 1.10x focus rhythm instead of a separate 1.045x grid rule.
-                // The same two-layer Home cover composition: a rounded shell
-                // surrounding inset art, rather than edge-to-edge cover squares.
-                shell := Rectangle {
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
-                    width: root.card-size * parent.card-scale;
-                    height: root.card-size * parent.card-scale;
-                    border-radius: root.card-size * (20.0 / 148.0);
-                    background: Theme.surface-raised;
-                    border-width: Theme.high-contrast ? 2px : 1px;
-                    border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.42);
-                    drop-shadow-offset-y: parent.selected ? 5px : 3px;
-                    drop-shadow-blur: parent.selected ? 16px : 11px;
-                    drop-shadow-color: Theme.shadow.with-alpha(parent.selected ? 0.90 : 0.68);
-                    animate width, height {
-                        duration: Motion.focus-duration;
-                        easing: ease-out;
-                    }
+                for row[index] in root.cards : Rectangle {
+                    // The grid refresh: a card that was on screen glides from its
+                    // old place (both measured in the viewport); a new one fades in.
+                    private property <bool> glides: root.grid-reordering && row.from-index >= 0;
+                    private property <length> home-x: root.grid-pad
+                        + Math.mod(row.absolute-index, root.grid-columns) * root.card-stride;
+                    private property <length> home-y: root.grid-pad
+                        + Math.floor(row.absolute-index / root.grid-columns) * root.row-stride;
+                    private property <length> from-x: root.previous-gallery-x + root.grid-pad
+                        + Math.mod(row.from-index, root.previous-grid-columns) * root.card-stride
+                        - root.gallery-x;
+                    private property <length> from-y: root.previous-gallery-y + root.grid-pad
+                        + Math.floor(row.from-index / root.previous-grid-columns) * root.row-stride
+                        - (root.rows-top - root.camera);
+                    x: self.glides ? self.from-x + (self.home-x - self.from-x) * root.moved : self.home-x;
+                    y: self.glides ? self.from-y + (self.home-y - self.from-y) * root.moved : self.home-y;
+                    z: self.glides ? 1 : 0;
+                    width: root.card-size; height: root.card-size;
+                    background: transparent;
+                    opacity: !root.grid-reordering || self.glides ? 1.0 : root.arrival;
+                    clip: false;
+                    private property <bool> selected: root.focus-visible
+                        && root.selected-index == row.absolute-index;
+                    private property <float> card-scale: self.selected ? Metrics.game-selected-scale : 1.0;
 
-                    artwork := Rectangle {
-                        x: root.art-inset; y: root.art-inset;
-                        width: parent.width - 2 * root.art-inset;
-                        height: parent.height - 2 * root.art-inset;
-                        background: transparent;
-                        border-radius: root.card-size * (12.0 / 148.0);
-                        clip: true;
-                        if row.game.has-artwork : Image {
-                            width: parent.width; height: parent.height;
-                            source: row.game.artwork;
-                            image-fit: contain;
-                            image-rendering: row.game.pixelated-artwork ? pixelated : smooth;
+                    // Selection size and focus outline now both follow Home's
+                    // 1.10x focus rhythm instead of a separate 1.045x grid rule.
+                    // The same two-layer Home cover composition: a rounded shell
+                    // surrounding inset art, rather than edge-to-edge cover squares.
+                    shell := Rectangle {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        width: root.card-size * parent.card-scale;
+                        height: root.card-size * parent.card-scale;
+                        border-radius: root.card-size * (20.0 / 148.0);
+                        background: Theme.surface-raised;
+                        border-width: Theme.high-contrast ? 2px : 1px;
+                        border-color: Theme.high-contrast ? Theme.foreground : Theme.divider.with-alpha(0.42);
+                        drop-shadow-offset-y: parent.selected ? 5px : 3px;
+                        drop-shadow-blur: parent.selected ? 16px : 11px;
+                        drop-shadow-color: Theme.shadow.with-alpha(parent.selected ? 0.90 : 0.68);
+                        animate width, height {
+                            duration: Motion.focus-duration;
+                            easing: ease-out;
                         }
-                        if !row.game.has-artwork : FallbackCover {
-                            width: parent.width; height: parent.height;
-                            game: row.game;
+
+                        artwork := Rectangle {
+                            x: root.art-inset; y: root.art-inset;
+                            width: parent.width - 2 * root.art-inset;
+                            height: parent.height - 2 * root.art-inset;
+                            background: transparent;
+                            border-radius: root.card-size * (12.0 / 148.0);
+                            clip: true;
+                            if row.game.has-artwork : Image {
+                                width: parent.width; height: parent.height;
+                                source: row.game.artwork;
+                                image-fit: contain;
+                                image-rendering: row.game.pixelated-artwork ? pixelated : smooth;
+                            }
+                            if !row.game.has-artwork : FallbackCover {
+                                width: parent.width; height: parent.height;
+                                game: row.game;
+                            }
+                        }
+                    }
+                    // As on Home, each cover owns its focus brackets; newly
+                    // selected brackets fade in in-place rather than sliding between
+                    // arbitrary grid positions or diagonally across row boundaries.
+                    FocusFrame {
+                        // Home's frame is attached to the scaling tile, not its
+                        // fixed navigation slot. Keep the same 9px token gap and
+                        // original 1x bracket paths/stroke through both motions.
+                        x: shell.x - Metrics.focus-offset;
+                        y: shell.y - Metrics.focus-offset;
+                        width: shell.width + Metrics.focus-offset * 2;
+                        height: shell.height + Metrics.focus-offset * 2;
+                        active: parent.selected;
+                        opacity: parent.selected ? 1.0 : 0.0;
+                        animate opacity { duration: Motion.focus-duration; easing: ease-in-out; }
+                    }
+                    TouchArea {
+                        width: parent.width; height: parent.height;
+                        // Any cover in view can be clicked; one only peeking is
+                        // selected and scrolled fully into view.
+                        clicked => { root.choose-card(row.absolute-index); }
+                        scroll-event(event) => {
+                            if event.delta-y != 0px {
+                                scroll-camera.scroll(event.delta-y);
+                                return accept;
+                            }
+                            reject
                         }
                     }
                 }
-                // As on Home, each cover owns its focus brackets; newly
-                // selected brackets fade in in-place rather than sliding between
-                // arbitrary grid positions or diagonally across row boundaries.
-                FocusFrame {
-                    // Home's frame is attached to the scaling tile, not its
-                    // fixed navigation slot. Keep the same 9px token gap and
-                    // original 1x bracket paths/stroke through both motions.
-                    x: shell.x - Metrics.focus-offset;
-                    y: shell.y - Metrics.focus-offset;
-                    width: shell.width + Metrics.focus-offset * 2;
-                    height: shell.height + Metrics.focus-offset * 2;
-                    active: parent.selected;
-                    opacity: parent.selected ? 1.0 : 0.0;
-                    animate opacity { duration: Motion.focus-duration; easing: ease-in-out; }
-                }
-                TouchArea {
-                    width: parent.width; height: parent.height;
-                    // Any cover in view can be clicked; one only peeking is
-                    // selected and scrolled fully into view.
-                    clicked => { root.choose-card(row.absolute-index); }
-                    scroll-event(event) => {
-                        if event.delta-y != 0px {
-                            scroll-camera.scroll(event.delta-y);
-                            return accept;
-                        }
-                        reject
-                    }
-                }
+
             }
 
         }
-
     }
 
     // Scroll-edge elevation follows the ANIMATED camera (gallery.y): the top

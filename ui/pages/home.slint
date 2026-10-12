@@ -33,23 +33,43 @@ export component HomePage inherits Rectangle {
         }
     }
 
-    carousel := GameCarousel {
+    // A finger (or mouse) dragging sideways pans the shelf, even starting on
+    // a game: once the drag is clearly sideways the handler takes it from the
+    // tile, so a tap still selects. Focus never moves.
+    swipe := SwipeGestureHandler {
         x: 0px;
         y: Metrics.selected-label-y - Metrics.top-chrome-height;
         width: parent.width;
         height: Metrics.carousel-shelf-y
             + Metrics.carousel-shelf-height
             - Metrics.selected-label-y;
-        games: root.games;
-        selected-index: root.selected-index;
-        selected-title: root.selected-title;
-        launching-game-index: root.launching-game-index;
-        launch-feedback-text: root.launch-feedback-text;
-        focus-visible: root.focus-visible;
-        game-selected(index) => { root.select-game(index); }
-        open-library => { root.open-library(); }
-        geometry-changed(first-game-center-x-px) => {
-            root.carousel-geometry-changed(first-game-center-x-px);
+        handle-swipe-left: true;
+        handle-swipe-right: true;
+        property <bool> dragging: false;
+        moved => {
+            if !self.dragging {
+                self.dragging = true;
+                carousel.drag-begin(self.current-position.x - self.pressed-position.x);
+            }
+            carousel.drag-to(self.current-position.x - self.pressed-position.x);
+        }
+        swiped => { self.dragging = false; carousel.drag-end(); }
+        cancelled => { self.dragging = false; carousel.drag-end(); }
+
+        carousel := GameCarousel {
+            width: parent.width;
+            height: parent.height;
+            games: root.games;
+            selected-index: root.selected-index;
+            selected-title: root.selected-title;
+            launching-game-index: root.launching-game-index;
+            launch-feedback-text: root.launch-feedback-text;
+            focus-visible: root.focus-visible;
+            game-selected(index) => { root.select-game(index); }
+            open-library => { root.open-library(); }
+            geometry-changed(first-game-center-x-px) => {
+                root.carousel-geometry-changed(first-game-center-x-px);
+            }
         }
     }
 

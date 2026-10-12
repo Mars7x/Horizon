@@ -10,7 +10,7 @@ import { SettingsRow } from "../components/settings-row.slint";
 import { ProfileAvatar } from "../components/profile-avatar.slint";
 import { ProfileFrameData, FriendData } from "../models/profile.slint";
 import { Surface } from "../components/list-row.slint";
-import { Scroll, ScrollCamera } from "../components/scroll.slint";
+import { DragScroll, Scroll, ScrollCamera } from "../components/scroll.slint";
 
 // The user's profile, opened from the avatar at the top left of Home. The
 // page itself is the profile, not its options: a card with the avatar large
@@ -191,94 +191,102 @@ export component ProfilePage inherits Rectangle {
         width: root.friends-width; height: root.list-height;
         background: transparent;
         clip: true;
-        // The wheel and touchpad pan the list; nothing in it takes focus.
-        TouchArea {
+        // The wheel, touchpad and a finger pan the list; nothing in it takes
+        // focus.
+        DragScroll {
             width: parent.width; height: parent.height;
             enabled: root.playing && !root.dialog-open;
-            scroll-event(event) => {
-                if event.delta-y != 0px {
-                    friends-camera.scroll(event.delta-y);
-                    return accept;
+            drag-begin(moved) => { friends-camera.drag-begin(moved); }
+            drag-to(moved) => { friends-camera.drag-to(moved); }
+            drag-end => { friends-camera.drag-end(); }
+            TouchArea {
+                width: parent.width; height: parent.height;
+                enabled: root.playing && !root.dialog-open;
+                scroll-event(event) => {
+                    if event.delta-y != 0px {
+                        friends-camera.scroll(event.delta-y);
+                        return accept;
+                    }
+                    reject
                 }
-                reject
             }
-        }
-        for friend[index] in root.friends : Surface {
-            y: index * root.friend-step - friends-camera.camera;
-            width: parent.width;
-            height: root.friend-step - Metrics.list-row-gap;
-            // Only rows near the view are drawn.
-            visible: self.y + self.height > 0px && self.y < parent.height;
+            for friend[index] in root.friends : Surface {
+                y: index * root.friend-step - friends-camera.camera;
+                width: parent.width;
+                height: root.friend-step - Metrics.list-row-gap;
+                // Only rows near the view are drawn.
+                visible: self.y + self.height > 0px && self.y < parent.height;
 
-            property <color> presence: friend.kind == 0 ? root.playing-color
-                : friend.kind == 1 ? Theme.accent
-                : friend.kind == 2 ? root.away-color
-                : Theme.secondary-foreground;
-            Rectangle {
-                x: 14px; y: (parent.height - self.height) / 2;
-                width: 44px; height: 44px;
-                border-radius: self.width / 2;
-                background: Theme.accent;
-                clip: true;
-                if !friend.has-avatar : Text {
-                    width: parent.width; height: parent.height;
-                    text: friend.initial;
-                    color: Theme.accent-foreground;
-                    font-size: 18px;
-                    font-weight: 700;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-                if friend.has-avatar : Image {
-                    width: parent.width; height: parent.height;
-                    source: friend.avatar;
-                    image-fit: cover;
-                }
-            }
-            // Presence: a dot at the avatar's corner, ringed in the row's colour.
-            Rectangle {
-                x: 14px + 44px - 13px; y: (parent.height - 44px) / 2 + 44px - 13px;
-                width: 15px; height: 15px;
-                border-radius: self.width / 2;
-                background: Theme.surface;
+                property <color> presence: friend.kind == 0 ? root.playing-color
+                    : friend.kind == 1 ? Theme.accent
+                    : friend.kind == 2 ? root.away-color
+                    : Theme.secondary-foreground;
                 Rectangle {
-                    x: 3px; y: 3px; width: 9px; height: 9px;
+                    x: 14px; y: (parent.height - self.height) / 2;
+                    width: 44px; height: 44px;
                     border-radius: self.width / 2;
-                    background: presence;
+                    background: Theme.accent;
+                    clip: true;
+                    if !friend.has-avatar : Text {
+                        width: parent.width; height: parent.height;
+                        text: friend.initial;
+                        color: Theme.accent-foreground;
+                        font-size: 18px;
+                        font-weight: 700;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    if friend.has-avatar : Image {
+                        width: parent.width; height: parent.height;
+                        source: friend.avatar;
+                        image-fit: cover;
+                    }
+                }
+                // Presence: a dot at the avatar's corner, ringed in the row's colour.
+                Rectangle {
+                    x: 14px + 44px - 13px; y: (parent.height - 44px) / 2 + 44px - 13px;
+                    width: 15px; height: 15px;
+                    border-radius: self.width / 2;
+                    background: Theme.surface;
+                    Rectangle {
+                        x: 3px; y: 3px; width: 9px; height: 9px;
+                        border-radius: self.width / 2;
+                        background: presence;
+                    }
+                }
+                MarqueeText {
+                    x: 74px; y: 8px;
+                    width: parent.width - 74px - 16px; height: 24px;
+                    text: friend.name;
+                    text-color: friend.kind == 3 ? Theme.secondary-foreground : Theme.foreground;
+                    edge-color: Theme.surface;
+                    font-size: Typography.body-size;
+                    font-weight: Typography.emphasis-weight;
+                }
+                MarqueeText {
+                    x: 74px; y: 33px;
+                    width: parent.width - 74px - 16px; height: 20px;
+                    text: friend.status;
+                    text-color: friend.kind == 3 ? Theme.secondary-foreground : presence;
+                    edge-color: Theme.surface;
+                    font-size: Typography.caption-size;
                 }
             }
-            MarqueeText {
-                x: 74px; y: 8px;
-                width: parent.width - 74px - 16px; height: 24px;
-                text: friend.name;
-                text-color: friend.kind == 3 ? Theme.secondary-foreground : Theme.foreground;
-                edge-color: Theme.surface;
+            // No list: why, in place of it.
+            if root.friends-state != 2 || root.friends-count == 0 : Text {
+                x: 24px; width: parent.width - 48px;
+                y: 0px; height: min(parent.height, 160px);
+                text: root.friends-state == 0 ? "Connect Steam in Settings to see your friends"
+                    : root.friends-state == 1 ? ""
+                    : root.friends-state == 3 ? "Your Steam friends list is private"
+                    : root.friends-state == 4 ? "Can't reach Steam right now"
+                    : "No friends yet";
+                color: Theme.secondary-foreground;
                 font-size: Typography.body-size;
-                font-weight: Typography.emphasis-weight;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                wrap: word-wrap;
             }
-            MarqueeText {
-                x: 74px; y: 33px;
-                width: parent.width - 74px - 16px; height: 20px;
-                text: friend.status;
-                text-color: friend.kind == 3 ? Theme.secondary-foreground : presence;
-                edge-color: Theme.surface;
-                font-size: Typography.caption-size;
-            }
-        }
-        // No list: why, in place of it.
-        if root.friends-state != 2 || root.friends-count == 0 : Text {
-            x: 24px; width: parent.width - 48px;
-            y: 0px; height: min(parent.height, 160px);
-            text: root.friends-state == 0 ? "Connect Steam in Settings to see your friends"
-                : root.friends-state == 1 ? ""
-                : root.friends-state == 3 ? "Your Steam friends list is private"
-                : root.friends-state == 4 ? "Can't reach Steam right now"
-                : "No friends yet";
-            color: Theme.secondary-foreground;
-            font-size: Typography.body-size;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            wrap: word-wrap;
         }
     }
     // Elevation only while friends are hidden above or below the view.

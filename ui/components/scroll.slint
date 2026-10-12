@@ -1,5 +1,6 @@
 import { Motion } from "../theme/theme.slint";
 import { Wheel } from "wheel.slint";
+import { Momentum } from "momentum.slint";
 
 // One scrolling standard for every vertical list and grid (Library, Album,
 // Achievements, Activity history). See docs/UI_STANDARDS.md, "Scrolling".
@@ -78,7 +79,11 @@ export component CameraSettle {
 //   it wasn't told (Up/Down in a read-only list), or reset it through
 //   `settle-key` (a fresh visit: instant, as does `instant`).
 // - A touchpad pulling past either end stretches the content (`Scroll.rubber`)
-//   and springs back when the fingers lift (`Wheel.touching`).
+//   and springs back when the fingers lift (`Wheel.touching`); a swipe that
+//   was still moving glides on (`Momentum`), reporting rows as it goes. A
+//   glide that reaches an end runs into the stretch and springs back.
+// - A finger dragging the list (`drag-begin`, `drag-to`, `drag-end`, from the
+//   page's swipe handler) moves it the same way, and never moves focus.
 export component ScrollCamera {
     in property <int> rest-row: 0;
     in property <length> stride: 1px;
@@ -131,13 +136,37 @@ export component ScrollCamera {
         root.pulling = false;
         root.pull = 0px;
     }
-    // Fingers lifting ends a pull. The timer only covers a touchpad whose
-    // gesture end never arrives (no winit, or a compositor without axis stop).
+    // Fingers lifting ends a swipe: a pull springs back, a moving swipe
+    // glides on. The timer only covers a touchpad whose gesture end never
+    // arrives (no winit, or a compositor without axis stop).
     private property <bool> fingers-down: Wheel.touching;
     changed fingers-down => {
         if !root.fingers-down && root.pulling {
+            let pulled = root.pull != 0px;
             root.spring-back();
+            if !pulled {
+                momentum.release();
+            }
         }
+    }
+    // A glide moves the camera; past an end it stretches the content instead,
+    // braking hard, and springs back once it stops.
+    momentum := Momentum {
+        glide(travel) => {
+            root.follow = true;
+            root.pulling = true;
+            let raw = root.target + root.pull + travel;
+            root.position = max(0px, min(root.limit, raw));
+            root.pull = raw - root.position;
+            // Stored lengths round, so a glide short of the end isn't exact.
+            if abs(root.pull) > 0.5px {
+                momentum.brake();
+            } else {
+                root.pull = 0px;
+            }
+            root.report();
+        }
+        ended => { root.spring-back(); }
     }
     release := Timer {
         interval: 600ms;
@@ -155,6 +184,7 @@ export component ScrollCamera {
     }
     // Show the focused item, moving no further than needed.
     function reveal-focus() {
+        momentum.stop();
         root.seen-focus = root.focus-key;
         root.follow = false;
         root.pull = 0px;
@@ -168,6 +198,7 @@ export component ScrollCamera {
     }
     // Go where the owner says.
     function rest-on-row() {
+        momentum.stop();
         root.follow = false;
         root.pull = 0px;
         root.position = Scroll.camera(root.rest-row * root.stride, root.content, root.viewport);
@@ -177,7 +208,12 @@ export component ScrollCamera {
     public function scroll(delta-y: length) {
         root.follow = !Wheel.is-notch(delta-y);
         root.position = root.target;
+        // New input catches a glide (the speed being measured stays).
+        if momentum.gliding {
+            momentum.stop();
+        }
         if root.follow {
+            momentum.add(Wheel.distance(delta-y));
             // Past an end, the travel becomes pull rather than movement. A
             // pull that starts while the content springs back takes it from
             // where it is.
@@ -197,11 +233,56 @@ export component ScrollCamera {
             // behind it, showing rows already let go. Keep it within a row of
             // where the camera is drawn.
             root.pull = 0px;
+            root.pulling = false;
             let lead = root.stride;
             let next = max(root.base - lead, min(root.base + lead, root.position + Wheel.distance(delta-y)));
             root.position = max(0px, min(root.limit, next));
         }
         root.report();
+    }
+
+    // A finger drag: the content follows it, stretching past an end, then
+    // glides on or springs back.
+    private property <bool> dragging: false;
+    // The unclamped camera the drag started from, and its last position.
+    private property <length> drag-start: 0px;
+    private property <length> drag-last: 0px;
+    // `moved`: how far the finger already is from where it went down (the
+    // swipe is recognised a little way in); the content moves from here, so
+    // it doesn't jump by that much.
+    public function drag-begin(moved: length) {
+        momentum.stop();
+        release.stop();
+        root.dragging = true;
+        // Take the content from wherever it is drawn (gliding, or springing).
+        let drawn = root.camera;
+        root.follow = true;
+        root.pulling = true;
+        root.position = max(0px, min(root.limit, drawn));
+        root.pull = Scroll.unrubber(drawn - root.position);
+        root.drag-start = root.position + root.pull + moved;
+        root.drag-last = root.position + root.pull;
+        root.report();
+    }
+    // `moved`: how far the finger is from where it went down.
+    public function drag-to(moved: length) {
+        // The content follows the finger: moving down shows what's above.
+        let raw = root.drag-start - moved;
+        momentum.add(raw - root.drag-last);
+        root.drag-last = raw;
+        root.position = max(0px, min(root.limit, raw));
+        root.pull = raw - root.position;
+        root.report();
+    }
+    public function drag-end() {
+        if root.dragging {
+            root.dragging = false;
+            let pulled = abs(root.pull) > 0.5px;
+            root.spring-back();
+            if !pulled {
+                momentum.release();
+            }
+        }
     }
 
     // Rust publishes focus and the row together; whichever change is seen
@@ -221,5 +302,47 @@ export component ScrollCamera {
     changed settle-key => {
         root.seen-focus = root.focus-key;
         root.rest-on-row();
+    }
+}
+
+// A finger (or mouse) dragging the content it wraps scrolls it: once the drag
+// is clearly along `vertical` (or sideways), it takes the drag from whatever
+// it started on, so a tap still selects. Pass the movement to a
+// `ScrollCamera`'s `drag-begin`, `drag-to` and `drag-end`. Focus never moves.
+export component DragScroll {
+    in property <bool> enabled: true;
+    in property <bool> vertical: true;
+    callback drag-begin(length);
+    callback drag-to(length);
+    callback drag-end();
+
+    SwipeGestureHandler {
+        width: root.width;
+        height: root.height;
+        enabled: root.enabled;
+        handle-swipe-up: root.vertical;
+        handle-swipe-down: root.vertical;
+        handle-swipe-left: !root.vertical;
+        handle-swipe-right: !root.vertical;
+        property <bool> dragging: false;
+        property <length> travel: root.vertical
+            ? self.current-position.y - self.pressed-position.y
+            : self.current-position.x - self.pressed-position.x;
+        moved => {
+            if !self.dragging {
+                self.dragging = true;
+                root.drag-begin(self.travel);
+            }
+            root.drag-to(self.travel);
+        }
+        swiped => {
+            self.dragging = false;
+            root.drag-end();
+        }
+        cancelled => {
+            self.dragging = false;
+            root.drag-end();
+        }
+        @children
     }
 }
