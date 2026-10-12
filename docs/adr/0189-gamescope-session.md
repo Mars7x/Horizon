@@ -29,6 +29,10 @@ Steam sets.
   NetworkManager and BlueZ.
 - All gamescope control lives in `platform::gamescope`; pages ask a
   `SessionCapabilities` value what exists.
+- The host script that starts Horizon also restarts it after a crash, and
+  performs Switch to Desktop when Horizon exits with that exit code, so the
+  Flatpak gains no host command beyond `flatpak_host`.
+- Bazzite is the first test OS.
 - Wayland is tried first inside gamescope; X11 through `fallback-x11` is the
   fallback if gamescope's focus and overlay control need it.
 
