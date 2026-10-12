@@ -5,12 +5,6 @@ import { ProfileFrameData } from "../models/profile.slint";
 import { BatteryIndicator, NetworkIndicator } from "status-glyphs.slint";
 import { AlbumIcon, ActivityIcon, AchievementsIcon, SettingsIcon, ShopIcon } from "utility-icons.slint";
 
-component Separator inherits Rectangle {
-    width: 1px;
-    height: 30px;
-    background: Theme.divider.with-alpha(0.78);
-}
-
 component StatusCluster inherits Rectangle {
     in property <int> network-kind: 0; // 0 offline, 1 Ethernet, 2 Wi-Fi, 3 other
     in property <int> wifi-strength: 0;
@@ -23,7 +17,6 @@ component StatusCluster inherits Rectangle {
     height: 30px;
     background: transparent;
 
-    Separator { x: 0px; y: (parent.height - self.height) / 2; }
     // Offline never claims a wired disconnection (NetworkManager hasn't said
     // which interface would be disconnected), and another kind of
     // connection is never assumed to be Ethernet.
@@ -125,14 +118,8 @@ export component TopNavigation inherits Rectangle {
         }
         TouchArea {
             width: parent.width; height: parent.height;
-            mouse-cursor: pointer;
             clicked => { root.profile-activated(); }
         }
-    }
-
-    Separator {
-        x: Metrics.top-edge-inset + avatar.width + 24px;
-        y: root.content-center-y - self.height / 2;
     }
 
     // The entire utility row is one screen-level focus region. Rust owns which

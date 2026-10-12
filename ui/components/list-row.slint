@@ -66,7 +66,6 @@ export component ListRow inherits Rectangle {
         edge-color: root.surface-color;
         font-size: Typography.body-size;
     }
-    @children
     touch := TouchArea {
         width: parent.width; height: parent.height;
         enabled: root.enabled;
@@ -79,6 +78,9 @@ export component ListRow inherits Rectangle {
             reject
         }
     }
+    // Above the row's own click area, so a trailing button (a row's Remove)
+    // gets its clicks; plain trailing text passes them through to the row.
+    @children
 }
 
 // The one achievement badge (Achievements entries, Activity Milestones):

@@ -9,7 +9,7 @@ use slint::{
     ComponentHandle, Timer, TimerMode,
     winit_030::{EventResult, WinitWindowAccessor, winit},
 };
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use tracing_subscriber::EnvFilter;
 
 use crate::{
@@ -73,17 +73,15 @@ pub fn run() -> Result<(), AppError> {
         )
         .init();
 
-    info!("starting Horizon phase 10.3.0");
-
     let database_path = data_paths::library_database_path()?;
     let repository = SqliteLibraryRepository::open(&database_path)?;
     let schema_version = repository.schema_version()?;
     let mut library = LibraryService::new(repository);
-    info!(
+    debug!(
         path = %database_path.display(),
         schema_version,
         games = library.game_count()?,
-        "persistent library initialized"
+        "library opened"
     );
 
     let registry = production_source_registry()?;
@@ -92,34 +90,27 @@ pub fn run() -> Result<(), AppError> {
     for report in import_summary.reports() {
         match report.outcome() {
             SourceImportOutcome::Imported { discovered } => {
-                info!(
-                    source = %report.source_id(),
-                    discovered,
-                    "source discovery imported"
-                );
+                debug!(source = %report.source_id(), discovered, "source imported");
             }
             SourceImportOutcome::Unavailable(reason) => {
-                info!(
-                    source = %report.source_id(),
-                    ?reason,
-                    "optional game source is unavailable"
-                );
+                debug!(source = %report.source_id(), ?reason, "source not available");
             }
             SourceImportOutcome::Failed(error) => {
                 warn!(
                     source = %report.source_id(),
                     %error,
-                    "game source discovery failed; continuing with persisted library"
+                    "source import failed; keeping its saved games"
                 );
             }
         }
     }
 
     let library_games = library.games()?;
-    info!(games = library_games.len(), "source-backed library ready");
-    if library_games.is_empty() {
-        warn!("no source-backed games are currently available; Home will show its empty state");
-    }
+    info!(
+        version = env!("CARGO_PKG_VERSION"),
+        games = library_games.len(),
+        "Horizon started"
+    );
 
     // Discovery owns the repository exclusively during startup. After the
     // import pass is complete, share that same repository with the runtime
@@ -172,10 +163,10 @@ pub fn run() -> Result<(), AppError> {
         ActivityController::top_game_limit(),
     )?;
     ActivityController::publish(&ui, &activity_overview);
-    info!(
+    debug!(
         observed_seconds = activity_overview.observed_playtime().get(),
         sessions = activity_overview.completed_sessions(),
-        "persisted Activity overview initialized"
+        "activity loaded"
     );
 
     let registry = Rc::new(registry);
@@ -208,10 +199,7 @@ pub fn run() -> Result<(), AppError> {
     match DbusManagedSessionExecutor::new() {
         Ok(executor) => {
             let available = executor.probe();
-            info!(
-                available,
-                "optional managed-session host helper probe completed"
-            );
+            debug!(available, "session helper checked");
             let executor: Rc<dyn ManagedSessionExecutor> = Rc::new(executor);
             launch_service = launch_service.with_managed_executor(executor);
         }
@@ -229,7 +217,6 @@ pub fn run() -> Result<(), AppError> {
     let runtime_observer: Rc<dyn RuntimeObservationExecutor> =
         Rc::new(SourceRuntimeObservationExecutor::new(Rc::clone(&registry)));
     launch_service = launch_service.with_runtime_observer(runtime_observer);
-    info!("in-process source-runtime observation initialized");
     let launch_service = Rc::new(launch_service);
     let launch_activity: Rc<dyn LaunchActivitySink> = activity_service.clone();
     let library_catalog = library_games.clone();
@@ -249,10 +236,7 @@ pub fn run() -> Result<(), AppError> {
     let activity_showcase =
         ActivityShowcaseController::new(&ui, library_catalog.clone(), Rc::clone(&home));
     activity_showcase.refresh(&ui, &activity_overview);
-    info!(
-        recent_games = recent_ids.len(),
-        "Home recent carousel initialized"
-    );
+    debug!(recent_games = recent_ids.len(), "home ready");
     // Changes are discovered from durable sessions, never by guessing on launch.
     // A small read-only DB query is cheap and keeps Home current after returns
     // from Steam/Heroic and when a source-owned session completes.
@@ -421,10 +405,6 @@ pub fn run() -> Result<(), AppError> {
     navigation.set_action_sound(Rc::new(move |cue| {
         cue_sounds.borrow_mut().play(cue);
     }));
-    info!(
-        route = ?navigation.current_route(),
-        "Phase 4.7 hardened navigation shell initialized"
-    );
 
     let ui_weak = ui.as_weak();
     let action_navigation = Rc::clone(&navigation);

@@ -25,13 +25,9 @@ component AnimatedPicture inherits Rectangle {
     }
 }
 
-// The profile picture at the top left of Home, after the reference mockup:
-// a circle set into a raised ring. The ring catches light along its top edge
-// (a bright crescent above its body colour, built from two solid circles so
-// every renderer draws it alike), has a fine edge and casts a soft shadow;
-// the picture sits in it behind a thin shaded rim. White in light mode, a
-// light gray in dark, plain foreground in High Contrast. Until there is a
-// picture, a monogram on the flat accent stands in for it.
+// The profile picture (Home's top left, and the Profile page): a plain
+// circle with a soft shadow. Until there is a picture, a monogram on the
+// flat accent stands in for it.
 //
 // An animated picture (`picture-frames`) plays while `playing`; see
 // AnimatedPicture.
@@ -42,15 +38,8 @@ export component ProfileAvatar inherits Rectangle {
     in property <[ProfileFrameData]> picture-frames;
     // Whether anything animated may move: only while it's on screen.
     in property <bool> playing: false;
-    // 54px in the top bar; the ring and monogram scale with it.
+    // 54px in the top bar; the monogram and shadow scale with it.
     in property <length> size: 54px;
-    private property <length> ring: max(4px, root.size * 4 / 54);
-    private property <length> inner: root.size - 2 * root.ring;
-    // The lit edge, and the ring's body.
-    private property <color> ring-light: Theme.high-contrast ? Theme.foreground
-        : Theme.is-dark ? #eceef2 : #ffffff;
-    private property <color> ring-body: Theme.high-contrast ? Theme.foreground
-        : Theme.is-dark ? #c6c7ce : #eeeff3;
     private property <color> shadow: Theme.is-dark ? #000000a0 : #00000047;
     width: root.size;
     height: root.size;
@@ -59,60 +48,30 @@ export component ProfileAvatar inherits Rectangle {
     Rectangle {
         width: root.size; height: root.size;
         border-radius: root.size / 2;
-        background: root.ring-light;
+        background: Theme.accent;
         drop-shadow-offset-y: root.size * 3 / 54;
         drop-shadow-blur: root.size * 14 / 54;
         drop-shadow-color: root.shadow;
-
-        // The body, a touch smaller and lower, so the light shows along the top.
-        Rectangle {
-            x: 1px; y: 1.6px;
-            width: root.size - 2px; height: root.size - 2px;
-            border-radius: (root.size - 2px) / 2;
-            background: root.ring-body;
+        if !root.has-picture : Text {
+            width: parent.width; height: parent.height;
+            text: root.monogram;
+            color: Theme.accent-foreground;
+            font-size: root.size * 24 / 54;
+            font-weight: 700;
+            horizontal-alignment: center;
+            vertical-alignment: center;
         }
-        // A fine edge around the whole ring.
-        Rectangle {
-            width: root.size; height: root.size;
+        // The picture gets its own clipped circle.
+        if root.has-picture : Rectangle {
+            width: parent.width; height: parent.height;
             border-radius: root.size / 2;
-            border-width: Theme.high-contrast ? 0px : 1px;
-            border-color: Theme.is-dark ? #00000066 : #00000014;
-            background: transparent;
-        }
-        Rectangle {
-            x: root.ring; y: root.ring;
-            width: root.inner;
-            height: root.inner;
-            border-radius: root.inner / 2;
-            background: Theme.accent;
-            if !root.has-picture : Text {
+            clip: true;
+            AnimatedPicture {
                 width: parent.width; height: parent.height;
-                text: root.monogram;
-                color: Theme.accent-foreground;
-                font-size: root.size * 22 / 54;
-                font-weight: 700;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-            // The picture gets its own clipped circle.
-            if root.has-picture : Rectangle {
-                width: parent.width; height: parent.height;
-                border-radius: root.inner / 2;
-                clip: true;
-                AnimatedPicture {
-                    width: parent.width; height: parent.height;
-                    still: root.picture;
-                    frames: root.picture-frames;
-                    playing: root.playing;
-                }
-            }
-            // The picture sits into the ring: a thin shaded rim at its edge.
-            Rectangle {
-                width: parent.width; height: parent.height;
-                border-radius: root.inner / 2;
-                border-width: Theme.high-contrast ? 0px : 1px;
-                border-color: #00000038;
-                background: transparent;
+                still: root.picture;
+                frames: root.picture-frames;
+                playing: root.playing;
             }
         }
-    }}
+    }
+}

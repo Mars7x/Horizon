@@ -15,7 +15,7 @@ use std::{
 
 use image::{ImageFormat, RgbaImage};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use super::{
     artwork::{SquareArtwork, normalize_remote_square, square_artwork_from_rgba},
@@ -213,7 +213,7 @@ pub fn start_artwork_worker(
                         if first_failure.is_none() {
                             first_failure = Some(format!("not matched: {diagnostic_name} ({id_source})"));
                         }
-                        info!(game = %diagnostic_name, id_source, "SteamGridDB lookup returned no unambiguous match");
+                        debug!(game = %diagnostic_name, id_source, "SteamGridDB: no clear match");
                         if let Some(path) = &cache { write_miss(path); }
                         continue;
                     }
@@ -304,8 +304,8 @@ pub fn start_artwork_worker(
                     if first_failure.is_none() {
                         first_failure = Some(format!("no square metadata: {diagnostic_name} (SteamGridDB ID {})", matched.game.id));
                     }
-                    info!(game = %diagnostic_name, steamgriddb_id = matched.game.id,
-                        "SteamGridDB game matched but no eligible square metadata returned");
+                    debug!(game = %diagnostic_name, steamgriddb_id = matched.game.id,
+                        "SteamGridDB: no square art");
                     if let Some(path) = &cache { write_miss(path); }
                     continue;
                 }
@@ -346,8 +346,8 @@ pub fn start_artwork_worker(
                         first_failure = Some(format!("download rejected: {diagnostic_name} ({})",
                             last_rejection.as_deref().unwrap_or("no compatible downloaded image")));
                     }
-                    info!(game = %diagnostic_name, steamgriddb_id = matched.game.id,
-                        rejection = ?last_rejection, "SteamGridDB square metadata matched, but image downloads failed validation");
+                    debug!(game = %diagnostic_name, steamgriddb_id = matched.game.id,
+                        rejection = ?last_rejection, "SteamGridDB: square art unusable");
                 }
                 if network_failed { return; }
             }

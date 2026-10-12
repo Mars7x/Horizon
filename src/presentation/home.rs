@@ -19,6 +19,7 @@ use tracing::{debug, warn};
 
 use crate::{
     AppWindow, GameCardData,
+    audio::UiSoundCue,
     domain::{GameId, LibraryGame},
     input::{UiAction, UiActionEvent},
     navigation::step_with_edge_wrap,
@@ -170,6 +171,8 @@ pub struct HomeController {
     // subsequent launch; the visual press is independent of session lifetime.
     press_generation: Rc<Cell<u64>>,
     card_changed: CallbackSlot<dyn Fn(usize, GameCardData)>,
+    /// UI sounds for clicks (a controller's are played by navigation).
+    sound: CallbackSlot<dyn Fn(UiSoundCue)>,
 }
 
 impl HomeController {
@@ -235,6 +238,7 @@ impl HomeController {
             playing: RefCell::new(PlayingState::default()),
             press_generation: Rc::new(Cell::new(0)),
             card_changed: RefCell::new(None),
+            sound: RefCell::new(None),
         });
 
         artwork_drain.bind(&controller);
@@ -247,7 +251,14 @@ impl HomeController {
                 return;
             };
 
+            let before = ui.get_selected_index();
             callback_controller.select_index(&ui, requested_index);
+            // A click that moves the selection sounds like a controller's move.
+            if ui.get_selected_index() != before
+                && let Some(sound) = callback_controller.sound.borrow().as_ref()
+            {
+                sound(UiSoundCue::Navigation);
+            }
         });
 
         controller
@@ -390,6 +401,10 @@ impl HomeController {
 
     pub fn set_card_changed(&self, listener: Rc<dyn Fn(usize, GameCardData)>) {
         *self.card_changed.borrow_mut() = Some(listener);
+    }
+
+    pub fn set_sound(&self, callback: Rc<dyn Fn(UiSoundCue)>) {
+        *self.sound.borrow_mut() = Some(callback);
     }
 
     pub fn launch_from_library(&self, ui: &AppWindow, index: usize) {

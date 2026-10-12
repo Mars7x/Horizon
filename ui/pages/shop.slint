@@ -9,6 +9,7 @@ import { SelectionFocusSurface } from "../components/selection-focus-surface.sli
 import { ActionButton } from "../components/action-button.slint";
 import { KeyboardButton } from "../components/on-screen-keyboard.slint";
 import { ConfirmDialog } from "../components/confirm-dialog.slint";
+import { Wheel } from "../components/wheel.slint";
 
 // A job's progress: a filled bar, or a sliding segment while flatpak
 // doesn't say how far it is (still with Reduced Motion).
@@ -405,7 +406,6 @@ export component ShopPage inherits Rectangle {
                 }
                 clear-touch := TouchArea {
                     width: parent.width; height: parent.height;
-                    mouse-cursor: pointer;
                     clicked => { root.search-clear(); }
                 }
             }
@@ -609,7 +609,9 @@ export component ShopPage inherits Rectangle {
             }
         }
 
-        // Screenshots: Left/Right, or a click on either half.
+        // Screenshots: LB/RB; a click (the left edge goes back, the rest
+        // forward, as Album's viewer); or a swipe: a finger or mouse drag, or
+        // two fingers on a touchpad. None of it moves focus.
         shot-frame := Rectangle {
             x: parent.right-x + (parent.right-width - parent.shot-width) / 2;
             y: parent.top;
@@ -628,10 +630,65 @@ export component ShopPage inherits Rectangle {
                 animate opacity { duration: Motion.value-swap-duration; easing: ease-in-out; }
                 accessible-role: none;
             }
-            if root.shots.length > 1 : HorizontalLayout {
+            if root.shots.length > 1 : shot-touch := TouchArea {
                 width: parent.width; height: parent.height;
-                TouchArea { clicked => { root.step-shot(-1); } }
-                TouchArea { clicked => { root.step-shot(1); } }
+                // How far back the left edge reaches.
+                property <length> back-edge: min(140px, self.width / 4);
+                // A drag this long is a swipe, not a click.
+                property <length> swipe-distance: 40px;
+                // Touchpad travel this gesture, and whether it has stepped.
+                property <length> travel: 0px;
+                property <bool> stepped: false;
+                property <bool> fingers: Wheel.touching;
+                changed fingers => {
+                    if !self.fingers { self.travel = 0px; self.stepped = false; }
+                }
+                // On release (Slint's `clicked` would also fire after a drag).
+                pointer-event(event) => {
+                    if event.kind != PointerEventKind.up || event.button != PointerEventButton.left {
+                        return;
+                    }
+                    if abs(self.mouse-x - self.pressed-x) >= self.swipe-distance {
+                        // Content follows the finger: dragging left shows the next.
+                        root.step-shot(self.mouse-x < self.pressed-x ? 1 : -1);
+                    } else if self.mouse-x >= 0px && self.mouse-x <= self.width
+                        && self.mouse-y >= 0px && self.mouse-y <= self.height {
+                        root.step-shot(self.mouse-x < self.back-edge ? -1 : 1);
+                    }
+                }
+                scroll-event(event) => {
+                    if event.delta-x == 0px {
+                        return reject;
+                    }
+                    // A wheel tilt steps once per notch; a touchpad steps once
+                    // per gesture, after enough travel.
+                    if Wheel.is-notch(event.delta-x) {
+                        root.step-shot(Wheel.distance(event.delta-x) > 0px ? 1 : -1);
+                        return accept;
+                    }
+                    self.travel += Wheel.distance(event.delta-x);
+                    if !self.stepped && abs(self.travel) >= self.swipe-distance * 2 {
+                        self.stepped = true;
+                        root.step-shot(self.travel > 0px ? 1 : -1);
+                    }
+                    accept
+                }
+                for side in [-1, 1] : Rectangle {
+                    x: side < 0 ? Metrics.spacing-md : parent.width - self.width - Metrics.spacing-md;
+                    y: (parent.height - self.height) / 2;
+                    width: 40px; height: 40px; border-radius: 20px;
+                    background: #00000080;
+                    opacity: shot-touch.has-hover && (side < 0) == (shot-touch.mouse-x < shot-touch.back-edge)
+                        ? 1.0 : 0.0;
+                    animate opacity { duration: Motion.hover-duration; easing: ease-in-out; }
+                    Text {
+                        width: parent.width; height: parent.height;
+                        text: side < 0 ? "‹" : "›";
+                        color: white;
+                        font-size: Typography.heading-size;
+                        horizontal-alignment: center; vertical-alignment: center;
+                    }
+                }
             }
         }
         if root.shots.length > 1 : HorizontalLayout {

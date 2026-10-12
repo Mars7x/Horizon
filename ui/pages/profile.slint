@@ -123,7 +123,6 @@ export component ProfilePage inherits Rectangle {
         TouchArea {
             x: avatar.x; y: avatar.y;
             width: avatar.width; height: avatar.height;
-            mouse-cursor: pointer;
             clicked => { if (!root.dialog-open) { root.edit(); } }
         }
         name-text := MarqueeText {
@@ -138,7 +137,6 @@ export component ProfilePage inherits Rectangle {
             active: root.playing;
             TouchArea {
                 width: parent.width; height: parent.height;
-                mouse-cursor: pointer;
                 clicked => { if (!root.dialog-open) { root.edit(); } }
             }
         }

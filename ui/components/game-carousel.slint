@@ -146,13 +146,17 @@ export component GameCarousel inherits Rectangle {
         root.ensure-selection-in-camera-zone();
         root.geometry-changed(root.first-game-center-x-px);
     }
+    // A spring-back's slower timing is for the spring only: the next move
+    // (a wrap-around too) glides at the carousel's usual pace.
     changed selected-index => {
         root.following-pointer = false;
+        root.springing = false;
         root.pull = 0px;
         root.ensure-selection-in-camera-zone();
         root.geometry-changed(root.first-game-center-x-px);
     }
     changed width => {
+        root.springing = false;
         root.ensure-selection-in-camera-zone();
         root.geometry-changed(root.first-game-center-x-px);
     }
@@ -165,6 +169,7 @@ export component GameCarousel inherits Rectangle {
     }
     changed games => {
         root.panned = false;
+        root.springing = false;
         root.ensure-selection-in-camera-zone();
         root.geometry-changed(root.first-game-center-x-px);
     }

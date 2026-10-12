@@ -24,13 +24,14 @@ use tracing::warn;
 
 use crate::{
     AppWindow, ShopAppData, ShopShotData,
+    audio::UiSoundCue,
     input::{UiAction, UiActionEvent},
     navigation::step_with_edge_wrap,
     platform::{
         flatpak_host::{self, HostFlatpakError, InstalledApp},
         launcher::open_uri,
     },
-    presentation::wake::drain_notify,
+    presentation::{CallbackSlot, wake::drain_notify},
     services::{
         flathub::{self, AppDetails, AppSummary, Category, FlathubClient, FlathubError, Page},
         image as decoding,
@@ -279,6 +280,9 @@ pub struct ShopController {
     action_focus: Cell<usize>,
     /// Uninstall's question is open, with Cancel (0) or Uninstall (1) focused.
     confirm: Cell<Option<i32>>,
+    /// UI sounds for clicks and swipes (a controller's are played by
+    /// navigation).
+    sound: CallbackSlot<dyn Fn(UiSoundCue)>,
 }
 
 impl ShopController {
@@ -318,11 +322,23 @@ impl ShopController {
             queue: RefCell::new(VecDeque::new()),
             action_focus: Cell::new(0),
             confirm: Cell::new(None),
+            sound: RefCell::new(None),
         });
         drain.bind(&controller);
         controller.bind_callbacks(ui);
         controller.publish(ui);
         controller
+    }
+
+    /// Clicks play what the same choice plays from a controller.
+    pub fn set_sound(&self, callback: Rc<dyn Fn(UiSoundCue)>) {
+        *self.sound.borrow_mut() = Some(callback);
+    }
+
+    fn cue(&self, cue: UiSoundCue) {
+        if let Some(callback) = self.sound.borrow().as_ref() {
+            callback(cue);
+        }
     }
 
     fn bind_callbacks(self: &Rc<Self>, ui: &AppWindow) {
@@ -337,7 +353,9 @@ impl ShopController {
                 ui.set_shop_searching(false);
                 shop.search_focused.set(false);
                 shop.select(&ui, index.max(0) as usize);
-                shop.open_details(&ui);
+                if shop.open_details(&ui) {
+                    shop.cue(UiSoundCue::Ok);
+                }
             }
         });
         let weak = on(self);
@@ -346,6 +364,7 @@ impl ShopController {
                 && let Some(ui) = shop.ui.upgrade()
             {
                 shop.cycle_category(&ui, direction);
+                shop.cue(UiSoundCue::Ok);
             }
         });
         let weak = on(self);
@@ -363,8 +382,11 @@ impl ShopController {
         ui.on_shop_search_open(move || {
             if let Some(shop) = weak.upgrade()
                 && let Some(ui) = shop.ui.upgrade()
+                && shop.details.borrow().is_none()
+                && !ui.get_shop_searching()
             {
                 shop.start_search(&ui);
+                shop.cue(UiSoundCue::Ok);
             }
         });
         let weak = on(self);
@@ -387,6 +409,7 @@ impl ShopController {
                 && let Some(ui) = shop.ui.upgrade()
             {
                 shop.clear_search(&ui);
+                shop.cue(UiSoundCue::Back);
             }
         });
         let weak = on(self);
@@ -395,23 +418,33 @@ impl ShopController {
                 && let Some(ui) = shop.ui.upgrade()
             {
                 shop.action_focus.set(index.max(0) as usize);
-                shop.activate_action(&ui);
+                if shop.activate_action(&ui) {
+                    shop.cue(UiSoundCue::Ok);
+                }
             }
         });
         let weak = on(self);
         ui.on_shop_confirm(move |choice| {
             if let Some(shop) = weak.upgrade()
                 && let Some(ui) = shop.ui.upgrade()
+                && shop.confirm.get().is_some()
             {
                 shop.choose_confirm(&ui, choice);
+                shop.cue(if choice == 1 {
+                    UiSoundCue::Ok
+                } else {
+                    UiSoundCue::Back
+                });
             }
         });
         let weak = on(self);
         ui.on_shop_close_details(move || {
             if let Some(shop) = weak.upgrade()
                 && let Some(ui) = shop.ui.upgrade()
+                && shop.details.borrow().is_some()
             {
                 shop.close_details(&ui);
+                shop.cue(UiSoundCue::Back);
             }
         });
         let weak = on(self);
@@ -419,7 +452,11 @@ impl ShopController {
             if let Some(shop) = weak.upgrade()
                 && let Some(ui) = shop.ui.upgrade()
             {
+                let before = ui.get_shop_shot();
                 shop.step_shot(&ui, delta, false);
+                if ui.get_shop_shot() != before {
+                    shop.cue(UiSoundCue::Navigation);
+                }
             }
         });
         let weak = on(self);

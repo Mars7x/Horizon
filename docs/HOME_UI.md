@@ -136,7 +136,7 @@ Before Phase 4, the home shell receives one more reusable refinement pass:
 - the selected-game pill contains centered text only; the decorative leading
   cartridge glyph is removed;
 - the right-edge continuation button is removed entirely;
-- profile, centered navigation, Wi-Fi, battery, and separators use one shared
+- profile, centered navigation, Wi-Fi and battery use one shared
   top-bar vertical axis;
 - footer content is lifted from the geometric center with one centralized
   metric so the clock and action hints match the reference's optical position;
@@ -182,8 +182,11 @@ composition and prevents component-by-component scaling drift.
 
 Top chrome now spans the full design surface. The profile avatar is inset from
 the true left edge by `Metrics.top-edge-inset`; the battery's right edge uses
-the same inset on the opposite side. Wi-Fi and its separator are derived from
+the same inset on the opposite side. Wi-Fi is derived from
 that right-side cluster, while the navigation group remains centered.
+
+Home has no vertical separators: none after the avatar, before Wi-Fi and
+battery, after the controller icon, or before the button hint.
 
 The footer clock is live rather than a mock value. Its complete visual group is
 centered in both 12-hour and 24-hour modes and receives one shared optical lift
@@ -600,4 +603,4 @@ Each edge fade's strength now comes from the title's animated position rather th
 
 ## Profile avatar
 
-The top-left profile (`components/profile-avatar.slint`) follows the reference mockup: a 54 px circle set into a raised ring. The ring catches light along its top edge (a bright crescent above its body colour, from two solid circles so every renderer draws it alike), has a fine edge and a soft shadow, and the picture sits in it behind a thin shaded rim. The ring is white in light mode, a light gray in dark (#eceef2 / #c6c7ce), and the foreground in High Contrast. The old notification dot is gone. The picture comes from the Profile page, opened by clicking the avatar or pressing A on it (ADR 0177, [PROFILE.md](PROFILE.md)): a chosen picture, the Steam avatar, or (once there is art) a built-in avatar; without one, the name's first letter (else "H") on the flat accent fills the circle. It takes the utilities' focus ring and lift when focused. An animated picture plays: a chosen GIF or animated PNG, or the Steam animated avatar. Rust decodes it whole and small (184 px, at most 600 frames), and `AnimatedPicture` steps through the frames on a Slint `Timer` at the file's own delays. It moves only while on screen (Home's bar, or the Profile page), never while Horizon isn't the active window (`Motion.loops-paused`), and shows the still first frame with Reduced Motion. The separator after it follows its width.
+The top-left profile (`components/profile-avatar.slint`) is a plain 54 px circle with a soft shadow; it has no frame or ring. The old notification dot is gone. The picture comes from the Profile page, opened by clicking the avatar or pressing A on it (ADR 0177, [PROFILE.md](PROFILE.md)): a chosen picture, the Steam avatar, or (once there is art) a built-in avatar; without one, the name's first letter (else "H") on the flat accent fills the circle. It takes the utilities' focus ring and lift when focused. An animated picture plays: a chosen GIF or animated PNG, or the Steam animated avatar. Rust decodes it whole and small (184 px, at most 600 frames), and `AnimatedPicture` steps through the frames on a Slint `Timer` at the file's own delays. It moves only while on screen (Home's bar, or the Profile page), never while Horizon isn't the active window (`Motion.loops-paused`), and shows the still first frame with Reduced Motion.

@@ -21,8 +21,11 @@ apps. Horizon does this through the host's own `flatpak`.
   bar. Most installed first; Installed lists updates first, then by name.
   More apps load as the selection nears the end.
 - **An app's page** (A): icon, name, developer, summary, its buttons, the
-  description (Up/Down scroll it) and the screenshots (LB/RB, or a click on
-  either half). Left/Right move between the buttons. B goes back to the
+  description (Up/Down scroll it) and the screenshots: LB/RB; a click (the
+  left edge goes back, the rest forward, with a ‹ or › on hover, as in
+  Album's viewer); or a swipe (a finger or mouse drag, or two fingers on a
+  touchpad, one step per gesture). None of these moves focus.
+  Left/Right move between the buttons. B goes back to the
   grid where it was.
 
 | App is | Buttons (A on the focused one) |

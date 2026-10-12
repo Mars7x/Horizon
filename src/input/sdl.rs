@@ -116,9 +116,9 @@ impl SdlGamepadInput {
             }
         });
 
-        info!(
+        debug!(
             poll_interval_ms = POLL_INTERVAL.as_millis(),
-            "SDL3 gamepad input started"
+            "gamepad input started"
         );
 
         Ok(Self { timer, state })
