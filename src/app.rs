@@ -13,11 +13,14 @@ use tracing::{debug, info, warn};
 use tracing_subscriber::EnvFilter;
 
 use crate::{
-    AppWindow, Wheel,
+    AppWindow, GlyphFamily, InputGlyphs, Wheel,
     appearance::store::AppearanceStore,
     audio::{UiSoundCue, UiSounds},
     error::AppError,
-    input::{ControllerStatus, InputDevice, InputManager, UiAction, UiActionEvent, mouse},
+    input::{
+        ControllerFamily, ControllerStatus, GlyphStyle, InputDevice, InputManager, UiAction,
+        UiActionEvent, mouse,
+    },
     persistence::{SqliteLibraryRepository, settings::SettingsStore},
     platform::{
         data_paths,
@@ -605,7 +608,19 @@ pub fn run() -> Result<(), AppError> {
         EventResult::Propagate
     });
 
-    let input = InputManager::new(action_sink, status_sink, Rc::clone(&last_device));
+    // Hints show the glyphs of the keyboard or controller used last.
+    let glyph_ui = ui.as_weak();
+    let glyph_sink: Rc<dyn Fn(GlyphStyle)> = Rc::new(move |style| {
+        if let Some(ui) = glyph_ui.upgrade() {
+            ui.global::<InputGlyphs>().set_family(glyph_family(style));
+        }
+    });
+    let input = InputManager::new(
+        action_sink,
+        status_sink,
+        Rc::clone(&last_device),
+        glyph_sink,
+    );
 
     // Network and battery readings wake the UI thread when they arrive.
     let system_ui = ui.as_weak();
@@ -826,4 +841,14 @@ pub fn run() -> Result<(), AppError> {
     ui.run()?;
 
     Ok(())
+}
+
+fn glyph_family(style: GlyphStyle) -> GlyphFamily {
+    match style {
+        GlyphStyle::Keyboard => GlyphFamily::Keyboard,
+        GlyphStyle::Controller(ControllerFamily::Xbox) => GlyphFamily::Xbox,
+        GlyphStyle::Controller(ControllerFamily::PlayStation) => GlyphFamily::Playstation,
+        GlyphStyle::Controller(ControllerFamily::Nintendo) => GlyphFamily::Nintendo,
+        GlyphStyle::Controller(ControllerFamily::SteamDeck) => GlyphFamily::SteamDeck,
+    }
 }

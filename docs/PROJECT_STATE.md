@@ -22,6 +22,7 @@ This page describes the **prepared source** assembled from the cleaned repositor
 - Existing SQLite schema through migration **0007**. Observed sessions and source lifetime are distinct; never add them together. Historic activity can remain after a game is no longer imported.
 - Artwork may come from source adapters or the optional SteamGridDB integration. Preserve local user choices and provenance.
 - Routing, focus decisions and semantic controller input are Rust-owned. Slint is presentation only.
+- Button glyphs follow the keyboard or controller used last (Xbox, PlayStation, Nintendo, Steam Deck); Nintendo pads confirm with A on the right, and Q/E are the keyboard's bumpers (ADR 0185, [Input](INPUT.md)).
 
 ## Current limitations and planned work (not implemented)
 

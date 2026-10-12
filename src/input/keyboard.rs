@@ -24,6 +24,10 @@ pub fn action_for_key(text: &str, repeated: bool) -> Option<UiAction> {
         UiAction::Home
     } else if key_matches(text, Key::Delete) {
         UiAction::Secondary
+    } else if text.eq_ignore_ascii_case("q") {
+        UiAction::LeftBumper
+    } else if text.eq_ignore_ascii_case("e") {
+        UiAction::RightBumper
     } else {
         return None;
     };
@@ -110,5 +114,18 @@ mod tests {
             action_for_key(encoded(Key::RightArrow).as_str(), true),
             Some(UiAction::Right)
         );
+    }
+
+    #[test]
+    fn q_and_e_are_the_bumpers() {
+        for (key, action) in [
+            ("q", UiAction::LeftBumper),
+            ("Q", UiAction::LeftBumper),
+            ("e", UiAction::RightBumper),
+            ("E", UiAction::RightBumper),
+        ] {
+            assert_eq!(action_for_key(key, false), Some(action));
+            assert_eq!(action_for_key(key, true), None);
+        }
     }
 }

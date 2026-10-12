@@ -1,6 +1,6 @@
 import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { ControllerIcon } from "system-icons.slint";
-import { HintBar } from "hint-bar.slint";
+import { HintBar, InputGlyphs, GlyphFamily } from "hint-bar.slint";
 
 component ClockReadout inherits Rectangle {
     in property <string> clock-time;
@@ -73,9 +73,10 @@ export component Footer inherits Rectangle {
     // Same component and line as every other page's hints, so "A OK" sits
     // exactly where those pages put their last hint.
     HintBar {
-        x: parent.width - Metrics.page-margin - 95px;
+        // The keyboard's "Enter" cap is wider than a face button.
+        x: parent.width - Metrics.page-margin - self.width;
         y: parent.height - Metrics.hint-row-center-from-bottom - self.height / 2;
-        width: 95px;
+        width: InputGlyphs.family == GlyphFamily.keyboard ? 113px : 95px;
         height: Metrics.hint-row-height;
         hints: [{ button: "A", label: "OK" }];
         activated(button) => { root.hint-activated(button); }

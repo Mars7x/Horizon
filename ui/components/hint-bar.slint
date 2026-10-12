@@ -1,29 +1,87 @@
 import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { HintData } from "../models/hints.slint";
 
+// Which device's glyphs hints show: the keyboard or the controller family
+// used last (Rust's `input::GlyphStyle`, published on change).
+export enum GlyphFamily { keyboard, xbox, playstation, nintendo, steam-deck }
+
+export global InputGlyphs {
+    in-out property <GlyphFamily> family: GlyphFamily.keyboard;
+}
+
 // Button glyph in the same style as Home's footer "A": filled foreground
-// shape, letter in the background colour. Face buttons are circles,
-// shoulder buttons are pills. `compact` is the small size used beside a
-// header value's label (LB/RB pickers).
+// shape, symbol in the background colour. `button` is the logical button
+// ("A" confirm, "B" back, "X" secondary, "LB"/"RB", "+" menu, "L3"/"R3");
+// the glyph drawn is that button on the device in use: Enter/Esc/Del/Q/E
+// key caps, ✕ ○ □ on PlayStation, L1/R1 or L/R shoulders. Face buttons are
+// circles, shoulders pills, keys rounded squares. `compact` is the small
+// size used beside a header value's label (LB/RB pickers).
 export component ButtonGlyph inherits Rectangle {
     in property <string> button;
     in property <bool> on-dark: false;
     in property <bool> compact: false;
-    private property <bool> shoulder: root.button.character-count > 1;
-    width: root.compact ? (root.shoulder ? 24px : 16px) : (root.shoulder ? 34px : 22px);
+    private property <GlyphFamily> family: InputGlyphs.family;
+    private property <bool> key: root.family == GlyphFamily.keyboard;
+    private property <bool> shoulder: root.button == "LB" || root.button == "RB";
+    // PlayStation face buttons are drawn shapes, not letters.
+    private property <bool> ps-face: root.family == GlyphFamily.playstation
+        && (root.button == "A" || root.button == "B" || root.button == "X" || root.button == "Y");
+    private property <string> label:
+        root.key ? (root.button == "A" ? "Enter" : root.button == "B" ? "Esc"
+            : root.button == "X" ? "Del" : root.button == "LB" ? "Q"
+            : root.button == "RB" ? "E" : root.button == "+" ? "F10" : root.button)
+        : root.shoulder ? (root.family == GlyphFamily.nintendo ? (root.button == "LB" ? "L" : "R")
+            : root.family == GlyphFamily.xbox ? root.button
+            : (root.button == "LB" ? "L1" : "R1"))
+        : root.ps-face ? ""
+        : root.button;
+    private property <color> ink: root.on-dark ? black : Theme.background;
+    private property <length> mark-stroke: root.compact ? 1.25px : 1.75px;
+    width: root.key ? max(root.compact ? 24px : 22px, glyph-text.preferred-width + (root.compact ? 8px : 10px))
+        : root.shoulder ? (root.compact ? 24px : root.label.character-count > 1 ? 34px : 28px)
+        : root.height;
     height: root.compact ? 16px : 22px;
-    border-radius: self.height / 2;
+    border-radius: root.key ? (root.compact ? 3px : 5px) : self.height / 2;
     background: root.on-dark ? white : Theme.foreground;
-    Text {
+    glyph-text := Text {
         width: parent.width;
         height: parent.height;
-        text: root.button;
-        color: root.on-dark ? black : Theme.background;
+        text: root.label;
+        color: root.ink;
         font-family: Typography.family;
-        font-size: root.compact ? 9px : (root.shoulder ? 11px : 12px);
+        font-size: root.compact ? 9px : (root.label.character-count > 1 ? 11px : 12px);
         font-weight: Typography.emphasis-weight;
         horizontal-alignment: center;
         vertical-alignment: center;
+    }
+    // ✕ (confirm)
+    if root.ps-face && root.button == "A" : Path {
+        width: parent.width; height: parent.height;
+        viewbox-width: 22; viewbox-height: 22;
+        commands: "M 7.25 7.25 L 14.75 14.75 M 14.75 7.25 L 7.25 14.75";
+        stroke: root.ink;
+        stroke-width: root.mark-stroke;
+    }
+    // ○ (back)
+    if root.ps-face && root.button == "B" : Rectangle {
+        width: parent.height * 0.44; height: self.width;
+        border-radius: self.width / 2;
+        border-width: root.mark-stroke;
+        border-color: root.ink;
+    }
+    // □ (secondary)
+    if root.ps-face && root.button == "X" : Rectangle {
+        width: parent.height * 0.38; height: self.width;
+        border-width: root.mark-stroke;
+        border-color: root.ink;
+    }
+    // △
+    if root.ps-face && root.button == "Y" : Path {
+        width: parent.width; height: parent.height;
+        viewbox-width: 22; viewbox-height: 22;
+        commands: "M 11 6.25 L 15.75 14.5 L 6.25 14.5 Z";
+        stroke: root.ink;
+        stroke-width: root.mark-stroke;
     }
 }
 

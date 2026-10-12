@@ -38,6 +38,27 @@ pub enum InputDevice {
     Touch,
 }
 
+/// A controller's button family, which decides its glyphs (and, for
+/// Nintendo's, which face button confirms).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ControllerFamily {
+    /// Xbox, and any controller not recognised as another family.
+    #[default]
+    Xbox,
+    PlayStation,
+    Nintendo,
+    SteamDeck,
+}
+
+/// The button glyphs hints show: those of the keyboard or controller used
+/// last. A mouse or touch screen keeps whichever was showing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GlyphStyle {
+    #[default]
+    Keyboard,
+    Controller(ControllerFamily),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UiActionEvent {
     pub action: UiAction,
