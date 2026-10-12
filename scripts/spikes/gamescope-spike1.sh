@@ -8,6 +8,8 @@
 #   bash scripts/spikes/gamescope-spike1.sh [steam|plain]
 #
 # From a desktop gamescope runs nested; from a text console, embedded.
+# Embedded, stay on that console until "Results:" (about 2.5 minutes):
+# switching away pauses gamescope and the run stops partway.
 # "steam" (default) starts gamescope the way gamescope-session-plus does (-e,
 # Steam mode); "plain" leaves -e out. Both add --expose-wayland.
 #

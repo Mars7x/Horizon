@@ -43,8 +43,12 @@ a window whose app ID matches the root's `GAMESCOPECTRL_BASELAYER_APPID`.
 Wayland windows always count as app ID 0, so a Wayland Horizon is never
 shown in Steam mode; an X11 window tagged `STEAM_GAME` is. Without `-e`, a
 Wayland Horizon works and returns after a window on top closes. This points
-to the X11 fallback; the embedded run must confirm it before the decision
-changes. See [GAMESCOPE_SESSION.md](../GAMESCOPE_SESSION.md).
+to the X11 fallback.
+
+Embedded on the same PC: Steam mode is the same. Without `-e`, a second
+Wayland window leaves gamescope with no focus while it is open; X11 windows
+work in every mode. The decision above is unchanged until it is revised in
+this ADR. See [GAMESCOPE_SESSION.md](../GAMESCOPE_SESSION.md).
 
 ## Consequences
 
