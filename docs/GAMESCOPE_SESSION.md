@@ -27,14 +27,22 @@ Horizon does not write its own compositor or display server.
    - `/usr/share/wayland-sessions/gamescope-session-horizon.desktop` (the
      login-screen entry, `DesktopNames=gamescope`).
 3. **Targets handhelds first** (built-in screen, battery, sleep, brightness):
-   Steam Deck, Odin 3 and similar. The OS to test on is still open.
+   Steam Deck, Odin 3 and similar. **Bazzite** is the first test OS: it
+   already ships gamescope-session-plus.
 4. **Games run in the session's gamescope.** The per-game nested gamescope
    helper (ADR 0046, `src/session_helper.rs`) has no role in the session.
 5. **Steam runs hidden** in the session so `steam://` launches, Steam Input
    and Steam's in-game overlay work; Horizon is the only face. Heroic and
    Flatpak games launch as they do today (URI; `flatpak_host`).
-6. **Home mid-game opens a quick menu** over the paused game: resume, quit
-   game, volume, brightness, and a way to full Home.
+   **Signing in:** if Steam isn't signed in, Horizon lets Steam's login
+   window come to the front once, then hides Steam again.
+6. **Home mid-game opens a quick menu**: a side panel sliding in from the
+   right over the dimmed game, like the Deck's quick access menu. It has:
+   - Resume, and Quit game (asks first);
+   - volume and brightness sliders;
+   - Screenshot, saved to the Album as Horizon's own capture;
+   - Performance for this game (frame limit, refresh rate);
+   - a way to full Home.
 7. **Session-only system controls:** power (sleep, restart, shut down, Switch
    to Desktop), volume and brightness, Wi-Fi and Bluetooth, and performance
    (frame limit, refresh rate, scaling; TDP needs root and comes later).
@@ -47,6 +55,27 @@ Horizon does not write its own compositor or display server.
    control in `src/platform/gamescope.rs`; all system services in their own
    `platform` modules. Presentation asks a `SessionCapabilities` value what
    exists and hides what doesn't, so pages never check "am I the session".
+10. **Starting:** "Horizon" is an entry on the login screen. Horizon doesn't
+    set up auto-login; the OS does that, as Bazzite already does for Game
+    Mode.
+11. **Crashes:** `CLIENTCMD` is a small host script that restarts Horizon
+    when it exits unexpectedly. A running game keeps running, because
+    gamescope stays up. After a few quick failures in a row, the session
+    ends for the desktop instead.
+12. **Switch to Desktop** ends the session and logs in to the desktop, as on
+    Bazzite and SteamOS (asks first; games are closed). Horizon doesn't run
+    the OS's session switcher itself (no host command beyond `flatpak_host`):
+    it exits with a "switch to desktop" exit code, and the host script runs
+    the switch (on Bazzite, its `steamos-session-select`).
+13. **The power button:** a short press sleeps; a long press opens Horizon's
+    power menu (sleep, restart, shut down, Switch to Desktop). Horizon takes
+    the key with a logind `handle-power-key` inhibitor and reads it from the
+    device, so logind doesn't act on it alone while Horizon runs. Waking
+   returns straight to whatever was on screen (the game, if one was running).
+14. **The quick menu is session-only.** On a desktop, games are ordinary
+    windows and Home brings Horizon forward, as today.
+15. **Bazzite and other session-plus systems only.** SteamOS (Valve's own
+    `gamescope-session`) isn't planned.
 
 ## How gamescope is controlled
 
@@ -102,16 +131,21 @@ Slint's X11 backend in the session.
    (login, updates, crash dialogs)? Does it write
    `GAMESCOPECTRL_BASELAYER_APPID` itself and fight Horizon? Who gets the
    Guide button in a Steam game: Steam's overlay or Horizon's quick menu?
+   Can Steam's login window be brought forward, then hidden again?
 4. **Portals.** Which of OpenURI, FileChooser and Settings work in a bare
    gamescope session, and which backend (e.g. `xdg-desktop-portal-gtk`) the
    session must start.
+5. **Screenshots.** Gamescope takes one on request; where does the file land,
+   and can the Flatpak read it (the host's `/tmp` isn't shared)?
+6. **The power key.** Does it reach Horizon as an input device on the Deck
+   and the Odin 3, and does the inhibitor stop logind's own suspend?
 
 ## Phases
 
 1. **Boot and play:** the host files; Horizon as the main app; launch and
    return from Steam, Heroic and Flatpak games; power and Switch to Desktop.
-2. **Quick menu:** the overlay on Home mid-game: resume, quit game, volume,
-   brightness, full Home.
+2. **Quick menu:** the side panel on Home mid-game: resume, quit game,
+   volume, brightness, screenshot, performance, full Home; the power key.
 3. **System settings:** Wi-Fi, Bluetooth and performance in Settings
    (session only).
 4. **Packaging** for the handheld OSes (an image layer or system extension
@@ -119,13 +153,7 @@ Slint's X11 backend in the session.
 
 ## Open questions
 
-- Which OS to test on first (Bazzite, SteamOS, Fedora on an Odin 3).
-- SteamOS ships Valve's own `gamescope-session`, not session-plus: support it
-  with our own small script later, or not at all?
-- Album captures in the session: gamescope can take screenshots; how Horizon
-  asks for one.
-- Sleep and resume on handhelds: who handles the power button (logind, the
-  OS, InputPlumber) and what Horizon shows on wake.
+None outside the spikes above.
 
 ## References
 
