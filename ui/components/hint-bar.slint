@@ -7,12 +7,16 @@ export enum GlyphFamily { keyboard, xbox, playstation, nintendo, steam-deck, odi
 
 export global InputGlyphs {
     in-out property <GlyphFamily> family: GlyphFamily.keyboard;
+    // Settings → Controller: controllers confirm with B and go back with A,
+    // so confirm hints show B and back hints A. Keys stay Enter and Esc.
+    in-out property <bool> swap-confirm: false;
 }
 
 // Button glyph in the same style as Home's footer "A": filled foreground
 // shape, symbol in the background colour. `button` is the logical button
 // ("A" confirm, "B" back, "X" secondary, "LB"/"RB", "+" menu, "L3"/"R3");
-// the glyph drawn is that button on the device in use: Enter/Esc/Del/Q/E
+// the glyph drawn is that button on the device in use (A and B trade
+// places on a controller when confirm and back are swapped): Enter/Esc/Del/Q/E
 // key caps, ✕ ○ □ on PlayStation, L1/R1 or L/R shoulders (the Odin 3:
 // Nintendo's letters, L1/R1). Face buttons are
 // circles, shoulders pills, keys rounded squares. `compact` is the small
@@ -23,10 +27,14 @@ export component ButtonGlyph inherits Rectangle {
     in property <bool> compact: false;
     private property <GlyphFamily> family: InputGlyphs.family;
     private property <bool> key: root.family == GlyphFamily.keyboard;
+    // The controller button that does it: confirm and back trade places when
+    // the user swapped them.
+    private property <string> face: root.key || !InputGlyphs.swap-confirm ? root.button
+        : root.button == "A" ? "B" : root.button == "B" ? "A" : root.button;
     private property <bool> shoulder: root.button == "LB" || root.button == "RB";
     // PlayStation face buttons are drawn shapes, not letters.
     private property <bool> ps-face: root.family == GlyphFamily.playstation
-        && (root.button == "A" || root.button == "B" || root.button == "X" || root.button == "Y");
+        && (root.face == "A" || root.face == "B" || root.face == "X" || root.face == "Y");
     private property <string> label:
         root.key ? (root.button == "A" ? "Enter" : root.button == "B" ? "Esc"
             : root.button == "X" ? "Del" : root.button == "LB" ? "Q"
@@ -35,7 +43,7 @@ export component ButtonGlyph inherits Rectangle {
             : root.family == GlyphFamily.xbox ? root.button
             : (root.button == "LB" ? "L1" : "R1"))
         : root.ps-face ? ""
-        : root.button;
+        : root.face;
     private property <color> ink: root.on-dark ? black : Theme.background;
     private property <length> mark-stroke: root.compact ? 1.25px : 1.75px;
     width: root.key ? max(root.compact ? 24px : 22px, glyph-text.preferred-width + (root.compact ? 8px : 10px))
@@ -56,7 +64,7 @@ export component ButtonGlyph inherits Rectangle {
         vertical-alignment: center;
     }
     // ✕ (confirm)
-    if root.ps-face && root.button == "A" : Path {
+    if root.ps-face && root.face == "A" : Path {
         width: parent.width; height: parent.height;
         viewbox-width: 22; viewbox-height: 22;
         commands: "M 7.25 7.25 L 14.75 14.75 M 14.75 7.25 L 7.25 14.75";
@@ -64,7 +72,7 @@ export component ButtonGlyph inherits Rectangle {
         stroke-width: root.mark-stroke;
     }
     // ○ (back)
-    if root.ps-face && root.button == "B" : Path {
+    if root.ps-face && root.face == "B" : Path {
         width: parent.width; height: parent.height;
         viewbox-width: 22; viewbox-height: 22;
         commands: "M 11 6.25 A 4.75 4.75 0 1 1 11 15.75 A 4.75 4.75 0 1 1 11 6.25 Z";
@@ -72,13 +80,13 @@ export component ButtonGlyph inherits Rectangle {
         stroke-width: root.mark-stroke;
     }
     // □ (secondary)
-    if root.ps-face && root.button == "X" : Rectangle {
+    if root.ps-face && root.face == "X" : Rectangle {
         width: parent.height * 0.38; height: self.width;
         border-width: root.mark-stroke;
         border-color: root.ink;
     }
     // △
-    if root.ps-face && root.button == "Y" : Path {
+    if root.ps-face && root.face == "Y" : Path {
         width: parent.width; height: parent.height;
         viewbox-width: 22; viewbox-height: 22;
         commands: "M 11 6.25 L 15.75 14.5 L 6.25 14.5 Z";

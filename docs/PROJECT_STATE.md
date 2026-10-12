@@ -23,6 +23,7 @@ This page describes the **prepared source** assembled from the cleaned repositor
 - Artwork may come from source adapters or the optional SteamGridDB integration. Preserve local user choices and provenance.
 - Routing, focus decisions and semantic controller input are Rust-owned. Slint is presentation only.
 - Button glyphs follow the keyboard or controller used last (Xbox, PlayStation, Nintendo, Steam Deck); Nintendo pads confirm with A on the right, and Q/E are the keyboard's bumpers (ADR 0185, [Input](INPUT.md)).
+- Settings → Controller can swap select and back on controllers, with the hints swapped or not (ADR 0188).
 
 ## Current limitations and planned work (not implemented)
 

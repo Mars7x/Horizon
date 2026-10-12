@@ -20,6 +20,7 @@ go directly inside them, with no extra `io.github.Mars7x.Horizon` folder:
 │   └── album/                       Horizon's own screenshots and clips (see ALBUM.md)
 ├── config/                          0700; files 0600 (not encryption)
 │   ├── appearance.json              theme, accent, UI sounds
+│   ├── controller.json              controller preferences (swap select and back, swap hints)
 │   ├── profile.json                 profile name, and which picture is shown (chosen, Steam, avatar)
 │   ├── steamgriddb.json             SteamGridDB API key, artwork preference
 │   └── steam-account.json           SteamID64 and Steam Web API key

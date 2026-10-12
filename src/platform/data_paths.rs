@@ -31,6 +31,7 @@ const STEAMGRIDDB_FILE: &str = "steamgriddb.json";
 const APPEARANCE_FILE: &str = "appearance.json";
 const STEAM_ACCOUNT_FILE: &str = "steam-account.json";
 const PROFILE_FILE: &str = "profile.json";
+const CONTROLLER_FILE: &str = "controller.json";
 const CACHE_VERSION_FILE: &str = ".version";
 const ALBUM_DIR: &str = "album";
 const PROFILE_PICTURE_FILE: &str = "profile.png";
@@ -108,6 +109,11 @@ pub fn steam_account_settings_path() -> Result<PathBuf, DataPathError> {
 
 pub fn appearance_settings_path() -> Result<PathBuf, DataPathError> {
     config_file_path(APPEARANCE_FILE)
+}
+
+/// Controller preferences (swapping confirm and back).
+pub fn controller_settings_path() -> Result<PathBuf, DataPathError> {
+    config_file_path(CONTROLLER_FILE)
 }
 
 /// Which profile picture to show (a chosen picture, Steam's, or a built-in

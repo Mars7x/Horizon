@@ -85,6 +85,16 @@ impl UiActionEvent {
 }
 
 impl UiAction {
+    /// The action with confirm and back exchanged, for controllers when the
+    /// "Swap A and B" setting is on.
+    pub const fn with_confirm_swapped(self) -> Self {
+        match self {
+            Self::Accept => Self::Back,
+            Self::Back => Self::Accept,
+            other => other,
+        }
+    }
+
     /// Actions interpreted by the application shell before page-local input.
     ///
     /// Accept remains contextual: the active focus region/page decides what it

@@ -324,12 +324,14 @@ export component AppWindow inherits Window {
 
 
 
-    // Settings: root, Appearance, Third-Party. All selection and persistence Rust-owned.
+    // Settings: root, Appearance, Controller, Third-Party. All selection and persistence Rust-owned.
     in property <int> settings-view: 0;
     in property <int> settings-selection: 0;
     in property <int> settings-theme-index: 0; // System, Light, Dark, Black
     in property <int> settings-accent-index: 0; // System, spectrum presets
     in property <bool> settings-ui-sounds-enabled: true;
+    in property <bool> settings-swap-confirm: false;
+    in property <bool> settings-swap-hints: true;
 
     in property <bool> settings-key-present: false;
     in property <string> settings-steam-identity: "Not set";
@@ -907,6 +909,8 @@ export component AppWindow inherits Window {
                     theme-index: root.settings-theme-index;
                     accent-index: root.settings-accent-index;
                     ui-sounds-enabled: root.settings-ui-sounds-enabled;
+                    swap-confirm: root.settings-swap-confirm;
+                    swap-hints: root.settings-swap-hints;
                     appearance-feedback: root.settings-appearance-feedback;
                     key-present: root.settings-key-present;
                     steam-identity: root.settings-steam-identity;
