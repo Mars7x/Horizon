@@ -35,9 +35,11 @@ use crate::{
         },
         album::AlbumController,
         appearance::AppearanceController,
+        catalog::Catalog,
         clock::ClockController,
-        home::HomeController,
+        home::{HOME_RECENT_LIMIT, HomeController},
         keyboard::KeyboardController,
+        library_reload::{LibraryReloadParts, LibraryReloader},
         navigation::NavigationController,
         profile::ProfileController,
         settings::SettingsController,
@@ -64,7 +66,6 @@ use crate::{
 
 const APP_ID: &str = "io.github.Mars7x.Horizon";
 const SOURCE_PLAYTIME_REFRESH_INTERVAL: Duration = Duration::from_secs(20);
-const HOME_RECENT_LIMIT: usize = 15;
 
 pub fn run() -> Result<(), AppError> {
     tracing_subscriber::fmt()
@@ -170,30 +171,40 @@ pub fn run() -> Result<(), AppError> {
     );
 
     let registry = Rc::new(registry);
+    // Home, Library and Activity share one catalog; a library reload (after
+    // a Shop install) appends to it without moving any game's index.
+    let catalog = Catalog::shared(library_games);
     let source_playtime_timer = Timer::default();
     let sync_registry = Rc::clone(&registry);
     let sync_activity = Rc::clone(&activity_service);
     let sync_worker = Rc::clone(&source_playtime_sync);
-    let sync_games = library_games.clone();
+    let sync_catalog = Rc::clone(&catalog);
     let sync_ui = ui.as_weak();
     source_playtime_timer.start(
         TimerMode::Repeated,
         SOURCE_PLAYTIME_REFRESH_INTERVAL,
-        move || match sync_worker.refresh(&sync_registry, &sync_games, &sync_activity) {
-            Ok(true) => {
-                if let Some(ui) = sync_ui.upgrade() {
-                    ActivityController::refresh(&ui, &sync_activity);
+        move || {
+            let games = sync_catalog
+                .borrow()
+                .iter()
+                .map(|(_, game)| game.clone())
+                .collect::<Vec<_>>();
+            match sync_worker.refresh(&sync_registry, &games, &sync_activity) {
+                Ok(true) => {
+                    if let Some(ui) = sync_ui.upgrade() {
+                        ActivityController::refresh(&ui, &sync_activity);
+                    }
                 }
+                Ok(false) => {}
+                Err(error) => warn!(%error, "source playtime refresh failed"),
             }
-            Ok(false) => {}
-            Err(error) => warn!(%error, "source playtime refresh failed"),
         },
     );
-    let artwork_service = ArtworkService::new(
+    let artwork_service = Rc::new(ArtworkService::new(
         Rc::clone(&registry),
         data_paths::local_artwork_cache_dir(artwork::LOCAL_ARTWORK_CACHE_VERSION),
         data_paths::steamgriddb_cache_dir(artwork::STEAMGRIDDB_CACHE_VERSION),
-    );
+    ));
     let mut launch_service =
         GameLaunchService::new(Rc::clone(&registry), Rc::new(PortalLaunchExecutor));
     match DbusManagedSessionExecutor::new() {
@@ -219,13 +230,16 @@ pub fn run() -> Result<(), AppError> {
     launch_service = launch_service.with_runtime_observer(runtime_observer);
     let launch_service = Rc::new(launch_service);
     let launch_activity: Rc<dyn LaunchActivitySink> = activity_service.clone();
-    let library_catalog = library_games.clone();
-    let achievements_catalog = library_games.clone();
-    let album_catalog = library_games.clone();
+    let achievements_catalog = catalog
+        .borrow()
+        .iter()
+        .map(|(_, game)| game.clone())
+        .collect::<Vec<_>>();
+    let album_catalog = achievements_catalog.clone();
     let recent_ids = activity_service.recent_game_ids(HOME_RECENT_LIMIT)?;
     let home = HomeController::new(
         &ui,
-        library_games,
+        Rc::clone(&catalog),
         &recent_ids,
         &artwork_service,
         &registry,
@@ -234,7 +248,7 @@ pub fn run() -> Result<(), AppError> {
     );
     // Mount a single stable Activity cover model before the UI is shown.
     let activity_showcase =
-        ActivityShowcaseController::new(&ui, library_catalog.clone(), Rc::clone(&home));
+        ActivityShowcaseController::new(&ui, Rc::clone(&catalog), Rc::clone(&home));
     activity_showcase.refresh(&ui, &activity_overview);
     debug!(recent_games = recent_ids.len(), "home ready");
     // Changes are discovered from durable sessions, never by guessing on launch.
@@ -263,7 +277,7 @@ pub fn run() -> Result<(), AppError> {
         ActivityDetailsController::new(Rc::clone(&activity_service), Rc::clone(&activity_showcase));
     let library_controller = crate::presentation::library::LibraryController::new(
         &ui,
-        library_catalog,
+        Rc::clone(&catalog),
         Rc::clone(&home),
         Rc::clone(&activity_service),
     );
@@ -350,6 +364,7 @@ pub fn run() -> Result<(), AppError> {
             profile.steam_account_changed(&ui);
         }
     }));
+    let settings_for_reload = Rc::clone(&settings);
     let navigation = NavigationController::new(
         &ui,
         Rc::clone(&home),
@@ -358,7 +373,8 @@ pub fn run() -> Result<(), AppError> {
     );
     navigation.set_achievements(achievements, &ui);
     navigation.set_profile(Rc::clone(&profile_page), &ui);
-    navigation.set_shop(ShopController::new(&ui));
+    let shop = ShopController::new(&ui);
+    navigation.set_shop(Rc::clone(&shop));
     // What the user last used decides whether a text field brings up the
     // on-screen keyboard (a controller or a touch screen does).
     let last_device = Rc::new(Cell::new(InputDevice::default()));
@@ -389,6 +405,26 @@ pub fn run() -> Result<(), AppError> {
         video,
     );
     navigation.set_album(Rc::clone(&album), &ui);
+    // A Shop install, update or uninstall can add, rename or remove a
+    // Flatpak game: read the library again.
+    let reload_settings = Rc::clone(&settings_for_reload);
+    let reloader = LibraryReloader::new(
+        &ui,
+        LibraryReloadParts {
+            catalog: Rc::clone(&catalog),
+            repository: Rc::clone(&runtime_repository),
+            activity: Rc::clone(&activity_service),
+            registry: Rc::clone(&registry),
+            artwork: Rc::clone(&artwork_service),
+            home: Rc::clone(&home),
+            library: Rc::clone(&library_controller),
+            showcase: Rc::clone(&activity_showcase),
+            album: Rc::clone(&album),
+            artwork_preferences: Rc::new(move || reload_settings.artwork_preferences()),
+        },
+    );
+    let shop_reloader = Rc::clone(&reloader);
+    shop.set_apps_changed(Rc::new(move || shop_reloader.reload()));
     navigation.set_activity_details(Rc::clone(&activity_details));
     // Prepare Activity synchronously on navigation, before PageTransitionLayer
     // exposes it. Do not depend on the 3-second recents refresh after entry.
@@ -774,6 +810,7 @@ pub fn run() -> Result<(), AppError> {
     let _clock = clock;
     let _system_monitor = system_monitor;
     let _album = album;
+    let _reloader = reloader;
     let _navigation = navigation;
     let _library_controller = library_controller;
     let _recent_refresh_timer = recent_refresh_timer;

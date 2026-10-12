@@ -9,8 +9,8 @@ use tracing::warn;
 
 use crate::{
     ActivityCoverData, ActivityDayData, ActivityHistoryRowData, AppWindow, GameCardData,
-    domain::{GameId, LibraryGame, PlaySessionState, PlaytimeSeconds},
-    presentation::home::HomeController,
+    domain::{GameId, PlaySessionState, PlaytimeSeconds},
+    presentation::{catalog::SharedCatalog, home::HomeController},
     services::activity::{ActivityOverview, ActivityRepository, ActivityService},
 };
 
@@ -87,14 +87,14 @@ impl ActivityController {
 /// Refreshing on entry changes the data *before* the route becomes visible;
 /// asynchronous Home artwork is then forwarded to the existing rows directly.
 pub struct ActivityShowcaseController {
-    catalog: Vec<LibraryGame>,
+    catalog: SharedCatalog,
     home: Rc<HomeController>,
     covers: Rc<VecModel<ActivityCoverData>>,
     displayed_ids: RefCell<Vec<GameId>>,
 }
 
 impl ActivityShowcaseController {
-    pub fn new(ui: &AppWindow, catalog: Vec<LibraryGame>, home: Rc<HomeController>) -> Rc<Self> {
+    pub fn new(ui: &AppWindow, catalog: SharedCatalog, home: Rc<HomeController>) -> Rc<Self> {
         let covers = Rc::new(VecModel::from(Vec::<ActivityCoverData>::new()));
         ui.set_activity_covers(ModelRc::from(Rc::clone(&covers)));
         Rc::new(Self {
@@ -109,11 +109,7 @@ impl ActivityShowcaseController {
         let mut new_ids = Vec::new();
         let mut new_covers = Vec::new();
         for summary in overview.top_games() {
-            let Some(index) = self
-                .catalog
-                .iter()
-                .position(|game| game.game().id() == summary.game_id())
-            else {
+            let Some(index) = self.catalog.borrow().position(summary.game_id()) else {
                 continue;
             };
             let Some(game) = self.home.card_at(index) else {
@@ -156,10 +152,11 @@ impl ActivityShowcaseController {
     }
 
     pub fn source_labels_for(&self, game_id: GameId) -> String {
-        self.catalog
+        let catalog = self.catalog.borrow();
+        catalog
             .iter()
-            .find(|game| game.game().id() == game_id)
-            .map(|game| {
+            .find(|(_, game)| game.game().id() == game_id)
+            .map(|(_, game)| {
                 game.sources()
                     .iter()
                     .map(|source| source_display_name(source.source_id().as_str()))
@@ -170,22 +167,25 @@ impl ActivityShowcaseController {
     }
 
     pub fn catalog_index_for(&self, game_id: GameId) -> Option<usize> {
-        self.catalog
-            .iter()
-            .position(|game| game.game().id() == game_id)
+        self.catalog.borrow().position(game_id)
     }
 
     /// A Home artwork lookup finishing must not wait for Activity's timer.
     /// Update the one matching cover without remounting the carousel model.
     pub fn on_card_updated(&self, catalog_index: usize, card: GameCardData) {
-        let Some(game) = self.catalog.get(catalog_index) else {
+        let Some(game_id) = self
+            .catalog
+            .borrow()
+            .get(catalog_index)
+            .map(|game| game.game().id())
+        else {
             return;
         };
         let position = self
             .displayed_ids
             .borrow()
             .iter()
-            .position(|id| id == &game.game().id());
+            .position(|id| *id == game_id);
         let Some(position) = position else {
             return;
         };

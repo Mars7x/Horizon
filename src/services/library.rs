@@ -55,6 +55,43 @@ pub trait LibraryRepository {
     fn game_count(&self) -> Result<usize, Self::Error>;
 }
 
+/// A borrowed repository works too: the running app keeps its one
+/// connection shared and lends it for a library reload.
+impl<R> LibraryRepository for &mut R
+where
+    R: LibraryRepository,
+{
+    type Error = R::Error;
+
+    fn upsert_discovered_game(&mut self, game: &DiscoveredGame) -> Result<GameId, Self::Error> {
+        (**self).upsert_discovered_game(game)
+    }
+
+    fn upsert_discovered_games(
+        &mut self,
+        games: &[DiscoveredGame],
+    ) -> Result<Vec<GameId>, Self::Error> {
+        (**self).upsert_discovered_games(games)
+    }
+
+    fn synchronize_source_snapshot(
+        &mut self,
+        source_id: &SourceId,
+        games: &[DiscoveredGame],
+        present_external_ids: &[ExternalGameId],
+    ) -> Result<Vec<GameId>, Self::Error> {
+        (**self).synchronize_source_snapshot(source_id, games, present_external_ids)
+    }
+
+    fn list_games(&self) -> Result<Vec<LibraryGame>, Self::Error> {
+        (**self).list_games()
+    }
+
+    fn game_count(&self) -> Result<usize, Self::Error> {
+        (**self).game_count()
+    }
+}
+
 pub struct LibraryService<R> {
     repository: R,
 }

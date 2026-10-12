@@ -87,6 +87,15 @@ where
 /// after a database write failure could leave caller assumptions invalid.
 pub struct SourceImportService;
 
+/// One source's discovery, read but not yet saved. Discovery only reads the
+/// sources' files, so it can run on a worker thread; saving happens where the
+/// library's database connection lives.
+#[derive(Debug)]
+pub struct SourceDiscoveryResult {
+    source_id: SourceId,
+    result: Result<SourceDiscovery, SourceError>,
+}
+
 impl SourceImportService {
     pub fn import_all<R>(
         registry: &SourceRegistry,
@@ -95,11 +104,32 @@ impl SourceImportService {
     where
         R: LibraryRepository,
     {
+        Self::save_all(Self::discover_all(registry), library)
+    }
+
+    /// Ask every source what it has, in registry order.
+    pub fn discover_all(registry: &SourceRegistry) -> Vec<SourceDiscoveryResult> {
+        registry
+            .iter()
+            .map(|source| SourceDiscoveryResult {
+                source_id: source.descriptor().id().clone(),
+                result: source.discover(),
+            })
+            .collect()
+    }
+
+    /// Save what `discover_all` found.
+    pub fn save_all<R>(
+        discoveries: Vec<SourceDiscoveryResult>,
+        library: &mut LibraryService<R>,
+    ) -> Result<SourceImportSummary, SourceImportError<R::Error>>
+    where
+        R: LibraryRepository,
+    {
         let mut summary = SourceImportSummary::default();
 
-        for source in registry.iter() {
-            let source_id = source.descriptor().id().clone();
-            let outcome = match source.discover() {
+        for SourceDiscoveryResult { source_id, result } in discoveries {
+            let outcome = match result {
                 Err(error) => SourceImportOutcome::Failed(error),
                 Ok(SourceDiscovery::Unavailable(reason)) => {
                     SourceImportOutcome::Unavailable(reason)

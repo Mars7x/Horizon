@@ -2,6 +2,7 @@ use ashpd::{Uri, desktop::open_uri::OpenFileRequest};
 use thiserror::Error;
 
 use crate::{
+    platform::flatpak_host,
     services::launch::{LaunchExecutionError, LaunchExecutor},
     sources::SourceLaunchTarget,
 };
@@ -17,13 +18,18 @@ pub enum PortalLaunchError {
 }
 
 /// Dispatches launch URIs through XDG Desktop Portal rather than assuming a
-/// host launcher binary is visible inside Horizon's Flatpak sandbox.
+/// host launcher binary is visible inside Horizon's Flatpak sandbox. Flatpak
+/// games are the exception: the host's `flatpak run`, through the one host
+/// boundary (`flatpak_host`, ADR 0183).
 pub struct PortalLaunchExecutor;
 
 impl LaunchExecutor for PortalLaunchExecutor {
     fn execute(&self, target: &SourceLaunchTarget) -> Result<(), LaunchExecutionError> {
         match target {
             SourceLaunchTarget::Uri(value) => open_uri(value).map_err(LaunchExecutionError::new),
+            SourceLaunchTarget::FlatpakApp(app_id) => {
+                flatpak_host::run(app_id).map_err(LaunchExecutionError::new)
+            }
         }
     }
 }

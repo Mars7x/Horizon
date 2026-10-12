@@ -16,7 +16,8 @@ This page describes the **prepared source** assembled from the cleaned repositor
 
 ## Production source and data boundaries
 
-- Production game sources: **Steam** and **Heroic**. Lutris and Bottles were retired; keep their existing removal migrations.
+- Production game sources: **Steam**, **Heroic** and **Flatpak** (installed Flatpaks in the Game category, ADR 0183, [Flatpak games](FLATPAK_GAMES.md)). Lutris and Bottles were retired; keep their existing removal migrations.
+- The library is read at startup and again after every successful Shop job (`LibraryReloader`); Home, Library and Activity share one append-only `Catalog` whose indices never move during a run.
 - Steam local game discovery and source-reported lifetime playtime are separate from opt-in **Steam Web API** achievement retrieval.
 - Existing SQLite schema through migration **0007**. Observed sessions and source lifetime are distinct; never add them together. Historic activity can remain after a game is no longer imported.
 - Artwork may come from source adapters or the optional SteamGridDB integration. Preserve local user choices and provenance.

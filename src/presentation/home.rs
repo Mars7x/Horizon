@@ -23,7 +23,11 @@ use crate::{
     domain::{GameId, LibraryGame},
     input::{UiAction, UiActionEvent},
     navigation::step_with_edge_wrap,
-    presentation::{CallbackSlot, wake::drain_notify},
+    presentation::{
+        CallbackSlot,
+        catalog::{Catalog, CatalogChanges, SharedCatalog},
+        wake::drain_notify,
+    },
     services::{
         activity::LaunchActivitySink,
         artwork::{ArtworkService, SquareArtwork},
@@ -153,15 +157,16 @@ pub struct HomeController {
     cards: Rc<VecModel<GameCardData>>,
     home_cards: Rc<VecModel<GameCardData>>,
     home_order: RefCell<Vec<usize>>,
-    /// Immutable provider-owned fallbacks, never replaced by downloaded art.
-    source_cards: Vec<GameCardData>,
-    artwork_lookup_jobs: Vec<ArtworkLookupJob>,
+    /// Provider-owned fallbacks, never replaced by downloaded art (a library
+    /// reload adds or rereads them).
+    source_cards: RefCell<Vec<GameCardData>>,
+    artwork_lookup_jobs: RefCell<Vec<ArtworkLookupJob>>,
     artwork_cache_root: Option<PathBuf>,
     artwork_sender: WorkerSender<ArtworkWorkerEvent>,
     artwork_receiver: RefCell<Receiver<ArtworkWorkerEvent>>,
     artwork_generation: Arc<AtomicU64>,
-    library_games: Vec<LibraryGame>,
-    titles: Vec<SharedString>,
+    catalog: SharedCatalog,
+    titles: RefCell<Vec<SharedString>>,
     launch_service: Rc<GameLaunchService>,
     launch_activity: Rc<dyn LaunchActivitySink>,
     state: RefCell<HomeState>,
@@ -178,13 +183,19 @@ pub struct HomeController {
 impl HomeController {
     pub fn new(
         ui: &AppWindow,
-        library_games: Vec<LibraryGame>,
+        catalog: SharedCatalog,
         recent_game_ids: &[GameId],
         artwork_service: &ArtworkService,
         registry: &crate::sources::SourceRegistry,
         launch_service: Rc<GameLaunchService>,
         launch_activity: Rc<dyn LaunchActivitySink>,
     ) -> Rc<Self> {
+        // A fresh catalog: every slot is present.
+        let library_games = catalog
+            .borrow()
+            .iter()
+            .map(|(_, game)| game.clone())
+            .collect::<Vec<_>>();
         let card_data = library_games
             .iter()
             .zip(artwork_service.square_artworks(&library_games))
@@ -194,11 +205,7 @@ impl HomeController {
         let artwork_lookup_jobs = library_games
             .iter()
             .enumerate()
-            .map(|(index, game)| ArtworkLookupJob {
-                index,
-                identity: steamgriddb_artwork::cache_identity(game),
-                lookup: SteamGridDbLookup::for_game(game, registry),
-            })
+            .map(|(index, game)| lookup_job(index, game, registry))
             .collect();
         // Artwork results wake the UI thread; nothing polls for them.
         let weak_ui = ui.as_weak();
@@ -210,7 +217,7 @@ impl HomeController {
         let (artwork_sender, artwork_receiver) = worker_channel(artwork_notify);
         let card_data_for_fallback = card_data.clone();
         let cards = Rc::new(VecModel::from(card_data));
-        let home_order = ordered_home_indices(&library_games, recent_game_ids);
+        let home_order = ordered_home_indices(&catalog.borrow(), recent_game_ids);
         let home_cards = Rc::new(VecModel::from(
             home_order
                 .iter()
@@ -223,14 +230,14 @@ impl HomeController {
             cards,
             home_cards,
             home_order: RefCell::new(home_order),
-            source_cards: card_data_for_fallback,
-            artwork_lookup_jobs,
+            source_cards: RefCell::new(card_data_for_fallback),
+            artwork_lookup_jobs: RefCell::new(artwork_lookup_jobs),
             artwork_cache_root: artwork_service.steamgriddb_cache_root(),
             artwork_sender,
             artwork_receiver: RefCell::new(artwork_receiver),
             artwork_generation: Arc::new(AtomicU64::new(0)),
-            library_games,
-            titles,
+            catalog,
+            titles: RefCell::new(titles),
             launch_service,
             launch_activity,
             state: RefCell::new(HomeState::default()),
@@ -277,26 +284,38 @@ impl HomeController {
     }
 
     fn update_steamgriddb(&self, preferences: ArtworkPreferences, force_refresh: bool) {
-        let generation = self.artwork_generation.fetch_add(1, Ordering::AcqRel) + 1;
         if !force_refresh {
-            for (index, card) in self.source_cards.iter().enumerate() {
-                self.publish_card(index, card.clone());
+            let source_cards = self.source_cards.borrow().clone();
+            for (index, card) in source_cards.into_iter().enumerate() {
+                self.publish_card(index, card);
             }
         }
+        self.start_steamgriddb(preferences, force_refresh);
+    }
+
+    /// Look up every game that needs a cover, superseding any earlier pass.
+    /// Covers already shown stay until a new one arrives.
+    fn start_steamgriddb(&self, preferences: ArtworkPreferences, force_refresh: bool) {
+        let generation = self.artwork_generation.fetch_add(1, Ordering::AcqRel) + 1;
         let Some(api_key) = preferences.api_key else {
             return;
         };
+        let catalog = self.catalog.borrow();
+        let source_cards = self.source_cards.borrow();
         let jobs = self
             .artwork_lookup_jobs
+            .borrow()
             .iter()
             .filter(|job| {
-                needs_external_artwork(
-                    preferences.prefer_steamgriddb,
-                    self.source_cards[job.index].has_artwork,
-                )
+                catalog.get(job.index).is_some()
+                    && needs_external_artwork(
+                        preferences.prefer_steamgriddb,
+                        source_cards[job.index].has_artwork,
+                    )
             })
             .cloned()
             .collect();
+        drop((catalog, source_cards));
         steamgriddb_artwork::start_artwork_worker(
             generation,
             Arc::clone(&self.artwork_generation),
@@ -320,10 +339,10 @@ impl HomeController {
                     if result.generation != self.artwork_generation.load(Ordering::Acquire) {
                         continue;
                     }
-                    let Some(fallback) = self.source_cards.get(result.index) else {
+                    let Some(mut card) = self.source_cards.borrow().get(result.index).cloned()
+                    else {
                         continue;
                     };
-                    let mut card = fallback.clone();
                     card.pixelated_artwork = result.artwork.pixelated();
                     card.artwork = square_artwork_to_slint(result.artwork);
                     card.has_artwork = true;
@@ -359,10 +378,69 @@ impl HomeController {
     }
 
     pub fn refresh_recent_games(&self, ui: &AppWindow, ids: &[GameId]) {
-        let order = ordered_home_indices(&self.library_games, ids);
+        let order = ordered_home_indices(&self.catalog.borrow(), ids);
         if *self.home_order.borrow() == order {
             return;
         }
+        self.show_home_order(ui, order);
+    }
+
+    /// The shared catalog was reloaded: make cards for new games, reread
+    /// changed ones, show the new Home row, and look up covers again (shown
+    /// covers stay; cached ones come straight back).
+    pub fn catalog_changed(
+        &self,
+        ui: &AppWindow,
+        changes: &CatalogChanges,
+        artwork_service: &ArtworkService,
+        registry: &crate::sources::SourceRegistry,
+        preferences: ArtworkPreferences,
+        recent_game_ids: &[GameId],
+    ) {
+        let reread = changes
+            .added
+            .iter()
+            .chain(&changes.updated)
+            .copied()
+            .collect::<Vec<_>>();
+        let games = {
+            let catalog = self.catalog.borrow();
+            reread
+                .iter()
+                .map(|index| catalog[*index].clone())
+                .collect::<Vec<_>>()
+        };
+        let artworks = artwork_service.square_artworks(&games);
+        for ((index, game), artwork) in reread.into_iter().zip(&games).zip(artworks) {
+            let card = game_card(game, artwork);
+            let job = lookup_job(index, game, registry);
+            if index < self.cards.row_count() {
+                self.source_cards.borrow_mut()[index] = card.clone();
+                self.titles.borrow_mut()[index] = card.title.clone();
+                self.artwork_lookup_jobs.borrow_mut()[index] = job;
+                self.publish_card(index, card);
+            } else {
+                // Added slots arrive in order, at the end.
+                self.source_cards.borrow_mut().push(card.clone());
+                self.titles.borrow_mut().push(card.title.clone());
+                self.artwork_lookup_jobs.borrow_mut().push(job);
+                self.cards.push(card);
+            }
+        }
+
+        let order = ordered_home_indices(&self.catalog.borrow(), recent_game_ids);
+        if *self.home_order.borrow() != order {
+            self.show_home_order(ui, order);
+        } else {
+            self.publish_selection(ui, self.state.borrow().selected_index);
+        }
+        if !changes.added.is_empty() || !changes.updated.is_empty() {
+            self.start_steamgriddb(preferences, false);
+        }
+    }
+
+    /// Show `order`, keeping the selected game selected when it's still there.
+    fn show_home_order(&self, ui: &AppWindow, order: Vec<usize>) {
         let previous = self.state.borrow().selected_index as usize;
         let previous_catalog_index = self.home_order.borrow().get(previous).copied();
         let next_selection = previous_catalog_index
@@ -568,10 +646,10 @@ impl HomeController {
         if self.launch_feedback.borrow().handoff_pending() {
             return;
         }
-        let Some(game) = usize::try_from(index)
+        let game = usize::try_from(index)
             .ok()
-            .and_then(|index| self.library_games.get(index))
-        else {
+            .and_then(|index| self.catalog.borrow().get(index).cloned());
+        let Some(game) = game.as_ref() else {
             debug!("Accept ignored because the source-backed Home library is empty");
             return;
         };
@@ -728,8 +806,7 @@ impl HomeController {
         let title = usize::try_from(selected_index)
             .ok()
             .and_then(|index| self.home_order.borrow().get(index).copied())
-            .and_then(|index| self.titles.get(index))
-            .cloned()
+            .and_then(|index| self.titles.borrow().get(index).cloned())
             .unwrap_or_default();
         ui.set_selected_title(if self.library_tile_selected() {
             "Library".into()
@@ -739,12 +816,12 @@ impl HomeController {
     }
 }
 
-const HOME_RECENT_LIMIT: usize = 15;
+pub(crate) const HOME_RECENT_LIMIT: usize = 15;
 
 /// Play history has priority; use an alphabetical catalogue fallback to keep
 /// Home useful before any sessions have been recorded. Neither group changes
 /// the original catalogue indices used for artwork, launches, or Playing.
-fn ordered_home_indices(catalog: &[LibraryGame], ids: &[GameId]) -> Vec<usize> {
+fn ordered_home_indices(catalog: &Catalog, ids: &[GameId]) -> Vec<usize> {
     let mut seen = HashSet::new();
     let mut order = Vec::with_capacity(catalog.len().min(HOME_RECENT_LIMIT));
 
@@ -754,7 +831,7 @@ fn ordered_home_indices(catalog: &[LibraryGame], ids: &[GameId]) -> Vec<usize> {
         if !seen.insert(*id) {
             continue;
         }
-        if let Some(index) = catalog.iter().position(|game| game.game().id() == *id) {
+        if let Some(index) = catalog.position(*id) {
             order.push(index);
             if order.len() == HOME_RECENT_LIMIT {
                 return order;
@@ -766,7 +843,6 @@ fn ordered_home_indices(catalog: &[LibraryGame], ids: &[GameId]) -> Vec<usize> {
     // otherwise empty Home slot, in case-insensitive A–Z order.
     let mut fallback: Vec<usize> = catalog
         .iter()
-        .enumerate()
         .filter_map(|(index, game)| (!seen.contains(&game.game().id())).then_some(index))
         .collect();
     fallback.sort_by(|&left, &right| {
@@ -780,6 +856,18 @@ fn ordered_home_indices(catalog: &[LibraryGame], ids: &[GameId]) -> Vec<usize> {
 
     order.extend(fallback.into_iter().take(HOME_RECENT_LIMIT - order.len()));
     order
+}
+
+fn lookup_job(
+    index: usize,
+    game: &LibraryGame,
+    registry: &crate::sources::SourceRegistry,
+) -> ArtworkLookupJob {
+    ArtworkLookupJob {
+        index,
+        identity: steamgriddb_artwork::cache_identity(game),
+        lookup: SteamGridDbLookup::for_game(game, registry),
+    }
 }
 
 fn needs_external_artwork(prefer_external: bool, has_source_artwork: bool) -> bool {
@@ -878,8 +966,13 @@ fn rgb((red, green, blue): (u8, u8, u8)) -> Color {
 mod tests {
     use super::{
         HOME_RECENT_LIMIT, HomeState, LaunchFeedbackState, PlayingState, monogram,
-        needs_external_artwork, ordered_home_indices,
+        needs_external_artwork,
     };
+    use crate::presentation::catalog::Catalog;
+
+    fn ordered_home_indices(games: &[LibraryGame], ids: &[GameId]) -> Vec<usize> {
+        super::ordered_home_indices(&Catalog::new(games.to_vec()), ids)
+    }
     use crate::domain::{Game, GameId, GameTitle, LibraryGame};
     use crate::services::runtime::{
         RuntimeObservationEvent, RuntimeObservationId, RuntimeObservationTerminalState,

@@ -146,17 +146,7 @@ pub fn web_uri(app_id: &str) -> Result<String, FlathubError> {
 /// A Flathub app ID: reverse-DNS, letters, digits, `_`, `-` and dots only,
 /// starting with a letter (so it can never read as a command-line option).
 pub fn valid_app_id(app_id: &str) -> Result<(), FlathubError> {
-    let parts: Vec<&str> = app_id.split('.').collect();
-    let valid = parts.len() >= 3
-        && app_id.starts_with(|c: char| c.is_ascii_alphabetic())
-        && app_id.len() <= 255
-        && parts.iter().all(|part| {
-            !part.is_empty()
-                && part
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-        });
-    if valid {
+    if crate::sources::flatpak::valid_app_id(app_id) {
         Ok(())
     } else {
         Err(FlathubError::InvalidAppId)

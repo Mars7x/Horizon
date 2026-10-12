@@ -1,5 +1,6 @@
 //! The host's Flatpak, for the Shop: what's installed, what can be updated,
-//! and installing, updating and uninstalling apps.
+//! and installing, updating and uninstalling apps; and for the Flatpak game
+//! source: running a game and listing what's running (ADR 0183).
 //!
 //! This is Horizon's one host-execution path (ADR 0181). Inside the sandbox
 //! it runs the host's `flatpak` through `flatpak-spawn --host`
@@ -10,7 +11,7 @@
 //! from anywhere else. Blocking: call it off the UI thread.
 
 use std::{
-    collections::HashSet,
+    collections::{BTreeSet, HashSet},
     io::Read,
     path::Path,
     process::{Command, Stdio},
@@ -18,7 +19,7 @@ use std::{
 
 use thiserror::Error;
 
-use crate::services::flathub::valid_app_id;
+use crate::{services::flathub::valid_app_id, sources::flatpak::FlatpakHost};
 
 /// The remote apps are installed from.
 const REMOTE: &str = "flathub";
@@ -216,6 +217,49 @@ pub fn updates() -> Result<HashSet<String>, HostFlatpakError> {
         .collect())
 }
 
+/// Start an installed app (a Flatpak game) and return without waiting for
+/// it. A thread waits for it instead, so it never lingers as a zombie.
+pub fn run(app_id: &str) -> Result<(), HostFlatpakError> {
+    let app_id = checked(app_id)?;
+    let mut child = flatpak(&["run", app_id])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    let waited = std::thread::Builder::new()
+        .name("flatpak-run".into())
+        .spawn(move || {
+            let _ = child.wait();
+        });
+    if let Err(error) = waited {
+        // The game still runs; only its exit goes unreaped until Horizon exits.
+        tracing::warn!(%error, "no thread to wait for the Flatpak game");
+    }
+    Ok(())
+}
+
+/// The IDs of the apps running now.
+pub fn running() -> Result<BTreeSet<String>, HostFlatpakError> {
+    let text = output("ps", &["ps", "--columns=application"])?;
+    Ok(parse_running(&text))
+}
+
+fn parse_running(text: &str) -> BTreeSet<String> {
+    text.lines()
+        .map(str::trim)
+        .filter(|id| valid_app_id(id).is_ok())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The Flatpak game source's view of the host.
+pub struct HostFlatpak;
+
+impl FlatpakHost for HostFlatpak {
+    fn running_apps(&self) -> Result<BTreeSet<String>, String> {
+        running().map_err(|error| error.to_string())
+    }
+}
+
 /// Install from Flathub: system-wide when the system has Flathub (as the
 /// software store does), else for this user, adding Flathub there if
 /// needed. A system install that's refused (no permission) is tried for
@@ -342,7 +386,17 @@ mod tests {
                 uninstall(bad, Installation::User),
                 Err(HostFlatpakError::InvalidAppId)
             ));
+            assert!(matches!(run(bad), Err(HostFlatpakError::InvalidAppId)));
         }
+    }
+
+    #[test]
+    fn running_apps_are_read_from_flatpak_ps() {
+        let running = parse_running("org.example.Game\nio.github.Mars7x.Horizon\nnot an id\n\n");
+        assert_eq!(
+            running.into_iter().collect::<Vec<_>>(),
+            vec!["io.github.Mars7x.Horizon", "org.example.Game"]
+        );
     }
 
     #[test]

@@ -7,13 +7,15 @@ use tracing::warn;
 
 use slint::{Model, ModelRc, VecModel};
 
-use super::home::HomeController;
+use super::{
+    catalog::{Catalog, SharedCatalog},
+    home::HomeController,
+};
 use crate::navigation::grid::{
     horizontal_step, scroll_to_selection, total_rows, vertical_step, wheel_scroll_top,
 };
 use crate::{
     AppWindow, LibraryCardData,
-    domain::LibraryGame,
     input::{UiAction, UiActionEvent},
     persistence::SqliteLibraryRepository,
     services::activity::{ActivityService, LibrarySortMetrics},
@@ -91,14 +93,13 @@ impl LibrarySort {
 }
 
 fn sorted_catalog_indices(
-    catalog: &[LibraryGame],
+    catalog: &Catalog,
     source: Option<&str>,
     sort: LibrarySort,
     metrics: &BTreeMap<i64, LibrarySortMetrics>,
 ) -> Vec<usize> {
     let mut order: Vec<usize> = catalog
         .iter()
-        .enumerate()
         .filter(|(_, game)| {
             source.is_none_or(|filter| {
                 game.sources()
@@ -144,6 +145,21 @@ fn source_title(id: &str) -> String {
         Some(first) => first.to_uppercase().collect::<String>() + letters.as_str(),
         None => String::new(),
     }
+}
+
+/// The sources the library's games come from, for the source filter.
+fn library_sources(catalog: &Catalog) -> Vec<String> {
+    let mut sources = catalog
+        .iter()
+        .flat_map(|(_, game)| {
+            game.sources()
+                .iter()
+                .map(|source| source.source_id().as_str().to_owned())
+        })
+        .collect::<Vec<_>>();
+    sources.sort();
+    sources.dedup();
+    sources
 }
 
 fn grid_columns(viewport_width: f32) -> usize {
@@ -212,8 +228,8 @@ impl Default for State {
 /// Source-neutral Library view of the unchanged Home catalogue. Rust retains
 /// absolute game identities while the Slint model only mounts visible rows.
 pub struct LibraryController {
-    catalog: Vec<LibraryGame>,
-    sources: Vec<String>,
+    catalog: SharedCatalog,
+    sources: RefCell<Vec<String>>,
     home: Rc<HomeController>,
     activity: Rc<ActivityService<SqliteLibraryRepository>>,
     metrics: RefCell<BTreeMap<i64, LibrarySortMetrics>>,
@@ -224,25 +240,16 @@ pub struct LibraryController {
 impl LibraryController {
     pub fn new(
         ui: &AppWindow,
-        catalog: Vec<LibraryGame>,
+        catalog: SharedCatalog,
         home: Rc<HomeController>,
         activity: Rc<ActivityService<SqliteLibraryRepository>>,
     ) -> Rc<Self> {
         let rows = Rc::new(VecModel::from(Vec::<LibraryCardData>::new()));
         ui.set_library_cards(ModelRc::from(Rc::clone(&rows)));
-        let mut sources = catalog
-            .iter()
-            .flat_map(|game| {
-                game.sources()
-                    .iter()
-                    .map(|source| source.source_id().as_str().to_owned())
-            })
-            .collect::<Vec<_>>();
-        sources.sort();
-        sources.dedup();
+        let sources = library_sources(&catalog.borrow());
         let controller = Rc::new(Self {
             catalog,
-            sources,
+            sources: RefCell::new(sources),
             home,
             activity,
             metrics: RefCell::new(BTreeMap::new()),
@@ -275,6 +282,26 @@ impl LibraryController {
             }
         }
     }
+    /// The shared catalog was reloaded: keep the source filter on the same
+    /// source (or All, when it's gone) and the selection on the same game.
+    pub fn catalog_changed(&self, ui: &AppWindow) {
+        let selected_id = self.selection_game_id();
+        let sources = library_sources(&self.catalog.borrow());
+        {
+            let mut s = self.state.borrow_mut();
+            let current = s
+                .source_index
+                .checked_sub(1)
+                .and_then(|index| self.sources.borrow().get(index).cloned());
+            s.source_index = current
+                .and_then(|source| sources.iter().position(|known| *known == source))
+                .map_or(0, |index| index + 1);
+        }
+        *self.sources.borrow_mut() = sources;
+        self.refresh_metrics();
+        self.rebuild(ui, selected_id);
+    }
+
     pub fn on_viewport_changed(&self, ui: &AppWindow) {
         self.publish(ui);
     }
@@ -283,7 +310,7 @@ impl LibraryController {
         let s = self.state.borrow();
         s.order
             .get(s.selection)
-            .map(|index| self.catalog[*index].game().id().get())
+            .map(|index| self.catalog.borrow()[*index].game().id().get())
     }
 
     /// Freeze only the already-mounted overscan rows, not the entire library.
@@ -295,7 +322,7 @@ impl LibraryController {
             .filter_map(|index| self.rows.row_data(index))
             .filter_map(|card| {
                 let original = *s.order.get(card.absolute_index as usize)?;
-                Some((self.catalog[original].game().id().get(), card))
+                Some((self.catalog.borrow()[original].game().id().get(), card))
             })
             .collect::<Vec<_>>();
         let from = s
@@ -304,7 +331,12 @@ impl LibraryController {
             .enumerate()
             .skip(s.mounted_start)
             .take(s.mounted_len)
-            .map(|(index, original)| (self.catalog[*original].game().id().get(), index as i32))
+            .map(|(index, original)| {
+                (
+                    self.catalog.borrow()[*original].game().id().get(),
+                    index as i32,
+                )
+            })
             .collect();
         ui.set_library_previous_grid_columns(
             grid_columns(ui.get_logical_viewport_width_px()) as i32
@@ -318,18 +350,25 @@ impl LibraryController {
 
     fn rebuild(&self, ui: &AppWindow, preferred_id: Option<i64>) {
         let mut s = self.state.borrow_mut();
+        let sources = self.sources.borrow();
         let source = s
             .source_index
             .checked_sub(1)
-            .and_then(|index| self.sources.get(index))
+            .and_then(|index| sources.get(index))
             .map(String::as_str);
-        let order = sorted_catalog_indices(&self.catalog, source, s.sort, &self.metrics.borrow());
+        let order = sorted_catalog_indices(
+            &self.catalog.borrow(),
+            source,
+            s.sort,
+            &self.metrics.borrow(),
+        );
+        drop(sources);
         let prior = s.selection;
         s.selection = preferred_id
             .and_then(|id| {
                 order
                     .iter()
-                    .position(|i| self.catalog[*i].game().id().get() == id)
+                    .position(|i| self.catalog.borrow()[*i].game().id().get() == id)
             })
             .unwrap_or(prior.min(order.len().saturating_sub(1)));
         s.order = order;
@@ -373,7 +412,8 @@ impl LibraryController {
         s.mounted_len = end.saturating_sub(start);
         s.window_dirty = false;
         let selected = s.order.get(s.selection).copied();
-        let selected_game_id = selected.map(|original| self.catalog[original].game().id().get());
+        let selected_game_id =
+            selected.map(|original| self.catalog.borrow()[original].game().id().get());
         if s.metadata_game_id != selected_game_id {
             s.metadata_game_id = selected_game_id;
             s.metadata_sequence = s.metadata_sequence.wrapping_add(1);
@@ -384,7 +424,11 @@ impl LibraryController {
         let from = |original: usize| {
             glide
                 .as_ref()
-                .and_then(|glide| glide.from.get(&self.catalog[original].game().id().get()))
+                .and_then(|glide| {
+                    glide
+                        .from
+                        .get(&self.catalog.borrow()[original].game().id().get())
+                })
                 .copied()
                 .unwrap_or(-1)
         };
@@ -395,7 +439,7 @@ impl LibraryController {
                 .filter_map(|(i, &original)| {
                     self.home.card_at(original).map(|card| LibraryCardData {
                         game: card,
-                        source: self.catalog[original]
+                        source: self.catalog.borrow()[original]
                             .sources()
                             .iter()
                             .map(|source| source_title(source.source_id().as_str()))
@@ -414,8 +458,12 @@ impl LibraryController {
         let (title, source) = selected
             .map(|index| {
                 (
-                    self.catalog[index].game().title().as_str().to_owned(),
-                    self.catalog[index]
+                    self.catalog.borrow()[index]
+                        .game()
+                        .title()
+                        .as_str()
+                        .to_owned(),
+                    self.catalog.borrow()[index]
                         .sources()
                         .iter()
                         .map(|source| source_title(source.source_id().as_str()))
@@ -427,8 +475,12 @@ impl LibraryController {
         let filter = s
             .source_index
             .checked_sub(1)
-            .and_then(|index| self.sources.get(index))
-            .map(|source| source_title(source))
+            .and_then(|index| {
+                self.sources
+                    .borrow()
+                    .get(index)
+                    .map(|source| source_title(source))
+            })
             .unwrap_or_else(|| "All sources".to_owned());
         let sort = s.sort.label();
         let selection = s.selection;
@@ -436,7 +488,7 @@ impl LibraryController {
         let mounted_ids: Vec<i64> = if glide.is_some() {
             s.order[start..end]
                 .iter()
-                .map(|original| self.catalog[*original].game().id().get())
+                .map(|original| self.catalog.borrow()[*original].game().id().get())
                 .collect()
         } else {
             Vec::new()
@@ -471,7 +523,7 @@ impl LibraryController {
         ui.set_library_filter_text(filter.into());
         ui.set_library_sort_text(sort.into());
         ui.set_library_total_count(count as i32);
-        ui.set_library_collection_count(self.catalog.len() as i32);
+        ui.set_library_collection_count(self.catalog.borrow().len() as i32);
     }
 
     pub fn on_card_updated(&self, original: usize, card: crate::GameCardData) {
@@ -572,14 +624,15 @@ impl LibraryController {
     }
 
     pub fn cycle_filter(&self, ui: &AppWindow) {
-        if self.sources.is_empty() {
+        let source_count = self.sources.borrow().len();
+        if source_count == 0 {
             return;
         }
         let selected_id = self.selection_game_id();
         self.capture_previous_grid(ui);
         {
             let mut s = self.state.borrow_mut();
-            s.source_index = (s.source_index + 1) % (self.sources.len() + 1);
+            s.source_index = (s.source_index + 1) % (source_count + 1);
             s.browse_sequence = s.browse_sequence.wrapping_add(1);
         }
         self.rebuild(ui, selected_id);
@@ -622,12 +675,39 @@ impl LibraryController {
 mod tests {
     use super::{
         CARD_GAP, GRID_PAD, GridLayout, LibrarySort, OVERSCAN_ROWS, grid_columns, horizontal_step,
-        scroll_to_selection, sorted_catalog_indices, source_title, total_rows, vertical_step,
-        visible_rows, wheel_scroll_top,
+        scroll_to_selection, source_title, total_rows, vertical_step, visible_rows,
+        wheel_scroll_top,
     };
     use crate::domain::{
         ExternalGameId, Game, GameId, GameTitle, LibraryGame, SourceGameRef, SourceId,
     };
+    use crate::presentation::catalog::Catalog;
+    use std::collections::BTreeMap;
+
+    fn sorted_catalog_indices(
+        games: &[LibraryGame],
+        source: Option<&str>,
+        sort: LibrarySort,
+        metrics: &BTreeMap<i64, crate::services::activity::LibrarySortMetrics>,
+    ) -> Vec<usize> {
+        super::sorted_catalog_indices(&Catalog::new(games.to_vec()), source, sort, metrics)
+    }
+
+    #[test]
+    fn games_no_longer_installed_are_left_out() {
+        let mut catalog = Catalog::new(vec![game(1, "One", "steam"), game(2, "Two", "flatpak")]);
+        catalog.merge(vec![game(1, "One", "steam")]);
+        assert_eq!(
+            super::sorted_catalog_indices(
+                &catalog,
+                None,
+                LibrarySort::Alphabetical,
+                &BTreeMap::new()
+            ),
+            vec![0]
+        );
+        assert_eq!(super::library_sources(&catalog), vec!["steam"]);
+    }
 
     fn game(id: i64, title: &str, source: &str) -> LibraryGame {
         LibraryGame::new(

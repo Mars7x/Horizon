@@ -2,7 +2,7 @@
 
 > **Current-state note:** This document includes the original per-phase architecture record. The implementation is now beyond those phases. Start with [PROJECT_STATE.md](PROJECT_STATE.md) and [INDEX.md](INDEX.md) for the current feature inventory, and inspect the checked-out source before relying on an older phase boundary. Do not reintroduce a retired route, provider, or animation from an early phase description.
 
-**Current layers:** `src/navigation/` and `src/input/` own semantic navigation; `src/presentation/` maps controllers to `ui/`; `src/services/` coordinates source-neutral use cases; `src/domain/` defines pure concepts; `src/persistence/`, `src/sources/` and `src/platform/` implement infrastructure. `ui/app.slint` composes Home, full-shell Library, five utility routes and the Profile page. Production game adapters are **Steam and Heroic**. Album captures come from Horizon's own folder and read-only `CaptureSource` adapters (Steam); video is `src/platform/video.rs` (FFmpeg decoding, PipeWire sound, through the C shims in `csrc/`) behind `services::album::VideoBackend`. Shared Steam account configuration lives in `src/services/steam_account.rs`, outside Achievements, shared with the profile picture and the Profile page's Steam friends.
+**Current layers:** `src/navigation/` and `src/input/` own semantic navigation; `src/presentation/` maps controllers to `ui/`; `src/services/` coordinates source-neutral use cases; `src/domain/` defines pure concepts; `src/persistence/`, `src/sources/` and `src/platform/` implement infrastructure. `ui/app.slint` composes Home, full-shell Library, five utility routes and the Profile page. Production game adapters are **Steam, Heroic and Flatpak**. Album captures come from Horizon's own folder and read-only `CaptureSource` adapters (Steam); video is `src/platform/video.rs` (FFmpeg decoding, PipeWire sound, through the C shims in `csrc/`) behind `services::album::VideoBackend`. Shared Steam account configuration lives in `src/services/steam_account.rs`, outside Achievements, shared with the profile picture and the Profile page's Steam friends.
 
 ## Architectural history (original phase boundaries)
 
@@ -24,7 +24,7 @@ The domain must not depend on Slint, SQLite, SDL, Flatpak, DBus, or source-speci
 - No source-specific branching outside source adapters/registries.
 - No hard-coded platform paths outside platform/source infrastructure.
 - No SQL in UI or presentation code.
-- No broad Flatpak permissions as a workaround for missing architecture. The Shop's host Flatpak access (ADR 0181) is a deliberate, documented exception confined to `platform/flatpak_host.rs`.
+- No broad Flatpak permissions as a workaround for missing architecture. The Shop's host Flatpak access (ADR 0181), also used to run and watch Flatpak games (ADR 0183), is a deliberate, documented exception confined to `platform/flatpak_host.rs`.
 - No production `unwrap()` for recoverable failures.
 - Database schema changes use numbered migrations once persistence is introduced.
 - UI colors, spacing, typography, radii, and motion values come from the Phase 1 design system.
@@ -224,6 +224,7 @@ Phase 9 expanded the concrete adapter set without changing the inward dependency
 
 - `src/sources/bottles.rs` owns Bottles `bottle.yml`/`External_Programs` details and the `bottles:` launch URI;
 - `src/sources/heroic.rs` owns Heroic/Legendary local metadata and the `heroic:` launch URI;
+- `src/sources/flatpak.rs` owns Flatpak export parsing and the game rules; it launches with `SourceLaunchTarget::FlatpakApp` and asks the host through the `FlatpakHost` trait, which `platform::flatpak_host` implements;
 - `src/sources/support.rs` contains only source-layer helpers shared by adapters, such as host XDG resolution and URI-component encoding;
 - startup registers every provider through `SourceRegistry`; `SourceImportService`, `LibraryService`, SQLite, Home, Activity, and the platform launcher remain unchanged and provider-neutral.
 
