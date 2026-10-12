@@ -101,6 +101,20 @@ set them. If Wayland can't do it, the fallback is the `fallback-x11` socket
 (X11 only where there is no Wayland, so the desktop stays Wayland-only) and
 Slint's X11 backend in the session.
 
+**Spike 1 result (nested, main PC, 2026-10-12): Wayland fails in Steam mode.**
+With `-e`, as session-plus starts gamescope, a Wayland window is never shown:
+not Horizon, not a Wayland test window, whatever its app ID. In Steam mode
+gamescope shows only a window whose app ID matches the root's
+`GAMESCOPECTRL_BASELAYER_APPID`, and a Wayland window always counts as
+app ID 0. `SteamAppId` (769 or 4242) reaches gamescope's Vulkan layer but
+doesn't change that; `SteamGameId` isn't read. An X11 window tagged
+`STEAM_GAME` is shown once the base layer names its app ID, and nothing is
+shown after it closes. Without `-e` everything works: Horizon is shown, a
+Wayland or X11 window on top takes the screen, and Horizon returns when it
+closes. This points to the X11 fallback. Still to confirm: the same result
+embedded (on a text console), and whether session-plus can run without `-e`
+(that would also drop Steam integration).
+
 ## Feature parity
 
 | Feature | Desktop | Session |
@@ -123,7 +137,12 @@ Slint's X11 backend in the session.
 
 1. **Wayland or X11.** Can a Wayland Horizon be gamescope's main app, give way
    to games and come back, and draw an overlay? Can it set the root
-   properties without X11?
+   properties without X11? **Nested result: not in Steam mode** (see
+   [How gamescope is controlled](#how-gamescope-is-controlled)). Script:
+   `scripts/spikes/gamescope-spike1.sh [steam|plain]`, which logs
+   `gamescopectl focus_info` and one frame from gamescope's PipeWire stream
+   at each step (`gamescopectl screenshot` saved nothing on 3.16.29).
+   Embedded run and overlay still to do.
 2. **Non-Steam windows.** Does gamescope show a Heroic or Flatpak game whose
    window has no `STEAM_GAME`? If not, Horizon tags new game windows itself.
    Does Heroic's own window appear when a game starts?
@@ -164,8 +183,8 @@ Workstation (GNOME, Wayland, 4K pages).
   layered onto the image (`rpm-ostree install gamescope`), as the session
   needs it on the host, not in a toolbox. Steam is the Flathub Flatpak, so
   spike 3 also covers Flatpak Steam: `steam://` reaching it, and its games
-  being tagged for gamescope from inside its sandbox. This session runs on
-  the laptop, so the PC's results come back as pasted output.
+  being tagged for gamescope from inside its sandbox. Gamescope there is
+  3.16.29 (Fedora 44), layered and booted on 2026-10-12.
 - Handheld-only details (the Deck's and Odin's power keys, their screens'
   rotation) wait for real devices.
 
