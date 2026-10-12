@@ -19,7 +19,10 @@ apps. Horizon does this through the host's own `flatpak`.
   tick), summary, and a badge: *Installed*, *Update* (accent), or the job on
   it (*Installing*, *Updating*, *Uninstalling*, *Waiting*) with a progress
   bar. Most installed first; Installed lists updates first, then by name.
-  More apps load as the selection nears the end.
+  More apps load as the selection (or the scrolled grid) nears the end,
+  until the listing's real end. Only the cards near the screen are mounted
+  (`presentation/mounted.rs`, as in the Album), so a long listing costs no
+  more than a short one.
 - **An app's page** (A): icon, name, developer, summary, its buttons, the
   description (Up/Down scroll it) and the screenshots: LB/RB; a click (the
   left edge goes back, the rest forward, with a ‹ or › on hover, as in
@@ -75,10 +78,14 @@ Install falls back to opening the software store on the app
 (`https://flathub.org/api/v2`): `POST /search` for every listing (an empty
 query with a category filter browses; the architecture filter always
 applies) and `GET /appstream/<app-id>` for an app's page and for the
-Installed list's summaries. Icons and screenshots download only from
-`dl.flathub.org` over HTTPS, at most 8 MB each, decoded off the UI thread
-and kept in memory. Each Flathub category's first pages stay in memory for
-30 minutes. Nothing is written to disk.
+Installed list's summaries (read once per run). Every request shares one
+connection pool (`FlathubClient::shared`). Icons and screenshots download
+only from `dl.flathub.org` over HTTPS, at most 8 MB each, decoded off the UI
+thread and kept in memory. Icons download only for the mounted cards, the
+ones in view first; scrolling on replaces what is still waiting, and the
+240 shown most recently are kept. An app's screenshots stop downloading
+when its page closes. Each Flathub category's pages stay in memory for 30
+minutes. Nothing is written to disk.
 
 ## Code
 

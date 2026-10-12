@@ -5,6 +5,7 @@ import { LibraryTile } from "library-tile.slint";
 import { SelectedGameLabel } from "selected-game-label.slint";
 import { Wheel } from "wheel.slint";
 import { Scroll } from "scroll.slint";
+import { Momentum } from "momentum.slint";
 
 // The home carousel is modeled as a camera looking onto one larger scene.
 // The rounded shelf, title/connector, game row, and focus frame all share the
@@ -91,11 +92,13 @@ export component GameCarousel inherits Rectangle {
         }
     }
 
-    // A swipe or tilt-wheel step pans the camera by pixels (a touchpad
-    // directly, a notch with the usual glide) and never moves the selection,
-    // even off screen; the next selection change brings the camera back to it.
-    // A touchpad pulling past either end stretches the shelf (`Scroll.rubber`)
-    // and it springs back when the fingers lift (`Wheel.touching`).
+    // A swipe or tilt-wheel step pans the camera by pixels (a touchpad or a
+    // finger directly, a notch with the usual glide) and never moves the
+    // selection, even off screen; the next selection change brings the camera
+    // back to it. A touchpad or finger pulling past either end stretches the
+    // shelf (`Scroll.rubber`) and it springs back when the fingers lift
+    // (`Wheel.touching`, or the drag's end); otherwise the camera glides on
+    // (`Momentum`).
     private property <bool> following-pointer: false;
     private property <bool> springing: false;
     private property <length> pull: 0px;
@@ -106,11 +109,16 @@ export component GameCarousel inherits Rectangle {
         let was-springing = root.springing;
         root.following-pointer = !Wheel.is-notch(delta-x);
         root.springing = false;
+        // New input catches a glide (the speed being measured stays).
+        if momentum.gliding {
+            momentum.stop();
+        }
         if root.following-pointer {
             if was-springing {
                 // Still springing back: continue from where the shelf is.
                 root.pull = Scroll.unrubber(-scene.x - root.camera-offset);
             }
+            momentum.add(Wheel.distance(delta-x));
             let raw = root.camera-offset + root.pull + Wheel.distance(delta-x);
             root.camera-offset = raw;
             root.clamp-camera();
@@ -125,15 +133,92 @@ export component GameCarousel inherits Rectangle {
     }
     function spring-back() {
         release.stop();
+        momentum.stop();
         root.following-pointer = false;
         root.springing = true;
         root.pull = 0px;
     }
-    // Fingers lifting ends a swipe; the timer only covers a missing gesture end.
+    // The end of a swipe or drag: spring back from a pull, else glide on.
+    function let-go() {
+        release.stop();
+        if root.pull != 0px {
+            root.spring-back();
+        } else {
+            momentum.release();
+        }
+    }
+    // A glide moves the camera; past an end it stretches the shelf instead,
+    // braking hard, and springs back once it stops.
+    momentum := Momentum {
+        glide(travel) => {
+            root.following-pointer = true;
+            root.springing = false;
+            let raw = root.camera-offset + root.pull + travel;
+            root.camera-offset = raw;
+            root.clamp-camera();
+            root.pull = raw - root.camera-offset;
+            // Stored lengths round, so a glide short of the end isn't exact.
+            if abs(root.pull) > 0.5px {
+                momentum.brake();
+            } else {
+                root.pull = 0px;
+            }
+        }
+        ended => {
+            if root.pull != 0px {
+                root.spring-back();
+            } else {
+                root.following-pointer = false;
+            }
+        }
+    }
+    // Fingers lifting ends a swipe; the timer only covers a missing gesture
+    // end (and doesn't glide: the fingers had stopped).
     private property <bool> fingers-down: Wheel.touching;
     changed fingers-down => {
-        if !root.fingers-down && root.following-pointer {
-            root.spring-back();
+        if !root.fingers-down && root.following-pointer && !momentum.gliding && !root.dragging {
+            root.let-go();
+        }
+    }
+
+    // A finger (or mouse) drag on the shelf, from Home's swipe handler: the
+    // shelf follows it, then glides or springs back.
+    private property <bool> dragging: false;
+    // The unclamped camera the drag started from, and its last position.
+    private property <length> drag-start: 0px;
+    private property <length> drag-last: 0px;
+    // `moved`: how far the finger already is from where it went down (the
+    // swipe is recognised a little way in); the shelf moves from here, so it
+    // doesn't jump by that much.
+    public function drag-begin(moved: length) {
+        root.panned = true;
+        root.dragging = true;
+        momentum.stop();
+        release.stop();
+        // Take the shelf from wherever it is drawn (gliding, or springing).
+        let drawn = -scene.x;
+        root.following-pointer = true;
+        root.springing = false;
+        root.camera-offset = drawn;
+        root.clamp-camera();
+        root.pull = Scroll.unrubber(drawn - root.camera-offset);
+        root.drag-start = root.camera-offset + root.pull + moved;
+        root.drag-last = root.camera-offset + root.pull;
+    }
+    // `moved`: how far the finger is from where it went down.
+    public function drag-to(moved: length) {
+        // The shelf follows the finger: moving right shows what's to the left.
+        let raw = root.drag-start - moved;
+        momentum.add(raw - root.drag-last);
+        root.drag-last = raw;
+        root.camera-offset = raw;
+        root.clamp-camera();
+        root.pull = raw - root.camera-offset;
+    }
+    public function drag-end() {
+        if root.dragging {
+            root.dragging = false;
+            root.let-go();
         }
     }
     release := Timer {
@@ -151,12 +236,14 @@ export component GameCarousel inherits Rectangle {
     changed selected-index => {
         root.following-pointer = false;
         root.springing = false;
+        momentum.stop();
         root.pull = 0px;
         root.ensure-selection-in-camera-zone();
         root.geometry-changed(root.first-game-center-x-px);
     }
     changed width => {
         root.springing = false;
+        momentum.stop();
         root.ensure-selection-in-camera-zone();
         root.geometry-changed(root.first-game-center-x-px);
     }
@@ -170,6 +257,7 @@ export component GameCarousel inherits Rectangle {
     changed games => {
         root.panned = false;
         root.springing = false;
+        momentum.stop();
         root.ensure-selection-in-camera-zone();
         root.geometry-changed(root.first-game-center-x-px);
     }

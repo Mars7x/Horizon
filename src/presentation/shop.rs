@@ -3,8 +3,9 @@
 //!
 //! A grid of apps, a category at a time (LB/RB) or what a search finds (the
 //! field above the grid); Installed lists what's on this machine, updates
-//! first. Pages of apps load as the selection nears the end; icons follow, a
-//! few at a time. A opens an app's page (description, screenshots, and
+//! first. Pages of apps load as the selection nears the end. Only the apps
+//! near the camera are mounted, and only their icons are downloaded, the
+//! ones on screen first; a bounded number of icons is kept. A opens an app's page (description, screenshots, and
 //! Install, or Update and Uninstall). Installing, updating and
 //! uninstalling run one at a time through the host's Flatpak
 //! (`platform::flatpak_host`, ADR 0181); without it, Install hands the app
@@ -14,7 +15,11 @@ use std::{
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet, VecDeque},
     rc::Rc,
-    sync::mpsc::Receiver,
+    sync::{
+        Arc, Mutex, PoisonError,
+        atomic::{AtomicU64, Ordering},
+        mpsc::Receiver,
+    },
     time::{Duration, Instant},
 };
 
@@ -31,7 +36,11 @@ use crate::{
         flatpak_host::{self, HostFlatpakError, InstalledApp},
         launcher::open_uri,
     },
-    presentation::{CallbackSlot, wake::drain_notify},
+    presentation::{
+        CallbackSlot,
+        mounted::{shift_window, window_shift},
+        wake::drain_notify,
+    },
     services::{
         flathub::{self, AppDetails, AppSummary, Category, FlathubClient, FlathubError, Page},
         image as decoding,
@@ -53,6 +62,10 @@ const SHOT_SIZE: (u32, u32) = (1280, 800);
 const MAX_SHOTS: usize = 8;
 /// Rows left below the selection when the next page starts loading.
 const LOAD_AHEAD_ROWS: usize = 3;
+/// Rows mounted above and below the ones in view.
+const OVERSCAN_ROWS: usize = 3;
+/// Icons kept in memory (about 64 KB each), most recently shown first.
+const MAX_ICONS: usize = 240;
 
 /// Installed apps' summaries fetched at once.
 const INSTALLED_WORKERS: usize = 4;
@@ -264,11 +277,21 @@ pub struct ShopController {
     search_focused: Cell<bool>,
     /// A finished search is loading: focus its results when they arrive.
     focus_results: Cell<bool>,
+    /// The mounted apps: `apps[mounted_start..]`, by ID.
     rows: Rc<VecModel<ShopAppData>>,
-    icons: RefCell<HashMap<String, Image>>,
-    requested_icons: RefCell<HashSet<String>>,
+    mounted_start: Cell<usize>,
+    mounted: RefCell<Vec<String>>,
+    icons: RefCell<IconCache>,
+    icon_queue: Arc<Mutex<IconQueue>>,
     details: RefCell<Option<Details>>,
     shots: Rc<VecModel<ShopShotData>>,
+    /// Bumped when an app's page opens or closes: its screenshots stop
+    /// downloading.
+    shots_generation: Arc<AtomicU64>,
+    /// The page buttons last published.
+    shown_actions: RefCell<Vec<PageAction>>,
+    /// Installed apps' Flathub summaries, read once.
+    summaries: Arc<Mutex<HashMap<String, AppSummary>>>,
     search_timer: slint::Timer,
     /// The host's installed apps, by ID (`None` until first read).
     installed: RefCell<Option<HashMap<String, InstalledApp>>>,
@@ -311,10 +334,15 @@ impl ShopController {
             search_focused: Cell::new(false),
             focus_results: Cell::new(false),
             rows,
-            icons: RefCell::new(HashMap::new()),
-            requested_icons: RefCell::new(HashSet::new()),
+            mounted_start: Cell::new(0),
+            mounted: RefCell::new(Vec::new()),
+            icons: RefCell::new(IconCache::default()),
+            icon_queue: Arc::new(Mutex::new(IconQueue::default())),
             details: RefCell::new(None),
             shots,
+            shots_generation: Arc::new(AtomicU64::new(0)),
+            shown_actions: RefCell::new(Vec::new()),
+            summaries: Arc::new(Mutex::new(HashMap::new())),
             search_timer: slint::Timer::default(),
             installed: RefCell::new(None),
             updates: RefCell::new(HashSet::new()),
@@ -374,6 +402,7 @@ impl ShopController {
             {
                 shop.first_row.set((shop.first_row.get() + rows).max(0));
                 ui.set_shop_first_row(shop.first_row.get());
+                shop.publish_rows(&ui, false);
                 let bottom = (shop.first_row.get() + ui.get_shop_visible_rows()) as usize;
                 shop.load_more_near(&ui, bottom * shop.columns(&ui));
             }
@@ -732,7 +761,6 @@ impl ShopController {
                 self.pages.set(pages);
                 self.state.set(ListState::Ready);
                 self.rebuild_rows(ui, 0);
-                self.fetch_icons();
             }
             None => {
                 self.apps.borrow_mut().clear();
@@ -761,11 +789,12 @@ impl ShopController {
         let category = Category::ALL[self.category.get()];
         let query = self.query.borrow().clone();
         let sender = self.sender.clone();
+        let summaries = Arc::clone(&self.summaries);
         let started = spawn("shop-list", move || {
             let result = if category == Category::Installed && query.is_empty() {
-                installed_page()
+                installed_page(&summaries)
             } else {
-                FlathubClient::new().and_then(|client| client.list(category, &query, page))
+                FlathubClient::shared().and_then(|client| client.list(category, &query, page))
             };
             let _ = sender.send(ShopEvent::Listed {
                 generation,
@@ -838,7 +867,7 @@ impl ShopController {
         let icon = app
             .icon_url
             .as_ref()
-            .and_then(|url| self.icons.borrow().get(url).cloned());
+            .and_then(|url| self.icons.borrow_mut().get(url));
         ui.set_shop_detail_name(app.name.as_str().into());
         ui.set_shop_detail_developer(app.developer.as_str().into());
         ui.set_shop_detail_summary(app.summary.as_str().into());
@@ -859,10 +888,11 @@ impl ShopController {
             description_row: 0,
         });
         ui.set_shop_details_open(true);
+        self.shots_generation.fetch_add(1, Ordering::Relaxed);
         self.publish_details(ui);
         let sender = self.sender.clone();
         spawn("shop-details", move || {
-            let result = FlathubClient::new().and_then(|client| client.details(&app_id));
+            let result = FlathubClient::shared().and_then(|client| client.details(&app_id));
             let _ = sender.send(ShopEvent::Details { app_id, result });
         });
         true
@@ -872,7 +902,8 @@ impl ShopController {
         if self.details.borrow_mut().take().is_none() {
             return;
         }
-        // The screenshots go with the page.
+        // The screenshots go with the page, and stop downloading.
+        self.shots_generation.fetch_add(1, Ordering::Relaxed);
         self.shots.set_vec(Vec::new());
         ui.set_shop_details_open(false);
         self.publish(ui);
@@ -1082,9 +1113,17 @@ impl ShopController {
         });
     }
 
-    /// Put each card's Installed/Update/progress state in the grid.
+    /// Put each mounted card's Installed/Update/progress state in the grid.
     fn refresh_row_states(&self) {
-        for (index, app) in self.apps.borrow().iter().enumerate() {
+        let start = self.mounted_start.get();
+        for (index, app) in self
+            .apps
+            .borrow()
+            .iter()
+            .skip(start)
+            .take(self.rows.row_count())
+            .enumerate()
+        {
             if let Some(mut row) = self.rows.row_data(index) {
                 let (status, busy, progress) = self.row_state(&app.app_id);
                 if row.status != status || row.busy != busy || row.progress != progress {
@@ -1117,61 +1156,58 @@ impl ShopController {
         (status.into(), false, -1.0)
     }
 
-    /// Download the icons of the listed apps not already kept.
-    fn fetch_icons(&self) {
-        let wanted: Vec<String> = {
-            let mut requested = self.requested_icons.borrow_mut();
-            self.apps
-                .borrow()
-                .iter()
-                .filter_map(|app| app.icon_url.clone())
-                .filter(|url| requested.insert(url.clone()))
-                .collect()
+    /// Download the icons of `urls` not kept yet, in order, instead of any
+    /// still waiting: a few workers take them one at a time.
+    fn want_icons(&self, urls: Vec<String>) {
+        let needed = {
+            let icons = self.icons.borrow();
+            let mut queue = self
+                .icon_queue
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            let queue = &mut *queue;
+            queue.wanted = urls
+                .into_iter()
+                .filter(|url| {
+                    !icons.contains(url)
+                        && !queue.in_flight.contains(url)
+                        && !queue.failed.contains(url)
+                })
+                .collect();
+            let needed = ICON_WORKERS
+                .min(queue.wanted.len())
+                .saturating_sub(queue.workers);
+            queue.workers += needed;
+            needed
         };
-        if wanted.is_empty() {
-            return;
+        for _ in 0..needed {
+            let (queue, sender) = (Arc::clone(&self.icon_queue), self.sender.clone());
+            if !spawn("shop-icons", move || icon_worker(&queue, &sender)) {
+                let mut queue = self
+                    .icon_queue
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner);
+                queue.workers = queue.workers.saturating_sub(1);
+            }
         }
-        let sender = self.sender.clone();
-        spawn("shop-icons", move || {
-            let Ok(client) = FlathubClient::new() else {
-                return;
-            };
-            let per_worker = wanted.len().div_ceil(ICON_WORKERS);
-            std::thread::scope(|scope| {
-                for urls in wanted.chunks(per_worker) {
-                    let (client, sender) = (&client, sender.clone());
-                    scope.spawn(move || {
-                        for url in urls {
-                            let picture = client.media(url).and_then(|bytes| {
-                                decoding::decode(&bytes, None)
-                                    .ok()
-                                    .map(|image| decoding::fit(image, (ICON_SIDE, ICON_SIDE)))
-                            });
-                            if let Some(picture) = picture
-                                && sender
-                                    .send(ShopEvent::Icon {
-                                        url: url.clone(),
-                                        picture,
-                                    })
-                                    .is_err()
-                            {
-                                return;
-                            }
-                        }
-                    });
-                }
-            });
-        });
     }
 
     fn fetch_shots(&self, app_id: String, urls: Vec<String>) {
         let sender = self.sender.clone();
+        let (current, generation) = (
+            Arc::clone(&self.shots_generation),
+            self.shots_generation.load(Ordering::Relaxed),
+        );
         spawn("shop-screenshots", move || {
-            let Ok(client) = FlathubClient::new() else {
+            let Ok(client) = FlathubClient::shared() else {
                 return;
             };
-            // The first one first: it's the one on screen.
+            // The first one first: it's the one on screen. Leaving the page
+            // stops the rest.
             for (index, url) in urls.iter().enumerate() {
+                if current.load(Ordering::Relaxed) != generation {
+                    return;
+                }
                 let picture = client.media(url).and_then(|bytes| {
                     decoding::decode(&bytes, None)
                         .ok()
@@ -1206,7 +1242,15 @@ impl ShopController {
                 } => self.listed(&ui, generation, page, result),
                 ShopEvent::Icon { url, picture } => {
                     let image = slint_image(&picture);
-                    for (index, app) in self.apps.borrow().iter().enumerate() {
+                    let start = self.mounted_start.get();
+                    for (index, app) in self
+                        .apps
+                        .borrow()
+                        .iter()
+                        .skip(start)
+                        .take(self.rows.row_count())
+                        .enumerate()
+                    {
                         if app.icon_url.as_deref() == Some(url.as_str())
                             && let Some(mut row) = self.rows.row_data(index)
                         {
@@ -1383,7 +1427,6 @@ impl ShopController {
                     );
                 }
                 self.rebuild_rows(ui, if page <= 1 { 0 } else { shown });
-                self.fetch_icons();
                 if self.focus_results.take() && !self.apps.borrow().is_empty() {
                     self.search_focused.set(false);
                     self.selected.set(0);
@@ -1400,46 +1443,78 @@ impl ShopController {
         }
     }
 
-    /// Put the listing in the grid. Apps from `kept` on are new: they fade
-    /// in, the ones before stay put.
+    /// The listing changed. Apps from `kept` on are new: they fade in, the
+    /// ones before stay put. Nothing kept: the grid starts over.
     fn rebuild_rows(&self, ui: &AppWindow, kept: usize) {
-        let icons = self.icons.borrow();
-        let rows: Vec<ShopAppData> = self
-            .apps
-            .borrow()
+        ui.set_shop_catalog_base(kept as i32);
+        ui.set_shop_catalog_revision(ui.get_shop_catalog_revision().wrapping_add(1));
+        self.publish_rows(ui, kept == 0);
+    }
+
+    /// Mount the apps near the camera: the rows in view and a few either
+    /// side. A window that only scrolled keeps the cards that stay; `rebuild`
+    /// (a new listing) replaces them all.
+    fn publish_rows(&self, ui: &AppWindow, rebuild: bool) {
+        let apps = self.apps.borrow();
+        let (start, end, in_view) = mounted_range(
+            apps.len(),
+            self.columns(ui),
+            self.first_row.get().max(0) as usize,
+            ui.get_shop_visible_rows().max(1) as usize,
+        );
+        ui.set_shop_app_count(apps.len() as i32);
+        let ids: Vec<String> = apps[start..end]
             .iter()
-            .map(|app| {
-                let icon = app
-                    .icon_url
-                    .as_ref()
-                    .and_then(|url| icons.get(url))
-                    .cloned();
-                let (status, busy, progress) = self.row_state(&app.app_id);
-                ShopAppData {
-                    name: app.name.as_str().into(),
-                    developer: app.developer.as_str().into(),
-                    summary: app.summary.as_str().into(),
-                    verified: app.verified,
-                    has_icon: icon.is_some(),
-                    icon: icon.unwrap_or_default(),
-                    status,
-                    busy,
-                    progress,
-                }
-            })
+            .map(|app| app.app_id.clone())
             .collect();
-        if kept > 0 && kept <= rows.len() && kept == self.rows.row_count() {
-            for row in rows.into_iter().skip(kept) {
-                self.rows.push(row);
-            }
+        let old_start = self.mounted_start.get();
+        if !rebuild && ids == *self.mounted.borrow() && start == old_start {
+            return;
+        }
+        let rows: Vec<ShopAppData> = apps[start..end]
+            .iter()
+            .enumerate()
+            .map(|(offset, app)| self.row(start + offset, app))
+            .collect();
+        if !rebuild && window_shift(&self.mounted.borrow(), old_start, &ids, start) {
+            shift_window(&self.rows, old_start, start, rows);
         } else {
             self.rows.set_vec(rows);
         }
-        ui.set_shop_catalog_base(kept as i32);
-        ui.set_shop_catalog_revision(ui.get_shop_catalog_revision().wrapping_add(1));
+        self.mounted_start.set(start);
+        *self.mounted.borrow_mut() = ids;
+        // Icons: the rows in view first, then those below, then above.
+        let urls = (in_view.start..end)
+            .chain(start..in_view.start)
+            .filter_map(|index| apps[index].icon_url.clone())
+            .collect();
+        drop(apps);
+        self.want_icons(urls);
+    }
+
+    fn row(&self, index: usize, app: &AppSummary) -> ShopAppData {
+        let icon = app
+            .icon_url
+            .as_ref()
+            .and_then(|url| self.icons.borrow_mut().get(url));
+        let (status, busy, progress) = self.row_state(&app.app_id);
+        ShopAppData {
+            index: index as i32,
+            name: app.name.as_str().into(),
+            developer: app.developer.as_str().into(),
+            summary: app.summary.as_str().into(),
+            verified: app.verified,
+            has_icon: icon.is_some(),
+            icon: icon.unwrap_or_default(),
+            status,
+            busy,
+            progress,
+        }
     }
 
     fn publish(&self, ui: &AppWindow) {
+        // The grid's shape may have changed (a resize).
+        self.publish_rows(ui, false);
         let len = self.apps.borrow().len();
         if len > 0 && self.selected.get() >= len {
             self.selected.set(len - 1);
@@ -1465,12 +1540,16 @@ impl ShopController {
         let focus = self.action_focus.get().min(actions.len().saturating_sub(1));
         self.action_focus.set(focus);
         let busy = self.current_busy();
-        ui.set_shop_actions(ModelRc::new(VecModel::from(
-            actions
-                .iter()
-                .map(|action| slint::SharedString::from(action.label()))
-                .collect::<Vec<_>>(),
-        )));
+        // A new model rebuilds the buttons: only when they change.
+        if *self.shown_actions.borrow() != actions {
+            ui.set_shop_actions(ModelRc::new(VecModel::from(
+                actions
+                    .iter()
+                    .map(|action| slint::SharedString::from(action.label()))
+                    .collect::<Vec<_>>(),
+            )));
+            *self.shown_actions.borrow_mut() = actions.clone();
+        }
         ui.set_shop_action_focus(focus as i32);
         ui.set_shop_action_label(
             actions
@@ -1503,11 +1582,12 @@ fn hand_to_store(app_id: &str) -> Result<(), String> {
 }
 
 /// The installed apps as the grid lists them: Flathub's own summaries
-/// (icon, developer), else what Flatpak knows (the name).
-fn installed_page() -> Result<Page, FlathubError> {
+/// (icon, developer), else what Flatpak knows (the name). A summary read
+/// once is kept in `summaries`.
+fn installed_page(summaries: &Mutex<HashMap<String, AppSummary>>) -> Result<Page, FlathubError> {
     let installed =
         flatpak_host::installed().map_err(|error| FlathubError::Network(error.to_string()))?;
-    let client = FlathubClient::new()?;
+    let client = FlathubClient::shared()?;
     let per_worker = installed.len().div_ceil(INSTALLED_WORKERS).max(1);
     let apps: Vec<AppSummary> = std::thread::scope(|scope| {
         let workers: Vec<_> = installed
@@ -1518,9 +1598,21 @@ fn installed_page() -> Result<Page, FlathubError> {
                     chunk
                         .iter()
                         .map(|app| {
-                            let found = (app.origin == "flathub")
-                                .then(|| client.app(&app.app_id).ok())
-                                .flatten();
+                            let kept = summaries
+                                .lock()
+                                .unwrap_or_else(PoisonError::into_inner)
+                                .get(&app.app_id)
+                                .cloned();
+                            let found = kept.or_else(|| {
+                                let found = (app.origin == "flathub")
+                                    .then(|| client.app(&app.app_id).ok())
+                                    .flatten()?;
+                                summaries
+                                    .lock()
+                                    .unwrap_or_else(PoisonError::into_inner)
+                                    .insert(app.app_id.clone(), found.clone());
+                                Some(found)
+                            });
                             found.unwrap_or_else(|| AppSummary {
                                 app_id: app.app_id.clone(),
                                 name: app.name.clone(),
@@ -1543,6 +1635,116 @@ fn installed_page() -> Result<Page, FlathubError> {
         total: apps.len(),
         apps,
     })
+}
+
+/// The apps to mount, `start..end`, for a grid of `len` apps in `columns`
+/// with `visible` rows in view from `first_row`; and the ones in view.
+fn mounted_range(
+    len: usize,
+    columns: usize,
+    first_row: usize,
+    visible: usize,
+) -> (usize, usize, std::ops::Range<usize>) {
+    let columns = columns.max(1);
+    let rows = len.div_ceil(columns);
+    let first_row = first_row.min(rows);
+    let at = |row: usize| (row * columns).min(len);
+    let start = at(first_row.saturating_sub(OVERSCAN_ROWS));
+    let end = at((first_row + visible + OVERSCAN_ROWS).min(rows));
+    (
+        start,
+        end,
+        at(first_row)..at((first_row + visible).min(rows)),
+    )
+}
+
+/// Downloaded icons, at most `MAX_ICONS`: the one shown least recently
+/// goes first.
+#[derive(Default)]
+struct IconCache {
+    icons: HashMap<String, (Image, u64)>,
+    clock: u64,
+}
+
+impl IconCache {
+    fn contains(&self, url: &str) -> bool {
+        self.icons.contains_key(url)
+    }
+
+    fn get(&mut self, url: &str) -> Option<Image> {
+        self.clock += 1;
+        let (image, used) = self.icons.get_mut(url)?;
+        *used = self.clock;
+        Some(image.clone())
+    }
+
+    fn insert(&mut self, url: String, image: Image) {
+        self.clock += 1;
+        self.icons.insert(url, (image, self.clock));
+        while self.icons.len() > MAX_ICONS {
+            let Some(oldest) = self
+                .icons
+                .iter()
+                .min_by_key(|(_, (_, used))| *used)
+                .map(|(url, _)| url.clone())
+            else {
+                break;
+            };
+            self.icons.remove(&oldest);
+        }
+    }
+}
+
+/// Icons waiting to download, downloading, and that couldn't be; and how
+/// many workers are taking them.
+#[derive(Default)]
+struct IconQueue {
+    wanted: VecDeque<String>,
+    in_flight: HashSet<String>,
+    failed: HashSet<String>,
+    workers: usize,
+}
+
+/// Take icons from the queue until it is empty.
+fn icon_worker(queue: &Mutex<IconQueue>, sender: &WorkerSender<ShopEvent>) {
+    let client = FlathubClient::shared().ok();
+    loop {
+        let url = {
+            let mut queue = queue.lock().unwrap_or_else(PoisonError::into_inner);
+            let Some(url) = queue.wanted.pop_front() else {
+                queue.workers = queue.workers.saturating_sub(1);
+                return;
+            };
+            queue.in_flight.insert(url.clone());
+            url
+        };
+        let picture = client.as_ref().and_then(|client| {
+            let bytes = client.media(&url)?;
+            decoding::decode(&bytes, None)
+                .ok()
+                .map(|image| decoding::fit(image, (ICON_SIDE, ICON_SIDE)))
+        });
+        let failed = picture.is_none();
+        let gone = picture.is_some_and(|picture| {
+            sender
+                .send(ShopEvent::Icon {
+                    url: url.clone(),
+                    picture,
+                })
+                .is_err()
+        });
+        let mut queue = queue.lock().unwrap_or_else(PoisonError::into_inner);
+        queue.in_flight.remove(&url);
+        if gone {
+            // The Shop is gone.
+            queue.wanted.clear();
+            queue.workers = queue.workers.saturating_sub(1);
+            return;
+        }
+        if failed {
+            queue.failed.insert(url);
+        }
+    }
 }
 
 fn count_text(total: usize) -> slint::SharedString {
@@ -1569,7 +1771,10 @@ fn slint_image(picture: &RgbaImage) -> Image {
 
 #[cfg(test)]
 mod tests {
-    use super::{GridMove, PageAction, count_text, grid_step, page_actions};
+    use super::{
+        GridMove, IconCache, MAX_ICONS, OVERSCAN_ROWS, PageAction, count_text, grid_step,
+        mounted_range, page_actions,
+    };
     use crate::input::UiAction::{Down, Left, Right, Up};
 
     #[test]
@@ -1606,5 +1811,34 @@ mod tests {
         assert_eq!(count_text(604).as_str(), "604 apps");
         assert_eq!(count_text(2890).as_str(), "2,890 apps");
         assert_eq!(count_text(1_234_567).as_str(), "1,234,567 apps");
+    }
+
+    #[test]
+    fn only_the_rows_near_the_camera_are_mounted() {
+        // 2,890 apps in 3 columns, 5 rows in view.
+        let (start, end, view) = mounted_range(2890, 3, 0, 5);
+        assert_eq!((start, end, view), (0, (5 + OVERSCAN_ROWS) * 3, 0..15));
+        let (start, end, view) = mounted_range(2890, 3, 100, 5);
+        assert_eq!(start, (100 - OVERSCAN_ROWS) * 3);
+        assert_eq!(end, (105 + OVERSCAN_ROWS) * 3);
+        assert_eq!(view, 300..315);
+        // The last row is short, and nothing goes past the end.
+        let (_, end, view) = mounted_range(2890, 3, 962, 5);
+        assert_eq!((end, view.end), (2890, 2890));
+        assert_eq!(mounted_range(0, 3, 4, 5), (0, 0, 0..0));
+    }
+
+    #[test]
+    fn the_icon_shown_least_recently_goes_first() {
+        let mut icons = IconCache::default();
+        for at in 0..MAX_ICONS {
+            icons.insert(format!("{at}"), slint::Image::default());
+        }
+        // The first one is shown again: the second is now the oldest.
+        assert!(icons.get("0").is_some());
+        icons.insert("new".into(), slint::Image::default());
+        assert!(icons.contains("0") && icons.contains("new"));
+        assert!(!icons.contains("1"));
+        assert_eq!(icons.icons.len(), MAX_ICONS);
     }
 }

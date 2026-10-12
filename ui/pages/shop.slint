@@ -3,7 +3,7 @@ import { ShopAppData, ShopShotData } from "../models/shop.slint";
 import { PageHeader, HeaderValue, Breadcrumb, ScrollEdgeShadow } from "../components/page-header.slint";
 import { MarqueeText } from "../components/marquee-text.slint";
 import { TransitionDriver, TransitionLayer } from "../components/transition.slint";
-import { Scroll, ScrollCamera } from "../components/scroll.slint";
+import { DragScroll, Scroll, ScrollCamera } from "../components/scroll.slint";
 import { Stopwatch } from "../components/stopwatch.slint";
 import { SelectionFocusSurface } from "../components/selection-focus-surface.slint";
 import { ActionButton } from "../components/action-button.slint";
@@ -171,7 +171,10 @@ component AppCard inherits Rectangle {
 // software store. Selection, loading and paging are Rust-owned
 // (presentation/shop.rs).
 export component ShopPage inherits Rectangle {
+    // The mounted apps (those near the camera), and how many the listing
+    // has loaded.
     in property <[ShopAppData]> apps;
+    in property <int> app-count: 0;
     in property <int> selected: 0;
     in property <int> first-row: 0;
     in property <int> visit: 0;
@@ -245,7 +248,7 @@ export component ShopPage inherits Rectangle {
     out property <int> columns: max(1, Math.floor((root.grid-width + root.gap) / (340px + root.gap)));
     out property <int> visible-rows: max(1, Math.floor((root.viewport-height + root.gap) / root.stride));
     private property <length> card-width: (root.grid-width - (root.columns - 1) * root.gap) / root.columns;
-    private property <int> row-count: Math.floor((root.apps.length + root.columns - 1) / root.columns);
+    private property <int> row-count: Math.floor((root.app-count + root.columns - 1) / root.columns);
     // Cards sit 2px in, for the focus border.
     private property <length> content: max(0px, root.row-count * root.stride - root.gap + 4px);
 
@@ -425,46 +428,53 @@ export component ShopPage inherits Rectangle {
             width: root.grid-width;
             height: root.viewport-height;
             background: transparent; clip: true;
-            TouchArea {
+            DragScroll {
                 width: parent.width; height: parent.height;
                 enabled: !root.details-open;
-                scroll-event(event) => {
-                    if event.delta-y != 0px {
-                        camera.scroll(event.delta-y);
-                        return accept;
+                drag-begin(moved) => { camera.drag-begin(moved); }
+                drag-to(moved) => { camera.drag-to(moved); }
+                drag-end => { camera.drag-end(); }
+                TouchArea {
+                    width: parent.width; height: parent.height;
+                    enabled: !root.details-open;
+                    scroll-event(event) => {
+                        if event.delta-y != 0px {
+                            camera.scroll(event.delta-y);
+                            return accept;
+                        }
+                        reject
                     }
-                    reject
+                }
+                for app in root.apps : AppCard {
+                    property <int> grid-row: Math.floor(app.index / root.columns);
+                    property <float> entrance: app.index < root.previous-count
+                        ? 1.0 : 1.0 - (1.0 - arrival-clock.progress) * (1.0 - arrival-clock.progress);
+                    opacity: self.entrance;
+                    x: Math.mod(app.index, root.columns) * (root.card-width + root.gap);
+                    y: self.grid-row * root.stride - root.grid-camera + 2px + (1.0 - self.entrance) * 8px;
+                    width: root.card-width; height: root.card-height;
+                    // Culling follows the animated camera.
+                    visible: self.grid-row * root.stride >= root.grid-camera - 3 * root.stride
+                        && self.grid-row * root.stride <= root.grid-camera + root.viewport-height + 3 * root.stride;
+                    app: app;
+                    focused: !root.search-focused && root.selected == app.index;
+                    enabled: !root.details-open;
+                    activated => { root.choose(app.index); }
+                    wheel(delta) => { camera.scroll(delta); }
+                }
+                if root.app-count == 0 && root.state != 0 : Text {
+                    x: 0px; y: Metrics.spacing-lg; width: parent.width;
+                    text: root.state == 2 ? "Can't reach Flathub right now" : "Nothing found";
+                    color: Theme.secondary-foreground; font-size: Typography.body-size;
+                    wrap: word-wrap;
                 }
             }
-            for app[i] in root.apps : AppCard {
-                property <int> grid-row: Math.floor(i / root.columns);
-                property <float> entrance: i < root.previous-count
-                    ? 1.0 : 1.0 - (1.0 - arrival-clock.progress) * (1.0 - arrival-clock.progress);
-                opacity: self.entrance;
-                x: Math.mod(i, root.columns) * (root.card-width + root.gap);
-                y: self.grid-row * root.stride - root.grid-camera + 2px + (1.0 - self.entrance) * 8px;
-                width: root.card-width; height: root.card-height;
-                // Culling follows the animated camera.
-                visible: self.grid-row * root.stride >= root.grid-camera - 3 * root.stride
-                    && self.grid-row * root.stride <= root.grid-camera + root.viewport-height + 3 * root.stride;
-                app: app;
-                focused: !root.search-focused && root.selected == i;
-                enabled: !root.details-open;
-                activated => { root.choose(i); }
-                wheel(delta) => { camera.scroll(delta); }
-            }
-            if root.apps.length == 0 && root.state != 0 : Text {
-                x: 0px; y: Metrics.spacing-lg; width: parent.width;
-                text: root.state == 2 ? "Can't reach Flathub right now" : "Nothing found";
-                color: Theme.secondary-foreground; font-size: Typography.body-size;
-                wrap: word-wrap;
-            }
         }
-        if root.apps.length > 0 : ScrollEdgeShadow {
+        if root.app-count > 0 : ScrollEdgeShadow {
             x: 0px; y: root.grid-top; width: root.width;
             strength: Scroll.edge(root.grid-camera);
         }
-        if root.active && root.apps.length > 0 : ScrollEdgeShadow {
+        if root.active && root.app-count > 0 : ScrollEdgeShadow {
             x: 0px; y: root.list-bottom - self.height; width: root.width;
             bottom: true;
             strength: Scroll.edge(root.content - root.grid-camera - root.viewport-height);

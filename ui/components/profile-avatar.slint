@@ -45,9 +45,13 @@ export component ProfileAvatar inherits Rectangle {
     height: root.size;
     background: transparent;
 
+    // The circle that casts the shadow. Under a picture it is a little
+    // smaller, so its colour can't show around the picture's soft edge.
+    private property <length> inset: root.has-picture ? 2px : 0px;
     Rectangle {
-        width: root.size; height: root.size;
-        border-radius: root.size / 2;
+        x: root.inset; y: root.inset;
+        width: root.size - root.inset * 2; height: self.width;
+        border-radius: self.width / 2;
         background: Theme.accent;
         drop-shadow-offset-y: root.size * 3 / 54;
         drop-shadow-blur: root.size * 14 / 54;
@@ -61,17 +65,17 @@ export component ProfileAvatar inherits Rectangle {
             horizontal-alignment: center;
             vertical-alignment: center;
         }
-        // The picture gets its own clipped circle.
-        if root.has-picture : Rectangle {
+    }
+    // The picture gets its own clipped circle.
+    if root.has-picture : Rectangle {
+        width: root.size; height: root.size;
+        border-radius: root.size / 2;
+        clip: true;
+        AnimatedPicture {
             width: parent.width; height: parent.height;
-            border-radius: root.size / 2;
-            clip: true;
-            AnimatedPicture {
-                width: parent.width; height: parent.height;
-                still: root.picture;
-                frames: root.picture-frames;
-                playing: root.playing;
-            }
+            still: root.picture;
+            frames: root.picture-frames;
+            playing: root.playing;
         }
     }
 }

@@ -1,5 +1,7 @@
-// One app in the Shop's grid (presentation/shop.rs).
+// One app in the Shop's grid (presentation/shop.rs). Only the apps near the
+// camera are mounted; `index` is the app's place in the whole listing.
 export struct ShopAppData {
+    index: int,
     name: string,
     developer: string,
     summary: string,
