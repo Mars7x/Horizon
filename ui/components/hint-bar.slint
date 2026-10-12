@@ -3,7 +3,7 @@ import { HintData } from "../models/hints.slint";
 
 // Which device's glyphs hints show: the keyboard or the controller family
 // used last (Rust's `input::GlyphStyle`, published on change).
-export enum GlyphFamily { keyboard, xbox, playstation, nintendo, steam-deck }
+export enum GlyphFamily { keyboard, xbox, playstation, nintendo, steam-deck, odin }
 
 export global InputGlyphs {
     in-out property <GlyphFamily> family: GlyphFamily.keyboard;
@@ -13,7 +13,8 @@ export global InputGlyphs {
 // shape, symbol in the background colour. `button` is the logical button
 // ("A" confirm, "B" back, "X" secondary, "LB"/"RB", "+" menu, "L3"/"R3");
 // the glyph drawn is that button on the device in use: Enter/Esc/Del/Q/E
-// key caps, ✕ ○ □ on PlayStation, L1/R1 or L/R shoulders. Face buttons are
+// key caps, ✕ ○ □ on PlayStation, L1/R1 or L/R shoulders (the Odin 3:
+// Nintendo's letters, L1/R1). Face buttons are
 // circles, shoulders pills, keys rounded squares. `compact` is the small
 // size used beside a header value's label (LB/RB pickers).
 export component ButtonGlyph inherits Rectangle {

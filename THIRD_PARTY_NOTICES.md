@@ -25,6 +25,8 @@ Horizon includes or derives small portions of artwork and other resources from t
   shows the model of the controller used last, tinted with Horizon's theme
   colour at the same UI-scale-aware raster resolution as the utility icons.
   The files are not modified. See ADR 0186.
+- Not Kenney's: `ui/assets/controllers/horizon_odin3.svg` (the AYN Odin 3) is
+  Horizon's own drawing in the same style, as the pack has no Odin (ADR 0187).
 
 ## GNOME symbolic artwork
 

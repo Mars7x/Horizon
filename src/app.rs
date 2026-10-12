@@ -850,5 +850,6 @@ fn glyph_family(style: GlyphStyle) -> GlyphFamily {
         GlyphStyle::Controller(ControllerFamily::PlayStation) => GlyphFamily::Playstation,
         GlyphStyle::Controller(ControllerFamily::Nintendo) => GlyphFamily::Nintendo,
         GlyphStyle::Controller(ControllerFamily::SteamDeck) => GlyphFamily::SteamDeck,
+        GlyphStyle::Controller(ControllerFamily::Odin) => GlyphFamily::Odin,
     }
 }

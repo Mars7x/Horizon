@@ -226,11 +226,49 @@ Wheel direction follows the desktop's scrolling setting (natural/reverse or trad
 Each opened SDL gamepad gets a `ControllerFamily` (`sdl::controller_family`):
 PlayStation for SDL's PS3/PS4/PS5 types, Nintendo for the Switch Pro and
 Joy-Cons, Steam Deck for Valve's Deck controller (vendor `0x28de`, product
-`0x1205`) or any Valve controller when the machine is a Deck (DMI board
-`Jupiter`/`Galileo`, which catches Steam's virtual gamepad in Game Mode), and
-Xbox for everything else.
+`0x1205`), Odin for the AYN Odin 3's own controls, and Xbox for everything
+else.
 
-Nintendo pads follow Nintendo's convention: the right button (A) confirms,
+**Behind Steam Input** (a game launched from Steam, Game Mode) every
+controller is a Steam virtual pad. Steam names the real controller behind each
+in a file it points to with `SteamVirtualGamepadInfo` (under Steam's
+`config/`, which Horizon's read-only Steam grants cover), and SDL then reports
+the real controller's IDs, name and type, so each gets its own family and
+drawing. If the variable is missing (Horizon started some other way, or it
+didn't reach the sandbox), `main` points it at the newest
+`config/virtualgamepadinfo.txt` in the Steam roots before SDL starts. Only a
+pad SDL still can't resolve stays Steam's (`28de:11ff`); on a Deck (DMI board
+`Jupiter`/`Galileo`) or an Odin 3 it's taken for the handheld's own controls.
+
+The Odin 3 is recognised by its device tree (model "AYN Odin 3", which sysfs
+shows in `/sys/devices/soc0/machine` inside Flatpak; compatible `ayn,odin3`
+outside it). On an Odin 3, its controls are the pad its kernel driver makes
+(`2020:3001`, "AYN Odin3 Gamepad"), the Xbox Elite 2 pad InputPlumber turns
+them into (`045e:0b00`, ArmadaOS's default), and Steam's virtual pad for
+either.
+InputPlumber's Elite 2 is told from a real one by being virtual: SDL's
+device path is an evdev node whose sysfs device is under
+`/sys/devices/virtual/input` (uinput), where a USB pad is on its bus.
+
+Roles are decided for all open pads together (`sdl::pad_roles`), again on
+every connect and disconnect:
+
+- Behind Steam Input both Elite 2s are virtual pads with Elite 2 IDs. Sysfs,
+  which Steam doesn't hide, says which Elite 2s exist: with no real one it's
+  the Odin's; with no InputPlumber pad it's the real one; with both, the
+  Odin's is the one in Steam's first slot (its controls exist from boot).
+  Steam's pads keep `28de:11ff` in sysfs and are numbered by name ("… pad
+  N"), as SDL reads them.
+- When the raw pad and InputPlumber's (or Steam's) are both open, as
+  ArmadaOS's raw-input sharing can allow, the raw one is ignored so a press
+  counts once; it's left out of the controller count too.
+
+The "gamepad connected" and "gamepad role" log lines record each pad's IDs,
+path, whether it's virtual, its Steam slot and what Horizon made of it.
+Untested on the device (ADR 0187).
+
+Nintendo pads and the Odin 3 (whose buttons wear Nintendo's labels) follow
+Nintendo's convention: the right button (A) confirms,
 the bottom (B) goes back and the top (X) is the secondary action. SDL's
 buttons are positional, so `action_for_button` maps them per family.
 
@@ -241,12 +279,12 @@ the first connected controller's family, else the keyboard. `app.rs` writes
 it to the Slint global `InputGlyphs.family`, and `ButtonGlyph`
 (`ui/components/hint-bar.slint`) draws the logical button for that device:
 
-| Logical | Keyboard | Xbox | PlayStation | Nintendo | Steam Deck |
-| --- | --- | --- | --- | --- | --- |
-| A (Accept) | Enter | A | ✕ | A | A |
-| B (Back) | Esc | B | ○ | B | B |
-| X (Secondary) | Del | X | □ | X | X |
-| LB / RB | Q / E | LB / RB | L1 / R1 | L / R | L1 / R1 |
+| Logical | Keyboard | Xbox | PlayStation | Nintendo | Steam Deck | Odin 3 |
+| --- | --- | --- | --- | --- | --- | --- |
+| A (Accept) | Enter | A | ✕ | A | A | A (right) |
+| B (Back) | Esc | B | ○ | B | B | B (bottom) |
+| X (Secondary) | Del | X | □ | X | X | X (top) |
+| LB / RB | Q / E | LB / RB | L1 / R1 | L / R | L1 / R1 | L1 / R1 |
 
 Hints and header values keep naming logical buttons ("A", "LB"), so a click
 still sends the same action whatever is drawn. See ADR 0185.

@@ -250,8 +250,10 @@ Host-battery priority and the red <=20% warning remain unchanged.
 
 The bottom-left icon draws the connected controller's model: Xbox 360, Xbox
 One/Series, PS3, PS4, PS5, Switch Pro, a left or right Joy-Con, a Joy-Con
-pair, the Steam Deck, or a generic gamepad for a pad SDL can't name. Art is
-Kenney's Input Prompts (CC0), unmodified, in `ui/assets/controllers/`.
+pair, the Steam Deck, the AYN Odin 3, or a generic gamepad for a pad SDL can't
+name. Art is Kenney's Input Prompts (CC0), unmodified, in
+`ui/assets/controllers/`; the Odin 3 (`horizon_odin3.svg`) is Horizon's own in
+the same style, as Kenney has none (ADR 0187).
 
 With several controllers it shows the one used last (else the first
 connected). `SdlState` keeps each pad's `ControllerShape` from SDL's gamepad

@@ -48,6 +48,9 @@ pub enum ControllerFamily {
     PlayStation,
     Nintendo,
     SteamDeck,
+    /// The AYN Odin 3's own controls: Nintendo-style labels (A on the
+    /// right) with L1/R1 shoulders.
+    Odin,
 }
 
 /// The button glyphs hints show: those of the keyboard or controller used

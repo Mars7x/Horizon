@@ -54,6 +54,7 @@ fn controller_art(shape: ControllerShape) -> ControllerArt {
         ControllerShape::JoyConRight => ControllerArt::JoyconRight,
         ControllerShape::JoyConPair => ControllerArt::JoyconPair,
         ControllerShape::SteamDeck => ControllerArt::SteamDeck,
+        ControllerShape::Odin3 => ControllerArt::Odin3,
     }
 }
 
