@@ -25,7 +25,7 @@
 | Where are files kept on disk? | [Files on disk](STORAGE.md) | `src/platform/data_paths.rs` |
 | Art, attribution, permission review? | [Artwork](ARTWORK.md), [Licensing](LICENSING.md) | `ui/assets/`, `REUSE.toml`, `THIRD_PARTY_NOTICES.md` |
 
-Additional focused guides: [Input](INPUT.md), [Clock](CLOCK.md), [Live status](STATUS.md), [Managed sessions](MANAGED_SESSIONS.md), [Shell hardening](SHELL_HARDENING.md), and [Flatpak notes](../flatpak/README.md).
+Additional focused guides: [Input](INPUT.md), [Horizon session (gamescope), design](GAMESCOPE_SESSION.md), [Clock](CLOCK.md), [Live status](STATUS.md), [Managed sessions](MANAGED_SESSIONS.md), [Shell hardening](SHELL_HARDENING.md), and [Flatpak notes](../flatpak/README.md).
 
 ## Historical records are not the current spec
 
