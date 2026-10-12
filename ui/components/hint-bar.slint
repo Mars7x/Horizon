@@ -63,11 +63,12 @@ export component ButtonGlyph inherits Rectangle {
         stroke-width: root.mark-stroke;
     }
     // ○ (back)
-    if root.ps-face && root.button == "B" : Rectangle {
-        width: parent.height * 0.44; height: self.width;
-        border-radius: self.width / 2;
-        border-width: root.mark-stroke;
-        border-color: root.ink;
+    if root.ps-face && root.button == "B" : Path {
+        width: parent.width; height: parent.height;
+        viewbox-width: 22; viewbox-height: 22;
+        commands: "M 11 6.25 A 4.75 4.75 0 1 1 11 15.75 A 4.75 4.75 0 1 1 11 6.25 Z";
+        stroke: root.ink;
+        stroke-width: root.mark-stroke;
     }
     // □ (secondary)
     if root.ps-face && root.button == "X" : Rectangle {
