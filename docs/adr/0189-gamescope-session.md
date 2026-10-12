@@ -36,6 +36,16 @@ Steam sets.
 - Wayland is tried first inside gamescope; X11 through `fallback-x11` is the
   fallback if gamescope's focus and overlay control need it.
 
+## Spike 1 result (2026-10-12)
+
+Nested on the main PC (gamescope 3.16.29): with `-e`, gamescope shows only
+a window whose app ID matches the root's `GAMESCOPECTRL_BASELAYER_APPID`.
+Wayland windows always count as app ID 0, so a Wayland Horizon is never
+shown in Steam mode; an X11 window tagged `STEAM_GAME` is. Without `-e`, a
+Wayland Horizon works and returns after a window on top closes. This points
+to the X11 fallback; the embedded run must confirm it before the decision
+changes. See [GAMESCOPE_SESSION.md](../GAMESCOPE_SESSION.md).
+
 ## Consequences
 
 - One codebase gives the desktop and the session the same pages.
