@@ -289,3 +289,17 @@ it to the Slint global `InputGlyphs.family`, and `ButtonGlyph`
 Hints and header values keep naming logical buttons ("A", "LB"), so a click
 still sends the same action whatever is drawn. See ADR 0185.
 
+## Swapping select and back
+
+**Settings → Controller → Swap Select and Back** makes every controller
+select with the button that normally goes back and go back with the one that
+normally selects (Xbox: B selects; Nintendo and the Odin 3: B, the bottom,
+selects; PlayStation: ○ selects). It is saved in `controller.json`
+(`services::controller_settings`). `InputManager` exchanges Accept and Back on
+controller actions only (`UiAction::with_confirm_swapped`); the keyboard
+keeps Enter and Esc, and clicked hints send their logical action as before.
+With **Swap Hints** on (the default), `app.rs` also sets
+`InputGlyphs.swap-confirm`, and `ButtonGlyph` then draws a controller's
+logical A as its B and B as its A, so the hints name the button that does it.
+With it off, hints keep the controller's usual buttons. See ADR 0188.
+

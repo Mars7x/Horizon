@@ -55,6 +55,7 @@ use crate::{
         activity::{ActivityService, ActivitySessionTransition, LaunchActivitySink},
         album::{ALBUM_CACHE_VERSION, NoVideo, VideoBackend},
         artwork::{self, ArtworkService},
+        controller_settings::ControllerPreferences,
         import::{SourceImportOutcome, SourceImportService},
         launch::GameLaunchService,
         library::LibraryService,
@@ -313,6 +314,7 @@ pub fn run() -> Result<(), AppError> {
         settings_service,
         appearance.clone(),
         Rc::clone(&steam_account),
+        data_paths::controller_settings_path()?,
     );
     let navigation_sound = Rc::new(RefCell::new(UiSounds::new(
         appearance.preferences().ui_sounds_enabled,
@@ -368,6 +370,7 @@ pub fn run() -> Result<(), AppError> {
         }
     }));
     let settings_for_reload = Rc::clone(&settings);
+    let settings_for_controller = Rc::clone(&settings);
     let navigation = NavigationController::new(
         &ui,
         Rc::clone(&home),
@@ -621,6 +624,22 @@ pub fn run() -> Result<(), AppError> {
         Rc::clone(&last_device),
         glyph_sink,
     );
+
+    // Settings → Controller can swap select and back on controllers; the
+    // hints swap their A and B to match, unless the user keeps them as they
+    // were.
+    let apply_controller = {
+        let (input, glyph_ui) = (Rc::clone(&input), ui.as_weak());
+        move |preferences: ControllerPreferences| {
+            input.set_swap_confirm(preferences.swap_confirm);
+            if let Some(ui) = glyph_ui.upgrade() {
+                ui.global::<InputGlyphs>()
+                    .set_swap_confirm(preferences.hints_swapped());
+            }
+        }
+    };
+    apply_controller(settings_for_controller.controller_preferences());
+    settings_for_controller.set_controller_changed(Rc::new(apply_controller));
 
     // Network and battery readings wake the UI thread when they arrive.
     let system_ui = ui.as_weak();

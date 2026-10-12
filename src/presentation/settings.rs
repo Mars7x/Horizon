@@ -1,7 +1,8 @@
-//! Controller-first Settings > Third-Party page; Slint displays state only.
+//! Controller-first Settings pages; Slint displays state only.
 use slint::ComponentHandle;
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
+    path::PathBuf,
     rc::Rc,
     sync::{
         Arc,
@@ -18,6 +19,7 @@ use crate::{
     platform::wayland_clipboard::WaylandClipboard,
     presentation::{CallbackSlot, appearance::AppearanceController},
     services::{
+        controller_settings::{self, ControllerPreferences},
         settings::{ArtworkPreferences, SettingsService},
         steam_account::SteamAccountService,
     },
@@ -28,6 +30,7 @@ enum SettingsView {
     #[default]
     Root,
     Appearance,
+    Controller,
     // Third-Party lists one "Open" row per service; each service has its
     // own sub-page so SteamGridDB and Steam work the same way.
     ThirdParty,
@@ -67,6 +70,9 @@ pub struct SettingsController {
     steam_account: Rc<RefCell<SteamAccountService>>,
     steam_account_changed: CallbackSlot<dyn Fn()>,
     appearance: AppearanceController,
+    controller: Cell<ControllerPreferences>,
+    controller_path: PathBuf,
+    controller_changed: CallbackSlot<dyn Fn(ControllerPreferences)>,
     artwork_changed: CallbackSlot<dyn Fn(ArtworkPreferences)>,
     artwork_refresh: CallbackSlot<dyn Fn(ArtworkPreferences)>,
     sound_changed: CallbackSlot<dyn Fn(bool)>,
@@ -81,6 +87,7 @@ impl SettingsController {
         service: SettingsService,
         appearance: AppearanceController,
         steam_account: Rc<RefCell<SteamAccountService>>,
+        controller_path: PathBuf,
     ) -> Rc<Self> {
         let controller = Rc::new(Self {
             page: RefCell::new(PageState::default()),
@@ -88,6 +95,9 @@ impl SettingsController {
             steam_account,
             steam_account_changed: RefCell::new(None),
             appearance,
+            controller: Cell::new(controller_settings::load_preferences(&controller_path)),
+            controller_path,
+            controller_changed: RefCell::new(None),
             artwork_changed: RefCell::new(None),
             artwork_refresh: RefCell::new(None),
             sound_changed: RefCell::new(None),
@@ -119,6 +129,50 @@ impl SettingsController {
     /// changes continue to reuse valid cached artwork.
     pub fn set_artwork_refresh(&self, callback: Rc<dyn Fn(ArtworkPreferences)>) {
         *self.artwork_refresh.borrow_mut() = Some(callback);
+    }
+
+    pub fn controller_preferences(&self) -> ControllerPreferences {
+        self.controller.get()
+    }
+
+    /// Called once a controller preference is saved.
+    pub fn set_controller_changed(&self, callback: Rc<dyn Fn(ControllerPreferences)>) {
+        *self.controller_changed.borrow_mut() = Some(callback);
+    }
+
+    /// Row 0 swaps select and back; row 1 whether hints swap with them.
+    fn set_controller_switch(&self, ui: &AppWindow, row: i32, on: bool) {
+        let current = self.controller.get();
+        let next = match row {
+            0 => ControllerPreferences {
+                swap_confirm: on,
+                ..current
+            },
+            1 => ControllerPreferences {
+                swap_hints: on,
+                ..current
+            },
+            _ => return,
+        };
+        if next == current {
+            return;
+        }
+        let result = controller_settings::save_preferences(&self.controller_path, &next);
+        if let Err(error) = &result {
+            tracing::warn!(%error, "could not save controller settings");
+        } else {
+            self.controller.set(next);
+            if let Some(callback) = self.controller_changed.borrow().as_ref() {
+                callback(next);
+            }
+            self.cue(UiSoundCue::Ok);
+        }
+        self.page.borrow_mut().feedback = if result.is_ok() {
+            String::new()
+        } else {
+            "Couldn't save".into()
+        };
+        self.publish(ui);
     }
 
     pub fn set_sound_changed(&self, callback: Rc<dyn Fn(bool)>) {
@@ -295,6 +349,10 @@ impl SettingsController {
                 } else if page.view == SettingsView::Appearance && page.selected == 14 {
                     drop(page);
                     self.set_ui_sounds_enabled(ui, action == UiAction::Right);
+                } else if page.view == SettingsView::Controller {
+                    let row = page.selected;
+                    drop(page);
+                    self.set_controller_switch(ui, row, action == UiAction::Right);
                 } else if page.view == SettingsView::Appearance {
                     drop(page);
                     let mut page = self.page.borrow_mut();
@@ -395,7 +453,7 @@ impl SettingsController {
         let view = self.page.borrow().view;
         match view {
             SettingsView::Root => {
-                if !(0..=1).contains(&selected) {
+                if root_destination(selected).is_none() {
                     return;
                 }
                 let mut page = self.page.borrow_mut();
@@ -450,6 +508,17 @@ impl SettingsController {
                     self.cue(UiSoundCue::Ok);
                 }
                 self.publish(ui);
+                return;
+            }
+            SettingsView::Controller => {
+                let current = self.controller.get();
+                let on = match selected {
+                    0 => !current.swap_confirm,
+                    1 => !current.swap_hints,
+                    _ => return,
+                };
+                self.page.borrow_mut().selected = selected;
+                self.set_controller_switch(ui, selected, on);
                 return;
             }
             SettingsView::ThirdParty => {
@@ -812,11 +881,15 @@ impl SettingsController {
             SettingsView::ThirdParty => 2,
             SettingsView::SteamAccount => 3,
             SettingsView::SteamGridDb => 4,
+            SettingsView::Controller => 5,
         });
         let prefs = self.appearance.preferences();
         ui.set_settings_theme_index(prefs.theme_index());
         ui.set_settings_accent_index(prefs.accent_index());
         ui.set_settings_ui_sounds_enabled(prefs.ui_sounds_enabled);
+        let controller = self.controller.get();
+        ui.set_settings_swap_confirm(controller.swap_confirm);
+        ui.set_settings_swap_hints(controller.swap_hints);
         ui.set_settings_appearance_feedback(if page.view == SettingsView::Appearance {
             page.feedback.clone().into()
         } else {
@@ -861,7 +934,8 @@ fn settings_parent(view: SettingsView) -> Option<(SettingsView, i32)> {
     match view {
         SettingsView::Root => None,
         SettingsView::Appearance => Some((SettingsView::Root, 0)),
-        SettingsView::ThirdParty => Some((SettingsView::Root, 1)),
+        SettingsView::Controller => Some((SettingsView::Root, 1)),
+        SettingsView::ThirdParty => Some((SettingsView::Root, 2)),
         SettingsView::SteamGridDb => Some((SettingsView::ThirdParty, 0)),
         SettingsView::SteamAccount => Some((SettingsView::ThirdParty, 1)),
     }
@@ -870,8 +944,9 @@ fn settings_parent(view: SettingsView) -> Option<(SettingsView, i32)> {
 /// Keep controller focus within visible/enabled Third-Party actions.
 fn selection_count(view: SettingsView) -> i32 {
     match view {
-        SettingsView::Root => 2,
+        SettingsView::Root => 3,
         SettingsView::Appearance => 15,
+        SettingsView::Controller => 2,
         SettingsView::ThirdParty => 2,
         SettingsView::SteamGridDb => 3,
         SettingsView::SteamAccount => 2,
@@ -906,7 +981,8 @@ fn steamgriddb_step_without_key(selected: i32, delta: i32, repeated: bool) -> i3
 fn root_destination(index: i32) -> Option<SettingsView> {
     match index {
         0 => Some(SettingsView::Appearance),
-        1 => Some(SettingsView::ThirdParty),
+        1 => Some(SettingsView::Controller),
+        2 => Some(SettingsView::ThirdParty),
         _ => None,
     }
 }
@@ -1023,7 +1099,8 @@ mod editor_navigation_tests {
 
     #[test]
     fn refresh_row_is_included_only_with_saved_key() {
-        assert_eq!(super::selection_count(SettingsView::Root), 2);
+        assert_eq!(super::selection_count(SettingsView::Root), 3);
+        assert_eq!(super::selection_count(SettingsView::Controller), 2);
         assert_eq!(super::selection_count(SettingsView::Appearance), 15);
         assert_eq!(super::selection_count(SettingsView::ThirdParty), 2);
         // Removing a key is X on its row, not a row of its own.
@@ -1110,8 +1187,12 @@ mod root_activation_regressions {
             Some((SettingsView::Root, 0))
         );
         assert_eq!(
-            settings_parent(SettingsView::ThirdParty),
+            settings_parent(SettingsView::Controller),
             Some((SettingsView::Root, 1))
+        );
+        assert_eq!(
+            settings_parent(SettingsView::ThirdParty),
+            Some((SettingsView::Root, 2))
         );
         assert_eq!(
             settings_parent(SettingsView::SteamGridDb),
@@ -1129,8 +1210,9 @@ mod root_activation_regressions {
     #[test]
     fn root_category_clicks_open_the_corresponding_page() {
         assert_eq!(root_destination(0), Some(SettingsView::Appearance));
-        assert_eq!(root_destination(1), Some(SettingsView::ThirdParty));
+        assert_eq!(root_destination(1), Some(SettingsView::Controller));
+        assert_eq!(root_destination(2), Some(SettingsView::ThirdParty));
         assert_eq!(root_destination(-1), None);
-        assert_eq!(root_destination(2), None);
+        assert_eq!(root_destination(3), None);
     }
 }

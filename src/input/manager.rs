@@ -34,6 +34,9 @@ pub struct InputManager {
     last_device: Rc<Cell<InputDevice>>,
     /// Which glyphs hints show; published to the UI when it changes.
     glyphs: Rc<GlyphTracker>,
+    /// Controllers confirm with their back button and back with their
+    /// confirm button (Settings → Controller). The keyboard is unchanged.
+    swap_confirm: Rc<Cell<bool>>,
 }
 
 /// Follows the keyboard or controller used last and tells the UI when its
@@ -72,15 +75,17 @@ impl InputManager {
         glyph_sink: Rc<dyn Fn(GlyphStyle)>,
     ) -> Rc<Self> {
         let glyphs = Rc::new(GlyphTracker::new(glyph_sink));
+        let swap_confirm = Rc::new(Cell::new(false));
         // Controller actions mark the controller as the device in use, and
         // show its family's glyphs.
         let gamepad_sink: GamepadActionSink = {
             let (sink, device) = (Rc::clone(&action_sink), Rc::clone(&last_device));
             let glyphs = Rc::clone(&glyphs);
-            Rc::new(move |event, family: ControllerFamily| {
+            let swap = Rc::clone(&swap_confirm);
+            Rc::new(move |event: UiActionEvent, family: ControllerFamily| {
                 device.set(InputDevice::Gamepad);
                 glyphs.set(GlyphStyle::Controller(family));
-                sink(event);
+                sink(controller_event(event, swap.get()));
             })
         };
         let gamepad_input = match SdlGamepadInput::start(gamepad_sink, Rc::clone(&status_sink)) {
@@ -107,7 +112,13 @@ impl InputManager {
             keyboard_repeat: Cell::new(None),
             last_device,
             glyphs,
+            swap_confirm,
         })
+    }
+
+    /// Swap confirm and back on controllers (not the keyboard).
+    pub fn set_swap_confirm(&self, swap: bool) {
+        self.swap_confirm.set(swap);
     }
 
     /// Enable or suspend semantic UI input according to Horizon window ownership.
@@ -188,6 +199,19 @@ impl InputManager {
     }
 }
 
+/// A controller's action as Horizon acts on it: confirm and back exchanged
+/// when the user swapped them.
+const fn controller_event(event: UiActionEvent, swap_confirm: bool) -> UiActionEvent {
+    if swap_confirm {
+        UiActionEvent {
+            action: event.action.with_confirm_swapped(),
+            ..event
+        }
+    } else {
+        event
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{cell::RefCell, rc::Rc};
@@ -208,6 +232,7 @@ mod tests {
             keyboard_repeat: Cell::new(None),
             last_device: Rc::default(),
             glyphs: Rc::new(GlyphTracker::new(Rc::new(|_| {}))),
+            swap_confirm: Rc::default(),
         };
         let right: SharedString = Key::RightArrow.into();
         let t = Instant::now();
@@ -245,6 +270,7 @@ mod tests {
             keyboard_repeat: Cell::new(None),
             last_device: Rc::default(),
             glyphs: Rc::new(GlyphTracker::new(Rc::new(|_| {}))),
+            swap_confirm: Rc::default(),
         };
         let right: SharedString = Key::RightArrow.into();
 
@@ -273,6 +299,7 @@ mod tests {
             glyphs: Rc::new(GlyphTracker::new(Rc::new(move |style| {
                 observed.borrow_mut().push(style)
             }))),
+            swap_confirm: Rc::default(),
         };
         let pad = GlyphStyle::Controller(ControllerFamily::PlayStation);
         manager.glyphs.set(pad);
@@ -281,5 +308,37 @@ mod tests {
         assert!(manager.handle_keyboard(right.as_str(), false));
         assert!(manager.handle_keyboard(right.as_str(), false));
         assert_eq!(*published.borrow(), [pad, GlyphStyle::Keyboard]);
+    }
+
+    #[test]
+    fn swapping_exchanges_only_controller_confirm_and_back() {
+        let accept = UiActionEvent::fresh(UiAction::Accept);
+        let back = UiActionEvent::fresh(UiAction::Back);
+        let up = UiActionEvent::repeated(UiAction::Up);
+        assert_eq!(controller_event(accept, false), accept);
+        assert_eq!(controller_event(accept, true), back);
+        assert_eq!(controller_event(back, true), accept);
+        assert_eq!(controller_event(up, true), up);
+        assert_eq!(
+            UiAction::Secondary.with_confirm_swapped(),
+            UiAction::Secondary
+        );
+
+        // Enter still confirms on the keyboard.
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let observed = Rc::clone(&events);
+        let manager = InputManager {
+            action_sink: Rc::new(move |event| observed.borrow_mut().push(event)),
+            gamepad_input: None,
+            ui_input_enabled: Cell::new(true),
+            keyboard_repeat: Cell::new(None),
+            last_device: Rc::default(),
+            glyphs: Rc::new(GlyphTracker::new(Rc::new(|_| {}))),
+            swap_confirm: Rc::default(),
+        };
+        manager.set_swap_confirm(true);
+        let enter: SharedString = Key::Return.into();
+        assert!(manager.handle_keyboard(enter.as_str(), false));
+        assert_eq!(events.borrow()[0].action, UiAction::Accept);
     }
 }

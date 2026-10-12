@@ -93,10 +93,12 @@ component AccentSwatch inherits Rectangle {
 }
 
 export component SettingsPage inherits Rectangle {
-    in property <int> view: 0; // 0 Settings, 1 Appearance, 2 Third-Party, 3 Steam Account
+    in property <int> view: 0; // 0 Settings, 1 Appearance, 2 Third-Party, 3 Steam Account, 4 SteamGridDB, 5 Controller
     in property <int> theme-index: 0; // System, Light, Dark, Black
     in property <int> accent-index: 0; // System, nine spectrum colours
     in property <bool> ui-sounds-enabled: true;
+    in property <bool> swap-confirm: false;
+    in property <bool> swap-hints: true;
     in property <string> appearance-feedback: "";
     in property <int> selection: 0;
     in property <bool> key-present: false;
@@ -186,11 +188,11 @@ export component SettingsPage inherits Rectangle {
     PageHeader { width: parent.width; title: "Settings"; }
 
     // Sub-views use the shared Zoom: going deeper zooms in, Back zooms out.
-    // Depth: Settings 0, Appearance/Third-Party 1, Steam Account/SteamGridDB 2.
+    // Depth: Settings 0, Appearance/Controller/Third-Party 1, Steam Account/SteamGridDB 2.
     view-transition := TransitionDriver { key: root.view; }
     private property <bool> view-back: root.view-depth(root.view) < root.view-depth(view-transition.from-key);
     pure function view-depth(view: int) -> int {
-        return view == 0 ? 0 : (view <= 2 ? 1 : 2);
+        return view == 0 ? 0 : (view <= 2 || view == 5 ? 1 : 2);
     }
 
     settings-home := TransitionLayer {
@@ -220,12 +222,20 @@ export component SettingsPage inherits Rectangle {
             }
             SettingsRow {
                 width: parent.width;
+                title: "Controller";
+                subtitle: "Select and back buttons";
+                trailing: "Open  ›";
+                focused: root.view == 0 && root.selection == 1;
+                activated => { if (root.view == 0 && !root.editing-key && !root.refresh-open) { root.activate(1); } }
+            }
+            SettingsRow {
+                width: parent.width;
                
                 title: "Third-Party";
                 subtitle: "Steam and SteamGridDB";
                 trailing: "Open  ›";
-                focused: root.view == 0 && root.selection == 1;
-                activated => { if (root.view == 0 && !root.editing-key && !root.refresh-open) { root.activate(1); } }
+                focused: root.view == 0 && root.selection == 2;
+                activated => { if (root.view == 0 && !root.editing-key && !root.refresh-open) { root.activate(2); } }
             }
         }
     }
@@ -418,6 +428,53 @@ export component SettingsPage inherits Rectangle {
             checked: root.ui-sounds-enabled;
             focused: root.view == 1 && root.selection == 14;
             activated => { if (root.view == 1 && !root.editing-key && !root.refresh-open) { root.activate(14); } }
+        }
+    }
+
+    controller := TransitionLayer {
+        x: Metrics.page-margin;
+        rest-y: Metrics.page-header-height;
+        width: root.content-width;
+        height: root.height - Metrics.page-header-height;
+        opaque: true;
+        active: root.view == 5;
+        outgoing: view-transition.from-key == 5;
+        returning: root.view-back;
+        phase: view-transition.phase;
+
+        Breadcrumb {
+            x: 0px; y: 0px; width: parent.width;
+            section: "Settings"; page: "Controller";
+            back => { if (root.view == 5 && !root.editing-key && !root.refresh-open) { root.go-back(); } }
+        }
+        SettingsRow {
+            x: 0px; y: Metrics.breadcrumb-height + Metrics.spacing-sm;
+            width: parent.width;
+            title: "Swap Select and Back";
+            subtitle: "Select with the back button, go back with the select button";
+            toggle: true;
+            checked: root.swap-confirm;
+            focused: root.view == 5 && root.selection == 0;
+            activated => { if (root.view == 5 && !root.editing-key && !root.refresh-open) { root.activate(0); } }
+        }
+        SettingsRow {
+            x: 0px; y: Metrics.breadcrumb-height + Metrics.spacing-sm + Metrics.list-row-height + Metrics.list-row-gap;
+            width: parent.width;
+            title: "Swap Hints";
+            subtitle: "Hints show the swapped buttons";
+            toggle: true;
+            checked: root.swap-hints;
+            focused: root.view == 5 && root.selection == 1;
+            activated => { if (root.view == 5 && !root.editing-key && !root.refresh-open) { root.activate(1); } }
+        }
+        Text {
+            x: 0px; y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 2;
+            width: parent.width; height: 30px;
+            text: root.feedback;
+            visible: root.view == 5 && root.feedback != "";
+            color: Theme.accent;
+            font-size: Typography.caption-size;
+            vertical-alignment: center;
         }
     }
 
