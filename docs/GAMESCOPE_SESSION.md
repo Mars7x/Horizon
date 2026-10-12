@@ -111,9 +111,14 @@ doesn't change that; `SteamGameId` isn't read. An X11 window tagged
 `STEAM_GAME` is shown once the base layer names its app ID, and nothing is
 shown after it closes. Without `-e` everything works: Horizon is shown, a
 Wayland or X11 window on top takes the screen, and Horizon returns when it
-closes. This points to the X11 fallback. Still to confirm: the same result
-embedded (on a text console), and whether session-plus can run without `-e`
-(that would also drop Steam integration).
+closes. This points to the X11 fallback.
+
+**Embedded (text console, same PC, 2026-10-12):** Steam mode gives the same
+result as nested. Without `-e`, Horizon is shown and returns after X11
+windows close, but while a second Wayland window is open gamescope focuses
+nothing and the screen shows neither window. Only X11 windows behave the
+same in every mode. Still to confirm: whether session-plus can run without
+`-e` (that would also drop Steam integration), and overlays.
 
 ## Feature parity
 
@@ -142,7 +147,8 @@ embedded (on a text console), and whether session-plus can run without `-e`
    `scripts/spikes/gamescope-spike1.sh [steam|plain]`, which logs
    `gamescopectl focus_info` and one frame from gamescope's PipeWire stream
    at each step (`gamescopectl screenshot` saved nothing on 3.16.29).
-   Embedded run and overlay still to do.
+   Embedded: the same, and a second Wayland window isn't shown even
+   without `-e`. Overlay still to do.
 2. **Non-Steam windows.** Does gamescope show a Heroic or Flatpak game whose
    window has no `STEAM_GAME`? If not, Horizon tags new game windows itself.
    Does Heroic's own window appear when a game starts?
