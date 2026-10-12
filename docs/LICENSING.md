@@ -26,7 +26,7 @@ The top-utility icons for Album, Activity, Achievements, Settings, and Shop are 
 
 The application icon at `data/io.github.Mars7x.Horizon.svg` is also Horizon-owned artwork supplied by the project owner and is covered by the project-owned REUSE annotation.
 
-`applications-games-symbolic.svg` remains third-party GNOME artwork under CC-BY-SA-3.0-US and its geometry is represented in `ui/components/system-icons.slint`. Keep that component's provenance intact. Before Horizon 1.0, perform a final compatibility review of this embedded derivative or replace it with an original/CC0 alternative if that simplifies distribution.
+The footer's controller drawings in `ui/assets/controllers/` are Kenney's Input Prompts (CC0), bundled unmodified; see `THIRD_PARTY_NOTICES.md`. They replaced GNOME's CC-BY-SA-3.0-US `applications-games-symbolic.svg` (ADR 0186).
 
 ## Software dependency notices
 

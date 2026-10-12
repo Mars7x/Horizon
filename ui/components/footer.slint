@@ -1,5 +1,5 @@
 import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
-import { ControllerIcon } from "system-icons.slint";
+import { ControllerIcon, ControllerArt } from "system-icons.slint";
 import { HintBar, InputGlyphs, GlyphFamily } from "hint-bar.slint";
 
 component ClockReadout inherits Rectangle {
@@ -39,6 +39,7 @@ component ClockReadout inherits Rectangle {
 export component Footer inherits Rectangle {
     in property <float> icon-render-scale: 1.0;
     in property <int> connected-controller-count: 0;
+    in property <ControllerArt> controller-art: ControllerArt.generic;
     in property <string> clock-time: "";
     in property <string> clock-suffix: "";
     // A hint was clicked: the button it shows ("A").
@@ -52,6 +53,7 @@ export component Footer inherits Rectangle {
     // construction would instantly destroy the icon on controller removal.
     controller-symbol := ControllerIcon {
         render-scale: root.icon-render-scale;
+        art: root.controller-art;
         x: Metrics.page-margin - (root.connected-controller-count > 0 ? 0px : Motion.status-slide-distance);
         y: (parent.height - self.height) / 2;
         opacity: root.connected-controller-count > 0 ? 1.0 : 0.0;

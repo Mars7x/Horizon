@@ -4,6 +4,8 @@ import { Wheel } from "components/wheel.slint";
 export { Wheel }
 import { InputGlyphs, GlyphFamily } from "components/hint-bar.slint";
 export { InputGlyphs, GlyphFamily }
+import { ControllerArt } from "components/system-icons.slint";
+export { ControllerArt }
 
 import { GameCardData } from "models/game-card.slint";
 export { GameCardData }
@@ -444,6 +446,8 @@ export component AppWindow inherits Window {
     in property <string> settings-refresh-error: "";
 
     in property <int> connected-controller-count: 0;
+    // The controller used last, drawn in the footer.
+    in property <ControllerArt> controller-art: ControllerArt.generic;
     in property <int> status-network-kind: 0;
     in property <int> status-wifi-strength: 0;
     in property <bool> status-network-limited: false;
@@ -1106,6 +1110,7 @@ export component AppWindow inherits Window {
                 transform-scale: root.chrome-scale;
                 transform-origin: { x: self.width / 2, y: root.height / 2 - self.y };
                 connected-controller-count: root.connected-controller-count;
+                controller-art: root.controller-art;
                 clock-time: root.clock-time;
                 clock-suffix: root.clock-suffix;
                 hint-activated(button) => { root.hint-activated(button); }

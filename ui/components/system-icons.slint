@@ -1,8 +1,7 @@
-// GNOME's unmodified source SVG (the controller) remains in ui/assets. The
+// Controller artwork is third-party and unmodified (see THIRD_PARTY_NOTICES.md). The
 // same adaptive SVG rendering policy used by utility-icons.slint applies: render at logical size for normal/smaller UI scales and increase
 // raster resolution only when AppWindow enlarges the scene, capped at 4x.
 // Tint is applied to the SVG mask, not by editing the original artwork.
-// License: GNOME Project CC-BY-SA-3.0-US; see THIRD_PARTY_NOTICES.md.
 import { Theme } from "../theme/theme.slint";
 
 export component SymbolicSvgIcon inherits Rectangle {
@@ -29,6 +28,21 @@ export component SymbolicSvgIcon inherits Rectangle {
     }
 }
 
+// The connected controller's model: Kenney's Input Prompts drawings (CC0,
+// ui/assets/controllers/, unmodified).
+export enum ControllerArt { generic, xbox-360, xbox-series, playstation-3, playstation-4, playstation-5, switch-pro, joycon-left, joycon-right, joycon-pair, steam-deck }
+
 export component ControllerIcon inherits SymbolicSvgIcon {
-    artwork: @image-url("../assets/applications-games-symbolic.svg");
+    in property <ControllerArt> art: ControllerArt.generic;
+    artwork: root.art == ControllerArt.xbox-360 ? @image-url("../assets/controllers/controller_xbox360.svg")
+        : root.art == ControllerArt.xbox-series ? @image-url("../assets/controllers/controller_xboxseries.svg")
+        : root.art == ControllerArt.playstation-3 ? @image-url("../assets/controllers/controller_playstation3.svg")
+        : root.art == ControllerArt.playstation-4 ? @image-url("../assets/controllers/controller_playstation4.svg")
+        : root.art == ControllerArt.playstation-5 ? @image-url("../assets/controllers/controller_playstation5.svg")
+        : root.art == ControllerArt.switch-pro ? @image-url("../assets/controllers/controller_switch_pro.svg")
+        : root.art == ControllerArt.joycon-left ? @image-url("../assets/controllers/switch_joycon_left.svg")
+        : root.art == ControllerArt.joycon-right ? @image-url("../assets/controllers/switch_joycon_right.svg")
+        : root.art == ControllerArt.joycon-pair ? @image-url("../assets/controllers/switch_joycon.svg")
+        : root.art == ControllerArt.steam-deck ? @image-url("../assets/controllers/controller_steamdeck.svg")
+        : @image-url("../assets/controllers/controller_generic.svg");
 }

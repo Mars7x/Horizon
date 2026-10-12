@@ -5,7 +5,17 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 notice="$root/THIRD_PARTY_NOTICES.md"
 
 required_assets=(
-  "applications-games-symbolic.svg"
+  "controllers/controller_xbox360.svg"
+  "controllers/controller_xboxseries.svg"
+  "controllers/controller_playstation3.svg"
+  "controllers/controller_playstation4.svg"
+  "controllers/controller_playstation5.svg"
+  "controllers/controller_switch_pro.svg"
+  "controllers/switch_joycon_left.svg"
+  "controllers/switch_joycon_right.svg"
+  "controllers/switch_joycon.svg"
+  "controllers/controller_steamdeck.svg"
+  "controllers/controller_generic.svg"
 )
 
 required_licenses=(
