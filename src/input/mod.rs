@@ -4,6 +4,6 @@ mod manager;
 pub mod mouse;
 pub mod sdl;
 
-pub use actions::{InputDevice, UiAction, UiActionEvent};
+pub use actions::{ControllerFamily, GlyphStyle, InputDevice, UiAction, UiActionEvent};
 pub use manager::InputManager;
 pub use sdl::ControllerStatus;

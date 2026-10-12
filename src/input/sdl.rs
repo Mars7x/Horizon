@@ -7,14 +7,21 @@ use std::{
 use sdl3::{
     EventPump, GamepadSubsystem, Sdl,
     event::Event,
-    gamepad::{Axis, Button, Gamepad},
-    joystick::PowerLevel,
+    gamepad::{Axis, Button, Gamepad, GamepadType},
+    joystick::{JoystickId, PowerLevel},
 };
 use slint::{Timer, TimerMode};
 use thiserror::Error;
 use tracing::{debug, info, warn};
 
-use super::actions::{UiAction, UiActionEvent};
+use super::actions::{ControllerFamily, UiAction, UiActionEvent};
+
+/// Valve's USB vendor, and the Steam Deck's built-in controller.
+const VALVE_VENDOR: u16 = 0x28de;
+const STEAM_DECK_PRODUCT: u16 = 0x1205;
+
+/// A controller action, with the family of the controller that made it.
+pub type GamepadActionSink = Rc<dyn Fn(UiActionEvent, ControllerFamily)>;
 
 // SDL is pumped from a UI-thread timer whose rate follows what input can
 // do right now: every 8ms while a controller can navigate Horizon, slower
@@ -75,7 +82,7 @@ pub struct SdlGamepadInput {
 
 impl SdlGamepadInput {
     pub fn start(
-        action_sink: Rc<dyn Fn(UiActionEvent)>,
+        action_sink: GamepadActionSink,
         status_sink: Rc<dyn Fn(ControllerStatus)>,
     ) -> Result<Self, GamepadInputError> {
         let sdl =
@@ -92,6 +99,9 @@ impl SdlGamepadInput {
             gamepad_subsystem,
             event_pump,
             open_gamepads: Vec::new(),
+            families: Vec::new(),
+            last_family: ControllerFamily::default(),
+            on_steam_deck: running_on_steam_deck(),
             last_power_poll: Instant::now(),
             enabled: true,
             analog_navigation: AnalogNavigation::default(),
@@ -128,6 +138,15 @@ impl SdlGamepadInput {
         self.state.borrow_mut().set_enabled(enabled);
         pace(&self.timer, &self.state.borrow());
     }
+
+    /// The family of the first connected controller, if any.
+    pub fn first_family(&self) -> Option<ControllerFamily> {
+        self.state
+            .borrow()
+            .families
+            .first()
+            .map(|(_, family)| *family)
+    }
 }
 
 fn pace(timer: &Timer, state: &SdlState) {
@@ -143,6 +162,11 @@ struct SdlState {
     gamepad_subsystem: GamepadSubsystem,
     event_pump: EventPump,
     open_gamepads: Vec<Gamepad>,
+    /// Each open controller's family, read once when it connects.
+    families: Vec<(JoystickId, ControllerFamily)>,
+    /// The controller used last, for held-button repeats.
+    last_family: ControllerFamily,
+    on_steam_deck: bool,
     last_power_poll: Instant,
     enabled: bool,
     analog_navigation: AnalogNavigation,
@@ -343,7 +367,14 @@ impl SdlState {
                 let name = gamepad
                     .name()
                     .unwrap_or_else(|| "Unknown gamepad".to_owned());
-                info!(controller = %name, "gamepad connected");
+                let family = controller_family(
+                    self.gamepad_subsystem.type_for_id(id),
+                    gamepad.vendor_id(),
+                    gamepad.product_id(),
+                    self.on_steam_deck,
+                );
+                info!(controller = %name, ?family, "gamepad connected");
+                self.families.push((id, family));
                 self.open_gamepads.push(gamepad);
                 true
             }
@@ -360,6 +391,12 @@ impl SdlState {
             let removed_device = gamepad.id().is_ok_and(|open_id| open_id == id);
             !removed_device && gamepad.connected()
         });
+        let open = self
+            .open_gamepads
+            .iter()
+            .filter_map(|gamepad| gamepad.id().ok())
+            .collect::<Vec<_>>();
+        self.families.retain(|(known, _)| open.contains(known));
         let removed = before.saturating_sub(self.open_gamepads.len());
         if removed > 0 {
             info!(removed, "gamepad disconnected");
@@ -427,9 +464,22 @@ fn battery_from_sdl(state: PowerLevel, percentage: i32) -> Option<ControllerBatt
     })
 }
 
+impl SdlState {
+    /// The family of the controller behind an event, remembered for repeats.
+    fn family_of(&mut self, id: JoystickId) -> ControllerFamily {
+        let family = self
+            .families
+            .iter()
+            .find(|(known, _)| *known == id)
+            .map_or(ControllerFamily::default(), |(_, family)| *family);
+        self.last_family = family;
+        family
+    }
+}
+
 fn poll_gamepad_events(
     state: &Rc<RefCell<SdlState>>,
-    action_sink: &Rc<dyn Fn(UiActionEvent)>,
+    action_sink: &GamepadActionSink,
     status_sink: &Rc<dyn Fn(ControllerStatus)>,
 ) {
     let mut state = state.borrow_mut();
@@ -454,26 +504,30 @@ fn poll_gamepad_events(
             // remains current, but background controller activity must never
             // become Horizon UI navigation.
             _ if !state.enabled => {}
-            Event::GamepadAxisMotion { axis, value, .. } => {
+            Event::GamepadAxisMotion {
+                which, axis, value, ..
+            } => {
                 if let Some(action) =
                     state
                         .analog_navigation
                         .axis_motion(axis, value, Instant::now())
                 {
                     debug!(?action, "left-stick UI action");
-                    action_sink(UiActionEvent::fresh(action));
+                    let family = state.family_of(which);
+                    action_sink(UiActionEvent::fresh(action), family);
                 }
             }
-            Event::GamepadButtonDown { button, .. } => {
+            Event::GamepadButtonDown { which, button, .. } => {
                 let now = Instant::now();
+                let family = state.family_of(which);
                 if let Some(direction) = direction_for_button(&button) {
                     if let Some(action) = state.digital_navigation.press(direction, now) {
                         debug!(?action, "d-pad UI action");
-                        action_sink(UiActionEvent::fresh(action));
+                        action_sink(UiActionEvent::fresh(action), family);
                     }
-                } else if let Some(action) = action_for_button(button) {
+                } else if let Some(action) = action_for_button(button, family) {
                     debug!(?action, "gamepad UI action");
-                    action_sink(UiActionEvent::fresh(action));
+                    action_sink(UiActionEvent::fresh(action), family);
                 }
             }
             Event::GamepadButtonUp { button, .. } => {
@@ -489,11 +543,11 @@ fn poll_gamepad_events(
         let now = Instant::now();
         if let Some(action) = state.analog_navigation.repeat_due(now) {
             debug!(?action, "left-stick repeated UI action");
-            action_sink(UiActionEvent::repeated(action));
+            action_sink(UiActionEvent::repeated(action), state.last_family);
         }
         if let Some(action) = state.digital_navigation.repeat_due(now) {
             debug!(?action, "d-pad repeated UI action");
-            action_sink(UiActionEvent::repeated(action));
+            action_sink(UiActionEvent::repeated(action), state.last_family);
         }
     }
 
@@ -518,12 +572,21 @@ pub const fn direction_for_button(button: &Button) -> Option<UiAction> {
     }
 }
 
-pub const fn action_for_button(button: Button) -> Option<UiAction> {
+/// SDL names face buttons by position. Most controllers confirm with the
+/// bottom one; Nintendo's confirm with the right one (labelled A), go back
+/// with the bottom (B) and use the top (X) for the secondary action, so the
+/// labels on the pad match the hints.
+pub const fn action_for_button(button: Button, family: ControllerFamily) -> Option<UiAction> {
+    let nintendo = matches!(family, ControllerFamily::Nintendo);
     match button {
         Button::DPadUp => Some(UiAction::Up),
         Button::DPadDown => Some(UiAction::Down),
         Button::DPadLeft => Some(UiAction::Left),
         Button::DPadRight => Some(UiAction::Right),
+        Button::South if nintendo => Some(UiAction::Back),
+        Button::East if nintendo => Some(UiAction::Accept),
+        Button::North if nintendo => Some(UiAction::Secondary),
+        Button::West if nintendo => None,
         Button::South => Some(UiAction::Accept),
         Button::East => Some(UiAction::Back),
         Button::West => Some(UiAction::Secondary),
@@ -536,6 +599,41 @@ pub const fn action_for_button(button: Button) -> Option<UiAction> {
     }
 }
 
+/// Which glyphs a controller's buttons wear.
+pub fn controller_family(
+    kind: GamepadType,
+    vendor: Option<u16>,
+    product: Option<u16>,
+    on_steam_deck: bool,
+) -> ControllerFamily {
+    match kind {
+        GamepadType::PS3 | GamepadType::PS4 | GamepadType::PS5 => ControllerFamily::PlayStation,
+        GamepadType::NintendoSwitchPro
+        | GamepadType::NintendoSwitchJoyconLeft
+        | GamepadType::NintendoSwitchJoyconRight
+        | GamepadType::NintendoSwitchJoyconPair => ControllerFamily::Nintendo,
+        // The Deck's own controls: directly, or as Steam's virtual gamepad
+        // while Steam runs on a Deck (Game Mode).
+        _ if vendor == Some(VALVE_VENDOR)
+            && (product == Some(STEAM_DECK_PRODUCT) || on_steam_deck) =>
+        {
+            ControllerFamily::SteamDeck
+        }
+        _ => ControllerFamily::Xbox,
+    }
+}
+
+/// Whether this machine is a Steam Deck (LCD "Jupiter" or OLED "Galileo"),
+/// from the firmware's board name. Readable inside Flatpak (sysfs).
+fn running_on_steam_deck() -> bool {
+    let read = |name: &str| {
+        std::fs::read_to_string(format!("/sys/class/dmi/id/{name}"))
+            .map(|value| value.trim().to_owned())
+            .unwrap_or_default()
+    };
+    read("board_vendor") == "Valve" && matches!(read("board_name").as_str(), "Jupiter" | "Galileo")
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::{Duration, Instant};
@@ -544,34 +642,112 @@ mod tests {
 
     use super::{
         ANALOG_INITIAL_REPEAT_DELAY, AnalogNavigation, DIGITAL_INITIAL_REPEAT_DELAY,
-        DigitalNavigation, action_for_button,
+        DigitalNavigation, action_for_button, controller_family,
     };
-    use crate::input::actions::UiAction;
+    use crate::input::actions::{ControllerFamily, UiAction};
 
     #[test]
     fn dpad_maps_to_navigation() {
-        assert_eq!(action_for_button(Button::DPadLeft), Some(UiAction::Left));
-        assert_eq!(action_for_button(Button::DPadRight), Some(UiAction::Right));
-        assert_eq!(action_for_button(Button::DPadUp), Some(UiAction::Up));
-        assert_eq!(action_for_button(Button::DPadDown), Some(UiAction::Down));
+        assert_eq!(
+            action_for_button(Button::DPadLeft, ControllerFamily::Xbox),
+            Some(UiAction::Left)
+        );
+        assert_eq!(
+            action_for_button(Button::DPadRight, ControllerFamily::Xbox),
+            Some(UiAction::Right)
+        );
+        assert_eq!(
+            action_for_button(Button::DPadUp, ControllerFamily::Xbox),
+            Some(UiAction::Up)
+        );
+        assert_eq!(
+            action_for_button(Button::DPadDown, ControllerFamily::Xbox),
+            Some(UiAction::Down)
+        );
     }
 
     #[test]
     fn face_buttons_map_to_semantic_actions() {
-        assert_eq!(action_for_button(Button::South), Some(UiAction::Accept));
-        assert_eq!(action_for_button(Button::East), Some(UiAction::Back));
+        let xbox = ControllerFamily::Xbox;
+        assert_eq!(
+            action_for_button(Button::South, xbox),
+            Some(UiAction::Accept)
+        );
+        assert_eq!(action_for_button(Button::East, xbox), Some(UiAction::Back));
+        assert_eq!(
+            action_for_button(Button::West, xbox),
+            Some(UiAction::Secondary)
+        );
+    }
+
+    #[test]
+    fn nintendo_pads_confirm_with_a_on_the_right() {
+        let nintendo = ControllerFamily::Nintendo;
+        assert_eq!(
+            action_for_button(Button::East, nintendo),
+            Some(UiAction::Accept)
+        );
+        assert_eq!(
+            action_for_button(Button::South, nintendo),
+            Some(UiAction::Back)
+        );
+        assert_eq!(
+            action_for_button(Button::North, nintendo),
+            Some(UiAction::Secondary)
+        );
+        assert_eq!(action_for_button(Button::West, nintendo), None);
+        assert_eq!(
+            action_for_button(Button::LeftShoulder, nintendo),
+            Some(UiAction::LeftBumper)
+        );
+    }
+
+    #[test]
+    fn controllers_are_told_apart_by_type_and_valve_ids() {
+        use sdl3::gamepad::GamepadType;
+        assert_eq!(
+            controller_family(GamepadType::PS5, None, None, false),
+            ControllerFamily::PlayStation
+        );
+        assert_eq!(
+            controller_family(GamepadType::NintendoSwitchJoyconPair, None, None, false),
+            ControllerFamily::Nintendo
+        );
+        assert_eq!(
+            controller_family(GamepadType::Standard, Some(0x28de), Some(0x1205), false),
+            ControllerFamily::SteamDeck
+        );
+        // Steam's virtual gamepad is a Deck only on a Deck.
+        assert_eq!(
+            controller_family(GamepadType::Xbox360, Some(0x28de), Some(0x11ff), true),
+            ControllerFamily::SteamDeck
+        );
+        assert_eq!(
+            controller_family(GamepadType::Xbox360, Some(0x28de), Some(0x11ff), false),
+            ControllerFamily::Xbox
+        );
+        assert_eq!(
+            controller_family(GamepadType::Unknown, Some(0x045e), None, false),
+            ControllerFamily::Xbox
+        );
     }
 
     #[test]
     fn shell_buttons_map_to_global_actions() {
-        assert_eq!(action_for_button(Button::Start), Some(UiAction::Menu));
-        assert_eq!(action_for_button(Button::Guide), Some(UiAction::Home));
         assert_eq!(
-            action_for_button(Button::LeftShoulder),
+            action_for_button(Button::Start, ControllerFamily::Xbox),
+            Some(UiAction::Menu)
+        );
+        assert_eq!(
+            action_for_button(Button::Guide, ControllerFamily::Xbox),
+            Some(UiAction::Home)
+        );
+        assert_eq!(
+            action_for_button(Button::LeftShoulder, ControllerFamily::Xbox),
             Some(UiAction::LeftBumper)
         );
         assert_eq!(
-            action_for_button(Button::RightShoulder),
+            action_for_button(Button::RightShoulder, ControllerFamily::Xbox),
             Some(UiAction::RightBumper)
         );
     }

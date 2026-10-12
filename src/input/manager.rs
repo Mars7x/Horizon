@@ -3,10 +3,11 @@ use std::{cell::Cell, rc::Rc, time::Instant};
 use tracing::warn;
 
 use super::{
-    actions::{InputDevice, UiAction, UiActionEvent},
+    actions::{ControllerFamily, GlyphStyle, InputDevice, UiAction, UiActionEvent},
     keyboard,
     sdl::{
-        ControllerStatus, DIGITAL_INITIAL_REPEAT_DELAY, DIGITAL_REPEAT_INTERVAL, SdlGamepadInput,
+        ControllerStatus, DIGITAL_INITIAL_REPEAT_DELAY, DIGITAL_REPEAT_INTERVAL, GamepadActionSink,
+        SdlGamepadInput,
     },
 };
 
@@ -31,6 +32,36 @@ pub struct InputManager {
     keyboard_repeat: Cell<Option<KeyboardRepeat>>,
     /// The device behind the last action, shared with the UI.
     last_device: Rc<Cell<InputDevice>>,
+    /// Which glyphs hints show; published to the UI when it changes.
+    glyphs: Rc<GlyphTracker>,
+}
+
+/// Follows the keyboard or controller used last and tells the UI when its
+/// glyph style changes. A mouse or touch screen leaves it as it is.
+pub struct GlyphTracker {
+    style: Cell<GlyphStyle>,
+    sink: Rc<dyn Fn(GlyphStyle)>,
+}
+
+impl GlyphTracker {
+    fn new(sink: Rc<dyn Fn(GlyphStyle)>) -> Self {
+        Self {
+            style: Cell::new(GlyphStyle::Keyboard),
+            sink,
+        }
+    }
+
+    fn set(&self, style: GlyphStyle) {
+        if self.style.replace(style) != style {
+            (self.sink)(style);
+        }
+    }
+
+    /// Publish the current style, whether or not it changed.
+    fn publish(&self, style: GlyphStyle) {
+        self.style.set(style);
+        (self.sink)(style);
+    }
 }
 
 impl InputManager {
@@ -38,12 +69,17 @@ impl InputManager {
         action_sink: Rc<dyn Fn(UiActionEvent)>,
         status_sink: Rc<dyn Fn(ControllerStatus)>,
         last_device: Rc<Cell<InputDevice>>,
+        glyph_sink: Rc<dyn Fn(GlyphStyle)>,
     ) -> Rc<Self> {
-        // Controller actions mark the controller as the device in use.
-        let gamepad_sink: Rc<dyn Fn(UiActionEvent)> = {
+        let glyphs = Rc::new(GlyphTracker::new(glyph_sink));
+        // Controller actions mark the controller as the device in use, and
+        // show its family's glyphs.
+        let gamepad_sink: GamepadActionSink = {
             let (sink, device) = (Rc::clone(&action_sink), Rc::clone(&last_device));
-            Rc::new(move |event| {
+            let glyphs = Rc::clone(&glyphs);
+            Rc::new(move |event, family: ControllerFamily| {
                 device.set(InputDevice::Gamepad);
+                glyphs.set(GlyphStyle::Controller(family));
                 sink(event);
             })
         };
@@ -56,12 +92,21 @@ impl InputManager {
             }
         };
 
+        // A connected controller's glyphs show from the start.
+        glyphs.publish(
+            gamepad_input
+                .as_ref()
+                .and_then(SdlGamepadInput::first_family)
+                .map_or(GlyphStyle::Keyboard, GlyphStyle::Controller),
+        );
+
         Rc::new(Self {
             action_sink,
             gamepad_input,
             ui_input_enabled: Cell::new(true),
             keyboard_repeat: Cell::new(None),
             last_device,
+            glyphs,
         })
     }
 
@@ -120,6 +165,7 @@ impl InputManager {
             }
         }
         self.last_device.set(InputDevice::Keyboard);
+        self.glyphs.set(GlyphStyle::Keyboard);
         (self.action_sink)(UiActionEvent { action, repeated });
         true
     }
@@ -161,6 +207,7 @@ mod tests {
             ui_input_enabled: Cell::new(true),
             keyboard_repeat: Cell::new(None),
             last_device: Rc::default(),
+            glyphs: Rc::new(GlyphTracker::new(Rc::new(|_| {}))),
         };
         let right: SharedString = Key::RightArrow.into();
         let t = Instant::now();
@@ -197,6 +244,7 @@ mod tests {
             ui_input_enabled: Cell::new(true),
             keyboard_repeat: Cell::new(None),
             last_device: Rc::default(),
+            glyphs: Rc::new(GlyphTracker::new(Rc::new(|_| {}))),
         };
         let right: SharedString = Key::RightArrow.into();
 
@@ -210,5 +258,28 @@ mod tests {
         manager.set_ui_input_enabled(true);
         assert!(manager.handle_keyboard(right.as_str(), false));
         assert_eq!(events.borrow().len(), 2);
+    }
+
+    #[test]
+    fn glyphs_follow_the_last_keyboard_or_controller() {
+        let published = Rc::new(RefCell::new(Vec::new()));
+        let observed = Rc::clone(&published);
+        let manager = InputManager {
+            action_sink: Rc::new(|_| {}),
+            gamepad_input: None,
+            ui_input_enabled: Cell::new(true),
+            keyboard_repeat: Cell::new(None),
+            last_device: Rc::default(),
+            glyphs: Rc::new(GlyphTracker::new(Rc::new(move |style| {
+                observed.borrow_mut().push(style)
+            }))),
+        };
+        let pad = GlyphStyle::Controller(ControllerFamily::PlayStation);
+        manager.glyphs.set(pad);
+        manager.glyphs.set(pad);
+        let right: SharedString = Key::RightArrow.into();
+        assert!(manager.handle_keyboard(right.as_str(), false));
+        assert!(manager.handle_keyboard(right.as_str(), false));
+        assert_eq!(*published.borrow(), [pad, GlyphStyle::Keyboard]);
     }
 }

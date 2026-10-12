@@ -50,9 +50,9 @@ Accept
 Back
 Menu
 Home
-LeftBumper
-RightBumper
-Secondary   (gamepad X / west, keyboard Delete; Album: delete)
+LeftBumper  (gamepad LB, keyboard Q)
+RightBumper (gamepad RB, keyboard E)
+Secondary   (gamepad X: west, or north on Nintendo pads; keyboard Delete; Album: delete)
 StickPress  (gamepad L3 or R3; the on-screen keyboard's Shift)
 ```
 
@@ -159,8 +159,8 @@ Canonical mappings:
 
 | Semantic action | Keyboard | SDL3 gamepad |
 | --- | --- | --- |
-| Accept | Return / Space | South face button |
-| Back | Escape / Back | East face button |
+| Accept | Return / Space | South face button (East on Nintendo pads) |
+| Back | Escape / Back | East face button (South on Nintendo pads) |
 | Menu | Menu key | Start |
 | Home | Home key | Guide |
 | Forward | (mouse forward button) | — |
@@ -220,4 +220,34 @@ Wheel direction follows the desktop's scrolling setting (natural/reverse or trad
 ## Last input device
 
 `input::InputDevice` records what the user last used: `InputManager` sets Gamepad for SDL actions and Keyboard for keyboard actions, and the winit window hook in `app.rs` sets Touch for touch events and Pointer for mouse buttons. The on-screen keyboard reads it to appear for a controller or a touch screen (see [KEYBOARD.md](KEYBOARD.md)). Under gamescope a touch screen may arrive as Pointer, so nothing may depend on telling the two apart.
+
+## Controller families and glyphs
+
+Each opened SDL gamepad gets a `ControllerFamily` (`sdl::controller_family`):
+PlayStation for SDL's PS3/PS4/PS5 types, Nintendo for the Switch Pro and
+Joy-Cons, Steam Deck for Valve's Deck controller (vendor `0x28de`, product
+`0x1205`) or any Valve controller when the machine is a Deck (DMI board
+`Jupiter`/`Galileo`, which catches Steam's virtual gamepad in Game Mode), and
+Xbox for everything else.
+
+Nintendo pads follow Nintendo's convention: the right button (A) confirms,
+the bottom (B) goes back and the top (X) is the secondary action. SDL's
+buttons are positional, so `action_for_button` maps them per family.
+
+`input::GlyphStyle` is the keyboard or the family used last. `InputManager`
+sets it on every keyboard or controller action and publishes it to the UI only
+when it changes; a mouse or touch screen leaves it as it was. At startup it is
+the first connected controller's family, else the keyboard. `app.rs` writes
+it to the Slint global `InputGlyphs.family`, and `ButtonGlyph`
+(`ui/components/hint-bar.slint`) draws the logical button for that device:
+
+| Logical | Keyboard | Xbox | PlayStation | Nintendo | Steam Deck |
+| --- | --- | --- | --- | --- | --- |
+| A (Accept) | Enter | A | ✕ | A | A |
+| B (Back) | Esc | B | ○ | B | B |
+| X (Secondary) | Del | X | □ | X | X |
+| LB / RB | Q / E | LB / RB | L1 / R1 | L / R | L1 / R1 |
+
+Hints and header values keep naming logical buttons ("A", "LB"), so a click
+still sends the same action whatever is drawn. See ADR 0185.
 
