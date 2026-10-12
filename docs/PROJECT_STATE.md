@@ -12,7 +12,7 @@ This page describes the **prepared source** assembled from the cleaned repositor
 - **Achievements:** fourth Home utility, after Activity; read-only Steam Web API achievement unlock states for eligible imported Steam games; list browsing and recent-unlocks preview. Now has source-aware game/achievement models, optional bounded Steam badge thumbnails, and a source selector; no other achievement provider, full offline cache, or comprehensive account sign-in flow yet.
 - **Settings:** appearance and third-party service configuration, including SteamGridDB and **Steam Account** under Third-Party. SteamID64 + personal Web API key can be stored in an app-private file with owner-only permissions; not encrypted or OAuth.
 - **Album:** Horizon's own captures (`data/album/`, written by the future screenshot/recording features) and the active Steam account's screenshots, newest first, in a grid with Game and Type filters. A full-screen viewer slides between captures and plays videos with FFmpeg, sound through PipeWire. See [Album](ALBUM.md).
-- **Shop:** retained utility route; do **not** infer a production commerce integration from its presence. There is no Web utility (ADR 0174) and no Friends utility: a read-only Steam friends list is on the Profile page (ADR 0178).
+- **Shop:** browses and searches Flathub (games first) with a controller, and installs, updates and uninstalls apps through the host's Flatpak; an Installed category manages what's on the machine (ADR 0181, [Shop](SHOP.md)). There is no Web utility (ADR 0174) and no Friends utility: a read-only Steam friends list is on the Profile page (ADR 0178).
 
 ## Production source and data boundaries
 

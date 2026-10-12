@@ -27,6 +27,6 @@ Flatpak chooses the local architecture (`aarch64` on ARM, `x86_64` on x86). Veri
 
 ## Flatpak permissions and source access
 
-Respect the narrow declared filesystem/input/D-Bus permissions. Steam and Heroic local discovery paths are source-specific; do not replace them with broad host filesystem or `--device=all` access to solve an import problem. Treat achievement Web API network access and optional Steam-account storage separately from local Steam installation detection.
+Respect the narrow declared filesystem/input/D-Bus permissions. The one exception is `--talk-name=org.freedesktop.Flatpak`, which lets the Shop run the host's `flatpak` to install and manage apps (ADR 0181); it is confined to `src/platform/flatpak_host.rs`. Steam and Heroic local discovery paths are source-specific; do not replace them with broad host filesystem or `--device=all` access to solve an import problem. Treat achievement Web API network access and optional Steam-account storage separately from local Steam installation detection.
 
 For local build/install, see `bash scripts/build-flatpak.sh` from the repository root. Use GNOME Builder for the normal iterative developer workflow.

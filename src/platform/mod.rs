@@ -2,6 +2,7 @@ pub mod clock;
 pub mod data_paths;
 pub mod ffmpeg;
 pub mod file_chooser;
+pub mod flatpak_host;
 pub mod launcher;
 pub mod pipewire;
 pub mod session_helper;

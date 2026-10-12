@@ -41,6 +41,7 @@ use crate::{
         navigation::NavigationController,
         profile::ProfileController,
         settings::SettingsController,
+        shop::ShopController,
         status::StatusController,
         wake::drain_notify,
     },
@@ -373,6 +374,7 @@ pub fn run() -> Result<(), AppError> {
     );
     navigation.set_achievements(achievements, &ui);
     navigation.set_profile(Rc::clone(&profile_page), &ui);
+    navigation.set_shop(ShopController::new(&ui));
     // What the user last used decides whether a text field brings up the
     // on-screen keyboard (a controller or a touch screen does).
     let last_device = Rc::new(Cell::new(InputDevice::default()));
@@ -467,6 +469,12 @@ pub fn run() -> Result<(), AppError> {
                 ui.get_keyboard_focused(),
                 ui.get_profile_editor_target(),
             ),
+            (
+                ui.get_shop_selected(),
+                ui.get_shop_search_focused(),
+                ui.get_shop_shot(),
+                ui.get_shop_description_row(),
+            ),
         );
         action_navigation.handle_action(&ui, event);
         let after = (
@@ -499,6 +507,12 @@ pub fn run() -> Result<(), AppError> {
                 ui.get_profile_edit_selection(),
                 ui.get_keyboard_focused(),
                 ui.get_profile_editor_target(),
+            ),
+            (
+                ui.get_shop_selected(),
+                ui.get_shop_search_focused(),
+                ui.get_shop_shot(),
+                ui.get_shop_description_row(),
             ),
         );
         if matches!(

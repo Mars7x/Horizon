@@ -2,6 +2,7 @@ pub mod achievements;
 pub mod activity;
 pub mod album;
 pub mod artwork;
+pub mod flathub;
 pub mod friends;
 pub mod image;
 pub mod import;

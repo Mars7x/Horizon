@@ -31,7 +31,10 @@ export component MarqueeText inherits Rectangle {
     // strength within the first few pixels of travel (or the whole travel,
     // if shorter), so a glyph crossing a clipping edge is always under a
     // solid fade.
-    private property <length> fade-width: min(22px, root.width / 6);
+    // The solid part (40%, about a glyph wide) hides any glyph cut by the
+    // clip; the rest tapers so the next glyph fades instead of showing a
+    // hard-edged sliver.
+    private property <length> fade-width: min(root.font-size * 2.4, root.width / 5);
     private property <length> fade-ramp: max(1px, min(6px, root.distance));
     private property <float> fade-left: max(0.0, min(1.0, root.offset / root.fade-ramp));
     private property <float> fade-right: max(0.0, min(1.0, (root.distance - root.offset) / root.fade-ramp));
@@ -83,14 +86,16 @@ export component MarqueeText inherits Rectangle {
         x: 0px; width: root.fade-width; height: parent.height;
         opacity: root.fade-left;
         background: @linear-gradient(90deg,
-            root.edge-color 0%, root.edge-color 25%, root.edge-color.with-alpha(0.6) 55%, transparent 100%);
+            root.edge-color 0%, root.edge-color 40%, root.edge-color.with-alpha(0.75) 60%,
+            root.edge-color.with-alpha(0.35) 80%, transparent 100%);
     }
     if root.overflows : Rectangle {
         x: parent.width - self.width;
         width: root.fade-width; height: parent.height;
         opacity: root.fade-right;
         background: @linear-gradient(90deg,
-            transparent 0%, root.edge-color.with-alpha(0.6) 45%, root.edge-color 75%, root.edge-color 100%);
+            transparent 0%, root.edge-color.with-alpha(0.35) 20%, root.edge-color.with-alpha(0.75) 40%,
+            root.edge-color 60%, root.edge-color 100%);
     }
     animate offset {
         enabled: root.animate-travel && !Motion.reduced-motion;

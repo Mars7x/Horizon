@@ -14,6 +14,7 @@ Read this file **before** editing Horizon. It describes rules for the current re
 - **Preserve Home** unless the requested change explicitly affects Home. Use its current focus frame, selected-cover scaling, motion, and marquee as reference when matching other pages; do not silently replace the Home implementation.
 - Five top utilities in this order: **Album, Activity, Achievements, Settings, Shop**. There is no Web or Friends utility; Steam friends live on the **Profile page** (opened from Home's avatar, ADR 0178). They have real `AppRoute::Utility` destinations. The **Library is full-shell**, not a shell-header page. `src/navigation/mod.rs` is the source of truth.
 - **Steam friends** are a read-only list on the Profile page through the shared Steam account/API boundary (`services::friends`, `SteamWebApiClient::friends`). A private friend list is reported as private, never as no friends. No messaging, invites or other credential workflow.
+- **The Shop browses Flathub** (`services::flathub`) and installs, updates and uninstalls Flatpak apps through the host's `flatpak` (ADR 0181). That is Horizon's one host-execution path (`--talk-name=org.freedesktop.Flatpak`): keep every host command in `src/platform/flatpak_host.rs`, fixed `flatpak` subcommands only, with an app ID checked by `valid_app_id`, never a shell, a path or an argument from elsewhere. Never offer to uninstall Horizon itself.
 - **Steam account settings belong in Settings → Third-Party → Steam Account**, not in Achievements. Never place credentials, secret values, or request URLs containing secrets in UI state, logs, docs, screenshots, or commits. Local file permissions are not encryption.
 - **Activity Milestones shows recent real Steam achievement unlocks**, not invented Horizon playtime challenges. Unavailable or private Steam data must not be represented as zero. Achievement lookup is read-only.
 - Source-reported lifetime playtime and Horizon-observed session playtime are **different measurements**. Never sum them. Keep the known limitations of foreground handoff and recovered/checkpointed sessions visible.
@@ -43,7 +44,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed layer boundaries, 
 - DB imports are atomic per successful source; incomplete scans must not delete installed identities. Uninstalled games may retain historical sessions but must not occupy active-library or installed-most-played slots.
 - Steam lifetime ingestion reads local source data and is **not** the same as Steam Web API achievements. Steam/Heroic discovery, achievements and account credentials have distinct responsibilities.
 - Treat a blank/unavailable data source as unknown, not as a real zero. Protect prior user artwork and persisted settings; do not make network fetching a UI-thread operation.
-- Avoid broad Flatpak filesystem, D-Bus, or device grants. Never add undocumented host execution as a shortcut.
+- Avoid broad Flatpak filesystem, D-Bus, or device grants. Never add host execution beyond the Shop's documented `flatpak_host` module (ADR 0181), and never use it as a shortcut for anything else.
 - Rust standard `PartialEq` implementations for tuples stop at 12 items; avoid giant state-comparison tuples (the Phase 10.4.1.1 E0369 hotfix).
 
 ## Safe change workflow

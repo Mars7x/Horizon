@@ -24,7 +24,7 @@ The domain must not depend on Slint, SQLite, SDL, Flatpak, DBus, or source-speci
 - No source-specific branching outside source adapters/registries.
 - No hard-coded platform paths outside platform/source infrastructure.
 - No SQL in UI or presentation code.
-- No broad Flatpak permissions as a workaround for missing architecture.
+- No broad Flatpak permissions as a workaround for missing architecture. The Shop's host Flatpak access (ADR 0181) is a deliberate, documented exception confined to `platform/flatpak_host.rs`.
 - No production `unwrap()` for recoverable failures.
 - Database schema changes use numbered migrations once persistence is introduced.
 - UI colors, spacing, typography, radii, and motion values come from the Phase 1 design system.
