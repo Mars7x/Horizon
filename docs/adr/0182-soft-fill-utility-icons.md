@@ -30,5 +30,5 @@ At the project owner's request the five top-utility SVGs are redrawn:
 
 ## Consequences
 
-The Friends heading icon on the Profile page keeps the older white sticker
-style until it is redrawn too.
+The Profile page's Friends heading drops its icon (the older white sticker
+artwork, `orange-friends.svg`), leaving the plain heading.

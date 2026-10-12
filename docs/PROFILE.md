@@ -34,7 +34,7 @@ A dialog with the text field, Cancel and Save, over Edit profile. With a control
 
 ### Friends
 
-The right of the page lists the Steam account's friends (`presentation/friends.rs`, `services/friends.rs`), under the Friends icon with "N online · M friends". Each row shows the friend's Steam avatar (their initial until it arrives), name, and what they're doing: "Playing *game*" in green, Online in the accent, Away or Busy in amber, and offline friends greyed with "Last online 3 days ago" when Steam says. In-game friends come first, then online, busy, away and offline, by name.
+The right of the page lists the Steam account's friends (`presentation/friends.rs`, `services/friends.rs`), under a Friends heading with "N online · M friends". Each row shows the friend's Steam avatar (their initial until it arrives), name, and what they're doing: "Playing *game*" in green, Online in the accent, Away or Busy in amber, and offline friends greyed with "Last online 3 days ago" when Steam says. In-game friends come first, then online, busy, away and offline, by name.
 
 - **Read-only.** No row takes focus, so A never acts on a friend. Up and Down scroll the list a row at a time; the wheel and touchpad pan it like any other list (`ScrollCamera`, with the edge shadows).
 - **Where it comes from.** `SteamWebApiClient::friends` asks `ISteamUser/GetFriendList` (relationship `friend`), then `GetPlayerSummaries` for up to 100 friends a request, with the key from Settings → Third-Party → Steam Account. Avatars (Steam's 64 px) download four at a time from Steam's avatar hosts only, with no key, and are kept by URL for the session.

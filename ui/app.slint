@@ -855,7 +855,6 @@ export component AppWindow inherits Window {
                     friends-count: root.profile-friends-count;
                     friends-summary: root.profile-friends-summary;
                     friends-row: root.profile-friends-row;
-                    icon-render-scale: root.ui-scale;
                     scroll-friends(rows) => { root.profile-scroll-friends(rows); }
                     edit => { if (root.current-route == AppRouteView.profile) { root.profile-edit(); } }
                     activate-option(row) => { if (root.current-route == AppRouteView.profile) { root.profile-activate-option(row); } }
