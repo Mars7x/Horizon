@@ -1034,6 +1034,9 @@ impl NavigationController {
         }
         ui.set_transition_from_route(route_view(from));
         ui.set_current_route(route_view(to));
+        if to == AppRoute::Home && from != AppRoute::Home {
+            self.home.reveal_row_changes(ui);
+        }
     }
 
     fn publish_focus(&self, ui: &AppWindow) {

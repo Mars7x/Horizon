@@ -8,6 +8,8 @@ import { Scroll } from "scroll.slint";
 import { Momentum } from "momentum.slint";
 import { CameraGlide } from "camera-glide.slint";
 import { InputResample } from "input-resample.slint";
+import { Stopwatch } from "stopwatch.slint";
+import { GridRefresh } from "grid-refresh.slint";
 
 // The home carousel is modeled as a camera looking onto one larger scene.
 // The rounded shelf, title/connector, game row, and focus frame all share the
@@ -15,6 +17,15 @@ import { InputResample } from "input-resample.slint";
 // only when it reaches a camera threshold does the complete scene pan.
 export component GameCarousel inherits Rectangle {
     in property <[GameCardData]> games;
+    // The row changing, as Rust publishes it (see AppWindow): games that
+    // were already in the row glide from their old place, a new one rises
+    // and fades in, and the Library tile slides to the end. A change made
+    // while Home was hidden waits for the page transition. Reduced Motion
+    // makes it instant.
+    in property <[int]> from-indices;
+    in property <int> previous-count: 0;
+    in property <int> reorder-sequence: 0;
+    in property <bool> reorder-delayed: false;
     in property <int> selected-index: 0;
     in property <string> selected-title;
     in property <int> launching-game-index: -1;
@@ -25,6 +36,19 @@ export component GameCarousel inherits Rectangle {
     callback geometry-changed(float);
 
     private property <length> camera-offset: 0px;
+
+    private property <duration> reorder-wait: root.reorder-delayed ? Motion.page-duration : 0ms;
+    reorder-clock := Stopwatch {
+        key: root.reorder-sequence;
+        length: root.reorder-sequence != 0 && GridRefresh.length() > 0ms
+            ? root.reorder-wait + GridRefresh.length() : 0ms;
+    }
+    private property <bool> reordering: reorder-clock.running;
+    private property <duration> reorder-elapsed: max(0ms, reorder-clock.elapsed - root.reorder-wait);
+    private property <float> moved: root.reordering ? GridRefresh.moved(root.reorder-elapsed) : 1.0;
+    private property <float> arrival: root.reordering ? GridRefresh.arrival(root.reorder-elapsed) : 1.0;
+    // How far a new game rises as it fades in.
+    private property <length> arrival-rise: 18px;
     private property <length> content-width: (root.games.length + 1) * Metrics.game-stride;
     private property <length> shelf-width:
         root.content-width + Metrics.carousel-content-padding * 2;
@@ -368,8 +392,13 @@ export component GameCarousel inherits Rectangle {
             background: transparent;
 
             for game[index] in root.games : GameTile {
-                x: index * Metrics.game-stride;
-                y: 0px;
+                x: root.reordering && root.from-indices[index] >= 0
+                    ? (root.from-indices[index]
+                        + (index - root.from-indices[index]) * root.moved) * Metrics.game-stride
+                    : index * Metrics.game-stride;
+                y: root.reordering && root.from-indices[index] < 0
+                    ? (1.0 - root.arrival) * root.arrival-rise : 0px;
+                opacity: root.reordering && root.from-indices[index] < 0 ? root.arrival : 1.0;
                 game: game;
                 item-index: index;
                 // Keep the logical selected index while content focus is away,
@@ -381,7 +410,10 @@ export component GameCarousel inherits Rectangle {
                 activated(index) => { root.game-selected(index); }
             }
             LibraryTile {
-                x: root.games.length * Metrics.game-stride;
+                x: root.reordering
+                    ? (root.previous-count
+                        + (root.games.length - root.previous-count) * root.moved) * Metrics.game-stride
+                    : root.games.length * Metrics.game-stride;
                 y: 0px;
                 selected: root.focus-visible && root.selected-index == root.games.length;
                 focus-visible: root.focus-visible;
