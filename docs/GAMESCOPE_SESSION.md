@@ -120,6 +120,24 @@ nothing and the screen shows neither window. Only X11 windows behave the
 same in every mode. Still to confirm: whether session-plus can run without
 `-e` (that would also drop Steam integration), and overlays.
 
+**You chose (after Spike 1): X11 in the session, Wayland wherever it
+works.** The desktop stays Wayland-only. In the session, Horizon's window is
+X11, because gamescope only shows tagged X11 windows; if a later gamescope
+shows Wayland windows in Steam mode, the session moves back to Wayland. To
+build it:
+
+- Slint gains `backend-winit-x11`; Wayland stays the first choice.
+- The manifest gains `--socket=fallback-x11`, which Flatpak grants only when
+  no Wayland display is visible, so the desktop never gets X11. Its
+  "Wayland-only UI" comment changes to say so.
+- The session starts Horizon without a Wayland display (no
+  `--expose-wayland`, or `WAYLAND_DISPLAY` unset by the host script), so
+  the X11 socket is the one Horizon gets.
+- The clipboard in the session needs an X11 path; `wayland_clipboard` is
+  Wayland-only.
+- Native Wayland games would be hidden too; spike 2 checks how games are
+  kept on X11.
+
 ## Feature parity
 
 | Feature | Desktop | Session |
@@ -134,7 +152,7 @@ same in every mode. Still to confirm: whether session-plus can run without
 | Theme "System", clock format | desktop settings portal | no desktop behind it: fall back to defaults, hide "System" (Spike 4) |
 | Choose a profile picture | file chooser portal | needs a portal backend in the session (Spike 4) |
 | Opening links | OpenURI portal | needs a backend in the session (Spike 4) |
-| Paste in text fields | Wayland clipboard | depends on Spike 1 |
+| Paste in text fields | Wayland clipboard | needs an X11 clipboard path |
 | Quick menu, power, volume, brightness, Wi-Fi, Bluetooth, performance | — | ✓ |
 | Battery, network, controller status | ✓ | ✓ |
 
