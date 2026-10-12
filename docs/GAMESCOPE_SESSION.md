@@ -159,6 +159,13 @@ Workstation (GNOME, Wayland, 4K pages).
 - **Steam** has no ARM build. It can run through FEX (installed), so spike 3
   is tried that way, but it may behave differently from x86 Steam and is
   checked again on a handheld.
+- **The main PC** (Fedora Silverblue, x86_64, AMD graphics) runs the same
+  spikes with real x86 Steam, so spike 3 is answered there. Gamescope is
+  layered onto the image (`rpm-ostree install gamescope`), as the session
+  needs it on the host, not in a toolbox. Steam is the Flathub Flatpak, so
+  spike 3 also covers Flatpak Steam: `steam://` reaching it, and its games
+  being tagged for gamescope from inside its sandbox. This session runs on
+  the laptop, so the PC's results come back as pasted output.
 - Handheld-only details (the Deck's and Odin's power keys, their screens'
   rotation) wait for real devices.
 
