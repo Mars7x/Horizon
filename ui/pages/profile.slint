@@ -11,7 +11,6 @@ import { ProfileAvatar } from "../components/profile-avatar.slint";
 import { ProfileFrameData, FriendData } from "../models/profile.slint";
 import { Surface } from "../components/list-row.slint";
 import { Scroll, ScrollCamera } from "../components/scroll.slint";
-import { FriendsIcon } from "../components/utility-icons.slint";
 
 // The user's profile, opened from the avatar at the top left of Home. The
 // page itself is the profile, not its options: a card with the avatar large
@@ -51,7 +50,6 @@ export component ProfilePage inherits Rectangle {
     in property <int> friends-count: 0;
     in property <string> friends-summary: "";
     in property <int> friends-row: 0;
-    in property <float> icon-render-scale: 1.0;
     callback edit();
     callback activate-option(int);
     callback remove-picture();
@@ -156,13 +154,8 @@ export component ProfilePage inherits Rectangle {
     }
 
     // Steam friends: read-only rows that scroll with Up/Down and the wheel.
-    FriendsIcon {
-        x: root.friends-x; y: root.top + 3px;
-        width: 28px; height: 28px;
-        render-scale: root.icon-render-scale;
-    }
     Text {
-        x: root.friends-x + 40px; y: root.top;
+        x: root.friends-x; y: root.top;
         width: root.friends-width * 0.5; height: 34px;
         text: "Friends";
         color: Theme.foreground;
