@@ -2,18 +2,37 @@
 
 Horizon includes or derives small portions of artwork and other resources from third-party projects. This file records the source, attribution, license, and modification status for those materials.
 
+## Kenney Input Prompts
+
+### Controllers — `ui/assets/controllers/`
+- Source: **Input Prompts 1.5A** by **Kenney** (www.kenney.nl),
+  https://kenney.nl/assets/input-prompts (`kenney_input-prompts_1.5.zip`).
+- License: Creative Commons Zero (`CC0-1.0`), `LICENSES/CC0-1.0.txt`. Credit
+  isn't required; it's given here anyway.
+- Files, copied byte-for-byte from the pack's `Vector/` folders:
+  `ui/assets/controllers/controller_xbox360.svg`,
+  `ui/assets/controllers/controller_xboxseries.svg`,
+  `ui/assets/controllers/controller_playstation3.svg`,
+  `ui/assets/controllers/controller_playstation4.svg`,
+  `ui/assets/controllers/controller_playstation5.svg`,
+  `ui/assets/controllers/controller_switch_pro.svg`,
+  `ui/assets/controllers/switch_joycon_left.svg`,
+  `ui/assets/controllers/switch_joycon_right.svg`,
+  `ui/assets/controllers/switch_joycon.svg`,
+  `ui/assets/controllers/controller_steamdeck.svg`,
+  `ui/assets/controllers/controller_generic.svg`.
+- Rendering: the footer's controller icon (`ui/components/system-icons.slint`)
+  shows the model of the controller used last, tinted with Horizon's theme
+  colour at the same UI-scale-aware raster resolution as the utility icons.
+  The files are not modified. See ADR 0186.
+
 ## GNOME symbolic artwork
 
-### Controller — `applications-games-symbolic.svg`
-- Source: GNOME Symbolic Icon Theme, surfaced through GNOME Icon Library
-- Attribution: GNOME Project
-- License: Creative Commons Attribution-ShareAlike 3.0 United States (`CC-BY-SA-3.0-US`)
-- Upstream attribution guidance: attribution as “GNOME Project” is sufficient; link to https://www.gnome.org/ where practical.
-- Source file in Horizon: `ui/assets/applications-games-symbolic.svg`
-- Rendering: `ui/components/system-icons.slint` displays the original SVG with Horizon's
-  theme tint and the same UI-scale-aware SVG raster resolution as the utility icons.
-- Changes: the original file is not modified; only the runtime colour and render
-  resolution are adapted. The earlier native-Path transcription is retired.
+### Controller — retired
+
+The footer's controller icon was GNOME's `applications-games-symbolic.svg`
+(GNOME Project, CC-BY-SA-3.0-US). Kenney's controller drawings replaced it
+(ADR 0186) and the file is no longer bundled. Kept as history.
 
 ### Network status — retired
 

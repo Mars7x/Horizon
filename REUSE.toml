@@ -46,16 +46,10 @@ SPDX-FileCopyrightText = "Horizon contributors"
 SPDX-License-Identifier = "GPL-3.0-or-later"
 
 [[annotations]]
-path = "ui/assets/applications-games-symbolic.svg"
+path = "ui/assets/controllers/*.svg"
 precedence = "override"
-SPDX-FileCopyrightText = "GNOME Project"
-SPDX-License-Identifier = "CC-BY-SA-3.0-US"
-
-[[annotations]]
-path = "ui/components/system-icons.slint"
-precedence = "override"
-SPDX-FileCopyrightText = ["Horizon contributors", "GNOME Project"]
-SPDX-License-Identifier = "GPL-3.0-or-later AND CC-BY-SA-3.0-US"
+SPDX-FileCopyrightText = "Kenney (www.kenney.nl)"
+SPDX-License-Identifier = "CC0-1.0"
 
 [[annotations]]
 path = "LICENSES/OFL-1.1.txt"

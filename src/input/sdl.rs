@@ -50,6 +50,35 @@ pub(super) const DIGITAL_REPEAT_INTERVAL: Duration = Duration::from_millis(115);
 pub struct ControllerStatus {
     pub connected_gamepads: usize,
     pub battery: Option<ControllerBattery>,
+    /// The controller used last (else the first connected), for the
+    /// footer's controller icon.
+    pub shape: Option<ControllerShape>,
+}
+
+/// Which controller drawing represents a connected pad.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControllerShape {
+    /// A pad SDL can't name: a generic gamepad.
+    Generic,
+    Xbox360,
+    /// Xbox One and Series pads (SDL doesn't tell them apart).
+    XboxSeries,
+    PlayStation3,
+    PlayStation4,
+    PlayStation5,
+    SwitchPro,
+    JoyConLeft,
+    JoyConRight,
+    JoyConPair,
+    SteamDeck,
+}
+
+/// An open controller's identity, read once when it connects.
+#[derive(Debug, Clone, Copy)]
+struct PadKind {
+    id: JoystickId,
+    family: ControllerFamily,
+    shape: ControllerShape,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,8 +128,9 @@ impl SdlGamepadInput {
             gamepad_subsystem,
             event_pump,
             open_gamepads: Vec::new(),
-            families: Vec::new(),
+            pads: Vec::new(),
             last_family: ControllerFamily::default(),
+            last_used: None,
             on_steam_deck: running_on_steam_deck(),
             last_power_poll: Instant::now(),
             enabled: true,
@@ -141,11 +171,7 @@ impl SdlGamepadInput {
 
     /// The family of the first connected controller, if any.
     pub fn first_family(&self) -> Option<ControllerFamily> {
-        self.state
-            .borrow()
-            .families
-            .first()
-            .map(|(_, family)| *family)
+        self.state.borrow().pads.first().map(|pad| pad.family)
     }
 }
 
@@ -163,9 +189,11 @@ struct SdlState {
     event_pump: EventPump,
     open_gamepads: Vec<Gamepad>,
     /// Each open controller's family, read once when it connects.
-    families: Vec<(JoystickId, ControllerFamily)>,
+    pads: Vec<PadKind>,
     /// The controller used last, for held-button repeats.
     last_family: ControllerFamily,
+    /// Which controller that was, for the footer's icon.
+    last_used: Option<JoystickId>,
     on_steam_deck: bool,
     last_power_poll: Instant,
     enabled: bool,
@@ -367,14 +395,16 @@ impl SdlState {
                 let name = gamepad
                     .name()
                     .unwrap_or_else(|| "Unknown gamepad".to_owned());
+                let kind = self.gamepad_subsystem.type_for_id(id);
                 let family = controller_family(
-                    self.gamepad_subsystem.type_for_id(id),
+                    kind,
                     gamepad.vendor_id(),
                     gamepad.product_id(),
                     self.on_steam_deck,
                 );
-                info!(controller = %name, ?family, "gamepad connected");
-                self.families.push((id, family));
+                let shape = controller_shape(kind, family);
+                info!(controller = %name, ?family, ?shape, "gamepad connected");
+                self.pads.push(PadKind { id, family, shape });
                 self.open_gamepads.push(gamepad);
                 true
             }
@@ -396,7 +426,7 @@ impl SdlState {
             .iter()
             .filter_map(|gamepad| gamepad.id().ok())
             .collect::<Vec<_>>();
-        self.families.retain(|(known, _)| open.contains(known));
+        self.pads.retain(|pad| open.contains(&pad.id));
         let removed = before.saturating_sub(self.open_gamepads.len());
         if removed > 0 {
             info!(removed, "gamepad disconnected");
@@ -443,6 +473,12 @@ impl SdlState {
                 let reading = pad.power_info();
                 battery_from_sdl(reading.state, reading.percentage)
             }),
+            shape: self
+                .pads
+                .iter()
+                .find(|pad| Some(pad.id) == self.last_used)
+                .or(self.pads.first())
+                .map(|pad| pad.shape),
         }
     }
 }
@@ -468,11 +504,12 @@ impl SdlState {
     /// The family of the controller behind an event, remembered for repeats.
     fn family_of(&mut self, id: JoystickId) -> ControllerFamily {
         let family = self
-            .families
+            .pads
             .iter()
-            .find(|(known, _)| *known == id)
-            .map_or(ControllerFamily::default(), |(_, family)| *family);
+            .find(|pad| pad.id == id)
+            .map_or(ControllerFamily::default(), |pad| pad.family);
         self.last_family = family;
+        self.last_used = Some(id);
         family
     }
 }
@@ -484,6 +521,7 @@ fn poll_gamepad_events(
 ) {
     let mut state = state.borrow_mut();
     let mut status_changed = false;
+    let used_before = state.last_used;
 
     while let Some(event) = state.event_pump.poll_event() {
         match event {
@@ -538,6 +576,9 @@ fn poll_gamepad_events(
             _ => {}
         }
     }
+
+    // Switching controllers changes the footer's icon.
+    status_changed |= state.last_used != used_before;
 
     if state.enabled {
         let now = Instant::now();
@@ -623,6 +664,26 @@ pub fn controller_family(
     }
 }
 
+/// The drawing for a pad: the Deck's for the Deck's own controls, else the
+/// model SDL reports, else a generic gamepad.
+pub fn controller_shape(kind: GamepadType, family: ControllerFamily) -> ControllerShape {
+    if family == ControllerFamily::SteamDeck {
+        return ControllerShape::SteamDeck;
+    }
+    match kind {
+        GamepadType::Xbox360 => ControllerShape::Xbox360,
+        GamepadType::XboxOne => ControllerShape::XboxSeries,
+        GamepadType::PS3 => ControllerShape::PlayStation3,
+        GamepadType::PS4 => ControllerShape::PlayStation4,
+        GamepadType::PS5 => ControllerShape::PlayStation5,
+        GamepadType::NintendoSwitchPro => ControllerShape::SwitchPro,
+        GamepadType::NintendoSwitchJoyconLeft => ControllerShape::JoyConLeft,
+        GamepadType::NintendoSwitchJoyconRight => ControllerShape::JoyConRight,
+        GamepadType::NintendoSwitchJoyconPair => ControllerShape::JoyConPair,
+        _ => ControllerShape::Generic,
+    }
+}
+
 /// Whether this machine is a Steam Deck (LCD "Jupiter" or OLED "Galileo"),
 /// from the firmware's board name. Readable inside Flatpak (sysfs).
 fn running_on_steam_deck() -> bool {
@@ -640,9 +701,10 @@ mod tests {
 
     use sdl3::gamepad::{Axis, Button};
 
+    use super::ControllerShape;
     use super::{
         ANALOG_INITIAL_REPEAT_DELAY, AnalogNavigation, DIGITAL_INITIAL_REPEAT_DELAY,
-        DigitalNavigation, action_for_button, controller_family,
+        DigitalNavigation, action_for_button, controller_family, controller_shape,
     };
     use crate::input::actions::{ControllerFamily, UiAction};
 
@@ -838,6 +900,33 @@ mod tests {
         assert_eq!(digital.active_direction, None);
         assert_eq!(digital.next_repeat, None);
         assert!(!digital.up && !digital.down && !digital.left && !digital.right);
+    }
+
+    #[test]
+    fn each_pad_gets_its_own_drawing() {
+        use sdl3::gamepad::GamepadType;
+        let shape = |kind| controller_shape(kind, controller_family(kind, None, None, false));
+        assert_eq!(shape(GamepadType::PS5), ControllerShape::PlayStation5);
+        assert_eq!(shape(GamepadType::PS4), ControllerShape::PlayStation4);
+        assert_eq!(shape(GamepadType::Xbox360), ControllerShape::Xbox360);
+        assert_eq!(shape(GamepadType::XboxOne), ControllerShape::XboxSeries);
+        assert_eq!(
+            shape(GamepadType::NintendoSwitchPro),
+            ControllerShape::SwitchPro
+        );
+        assert_eq!(
+            shape(GamepadType::NintendoSwitchJoyconLeft),
+            ControllerShape::JoyConLeft
+        );
+        assert_eq!(
+            shape(GamepadType::NintendoSwitchJoyconPair),
+            ControllerShape::JoyConPair
+        );
+        assert_eq!(shape(GamepadType::Unknown), ControllerShape::Generic);
+        assert_eq!(
+            controller_shape(GamepadType::XboxOne, ControllerFamily::SteamDeck),
+            ControllerShape::SteamDeck
+        );
     }
 }
 

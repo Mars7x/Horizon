@@ -2,8 +2,8 @@
 //! Presentation never reads D-Bus or hardware directly.
 
 use crate::{
-    AppWindow,
-    input::ControllerStatus,
+    AppWindow, ControllerArt,
+    input::{ControllerStatus, sdl::ControllerShape},
     platform::system_status::{BatteryReading, SystemStatus},
 };
 
@@ -13,6 +13,10 @@ impl StatusController {
     pub fn publish(ui: &AppWindow, host: SystemStatus, controller: ControllerStatus) {
         use crate::platform::system_status::NetworkKind;
         ui.set_connected_controller_count(controller.connected_gamepads as i32);
+        // Keep the last drawing while the icon fades out after a disconnect.
+        if let Some(shape) = controller.shape {
+            ui.set_controller_art(controller_art(shape));
+        }
         ui.set_status_network_kind(host.network.ui_code());
         ui.set_status_wifi_strength(if host.network == NetworkKind::Wifi {
             host.wifi_strength as i32
@@ -34,6 +38,22 @@ impl StatusController {
         ui.set_status_battery_visible(battery.is_some());
         ui.set_status_battery_percent(battery.map_or(0, |b| b.percent as i32));
         ui.set_status_battery_charging(battery.is_some_and(|b| b.charging));
+    }
+}
+
+fn controller_art(shape: ControllerShape) -> ControllerArt {
+    match shape {
+        ControllerShape::Generic => ControllerArt::Generic,
+        ControllerShape::Xbox360 => ControllerArt::Xbox360,
+        ControllerShape::XboxSeries => ControllerArt::XboxSeries,
+        ControllerShape::PlayStation3 => ControllerArt::Playstation3,
+        ControllerShape::PlayStation4 => ControllerArt::Playstation4,
+        ControllerShape::PlayStation5 => ControllerArt::Playstation5,
+        ControllerShape::SwitchPro => ControllerArt::SwitchPro,
+        ControllerShape::JoyConLeft => ControllerArt::JoyconLeft,
+        ControllerShape::JoyConRight => ControllerArt::JoyconRight,
+        ControllerShape::JoyConPair => ControllerArt::JoyconPair,
+        ControllerShape::SteamDeck => ControllerArt::SteamDeck,
     }
 }
 

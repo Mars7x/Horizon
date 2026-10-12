@@ -211,7 +211,7 @@ intermediates. When the scene enlarges, the raster target tracks `ui-scale`
 The GNOME SVG source files and icon state mappings remain unchanged, and
 source alpha is retained through theme colorization. The bottom-left
 controller indicator uses the same adaptive strategy with its original GNOME
-SVG. Battery geometry, status update timing and connection detection do not
+SVG (since ADR 0186, Kenney's controller drawings instead). Battery geometry, status update timing and connection detection do not
 change. This is a rendering-quality optimization, not an additional status
 source or a guarantee of identical antialiasing on all compositors/scales.
 
@@ -245,3 +245,18 @@ may be paused at a configured threshold. State 5 is now displayed without the
 bolt; 0/2/3/4/6 likewise do not assert charging. BlueZ Battery1 publishes no
 charging state, and the 2.4GHz receiver may withhold it; no bolt is invented.
 Host-battery priority and the red <=20% warning remain unchanged.
+
+## Footer controller icon (ADR 0186)
+
+The bottom-left icon draws the connected controller's model: Xbox 360, Xbox
+One/Series, PS3, PS4, PS5, Switch Pro, a left or right Joy-Con, a Joy-Con
+pair, the Steam Deck, or a generic gamepad for a pad SDL can't name. Art is
+Kenney's Input Prompts (CC0), unmodified, in `ui/assets/controllers/`.
+
+With several controllers it shows the one used last (else the first
+connected). `SdlState` keeps each pad's `ControllerShape` from SDL's gamepad
+type when it connects (`sdl::controller_shape`) and reports it in
+`ControllerStatus.shape`; a press on a different controller republishes the
+status. `StatusController` sets `controller-art`, and keeps the last drawing
+while the icon fades out after a disconnect.
+
