@@ -33,8 +33,14 @@ Steam sets.
   performs Switch to Desktop when Horizon exits with that exit code, so the
   Flatpak gains no host command beyond `flatpak_host`.
 - Bazzite is the first test OS.
-- Wayland is tried first inside gamescope; X11 through `fallback-x11` is the
-  fallback if gamescope's focus and overlay control need it.
+- ~~Wayland is tried first inside gamescope; X11 through `fallback-x11` is the
+  fallback if gamescope's focus and overlay control need it.~~ Revised after
+  Spike 1 (2026-10-12): in the session Horizon's window is X11, through
+  `--socket=fallback-x11` and Slint's X11 backend, because gamescope shows
+  only tagged X11 windows in Steam mode. The session starts Horizon without a
+  Wayland display so Flatpak grants that socket; the desktop stays
+  Wayland-only. Wayland is used wherever it works, and the session returns to
+  it if gamescope gains Wayland app IDs.
 
 ## Spike 1 result (2026-10-12)
 
@@ -47,13 +53,16 @@ to the X11 fallback.
 
 Embedded on the same PC: Steam mode is the same. Without `-e`, a second
 Wayland window leaves gamescope with no focus while it is open; X11 windows
-work in every mode. The decision above is unchanged until it is revised in
-this ADR. See [GAMESCOPE_SESSION.md](../GAMESCOPE_SESSION.md).
+work in every mode. The Wayland/X11 decision above is revised accordingly.
+See [GAMESCOPE_SESSION.md](../GAMESCOPE_SESSION.md).
 
 ## Consequences
 
 - One codebase gives the desktop and the session the same pages.
 - New system-bus grants exist on the desktop too, unused there.
+- The manifest gains `fallback-x11`. Flatpak grants it only without
+  Wayland, so the desktop's Wayland-only rule holds; the session needs an
+  X11 clipboard path.
 - Gamescope's Steam-shaped, thinly documented control surface is a risk;
   OpenGamepadUI is the main prior art.
 - Desktop-portal features (theme "System", file chooser, links) need a
