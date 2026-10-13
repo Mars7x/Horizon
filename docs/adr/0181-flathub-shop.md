@@ -4,7 +4,7 @@ Date: 2026-10-11
 
 ## Status
 
-Accepted. A deliberate exception to "no host execution" (AGENTS.md).
+Superseded (2026-10-12): the Shop, the Flatpak game source and the host `flatpak` access were removed when Horizon moved to embedded emulator cores. Originally: Accepted. A deliberate exception to "no host execution" (AGENTS.md).
 
 ## Context
 

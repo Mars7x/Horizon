@@ -21,11 +21,10 @@ pub enum UtilityPage {
     Activity,
     Achievements,
     Settings,
-    Shop,
 }
 
 impl UtilityPage {
-    const COUNT: usize = 5;
+    const COUNT: usize = 4;
 
     const fn index(self) -> usize {
         match self {
@@ -33,7 +32,6 @@ impl UtilityPage {
             Self::Activity => 1,
             Self::Achievements => 2,
             Self::Settings => 3,
-            Self::Shop => 4,
         }
     }
 }
@@ -94,11 +92,10 @@ pub enum TopUtility {
     Activity,
     Achievements,
     Settings,
-    Shop,
 }
 
 impl TopUtility {
-    pub const COUNT: i32 = 5;
+    pub const COUNT: i32 = 4;
 
     pub const fn index(self) -> i32 {
         match self {
@@ -106,7 +103,6 @@ impl TopUtility {
             Self::Activity => 1,
             Self::Achievements => 2,
             Self::Settings => 3,
-            Self::Shop => 4,
         }
     }
 
@@ -116,7 +112,6 @@ impl TopUtility {
             1 => Some(Self::Activity),
             2 => Some(Self::Achievements),
             3 => Some(Self::Settings),
-            4 => Some(Self::Shop),
             _ => None,
         }
     }
@@ -127,7 +122,6 @@ impl TopUtility {
             Self::Activity => UtilityPage::Activity,
             Self::Achievements => UtilityPage::Achievements,
             Self::Settings => UtilityPage::Settings,
-            Self::Shop => UtilityPage::Shop,
         }
     }
 
@@ -143,7 +137,6 @@ impl UtilityPage {
             Self::Activity => TopUtility::Activity,
             Self::Achievements => TopUtility::Achievements,
             Self::Settings => TopUtility::Settings,
-            Self::Shop => TopUtility::Shop,
         }
     }
 }
@@ -229,7 +222,6 @@ impl Default for RouteFocusMemory {
                 FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Activity)),
                 FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Achievements)),
                 FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Settings)),
-                FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Shop)),
                 FocusSnapshot::for_route(AppRoute::Profile),
             ],
         }
@@ -404,7 +396,7 @@ impl ShellFocus {
     }
 
     /// Move horizontally inside the utility strip. The row never wraps:
-    /// the avatar is its left end and Shop its right end. A real move
+    /// the avatar is its left end and Settings its right end. A real move
     /// clears the return anchor.
     pub fn move_utility(&mut self, delta: i32) -> bool {
         if self.region != ShellFocusRegion::TopUtilities || delta == 0 {
@@ -582,7 +574,6 @@ mod tests {
             UtilityPage::Activity,
             UtilityPage::Achievements,
             UtilityPage::Settings,
-            UtilityPage::Shop,
         ] {
             assert!(!AppRoute::Utility(page).uses_shell_chrome());
         }
@@ -731,14 +722,13 @@ mod tests {
             AppRoute::Utility(UtilityPage::Activity),
             AppRoute::Utility(UtilityPage::Achievements),
             AppRoute::Utility(UtilityPage::Settings),
-            AppRoute::Utility(UtilityPage::Shop),
             AppRoute::Home,
         ] {
             assert!(navigator.navigate_to(route));
         }
 
         assert_eq!(navigator.current(), AppRoute::Home);
-        assert_eq!(navigator.back_stack_depth(), 7);
+        assert_eq!(navigator.back_stack_depth(), 6);
     }
 
     #[test]
@@ -762,19 +752,19 @@ mod tests {
 
         assert!(focus.move_utility(-2));
         assert_eq!(focus.utility(), TopUtility::Album);
-        // The row's left end is the avatar, not a wrap to Shop.
+        // The row's left end is the avatar, not a wrap to Settings.
         assert!(focus.move_utility(-1));
         assert!(focus.profile());
         assert!(!focus.move_utility(-1));
         assert!(focus.move_utility(1));
-        // The right end stops at Shop, held or fresh.
+        // The right end stops at Settings, held or fresh.
         for _ in 0..5 {
             focus.move_utility(1);
         }
-        assert_eq!(focus.utility(), TopUtility::Shop);
+        assert_eq!(focus.utility(), TopUtility::Settings);
         assert!(!focus.move_utility(1));
         assert!(!focus.move_utility(1));
-        assert_eq!(focus.utility(), TopUtility::Shop);
+        assert_eq!(focus.utility(), TopUtility::Settings);
     }
 
     #[test]
@@ -784,7 +774,6 @@ mod tests {
             (TopUtility::Activity, UtilityPage::Activity),
             (TopUtility::Achievements, UtilityPage::Achievements),
             (TopUtility::Settings, UtilityPage::Settings),
-            (TopUtility::Shop, UtilityPage::Shop),
         ] {
             assert_eq!(utility.page(), page);
             assert_eq!(utility.route(), AppRoute::Utility(page));
@@ -855,7 +844,6 @@ mod tests {
             (UtilityPage::Activity, TopUtility::Activity),
             (UtilityPage::Achievements, TopUtility::Achievements),
             (UtilityPage::Settings, TopUtility::Settings),
-            (UtilityPage::Shop, TopUtility::Shop),
         ] {
             let snapshot = memory.recall(AppRoute::Utility(page));
             assert_eq!(snapshot.utility(), utility);
@@ -869,14 +857,17 @@ mod tests {
         let mut focus = ShellFocus::default();
         let settings = AppRoute::Utility(UtilityPage::Settings);
 
-        focus.enter_utilities_from_content(TopUtility::Shop, 2);
+        focus.enter_utilities_from_content(TopUtility::Achievements, 2);
         memory.remember(AppRoute::Home, focus.snapshot());
 
         focus.restore(FocusSnapshot::for_route(settings));
         focus.enter_utilities();
         memory.remember(settings, focus.snapshot());
 
-        assert_eq!(memory.recall(AppRoute::Home).utility(), TopUtility::Shop);
+        assert_eq!(
+            memory.recall(AppRoute::Home).utility(),
+            TopUtility::Achievements
+        );
         assert_eq!(
             memory.recall(AppRoute::Home).region(),
             ShellFocusRegion::TopUtilities
@@ -903,11 +894,10 @@ mod tests {
         let step = 64.0;
 
         for (x, utility) in [
-            (512.0, TopUtility::Album),
-            (576.0, TopUtility::Activity),
-            (640.0, TopUtility::Achievements),
-            (704.0, TopUtility::Settings),
-            (768.0, TopUtility::Shop),
+            (544.0, TopUtility::Album),
+            (608.0, TopUtility::Activity),
+            (672.0, TopUtility::Achievements),
+            (736.0, TopUtility::Settings),
         ] {
             assert_eq!(nearest_utility_for_x(x, viewport_width, step), utility);
         }
@@ -916,7 +906,7 @@ mod tests {
     #[test]
     fn utility_and_game_center_helpers_support_reverse_spatial_transfer() {
         let activity_x = utility_center_x(TopUtility::Activity, 1280.0, 64.0);
-        assert_eq!(activity_x, 576.0);
+        assert_eq!(activity_x, 608.0);
 
         assert_eq!(nearest_game_for_x(activity_x, 439.0, 250.0, 8), 1);
         assert_eq!(nearest_game_for_x(768.0, 439.0, 250.0, 8), 1);
@@ -925,7 +915,7 @@ mod tests {
     #[test]
     fn full_shell_focus_memory_normalizes_hidden_header_focus() {
         let mut memory = RouteFocusMemory::default();
-        let route = AppRoute::Utility(UtilityPage::Shop);
+        let route = AppRoute::Utility(UtilityPage::Album);
         let mut focus = ShellFocus::default();
 
         assert!(focus.enter_utilities_from_content(TopUtility::Settings, 6));
@@ -946,7 +936,6 @@ mod tests {
             AppRoute::Utility(UtilityPage::Activity),
             AppRoute::Utility(UtilityPage::Achievements),
             AppRoute::Utility(UtilityPage::Settings),
-            AppRoute::Utility(UtilityPage::Shop),
         ];
         let mut navigator = Navigator::default();
         let mut visited = vec![AppRoute::Home];

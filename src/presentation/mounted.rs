@@ -1,4 +1,4 @@
-//! Long grids mount only the items near their camera (Album, the Shop). As
+//! Long grids mount only the items near their camera (the Album). As
 //! the camera moves, the mounted window scrolls in place: the items that
 //! stay keep their Slint elements, so their focus and motion carry on.
 

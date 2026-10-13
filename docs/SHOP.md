@@ -1,3 +1,6 @@
+> **Retired (2026-10-12):** removed when Horizon moved to embedded emulator cores; the
+> host `flatpak` access (`flatpak_host`) went with it. Kept as history.
+
 # Shop
 
 The Shop is Flathub with a controller, and where Flatpak apps are managed

@@ -4,7 +4,7 @@ Date: 2026-10-12
 
 ## Status
 
-Accepted. Extends ADR 0181's host-execution exception; answers its
+Superseded (2026-10-12): the Shop, the Flatpak game source and the host `flatpak` access were removed when Horizon moved to embedded emulator cores. Originally: Accepted. Extends ADR 0181's host-execution exception; answers its
 "Installed apps don't join the Library yet".
 
 ## Context

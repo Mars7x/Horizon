@@ -1,4 +1,4 @@
-//! Reading the library again while Horizon runs (after a Shop install, say).
+//! Reading the library again while Horizon runs.
 //!
 //! The sources are asked on a worker thread, with a registry of its own;
 //! what they found is saved on the UI thread, where the library's database

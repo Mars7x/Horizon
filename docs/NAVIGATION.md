@@ -18,13 +18,13 @@ SDL3 / keyboard / pointer intent
          ui/app.slint      -> visible retained route layers
 ```
 
-`src/navigation/mod.rs` defines `AppRoute::Home`, `AppRoute::Library` and `AppRoute::Utility(UtilityPage)`; the **five** utility pages are, in order, **Album, Activity, Achievements, Settings, Shop**. There is no Web utility (removed; ADR 0174) and no Friends utility (removed; Steam friends are on the Profile page, ADR 0178). `TopUtility` and Slint must agree on these positions. The Rust controller alone decides route push/pop, focus restoration and global action handling.
+`src/navigation/mod.rs` defines `AppRoute::Home`, `AppRoute::Library` and `AppRoute::Utility(UtilityPage)`; the **four** utility pages are, in order, **Album, Activity, Achievements, Settings**. There is no Web utility (removed; ADR 0174), no Friends utility (removed; Steam friends are on the Profile page, ADR 0178) and no Shop (removed 2026-10-12; ADR 0181 superseded). `TopUtility` and Slint must agree on these positions. The Rust controller alone decides route push/pop, focus restoration and global action handling.
 
 ## Shell vs full-shell surfaces
 
 - **Home** owns the persistent utility row and shell chrome. Its established cover, focus and marquee geometry must not be redesigned when updating another route.
 - **Library** is a full-shell page with local Source/Sort controls and grid focus; it is *not* a second Home-header page.
-- **All five utilities** occupy the full-shell destination, hiding Home's chrome. Achievements and Album have their own views; Shop has an app page inside it (see [Shop](SHOP.md)). Album's viewer is page-local state: B closes it before route Back applies, as with Achievements' game view and the Shop's app page.
+- **All four utilities** occupy the full-shell destination, hiding Home's chrome. Achievements and Album have their own views. Album's viewer is page-local state: B closes it before route Back applies, as with Achievements' game view.
 - **Menu/Start opens Library**, using the same route as the Home Library tile (`NavigationController::handle_menu`). It is not currently a global modal overlay; older Phase 4 documentation describes a superseded menu design.
 
 The current `AppRoute::uses_shell_chrome()` returns true for **Home only**. Do not copy older docs asserting that Library also displays Home chrome.

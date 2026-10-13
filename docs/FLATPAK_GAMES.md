@@ -1,3 +1,6 @@
+> **Retired (2026-10-12):** removed when Horizon moved to embedded emulator cores; the
+> host `flatpak` access (`flatpak_host`) went with it. Kept as history.
+
 # Flatpak games source
 
 Games installed as Flatpaks (from the Shop or anywhere else) are a normal

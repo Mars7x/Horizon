@@ -5,7 +5,7 @@ The profile is the user's name and picture on this device, with their Steam frie
 ## Opening it
 
 - **Pointer:** click the avatar at the top left of Home.
-- **Controller or keyboard:** the avatar is part of the top row, to the left of the first utility. Left from Album reaches it, held or not, and the row ends there (the top row never wraps; Shop is its right end). Right goes back to Album, Down goes to the games, and A opens the Profile page.
+- **Controller or keyboard:** the avatar is part of the top row, to the left of the first utility. Left from Album reaches it, held or not, and the row ends there (the top row never wraps; Settings is its right end). Right goes back to Album, Down goes to the games, and A opens the Profile page.
   - On the avatar it gets the utilities' single-stroke focus ring and their 2 px lift, and no utility shows focus.
   - Up from a game it was left from returns to Album.
 - The **Profile page** (`AppRoute::Profile`) is a full-shell page with history: Back returns where you were, and Forward reopens it. Every visit starts with nothing open and the friends list at its top.

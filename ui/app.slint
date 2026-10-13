@@ -39,9 +39,6 @@ import { AchievementsPage } from "pages/achievements.slint";
 import { AlbumPage } from "pages/album.slint";
 import { ActivityGameDetailsPage } from "pages/activity-game-details.slint";
 import { SettingsPage } from "pages/settings.slint";
-import { ShopPage } from "pages/shop.slint";
-import { ShopAppData, ShopShotData } from "models/shop.slint";
-export { ShopAppData, ShopShotData }
 import { ProfilePage } from "pages/profile.slint";
 
 export component AppWindow inherits Window {
@@ -97,7 +94,7 @@ export component AppWindow inherits Window {
         return route == AppRouteView.home ? 0 : route == AppRouteView.library ? 1
             : route == AppRouteView.album ? 2 : route == AppRouteView.activity ? 3
             : route == AppRouteView.achievements ? 4 : route == AppRouteView.settings ? 5
-            : route == AppRouteView.shop ? 6 : 7;
+            : 6;
     }
     private property <int> route-phase: route-transition.phase;
     private property <bool> route-back: root.current-route == AppRouteView.home
@@ -126,17 +123,6 @@ export component AppWindow inherits Window {
         : root.current-route == AppRouteView.settings ? (root.settings-secondary-label != ""
             ? [{ button: "X", label: root.settings-secondary-label }, { button: "B", label: "Back" }, { button: "A", label: "Select" }]
             : [{ button: "B", label: "Back" }, { button: "A", label: "Select" }])
-        : root.current-route == AppRouteView.shop ? (root.shop-confirm-open
-            ? [{ button: "B", label: "Cancel" }, { button: "A", label: "Select" }]
-            : root.shop-details-open ? (root.shop-busy-label != "" || root.shop-action-label == ""
-                ? [{ button: "B", label: "Back" }]
-                : [{ button: "B", label: "Back" }, { button: "A", label: root.shop-action-label }])
-            : root.shop-searching ? [{ button: "B", label: "Done" }]
-            : root.shop-search-focused ? (root.shop-query != ""
-                ? [{ button: "X", label: "Clear" }, { button: "B", label: "Back" }, { button: "A", label: "Search" }]
-                : [{ button: "B", label: "Back" }, { button: "A", label: "Search" }])
-            : root.shop-app-count > 0 ? [{ button: "B", label: "Back" }, { button: "A", label: "Open" }]
-            : [{ button: "B", label: "Back" }])
         : root.current-route == AppRouteView.profile ? (root.profile-editing-name || root.profile-confirm-open
             ? [{ button: "B", label: "Cancel" }, { button: "A", label: "Select" }]
             : root.profile-edit-open ? (root.profile-edit-selection == 1 && root.profile-page-has-chosen
@@ -389,56 +375,6 @@ export component AppWindow inherits Window {
     callback profile-save-name(string);
     callback profile-cancel-name();
 
-    // Shop: Flathub, browsed in a grid (presentation/shop.rs). Selection,
-    // paging and loading are Rust-owned.
-    in property <[ShopAppData]> shop-apps;
-    in property <int> shop-app-count: 0;
-    in property <int> shop-selected: 0;
-    in property <int> shop-first-row: 0;
-    in property <int> shop-visit: 0;
-    in property <int> shop-state: 0;
-    in property <string> shop-category: "Games";
-    in property <string> shop-count: "";
-    in-out property <string> shop-query: "";
-    in property <bool> shop-search-focused: false;
-    in property <bool> shop-searching: false;
-    in property <int> shop-catalog-revision: 0;
-    in property <int> shop-catalog-base: 0;
-    out property <int> shop-description-steps: shop-page.description-steps;
-    out property <int> shop-columns: shop-page.columns;
-    out property <int> shop-visible-rows: shop-page.visible-rows;
-    in property <bool> shop-details-open: false;
-    in property <string> shop-detail-name;
-    in property <string> shop-detail-developer;
-    in property <string> shop-detail-summary;
-    in property <bool> shop-detail-verified: false;
-    in property <image> shop-detail-icon;
-    in property <bool> shop-detail-has-icon: false;
-    in property <string> shop-detail-description;
-    in property <int> shop-detail-state: 0;
-    in property <[ShopShotData]> shop-shots;
-    in property <int> shop-shot: 0;
-    in property <int> shop-description-row: 0;
-    in property <string> shop-feedback: "";
-    in property <[string]> shop-actions;
-    in property <int> shop-action-focus: 0;
-    in property <string> shop-action-label: "";
-    in property <string> shop-busy-label: "";
-    in property <float> shop-progress: -1;
-    in property <bool> shop-confirm-open: false;
-    in property <int> shop-confirm-focus: 0;
-    callback shop-choose(int);
-    callback shop-cycle-category(int);
-    callback shop-scroll-rows(int);
-    callback shop-search-open();
-    callback shop-search-edited(string);
-    callback shop-search-finish();
-    callback shop-search-clear();
-    callback shop-activate-action(int);
-    callback shop-confirm(int);
-    callback shop-close-details();
-    callback shop-step-shot(int);
-    callback shop-scroll-description(int);
     in property <string> settings-appearance-feedback: "";
     in property <string> settings-artwork-status: "";
     in property <bool> settings-refresh-open: false;
@@ -512,13 +448,9 @@ export component AppWindow inherits Window {
         if (!root.profile-editing-name) { input-scope.focus(); }
         root.text-entry-changed(1, root.profile-editing-name);
     }
-    changed shop-searching => {
-        if (!root.shop-searching) { input-scope.focus(); }
-        root.text-entry-changed(2, root.shop-searching);
-    }
 
     // The on-screen keyboard (presentation/keyboard.rs). Text targets: 0 the
-    // Settings key editor, 1 the Profile name editor, 2 the Shop's search.
+    // Settings key editor, 1 the Profile name editor.
     in property <bool> keyboard-open: false;
     in property <[KeyboardKeyData]> keyboard-keys;
     in property <int> keyboard-focused: 0;
@@ -944,70 +876,6 @@ export component AppWindow inherits Window {
                 }
             }
 
-            TransitionLayer {
-                x: 0px;
-                width: parent.width;
-                height: parent.height;
-                active: root.current-route == AppRouteView.shop;
-                phase: root.route-phase;
-                returning: root.route-back;
-                outgoing: root.current-route != AppRouteView.shop
-                    && root.transition-from-route == AppRouteView.shop;
-
-                shop-page := ShopPage {
-                    width: parent.width;
-                    height: parent.height;
-                    active: root.current-route == AppRouteView.shop;
-                    keyboard-inset: root.keyboard-inset;
-                    keyboard-caret: root.keyboard-caret;
-                    keyboard-edit: root.keyboard-edit;
-                    keyboard-show => { root.keyboard-show(2); }
-                    apps: root.shop-apps;
-                    app-count: root.shop-app-count;
-                    selected: root.shop-selected;
-                    first-row: root.shop-first-row;
-                    visit: root.shop-visit;
-                    state: root.shop-state;
-                    category: root.shop-category;
-                    count: root.shop-count;
-                    query <=> root.shop-query;
-                    search-focused: root.shop-search-focused;
-                    searching: root.shop-searching;
-                    catalog-revision: root.shop-catalog-revision;
-                    catalog-base: root.shop-catalog-base;
-                    details-open: root.shop-details-open;
-                    detail-name: root.shop-detail-name;
-                    detail-developer: root.shop-detail-developer;
-                    detail-summary: root.shop-detail-summary;
-                    detail-verified: root.shop-detail-verified;
-                    detail-icon: root.shop-detail-icon;
-                    detail-has-icon: root.shop-detail-has-icon;
-                    detail-description: root.shop-detail-description;
-                    detail-state: root.shop-detail-state;
-                    shots: root.shop-shots;
-                    shot: root.shop-shot;
-                    description-row: root.shop-description-row;
-                    feedback: root.shop-feedback;
-                    choose(index) => { root.shop-choose(index); }
-                    cycle-category(direction) => { root.shop-cycle-category(direction); }
-                    scroll-rows(rows) => { root.shop-scroll-rows(rows); }
-                    search-open => { root.shop-search-open(); }
-                    search-edited(text) => { root.shop-search-edited(text); }
-                    search-finish => { root.shop-search-finish(); }
-                    search-clear => { root.shop-search-clear(); }
-                    actions: root.shop-actions;
-                    action-focus: root.shop-action-focus;
-                    busy-label: root.shop-busy-label;
-                    progress: root.shop-progress;
-                    confirm-open: root.shop-confirm-open;
-                    confirm-focus: root.shop-confirm-focus;
-                    activate-action(index) => { root.shop-activate-action(index); }
-                    confirm(choice) => { root.shop-confirm(choice); }
-                    close-details => { root.shop-close-details(); }
-                    step-shot(delta) => { root.shop-step-shot(delta); }
-                    scroll-description(rows) => { root.shop-scroll-description(rows); }
-                }
-            }
 
             // One hint bar for every full-screen page, at the same position.
             // Display-only: these labels mirror what Rust's input handlers do

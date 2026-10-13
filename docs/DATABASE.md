@@ -19,7 +19,13 @@ The current migration sequence is:
 0004_source_runtime_tracking.sql
 0005_remove_lutris_source.sql
 0006_activity_session_checkpoints.sql
+0007_remove_bottles_source.sql
+0008_remove_flatpak_source.sql
 ```
+
+`0008` retires Flatpak games like `0005` and `0007`: their `game_sources` rows go,
+and a game is deleted only if nothing else (another source, play sessions,
+source lifetime playtime) still refers to it.
 
 Startup applies missing migrations in one transaction per migration. Migration history must be contiguous. A database from a newer Horizon schema is rejected instead of being opened with older code.
 

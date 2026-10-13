@@ -147,7 +147,7 @@ pub struct HomeController {
     /// row), so the carousel can glide them there (`home-from-indices`).
     home_from: Rc<VecModel<i32>>,
     /// The row as it was last seen on screen. A change made while Home is
-    /// hidden (a Shop install) plays when Home is next shown.
+    /// hidden (a library reload) plays when Home is next shown.
     seen_order: RefCell<Vec<usize>>,
     home_order: RefCell<Vec<usize>>,
     /// Provider-owned fallbacks, never replaced by downloaded art (a library

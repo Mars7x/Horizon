@@ -41,11 +41,9 @@ use crate::{
         clock::ClockController,
         home::{HOME_RECENT_LIMIT, HomeController},
         keyboard::KeyboardController,
-        library_reload::{LibraryReloadParts, LibraryReloader},
         navigation::NavigationController,
         profile::ProfileController,
         settings::SettingsController,
-        shop::ShopController,
         status::StatusController,
         wake::drain_notify,
     },
@@ -173,8 +171,8 @@ pub fn run() -> Result<(), AppError> {
     );
 
     let registry = Rc::new(registry);
-    // Home, Library and Activity share one catalog; a library reload (after
-    // a Shop install) appends to it without moving any game's index.
+    // Home, Library and Activity share one catalog; a library reload appends
+    // to it without moving any game's index.
     let catalog = Catalog::shared(library_games);
     let source_playtime_timer = Timer::default();
     let sync_registry = Rc::clone(&registry);
@@ -353,7 +351,6 @@ pub fn run() -> Result<(), AppError> {
             profile.steam_account_changed(&ui);
         }
     }));
-    let settings_for_reload = Rc::clone(&settings);
     let settings_for_controller = Rc::clone(&settings);
     let navigation = NavigationController::new(
         &ui,
@@ -363,8 +360,6 @@ pub fn run() -> Result<(), AppError> {
     );
     navigation.set_achievements(achievements, &ui);
     navigation.set_profile(Rc::clone(&profile_page), &ui);
-    let shop = ShopController::new(&ui);
-    navigation.set_shop(Rc::clone(&shop));
     // What the user last used decides whether a text field brings up the
     // on-screen keyboard (a controller or a touch screen does).
     let last_device = Rc::new(Cell::new(InputDevice::default()));
@@ -395,26 +390,6 @@ pub fn run() -> Result<(), AppError> {
         video,
     );
     navigation.set_album(Rc::clone(&album), &ui);
-    // A Shop install, update or uninstall can add, rename or remove a
-    // Flatpak game: read the library again.
-    let reload_settings = Rc::clone(&settings_for_reload);
-    let reloader = LibraryReloader::new(
-        &ui,
-        LibraryReloadParts {
-            catalog: Rc::clone(&catalog),
-            repository: Rc::clone(&runtime_repository),
-            activity: Rc::clone(&activity_service),
-            registry: Rc::clone(&registry),
-            artwork: Rc::clone(&artwork_service),
-            home: Rc::clone(&home),
-            library: Rc::clone(&library_controller),
-            showcase: Rc::clone(&activity_showcase),
-            album: Rc::clone(&album),
-            artwork_preferences: Rc::new(move || reload_settings.artwork_preferences()),
-        },
-    );
-    let shop_reloader = Rc::clone(&reloader);
-    shop.set_apps_changed(Rc::new(move || shop_reloader.reload()));
     navigation.set_activity_details(Rc::clone(&activity_details));
     // Prepare Activity synchronously on navigation, before PageTransitionLayer
     // exposes it. Do not depend on the 3-second recents refresh after entry.
@@ -475,12 +450,6 @@ pub fn run() -> Result<(), AppError> {
                 ui.get_keyboard_focused(),
                 ui.get_profile_editor_target(),
             ),
-            (
-                ui.get_shop_selected(),
-                ui.get_shop_search_focused(),
-                ui.get_shop_shot(),
-                ui.get_shop_description_row(),
-            ),
         );
         action_navigation.handle_action(&ui, event);
         let after = (
@@ -513,12 +482,6 @@ pub fn run() -> Result<(), AppError> {
                 ui.get_profile_edit_selection(),
                 ui.get_keyboard_focused(),
                 ui.get_profile_editor_target(),
-            ),
-            (
-                ui.get_shop_selected(),
-                ui.get_shop_search_focused(),
-                ui.get_shop_shot(),
-                ui.get_shop_description_row(),
             ),
         );
         if matches!(
@@ -784,7 +747,6 @@ pub fn run() -> Result<(), AppError> {
     let _clock = clock;
     let _system_monitor = system_monitor;
     let _album = album;
-    let _reloader = reloader;
     let _navigation = navigation;
     let _library_controller = library_controller;
     let _recent_refresh_timer = recent_refresh_timer;

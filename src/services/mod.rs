@@ -3,7 +3,6 @@ pub mod activity;
 pub mod album;
 pub mod artwork;
 pub mod controller_settings;
-pub mod flathub;
 pub mod friends;
 pub mod image;
 pub mod import;
