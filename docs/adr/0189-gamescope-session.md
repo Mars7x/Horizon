@@ -43,6 +43,12 @@ Steam sets.
   Wayland display so Flatpak grants that socket; the desktop stays
   Wayland-only. Wayland is used wherever it works, and the session returns to
   it if gamescope gains Wayland app IDs.
+- Decided after the spikes (2026-10-12): Horizon's app IDs are a reserved
+  block from `0x7F000000` (Horizon itself, then base + database `id` for
+  Heroic and Flatpak games); the session's host script provides
+  gamescope's `DISPLAY` to the user's systemd environment so
+  `flatpak_host` stays unchanged; screenshots go through gamescope's
+  control socket (`--filesystem=xdg-run/gamescope-0`).
 
 ## Spike 1 result (2026-10-12)
 
@@ -107,6 +113,8 @@ read (gamescope's control socket, or another route) is still to decide.
 
 - One codebase gives the desktop and the session the same pages.
 - New system-bus grants exist on the desktop too, unused there.
+- The manifest gains `--filesystem=xdg-run/gamescope-0` for the
+  screenshot control socket.
 - The manifest gains `fallback-x11`. Flatpak grants it only without
   Wayland, so the desktop's Wayland-only rule holds; the session needs an
   X11 clipboard path.

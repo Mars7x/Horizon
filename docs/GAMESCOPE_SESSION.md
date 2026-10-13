@@ -80,6 +80,25 @@ Horizon does not write its own compositor or display server.
     windows and Home brings Horizon forward, as today.
 15. **Bazzite and other session-plus systems only.** SteamOS (Valve's own
     `gamescope-session`) isn't planned.
+16. **App IDs (after the spikes):** a reserved block starting at
+    `0x7F000000` (2130706432). Horizon's own windows are the base; a Heroic
+    or Flatpak game's window is the base plus the game's database `id`.
+    That is far above real Steam app IDs (about 4 million) and below
+    Steam's shortcut range (2^31 and up). Steam games keep the ID Steam
+    tags them with. 769 is Steam's and is used only to show Steam's own
+    windows (login). Note: `games.id` has no `AUTOINCREMENT`, so SQLite may
+    reuse the highest ID after a delete.
+17. **Display for Flatpak games (after spike 2):** the session's host
+    script puts gamescope's `DISPLAY` and `XDG_CURRENT_DESKTOP=gamescope`
+    into the user's systemd environment, and restarts the Flatpak session
+    helper, before Horizon starts, so `flatpak-spawn --host` runs games on
+    gamescope's display. `flatpak_host` is unchanged. To check with GNOME
+    logged out, as in spike 4.
+18. **Screenshots (after spike 5):** through gamescope's control socket.
+    The manifest gains only `--filesystem=xdg-run/gamescope-0`, and
+    `platform::gamescope` speaks gamescope's control protocol to save the
+    picture straight into Horizon's data folder. The same socket can carry
+    the performance settings later.
 
 ## How gamescope is controlled
 
