@@ -110,6 +110,15 @@ the root-property request always writes the host's `/tmp/gamescope.png`,
 which the Flatpak cannot read. How Horizon requests a screenshot it can
 read (gamescope's control socket, or another route) is still to decide.
 
+## Spike 6 result (2026-10-12)
+
+The power button's devices aren't readable by the user, but embedded
+gamescope delivers the key to the focused window as `XF86PowerOff`. A PC's
+ACPI button reports no hold time, so the power key opens the power menu
+there; where the hold time is reported, a short press sleeps and a long
+press opens the menu. Horizon still holds a `handle-power-key` inhibitor so
+logind doesn't power off.
+
 ## Consequences
 
 - One codebase gives the desktop and the session the same pages.

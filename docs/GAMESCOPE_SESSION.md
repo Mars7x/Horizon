@@ -71,11 +71,17 @@ Horizon does not write its own compositor or display server.
     the OS's session switcher itself (no host command beyond `flatpak_host`):
     it exits with a "switch to desktop" exit code, and the host script runs
     the switch (on Bazzite, its `steamos-session-select`).
-13. **The power button:** a short press sleeps; a long press opens Horizon's
-    power menu (sleep, restart, shut down, Switch to Desktop). Horizon takes
-    the key with a logind `handle-power-key` inhibitor and reads it from the
-    device, so logind doesn't act on it alone while Horizon runs. Waking
-   returns straight to whatever was on screen (the game, if one was running).
+13. **The power button:** where the hold time is reported, a short press
+    sleeps and a long press opens Horizon's power menu (sleep, restart, shut
+    down, Switch to Desktop); the long press stays well under the 4 seconds
+    after which PC hardware forces a power-off. Where it isn't (a PC's ACPI
+    button reports press and release in the same instant, spike 6), a press
+    opens the power menu. How Horizon tells the two apart is decided when
+    it is built. Horizon takes the key with a logind `handle-power-key`
+    inhibitor, so logind doesn't power off on its own, and receives it as
+    the `XF86PowerOff` key from gamescope, not from the device (the
+    device isn't readable by the user). Waking returns straight to whatever
+    was on screen (the game, if one was running).
 14. **The quick menu is session-only.** On a desktop, games are ordinary
     windows and Home brings Horizon forward, as today.
 15. **Bazzite and other session-plus systems only.** SteamOS (Valve's own
@@ -288,6 +294,18 @@ build it:
 6. **The power key.** Does it reach Horizon as an input device (a PC's power
    button or a handheld's), and does the inhibitor stop logind's own
    suspend?
+   **Result (main PC, embedded, 2026-10-12):** the power button's devices
+   are `root:input` 0660 with no per-user access, so neither the user nor
+   the Flatpak can read them. Embedded gamescope reads them through
+   libinput and delivers each press to the focused X11 window as
+   `XF86PowerOff` (keycode 124). This PC's ACPI button reports press and
+   release in the same instant, even when held for 2 seconds, so a long
+   press can't be detected on it. With GNOME's `handle-power-key` block
+   inhibitor held (action "nothing"), presses did nothing else; without any
+   inhibitor logind would power off (`HandlePowerKey=poweroff`). A
+   handheld's button is still untested. Script:
+   `scripts/spikes/gamescope-spike6.sh` (run with GNOME logged in, from a
+   text console).
 
 ### Where the spikes run
 
