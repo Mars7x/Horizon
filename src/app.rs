@@ -25,6 +25,7 @@ use crate::{
     persistence::{SqliteLibraryRepository, settings::SettingsStore},
     platform::{
         data_paths,
+        gamescope::{self, Gamescope},
         launcher::PortalLaunchExecutor,
         session_helper::DbusManagedSessionExecutor,
         slint_backend,
@@ -146,6 +147,10 @@ pub fn run(mode: SessionMode) -> Result<(), AppError> {
     slint::set_xdg_app_id(APP_ID)?;
 
     let ui = AppWindow::new()?;
+    let gamescope_timer = Rc::new(Timer::default());
+    if capabilities.controls_gamescope() {
+        take_gamescope_screen(&ui, &gamescope_timer);
+    }
     let appearance = AppearanceController::new(
         &ui,
         AppearanceStore::new(data_paths::appearance_settings_path()?),
@@ -860,10 +865,44 @@ pub fn run(mode: SessionMode) -> Result<(), AppError> {
     let _live_activity_timer = live_activity_timer;
     let _activity_checkpoint_timer = activity_checkpoint_timer;
     let _managed_session_timer = managed_session_timer;
+    let _gamescope_timer = gamescope_timer;
 
     ui.run()?;
 
     Ok(())
+}
+
+/// In the session, tags Horizon's window and makes gamescope show it, once
+/// winit has created the window.
+fn take_gamescope_screen(ui: &AppWindow, timer: &Rc<Timer>) {
+    let gamescope = match Gamescope::connect() {
+        Ok(gamescope) => gamescope,
+        Err(error) => {
+            warn!(%error, "gamescope control unavailable; gamescope may show nothing");
+            return;
+        }
+    };
+    let ui = ui.as_weak();
+    let stop = Rc::downgrade(timer);
+    timer.start(TimerMode::Repeated, Duration::from_millis(50), move || {
+        let Some(window) = ui
+            .upgrade()
+            .and_then(|ui| gamescope::x11_window(ui.window()))
+        else {
+            return;
+        };
+        match gamescope.show_horizon(window) {
+            Ok(()) => info!(
+                window,
+                app_id = gamescope::HORIZON_APP_ID,
+                "gamescope shows Horizon"
+            ),
+            Err(error) => warn!(%error, "couldn't make gamescope show Horizon"),
+        }
+        if let Some(timer) = stop.upgrade() {
+            timer.stop();
+        }
+    });
 }
 
 fn glyph_family(style: GlyphStyle) -> GlyphFamily {
