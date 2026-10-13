@@ -371,8 +371,20 @@ Each step is built, tested and documented before the next.
    winit has created the window; if gamescope can't be reached it logs a
    warning and carries on. Checked: the dev build with `--session` is
    shown by gamescope in Steam mode (`-e`).
-4. Games in front and back: follow Steam's tag; tag the first new untagged
-   window after a Heroic or Flatpak launch; return when its windows close.
+4. **Done:** games in front and back. Sources say who tags a game's
+   window (`GameSource::window_app_id`: Steam gives its app ID; others
+   none), and `GameLaunchService` tells a `LaunchListener` about every
+   launch. In the session, `platform::gamescope::SessionFront` polls
+   gamescope's windows every 250 ms: it waits for the Steam-tagged window,
+   or tags every new untagged, non-override-redirect window after a Heroic
+   or Flatpak launch with base plus `games.id`; then moves the base layer
+   to the game, and back to Horizon after 2 seconds with no game window
+   (games swap windows while starting). It gives up after 3 minutes with
+   no window. Risk: a launcher's own new window (Heroic's) would be tagged
+   as the game. Checked end to end in nested Steam-mode gamescope: Enter on
+   A Short Hike showed the game, closing it showed Home again. Found then:
+   Horizon ignores SIGTERM (only SIGKILL stops it, probably SDL3's quit
+   event going unhandled); fixed in step 5, which needs a clean stop.
 5. Session files in `data/session/`: session-plus `sessions.d/horizon`, the
    login entry, the host script (systemd environment, helper restart,
    Steam `-silent`, crash restarts, Switch to Desktop), and a dev script

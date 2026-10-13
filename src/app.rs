@@ -25,7 +25,7 @@ use crate::{
     persistence::{SqliteLibraryRepository, settings::SettingsStore},
     platform::{
         data_paths,
-        gamescope::{self, Gamescope},
+        gamescope::{self, Gamescope, SessionFront},
         launcher::PortalLaunchExecutor,
         session_helper::DbusManagedSessionExecutor,
         slint_backend,
@@ -148,9 +148,21 @@ pub fn run(mode: SessionMode) -> Result<(), AppError> {
 
     let ui = AppWindow::new()?;
     let gamescope_timer = Rc::new(Timer::default());
-    if capabilities.controls_gamescope() {
-        take_gamescope_screen(&ui, &gamescope_timer);
-    }
+    let session_front = if capabilities.controls_gamescope() {
+        match Gamescope::connect() {
+            Ok(gamescope) => {
+                let front = SessionFront::new(gamescope);
+                take_gamescope_screen(&ui, &front, &gamescope_timer);
+                Some(front)
+            }
+            Err(error) => {
+                warn!(%error, "gamescope control unavailable; gamescope may show nothing");
+                None
+            }
+        }
+    } else {
+        None
+    };
     let appearance = AppearanceController::new(
         &ui,
         AppearanceStore::new(data_paths::appearance_settings_path()?),
@@ -241,6 +253,10 @@ pub fn run(mode: SessionMode) -> Result<(), AppError> {
     let runtime_observer: Rc<dyn RuntimeObservationExecutor> =
         Rc::new(SourceRuntimeObservationExecutor::new(Rc::clone(&registry)));
     launch_service = launch_service.with_runtime_observer(runtime_observer);
+    if let Some(front) = &session_front {
+        // In the session, launched games are brought to the front.
+        launch_service = launch_service.with_launch_listener(front.clone());
+    }
     let launch_service = Rc::new(launch_service);
     let launch_activity: Rc<dyn LaunchActivitySink> = activity_service.clone();
     let achievements_catalog = catalog
@@ -866,6 +882,7 @@ pub fn run(mode: SessionMode) -> Result<(), AppError> {
     let _activity_checkpoint_timer = activity_checkpoint_timer;
     let _managed_session_timer = managed_session_timer;
     let _gamescope_timer = gamescope_timer;
+    let _session_front = session_front;
 
     ui.run()?;
 
@@ -874,15 +891,9 @@ pub fn run(mode: SessionMode) -> Result<(), AppError> {
 
 /// In the session, tags Horizon's window and makes gamescope show it, once
 /// winit has created the window.
-fn take_gamescope_screen(ui: &AppWindow, timer: &Rc<Timer>) {
-    let gamescope = match Gamescope::connect() {
-        Ok(gamescope) => gamescope,
-        Err(error) => {
-            warn!(%error, "gamescope control unavailable; gamescope may show nothing");
-            return;
-        }
-    };
+fn take_gamescope_screen(ui: &AppWindow, front: &Rc<SessionFront>, timer: &Rc<Timer>) {
     let ui = ui.as_weak();
+    let front = Rc::downgrade(front);
     let stop = Rc::downgrade(timer);
     timer.start(TimerMode::Repeated, Duration::from_millis(50), move || {
         let Some(window) = ui
@@ -891,13 +902,17 @@ fn take_gamescope_screen(ui: &AppWindow, timer: &Rc<Timer>) {
         else {
             return;
         };
-        match gamescope.show_horizon(window) {
-            Ok(()) => info!(
-                window,
-                app_id = gamescope::HORIZON_APP_ID,
-                "gamescope shows Horizon"
-            ),
-            Err(error) => warn!(%error, "couldn't make gamescope show Horizon"),
+        if let Some(front) = front.upgrade() {
+            match front.gamescope().show_horizon(window) {
+                Ok(()) => {
+                    info!(
+                        window,
+                        app_id = gamescope::HORIZON_APP_ID,
+                        "gamescope shows Horizon"
+                    )
+                }
+                Err(error) => warn!(%error, "couldn't make gamescope show Horizon"),
+            }
         }
         if let Some(timer) = stop.upgrade() {
             timer.stop();
