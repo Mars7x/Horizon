@@ -64,6 +64,17 @@ tag game windows itself. With no Wayland display exposed, Wayland-capable
 apps use X11 on their own. `flatpak-spawn --host` gives games the desktop's
 display, so in the session `platform::flatpak_host` must pass gamescope's.
 
+## Spike 3 result (2026-10-12)
+
+Flatpak Steam started `-silent` stays hidden and never sets the base layer.
+`steam://` launches reach it from gamescope and through OpenURI; Steam tags
+the game window, but the game is shown only once the base layer names it,
+and nothing is shown after it closes until the base layer is set back.
+Steam tags its own windows 769, so Horizon takes its own app ID (not 769)
+and drives the base layer itself: the game's ID when its window appears,
+its own when it closes, 769 to show Steam's login. The Guide button is
+still untested.
+
 ## Consequences
 
 - One codebase gives the desktop and the session the same pages.

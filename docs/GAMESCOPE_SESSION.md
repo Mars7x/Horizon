@@ -35,7 +35,8 @@ Horizon does not write its own compositor or display server.
    and Steam's in-game overlay work; Horizon is the only face. Heroic and
    Flatpak games launch as they do today (URI; `flatpak_host`).
    **Signing in:** if Steam isn't signed in, Horizon lets Steam's login
-   window come to the front once, then hides Steam again.
+   window come to the front once, then hides Steam again (base layer 769,
+   then back to Horizon's own ID; Spike 3).
 6. **Home mid-game opens a quick menu**: a side panel sliding in from the
    right over the dimmed game, like the Deck's quick access menu. It has:
    - Resume, and Quit game (asks first);
@@ -84,9 +85,10 @@ window properties, not Wayland:
 
 | Property | Where | Meaning |
 | --- | --- | --- |
-| `STEAM_GAME = 769` | Horizon's main window | The session's main app. Without a `STEAM_GAME`, gamescope may show nothing. |
-| `STEAM_GAME = <other>` | A game's window | Drawn over the main app; the main app returns when it closes. Steam sets its games' app ID. |
-| `GAMESCOPECTRL_BASELAYER_APPID` | Root window | Which app is in front; how the quick menu's "Home" and "Resume" switch. |
+| `STEAM_GAME = <Horizon's ID>` | Horizon's main window | Horizon's own app ID, not 769: 769 is Steam's, and Steam tags its own windows with it (Spike 3). An untagged window is never shown (Spikes 1, 2). |
+| `STEAM_GAME = 769` | Steam's windows | Set by Steam. Shown only while the base layer is 769, e.g. for Steam's login. |
+| `STEAM_GAME = <game>` | A game's window | Steam tags its games; Horizon tags Heroic and Flatpak games itself (Spike 2). |
+| `GAMESCOPECTRL_BASELAYER_APPID` | Root window | Which app is shown. Steam never sets it in this session; Horizon sets it to a game's ID when its window appears and back to its own ID when it closes. Nothing is shown while it names an app with no window (Spike 3). Also how the quick menu's "Home" and "Resume" switch. |
 | `STEAM_OVERLAY` / `GAMESCOPE_EXTERNAL_OVERLAY` | An overlay window | Drawn over the game (the quick menu). Little documented. |
 | `STEAM_INPUT_FOCUS` | — | Which window gets input while an overlay is up. |
 
@@ -190,6 +192,20 @@ build it:
    `GAMESCOPECTRL_BASELAYER_APPID` itself and fight Horizon? Who gets the
    Guide button in a Steam game: Steam's overlay or Horizon's quick menu?
    Can Steam's login window be brought forward, then hidden again?
+   **Result (main PC, Flatpak Steam 1.0.0.87, nested and embedded,
+   2026-10-12):** `steam -silent` stayed hidden (no window shown in 90 s;
+   Steam was already signed in, so no login or update window came up). Steam
+   never set `GAMESCOPECTRL_BASELAYER_APPID`. `steam://rungameid` reached the
+   hidden Steam both from gamescope and through the OpenURI portal
+   (Horizon's route); the game window opened in 6–10 s, tagged with its app
+   ID by Steam, and was shown only once the base layer named it. After the
+   game closed, nothing was shown until the base layer was set back to the
+   main app. Steam tags its own windows 769, so a main app tagged 769 lost
+   the screen to Steam's main window; with its own ID, base layer 769 brought
+   Steam's main window forward and the main app's ID hid it again, the
+   mechanism for signing in. A game closed cleanly on `WM_DELETE_WINDOW`.
+   **Still open:** the Guide button (not pressed in the run) and Steam's
+   login and update windows. Script: `scripts/spikes/gamescope-spike3.sh`.
 4. **Portals.** Which of OpenURI, FileChooser and Settings work in a bare
    gamescope session, and which backend (e.g. `xdg-desktop-portal-gtk`) the
    session must start.
