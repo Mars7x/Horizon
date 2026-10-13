@@ -24,7 +24,7 @@ The domain must not depend on Slint, SQLite, SDL, Flatpak, DBus, or source-speci
 - No source-specific branching outside source adapters/registries.
 - No hard-coded platform paths outside platform/source infrastructure.
 - No SQL in UI or presentation code.
-- No broad Flatpak permissions as a workaround for missing architecture. The Shop's host Flatpak access (ADR 0181), also used to run and watch Flatpak games (ADR 0183), is a deliberate, documented exception confined to `platform/flatpak_host.rs`.
+- No broad Flatpak permissions as a workaround for missing architecture. Horizon has no host command execution: the Shop's host Flatpak access (ADR 0181, 0183) was removed with the Shop and Flatpak games (2026-10-12).
 - No production `unwrap()` for recoverable failures.
 - Database schema changes use numbered migrations once persistence is introduced.
 - UI colors, spacing, typography, radii, and motion values come from the Phase 1 design system.
@@ -139,7 +139,7 @@ See ADR 0033.
 
 ## Phase 4.6 route-transition presentation boundary
 
-Route policy remains entirely in Rust. `NavigationController` publishes `AppRouteView`; Slint maps that presentation enum to retained `PageTransitionLayer` instances for Home, Library, and all five utility submenu routes. Home/Library retain the central shell bounds while every `UtilityPage` fills the logical surface. The layer owns only visual interpolation and pointer isolation during overlap. It cannot push/pop routes, alter focus memory, or change Back/Home/Menu behavior.
+Route policy remains entirely in Rust. `NavigationController` publishes `AppRouteView`; Slint maps that presentation enum to retained `PageTransitionLayer` instances for Home, Library, and all four utility submenu routes. Home/Library retain the central shell bounds while every `UtilityPage` fills the logical surface. The layer owns only visual interpolation and pointer isolation during overlap. It cannot push/pop routes, alter focus memory, or change Back/Home/Menu behavior.
 
 Route motion is limited to opacity plus a small vertical settle using `Metrics.page-transition-offset` and `Motion.page-duration`. The latter already resolves to zero through the appearance pipeline when the host requests Reduced Motion, so accessibility preference changes do not require a second navigation code path. Shell chrome is outside the transition contract and is suppressed for the lifetime of any utility submenu route.
 
@@ -224,7 +224,7 @@ Phase 9 expanded the concrete adapter set without changing the inward dependency
 
 - `src/sources/bottles.rs` owns Bottles `bottle.yml`/`External_Programs` details and the `bottles:` launch URI;
 - `src/sources/heroic.rs` owns Heroic/Legendary local metadata and the `heroic:` launch URI;
-- `src/sources/flatpak.rs` owns Flatpak export parsing and the game rules; it launches with `SourceLaunchTarget::FlatpakApp` and asks the host through the `FlatpakHost` trait, which `platform::flatpak_host` implements;
+- `src/sources/flatpak.rs` (removed 2026-10-12 with the Flatpak game source) owned Flatpak export parsing;
 - `src/sources/support.rs` contains only source-layer helpers shared by adapters, such as host XDG resolution and URI-component encoding;
 - startup registers every provider through `SourceRegistry`; `SourceImportService`, `LibraryService`, SQLite, Home, Activity, and the platform launcher remain unchanged and provider-neutral.
 

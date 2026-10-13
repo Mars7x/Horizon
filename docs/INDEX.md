@@ -17,10 +17,10 @@
 | Steam achievements and recent unlocks? | [Achievements](ACHIEVEMENTS.md) | `src/services/achievements.rs`, `src/presentation/achievements.rs` |
 | Screenshots, clips, video playback? | [Album](ALBUM.md) | `src/services/album/`, `src/presentation/album.rs`, `src/platform/video.rs`, `ui/pages/album.slint` |
 | External credentials or appearance? | [Settings](SETTINGS.md), [Appearance](APPEARANCE.md) | `src/services/steam_account.rs`, `src/presentation/settings.rs` |
-| Browsing and installing from Flathub? | [Shop](SHOP.md) | `src/services/flathub.rs`, `src/presentation/shop.rs`, `ui/pages/shop.slint` |
+| Browsing and installing from Flathub? | [Shop, retired](SHOP.md) | removed 2026-10-12 |
 | Typing with a controller or touch screen? | [On-screen keyboard](KEYBOARD.md) | `src/navigation/keyboard.rs`, `src/presentation/keyboard.rs`, `ui/components/on-screen-keyboard.slint` |
 | Profile name, picture and Steam friends? | [Profile](PROFILE.md) | `src/services/profile.rs`, `src/services/friends.rs`, `src/presentation/profile.rs`, `src/presentation/friends.rs`, `ui/pages/profile.slint` |
-| Imports and provider capabilities? | [Sources](SOURCES.md), [Steam](STEAM.md), [Heroic](HEROIC.md), [Flatpak games](FLATPAK_GAMES.md) | `src/sources/`, `src/services/import.rs`, `src/presentation/library_reload.rs` |
+| Imports and provider capabilities? | [Sources](SOURCES.md), [Steam](STEAM.md), [Heroic](HEROIC.md), [Flatpak games, retired](FLATPAK_GAMES.md) | `src/sources/`, `src/services/import.rs`, `src/presentation/library_reload.rs` |
 | Database or migrations? | [Database](DATABASE.md), [Domain](DOMAIN.md) | `src/persistence/`, `src/domain/` |
 | Where are files kept on disk? | [Files on disk](STORAGE.md) | `src/platform/data_paths.rs` |
 | Art, attribution, permission review? | [Artwork](ARTWORK.md), [Licensing](LICENSING.md) | `ui/assets/`, `REUSE.toml`, `THIRD_PARTY_NOTICES.md` |

@@ -17,7 +17,6 @@ use crate::domain::{
     DomainValidationError, ExternalGameId, GameTitle, PlaytimeSeconds, SourceId, album::MediaKind,
 };
 
-pub mod flatpak;
 pub mod heroic;
 pub mod steam;
 mod support;
@@ -67,9 +66,6 @@ impl SourceArtworkCandidate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceLaunchTarget {
     Uri(String),
-    /// `flatpak run` of this app ID on the host. Sources check the ID
-    /// (`flatpak::valid_app_id`); the launcher checks it again.
-    FlatpakApp(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -442,9 +438,6 @@ pub fn production_source_registry() -> Result<SourceRegistry, SourceRegistryBuil
     let mut registry = SourceRegistry::new();
     registry.register(steam::SteamSource::new()?)?;
     registry.register(heroic::HeroicSource::new()?)?;
-    registry.register(flatpak::FlatpakSource::new(std::sync::Arc::new(
-        crate::platform::flatpak_host::HostFlatpak,
-    ))?)?;
     Ok(registry)
 }
 
@@ -531,8 +524,8 @@ mod tests {
     fn production_registry_excludes_retired_lutris_source() {
         let registry = production_source_registry().expect("production registry");
 
-        assert_eq!(registry.len(), 3);
-        assert!(registry.get(&source_id("flatpak")).is_some());
+        assert_eq!(registry.len(), 2);
+        assert!(registry.get(&source_id("flatpak")).is_none());
         assert!(registry.get(&source_id("steam")).is_some());
         assert!(registry.get(&source_id("bottles")).is_none());
         assert!(registry.get(&source_id("heroic")).is_some());

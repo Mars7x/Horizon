@@ -22,7 +22,7 @@ If the exact asset license cannot be established, it must be marked as a release
 
 ## SVG artwork
 
-The top-utility icons for Album, Activity, Achievements, Settings, and Shop are Horizon-owned artwork. The original set was supplied by the project owner; the icons were redrawn at the owner's request in the same style (ADR 0182). None of it is third-party artwork. They are stored as SVG files in `ui/assets/` and rendered directly by Slint. Their authored paths, fills, strokes, filters, and colors are not transcribed or recolored at runtime.
+The top-utility icons for Album, Activity, Achievements and Settings are Horizon-owned artwork (the Shop's was removed with the Shop). The original set was supplied by the project owner; the icons were redrawn at the owner's request in the same style (ADR 0182). None of it is third-party artwork. They are stored as SVG files in `ui/assets/` and rendered directly by Slint. Their authored paths, fills, strokes, filters, and colors are not transcribed or recolored at runtime.
 
 The application icon at `data/io.github.Mars7x.Horizon.svg` is also Horizon-owned artwork supplied by the project owner and is covered by the project-owned REUSE annotation.
 

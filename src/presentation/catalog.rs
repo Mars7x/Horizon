@@ -2,9 +2,8 @@
 //! indices never change while Horizon runs.
 //!
 //! Every page keys its cards, artwork and Playing state by catalog index, so
-//! a library reload (after a Shop install, say) must not move a game. New
-//! games are appended; a game that's gone keeps its slot, marked absent, and
-//! every page skips it.
+//! a library reload must not move a game. New games are appended; a game
+//! that's gone keeps its slot, marked absent, and every page skips it.
 
 use std::{cell::RefCell, ops::Index, rc::Rc};
 

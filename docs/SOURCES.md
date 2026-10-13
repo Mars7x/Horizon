@@ -1,6 +1,6 @@
 # Source framework
 
-Phase 6 defined the provider boundary that launcher adapters plug into. Phase 7 exercised it with Steam; Phase 9 expanded the same unchanged generic contracts to additional providers. The current production set is Steam, Heroic and Flatpak ([Flatpak games](FLATPAK_GAMES.md)). Historical Bottles support was retired in Phase 9.5.44.43.
+Phase 6 defined the provider boundary that launcher adapters plug into. Phase 7 exercised it with Steam; Phase 9 expanded the same unchanged generic contracts to additional providers. The current production set is Steam and Heroic; Flatpak games ([Flatpak games](FLATPAK_GAMES.md)) were retired on 2026-10-12 (migration 0008). Historical Bottles support was retired in Phase 9.5.44.43.
 
 ## Boundary
 

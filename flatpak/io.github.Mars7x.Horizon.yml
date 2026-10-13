@@ -16,9 +16,8 @@ build-options:
 finish-args:
   - --require-version=1.16.0
   - --share=ipc
-  # Optional SteamGridDB API metadata and artwork downloads, Steam Web API
-  # requests, and the Shop's Flathub catalogue (flathub.org, dl.flathub.org).
-  # Flatpak cannot restrict --share=network to a single host.
+  # Optional SteamGridDB API metadata and artwork downloads and Steam Web API
+  # requests. Flatpak cannot restrict --share=network to a single host.
   - --share=network
   - --socket=wayland
   # All sound (UI sounds and Album video) is a native PipeWire stream:
@@ -31,13 +30,6 @@ finish-args:
   # Horizon needs evdev/input access for controller navigation.
   # Do not broaden this to --device=all.
   - --device=input
-  # The Shop installs, updates, uninstalls and opens Flathub apps with the
-  # host's `flatpak` through `flatpak-spawn --host` (ADR 0181), and Flatpak
-  # games are started (`flatpak run`) and watched (`flatpak ps`) the same
-  # way (ADR 0183). This is host command execution: Horizon only ever runs
-  # the fixed `flatpak` subcommands in src/platform/flatpak_host.rs, with a
-  # checked app ID.
-  - --talk-name=org.freedesktop.Flatpak
   # Read-only status queries over the host system bus: active Ethernet/Wi-Fi
   # connection and signal strength, plus host laptop/handheld battery level.
   # NetworkManager/UPower retain their usual polkit restrictions for writes.
@@ -72,14 +64,6 @@ finish-args:
   # the standard native path, not the host state directory as a whole.
   - --filesystem=~/.local/state/Heroic/logs:ro
   - --filesystem=~/.var/app/com.heroicgameslauncher.hgl:ro
-  # Flatpak games (ADR 0183): the exported desktop entries and icons of the
-  # user and system installations, read-only. Exported files are links into
-  # each installation's app folder, so that is read-only too. Launching and
-  # noticing a running game use the host `flatpak` (run, ps) above.
-  - --filesystem=xdg-data/flatpak/exports:ro
-  - --filesystem=xdg-data/flatpak/app:ro
-  - --filesystem=/var/lib/flatpak/exports:ro
-  - --filesystem=/var/lib/flatpak/app:ro
 
 modules:
   # Install the four canonical Google Fonts LINE Seed JP TTFs from one immutable

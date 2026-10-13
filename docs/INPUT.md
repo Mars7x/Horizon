@@ -98,7 +98,7 @@ The Rust `NavigationController` remains above page controllers while `AppWindow`
 - Accept is recognized but intentionally does not launch anything yet
 - Back is interpreted at the navigation layer and restores route history when available
 - Home resets route history to the Home root
-- Library, Activity, Achievements, Album and Settings have page-local controllers (see their feature guides); Profile's is in [PROFILE.md](PROFILE.md); Shop has no page-local navigation policy
+- Library, Activity, Achievements, Album and Settings have page-local controllers (see their feature guides); Profile's is in [PROFILE.md](PROFILE.md); the Shop is gone
 - Up / Down / Menu / bumpers remain semantic and gain additional screen-level behavior in later Phase 4 passes
 
 The input adapters themselves are unchanged: they never inspect or choose application routes. See `NAVIGATION.md`.
@@ -165,7 +165,7 @@ Canonical mappings:
 | Home | Home key | Guide |
 | Forward | (mouse forward button) | — |
 
-The adapters only produce `UiAction`; `NavigationController` owns meaning. Back closes the global shell Menu when open, then falls through to normal route history. All five top utilities are real routed submenu destinations, so there is no separate utility-overlay modal priority. Menu toggles Horizon's shell Menu without mutating route history. Home closes the shell Menu and resets navigation to Home content focus with the first Home game selected. Unit tests cover both keyboard and SDL mappings so the two input paths cannot silently drift.
+The adapters only produce `UiAction`; `NavigationController` owns meaning. Back closes the global shell Menu when open, then falls through to normal route history. All four top utilities are real routed submenu destinations, so there is no separate utility-overlay modal priority. Menu toggles Horizon's shell Menu without mutating route history. Home closes the shell Menu and resets navigation to Home content focus with the first Home game selected. Unit tests cover both keyboard and SDL mappings so the two input paths cannot silently drift.
 
 
 

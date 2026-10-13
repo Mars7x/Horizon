@@ -503,7 +503,7 @@ outline-only focus treatment as Settings (rounded to each icon's geometry).
 Directional repeat NEVER wraps. A new discrete Left/Right press when already
 at the game row boundary MAY wrap to the opposite end; the same press that
 reaches an edge does not wrap. The header row never wraps (since ADR 0178's
-follow-up): the avatar is its left end and Shop its right end. Keyboard, controller D-pad and analog share
+follow-up): the avatar is its left end and Settings its right end. Keyboard, controller D-pad and analog share
 one Rust policy. See ADR 0117.
 
 

@@ -12,14 +12,14 @@ This page describes the **prepared source** assembled from the cleaned repositor
 - **Achievements:** fourth Home utility, after Activity; read-only Steam Web API achievement unlock states for eligible imported Steam games; list browsing and recent-unlocks preview. Now has source-aware game/achievement models, optional bounded Steam badge thumbnails, and a source selector; no other achievement provider, full offline cache, or comprehensive account sign-in flow yet.
 - **Settings:** appearance and third-party service configuration, including SteamGridDB and **Steam Account** under Third-Party. SteamID64 + personal Web API key can be stored in an app-private file with owner-only permissions; not encrypted or OAuth.
 - **Album:** Horizon's own captures (`data/album/`, written by the future screenshot/recording features) and the active Steam account's screenshots, newest first, in a grid with Game and Type filters. A full-screen viewer slides between captures and plays videos with FFmpeg, sound through PipeWire. See [Album](ALBUM.md).
-- **Shop:** browses and searches Flathub (games first) with a controller, and installs, updates and uninstalls apps through the host's Flatpak; an Installed category manages what's on the machine (ADR 0181, [Shop](SHOP.md)). There is no Web utility (ADR 0174) and no Friends utility: a read-only Steam friends list is on the Profile page (ADR 0178).
+- There is no Shop (removed 2026-10-12; ADR 0181 superseded), no Web utility (ADR 0174) and no Friends utility: a read-only Steam friends list is on the Profile page (ADR 0178).
 
 ## Production source and data boundaries
 
-- Production game sources: **Steam**, **Heroic** and **Flatpak** (installed Flatpaks in the Game category, ADR 0183, [Flatpak games](FLATPAK_GAMES.md)). Lutris and Bottles were retired; keep their existing removal migrations.
-- The library is read at startup and again after every successful Shop job (`LibraryReloader`); Home, Library and Activity share one append-only `Catalog` whose indices never move during a run.
+- Production game sources: **Steam** and **Heroic**. Lutris, Bottles and Flatpak games (2026-10-12, migration 0008) were retired; keep their existing removal migrations.
+- The library is read at startup (`LibraryReloader` can read it again but nothing triggers it since the Shop was removed); Home, Library and Activity share one append-only `Catalog` whose indices never move during a run.
 - Steam local game discovery and source-reported lifetime playtime are separate from opt-in **Steam Web API** achievement retrieval.
-- Existing SQLite schema through migration **0007**. Observed sessions and source lifetime are distinct; never add them together. Historic activity can remain after a game is no longer imported.
+- Existing SQLite schema through migration **0008**. Observed sessions and source lifetime are distinct; never add them together. Historic activity can remain after a game is no longer imported.
 - Artwork may come from source adapters or the optional SteamGridDB integration. Preserve local user choices and provenance.
 - Routing, focus decisions and semantic controller input are Rust-owned. Slint is presentation only.
 - Button glyphs follow the keyboard or controller used last (Xbox, PlayStation, Nintendo, Steam Deck); Nintendo pads confirm with A on the right, and Q/E are the keyboard's bumpers (ADR 0185, [Input](INPUT.md)).

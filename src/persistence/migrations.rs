@@ -44,9 +44,14 @@ const MIGRATIONS: &[Migration] = &[
         name: "remove_bottles_source",
         sql: include_str!("migrations/0007_remove_bottles_source.sql"),
     },
+    Migration {
+        version: 8,
+        name: "remove_flatpak_source",
+        sql: include_str!("migrations/0008_remove_flatpak_source.sql"),
+    },
 ];
 
-pub(crate) const LATEST_SCHEMA_VERSION: i64 = 7;
+pub(crate) const LATEST_SCHEMA_VERSION: i64 = 8;
 
 const MIGRATION_LEDGER_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -131,6 +136,54 @@ mod tests {
         assert_eq!(
             current_schema_version(&connection).expect("schema version"),
             LATEST_SCHEMA_VERSION
+        );
+    }
+
+    #[test]
+    fn retiring_flatpak_keeps_played_games_and_other_sources() {
+        let mut connection = Connection::open_in_memory().expect("in-memory database");
+        migrate(&mut connection).expect("migrate");
+        connection
+            .execute_batch(
+                r#"
+                INSERT INTO games(id, title, created_at, updated_at) VALUES
+                    (1, 'Unplayed Flatpak', 0, 0),
+                    (2, 'Played Flatpak', 0, 0),
+                    (3, 'Steam Game', 0, 0);
+                INSERT INTO game_sources(game_id, source_id, external_id, first_seen_at, last_seen_at) VALUES
+                    (1, 'flatpak', 'org.example.One', 0, 0),
+                    (2, 'flatpak', 'org.example.Two', 0, 0),
+                    (3, 'steam', '70', 0, 0);
+                INSERT INTO play_sessions(
+                    id, game_id, source_id, started_at, ended_at, tracking_method, state, checkpoint_at
+                ) VALUES (1, 2, 'flatpak', 10, 20, 'source_runtime', 'completed', 20);
+                "#,
+            )
+            .expect("seed");
+
+        connection
+            .execute_batch(include_str!("migrations/0008_remove_flatpak_source.sql"))
+            .expect("retire flatpak");
+
+        let count = |sql: &str| {
+            connection
+                .query_row(sql, [], |row| row.get::<_, i64>(0))
+                .expect("count")
+        };
+        assert_eq!(count("SELECT COUNT(*) FROM games WHERE id = 1"), 0);
+        assert_eq!(count("SELECT COUNT(*) FROM games WHERE id = 2"), 1);
+        assert_eq!(count("SELECT COUNT(*) FROM games WHERE id = 3"), 1);
+        assert_eq!(
+            count("SELECT COUNT(*) FROM game_sources WHERE source_id = 'flatpak'"),
+            0
+        );
+        assert_eq!(
+            count("SELECT COUNT(*) FROM game_sources WHERE source_id = 'steam'"),
+            1
+        );
+        assert_eq!(
+            count("SELECT COUNT(*) FROM play_sessions WHERE game_id = 2"),
+            1
         );
     }
 

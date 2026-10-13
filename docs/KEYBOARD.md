@@ -4,7 +4,7 @@ Horizon draws its own keyboard for typing with a controller or a touch screen (A
 
 ## When it appears
 
-- A text editor opens (the Settings key and Steam ID editor, the Profile name editor, the Shop's search) and the last input was a **controller** or a **touch screen**. A physical keyboard or a mouse doesn't bring it up.
+- A text editor opens (the Settings key and Steam ID editor, the Profile name editor) and the last input was a **controller** or a **touch screen**. A physical keyboard or a mouse doesn't bring it up.
 - **A on the text field** brings it back after it was closed.
 - The field's **keyboard button** (right of the text) brings it up by pointer. Under gamescope a touch screen can arrive as a mouse, so this button, not touch detection, is what guarantees a touch user can always get the keyboard.
 
