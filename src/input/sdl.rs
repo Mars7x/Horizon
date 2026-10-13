@@ -651,8 +651,7 @@ fn poll_gamepad_events(
             }
             // SDL turns SIGTERM and SIGINT into this; Horizon has no SDL
             // windows, so nothing else sends it. Stop the way closing the
-            // window would, also while a game is in front (the session's
-            // host script stops Horizon this way).
+            // window would, also while a game is in front.
             Event::Quit { .. } => {
                 info!("asked to quit");
                 if let Err(error) = slint::quit_event_loop() {

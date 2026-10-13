@@ -1,6 +1,0 @@
-# gamescope-session-plus session for Horizon (ADR 0189,
-# docs/GAMESCOPE_SESSION.md). Installed as
-# /usr/share/gamescope-session-plus/sessions.d/horizon and sourced by
-# gamescope-session-plus, which starts gamescope (--steam) and then runs
-# CLIENTCMD as its main app.
-CLIENTCMD="/usr/libexec/horizon-gamescope-session"

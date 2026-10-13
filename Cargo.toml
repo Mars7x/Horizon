@@ -23,7 +23,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
 zbus = "5.19"
-slint = { version = "~1.18", default-features = false, features = ["compat-1-18", "std", "backend-winit-wayland", "backend-winit-x11", "renderer-skia", "unstable-winit-030"] }
+slint = { version = "~1.18", default-features = false, features = ["compat-1-18", "std", "backend-winit-wayland", "renderer-skia", "unstable-winit-030"] }
 smithay-clipboard = "0.7.3"
 sdl3 = { version = "0.20", default-features = false, features = ["use-pkg-config"] }
 steam-vdf-parser = "0.1.2"
@@ -32,9 +32,6 @@ tokio = { version = "1", features = ["macros", "rt", "sync"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 jxl-oxide = { version = "0.12.6", default-features = false, features = ["image"] }
-# gamescope control in the session (platform::gamescope, ADR 0189): X11
-# window properties. Already in the build through winit's X11 backend.
-x11rb = "0.13.2"
 
 [build-dependencies]
 cc = "1"

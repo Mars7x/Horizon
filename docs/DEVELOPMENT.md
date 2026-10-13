@@ -39,15 +39,6 @@ flatpak list --runtime --columns=application,arch,branch
 
 Look for `aarch64` on that machine. Download failures such as `Could not resolve hostname` or `Timeout was reached` are network/Flathub issues, not evidence of a Rust build failure. Retry once connectivity is restored. If SDK installation succeeds but compilation fails, capture the **first compiler error** and the source line, not only Builder's final failure summary.
 
-## Trying the gamescope session
-
-`scripts/session-dev.sh` starts Horizon's gamescope session on a machine
-without gamescope-session-plus (needs gamescope on the host). Log out of the
-desktop, log in on a text console, and run it there; `--dev` uses this
-checkout's debug build (built in the 26.08 SDK as above, with SDL3 on
-`LD_LIBRARY_PATH`), and `bash scripts/session-dev.sh --stop` from another
-console ends it. See [GAMESCOPE_SESSION.md](GAMESCOPE_SESSION.md).
-
 ## Architecture-sensitive testing
 
 - **Rust/controller/navigation changes:** test Home/Back history, repeated D-pad/analog input, disconnected/reconnected controllers, pointer vs Accept parity, rapid route changes and page focus restoration.
