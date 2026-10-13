@@ -33,7 +33,6 @@ use crate::{
         artwork::{ArtworkService, SquareArtwork},
         launch::{GameLaunchMode, GameLaunchService},
         runtime::{RuntimeObservationEvent, RuntimeObservationId},
-        session::ManagedSessionId,
         settings::ArtworkPreferences,
         steamgriddb::SteamGridDbLookup,
         steamgriddb_artwork::{self, ArtworkLookupJob, ArtworkWorkerEvent},
@@ -84,22 +83,20 @@ enum LaunchFeedbackState {
         index: i32,
     },
     // Dispatch is not a confirmed running process. Keep this transient state
-    // separate from the per-card runtime/managed lifecycle badge.
-    Dispatched {
-        managed_session: Option<ManagedSessionId>,
-    },
+    // separate from the per-card runtime lifecycle badge.
+    Dispatched,
     Failed,
 }
 
 impl LaunchFeedbackState {
     fn handoff_pending(self) -> bool {
-        matches!(self, Self::Launching { .. } | Self::Dispatched { .. })
+        matches!(self, Self::Launching { .. } | Self::Dispatched)
     }
 
     fn status_text(self) -> &'static str {
         match self {
             Self::Failed => "Launch failed",
-            Self::Idle | Self::Launching { .. } | Self::Dispatched { .. } => "",
+            Self::Idle | Self::Launching { .. } | Self::Dispatched => "",
         }
     }
 }
@@ -111,7 +108,6 @@ impl LaunchFeedbackState {
 struct PlayingState {
     pending_runtime: BTreeMap<RuntimeObservationId, i32>,
     running_runtime: BTreeMap<RuntimeObservationId, i32>,
-    managed: BTreeMap<ManagedSessionId, i32>,
 }
 
 impl PlayingState {
@@ -133,19 +129,10 @@ impl PlayingState {
         }
     }
 
-    fn managed_started(&mut self, session_id: ManagedSessionId, index: i32) {
-        self.managed.insert(session_id, index);
-    }
-
-    fn managed_ended(&mut self, session_id: ManagedSessionId) -> Option<i32> {
-        self.managed.remove(&session_id)
-    }
-
     fn is_playing(&self, index: i32) -> bool {
         self.running_runtime
             .values()
             .any(|running| *running == index)
-            || self.managed.values().any(|running| *running == index)
     }
 }
 
@@ -557,40 +544,6 @@ impl HomeController {
         }
     }
 
-    /// Resolve launch feedback for a managed session that terminates before or
-    /// after the normal foreground handoff. The managed session itself remains
-    /// owned by the launch/activity services; Home only owns transient feedback.
-    pub fn handle_managed_session_completion(
-        &self,
-        ui: &AppWindow,
-        session_id: ManagedSessionId,
-        failed: bool,
-    ) {
-        let ended_index = self.playing.borrow_mut().managed_ended(session_id);
-        if let Some(index) = ended_index {
-            self.refresh_playing_card(index);
-        }
-        let matches_session = matches!(
-            *self.launch_feedback.borrow(),
-            LaunchFeedbackState::Dispatched {
-                managed_session: Some(current),
-                ..
-            } if current == session_id
-        );
-        if !matches_session {
-            return;
-        }
-
-        self.set_launch_feedback(
-            ui,
-            if failed {
-                LaunchFeedbackState::Failed
-            } else {
-                LaunchFeedbackState::Idle
-            },
-        );
-    }
-
     /// Consume the same lifecycle events used by Activity, including terminal
     /// errors/loss. The UI does not infer running status from focus or a URI.
     pub fn handle_runtime_observation_event(&self, event: &RuntimeObservationEvent) {
@@ -706,7 +659,7 @@ impl HomeController {
 
         match self.launch_service.launch_game(game) {
             Ok(receipt) => {
-                let managed_session = match receipt.mode() {
+                match receipt.mode() {
                     GameLaunchMode::External => {
                         self.launch_activity
                             .launch_dispatched(game.game().id(), receipt.source_id().clone());
@@ -716,7 +669,6 @@ impl HomeController {
                             source = %receipt.source_id(),
                             "external game launch dispatched; waiting for foreground handoff"
                         );
-                        None
                     }
                     GameLaunchMode::Observed(observation_id) => {
                         self.playing.borrow_mut().arm_runtime(observation_id, index);
@@ -732,29 +684,11 @@ impl HomeController {
                             observation_id = observation_id.get(),
                             "external game launch dispatched with source runtime observation"
                         );
-                        None
                     }
-                    GameLaunchMode::Managed(session_id) => {
-                        self.playing.borrow_mut().managed_started(session_id, index);
-                        self.refresh_playing_card(index);
-                        self.launch_activity.managed_session_started(
-                            session_id,
-                            game.game().id(),
-                            receipt.source_id().clone(),
-                        );
-                        debug!(
-                            game_id = game.game().id().get(),
-                            title = %game.game().title().as_str(),
-                            source = %receipt.source_id(),
-                            session_id = session_id.get(),
-                            "managed game session started"
-                        );
-                        Some(session_id)
-                    }
-                };
+                }
                 // Handoff/press feedback stays transient; source-confirmed
-                // runtime and managed lifecycles drive per-card Playing.
-                self.set_launch_feedback(ui, LaunchFeedbackState::Dispatched { managed_session });
+                // runtime lifecycles drive per-card Playing.
+                self.set_launch_feedback(ui, LaunchFeedbackState::Dispatched);
                 self.schedule_press_release(ui);
             }
             Err(error) => {
@@ -777,7 +711,7 @@ impl HomeController {
                     .set(self.press_generation.get().wrapping_add(1));
                 ui.set_launching_game_index(index);
             }
-            LaunchFeedbackState::Dispatched { .. } => {
+            LaunchFeedbackState::Dispatched => {
                 // Keep the short press held until the release timer fires.
             }
             LaunchFeedbackState::Idle | LaunchFeedbackState::Failed => {
@@ -1048,7 +982,6 @@ mod tests {
             })
             .collect()
     }
-    use crate::services::session::ManagedSessionId;
 
     #[test]
     fn artwork_precedence_skips_external_when_source_present_by_default() {
@@ -1071,9 +1004,7 @@ mod tests {
         assert!(launching.handoff_pending());
         assert_eq!(launching.status_text(), "");
 
-        let dispatched = LaunchFeedbackState::Dispatched {
-            managed_session: None,
-        };
+        let dispatched = LaunchFeedbackState::Dispatched;
         assert!(dispatched.handoff_pending());
         assert_eq!(dispatched.status_text(), "");
 
@@ -1126,20 +1057,6 @@ mod tests {
             terminal: RuntimeObservationTerminalState::Lost,
         });
         assert!(state.is_playing(4));
-    }
-
-    #[test]
-    fn managed_session_badge_is_cleared_by_matching_completion_only() {
-        let mut badge = PlayingState::default();
-        let first = ManagedSessionId::new(3).unwrap();
-        let second = ManagedSessionId::new(4).unwrap();
-        badge.managed_started(first, 2);
-        badge.managed_started(second, 5);
-        assert!(badge.is_playing(2));
-        assert!(badge.is_playing(5));
-        assert_eq!(badge.managed_ended(first), Some(2));
-        assert!(!badge.is_playing(2));
-        assert!(badge.is_playing(5));
     }
 
     #[test]

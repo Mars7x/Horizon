@@ -1,3 +1,8 @@
+> **Retired (2026-10-12):** the managed-session helper (`horizon-session-helper`,
+> `io.github.Mars7x.Horizon.Session1`) and all managed-session code were removed
+> when Horizon moved to embedded emulator cores. Kept as history; ADR 0046 is
+> superseded.
+
 > **Current support (Phase 9.5.44.43):** Bottles has been retired as a source.
 > The historical Bottles managed-session design below is retained for context;
 > neither the normal app nor the host helper registers Bottles anymore.

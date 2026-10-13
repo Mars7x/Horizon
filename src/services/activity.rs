@@ -1,16 +1,14 @@
 use std::{cell::RefCell, collections::BTreeMap, error::Error, rc::Rc};
 
 use chrono::{Datelike, Duration as ChronoDuration, Local, TimeZone, Utc};
-use tracing::warn;
 
 use crate::{
     domain::{
         GameId, GameTitle, PlaySession, PlaySessionId, PlaytimeSeconds, SessionTrackingMethod,
         SourceId, SourceLifetimePlaytime,
     },
-    services::{
-        runtime::{RuntimeObservationEvent, RuntimeObservationId, RuntimeObservationTerminalState},
-        session::{ManagedSessionId, ManagedSessionTerminalState},
+    services::runtime::{
+        RuntimeObservationEvent, RuntimeObservationId, RuntimeObservationTerminalState,
     },
 };
 
@@ -341,19 +339,13 @@ impl ActivitySessionTransition {
 /// Small source-neutral hook used by Home after a launch path is selected.
 ///
 /// Home does not know how activity persistence works. The sink records which
-/// observation model owns the launch: foreground handoff, source runtime, or a
-/// managed session. Provider-specific lifecycle details never enter Home.
+/// observation model owns the launch: foreground handoff or source runtime.
+/// Provider-specific lifecycle details never enter Home.
 pub trait LaunchActivitySink {
     fn launch_dispatched(&self, game_id: GameId, source_id: SourceId);
     fn runtime_observation_armed(
         &self,
         observation_id: RuntimeObservationId,
-        game_id: GameId,
-        source_id: SourceId,
-    );
-    fn managed_session_started(
-        &self,
-        managed_session_id: ManagedSessionId,
         game_id: GameId,
         source_id: SourceId,
     );
@@ -378,7 +370,6 @@ pub struct ActivityService<R> {
     active_session: RefCell<Option<ForegroundSession>>,
     foreground_return: RefCell<Option<ForegroundReturnCandidate>>,
     runtime_observations: RefCell<BTreeMap<RuntimeObservationId, RuntimeActivity>>,
-    managed_sessions: RefCell<BTreeMap<ManagedSessionId, PlaySessionId>>,
 }
 
 impl<R> ActivityService<R>
@@ -392,7 +383,6 @@ where
             active_session: RefCell::new(None),
             foreground_return: RefCell::new(None),
             runtime_observations: RefCell::new(BTreeMap::new()),
-            managed_sessions: RefCell::new(BTreeMap::new()),
         }
     }
 
@@ -401,7 +391,6 @@ where
         self.active_session.borrow_mut().take();
         self.foreground_return.borrow_mut().take();
         self.runtime_observations.borrow_mut().clear();
-        self.managed_sessions.borrow_mut().clear();
         self.repository.borrow_mut().interrupt_open_play_sessions()
     }
 
@@ -628,70 +617,8 @@ where
         result
     }
 
-    pub fn handle_managed_session_terminal(
-        &self,
-        managed_session_id: ManagedSessionId,
-        terminal: &ManagedSessionTerminalState,
-    ) -> Result<ActivitySessionTransition, R::Error> {
-        let Some(play_session_id) = self
-            .managed_sessions
-            .borrow_mut()
-            .remove(&managed_session_id)
-        else {
-            return Ok(ActivitySessionTransition::None);
-        };
-
-        let result = match terminal {
-            ManagedSessionTerminalState::Exited { .. } => self
-                .repository
-                .borrow_mut()
-                .complete_play_session(play_session_id, Utc::now().timestamp())
-                .map(|()| ActivitySessionTransition::Completed(play_session_id)),
-            ManagedSessionTerminalState::Failed { .. } | ManagedSessionTerminalState::Lost => self
-                .repository
-                .borrow_mut()
-                .interrupt_play_session(play_session_id)
-                .map(|()| ActivitySessionTransition::Interrupted(play_session_id)),
-        };
-
-        if result.is_err() {
-            self.managed_sessions
-                .borrow_mut()
-                .insert(managed_session_id, play_session_id);
-        }
-        result
-    }
-
-    fn begin_managed_session_at(
-        &self,
-        managed_session_id: ManagedSessionId,
-        game_id: GameId,
-        source_id: &SourceId,
-        now: i64,
-    ) -> Result<PlaySessionId, R::Error> {
-        if let Some(existing) = self
-            .managed_sessions
-            .borrow()
-            .get(&managed_session_id)
-            .copied()
-        {
-            return Ok(existing);
-        }
-
-        let play_session_id = self.repository.borrow_mut().begin_play_session(
-            game_id,
-            source_id,
-            now,
-            SessionTrackingMethod::ManagedSession,
-        )?;
-        self.managed_sessions
-            .borrow_mut()
-            .insert(managed_session_id, play_session_id);
-        Ok(play_session_id)
-    }
-
     pub fn has_live_session(&self) -> bool {
-        if self.active_session.borrow().is_some() || !self.managed_sessions.borrow().is_empty() {
+        if self.active_session.borrow().is_some() {
             return true;
         }
 
@@ -802,29 +729,6 @@ where
                 play_session_id: None,
             },
         );
-    }
-
-    fn managed_session_started(
-        &self,
-        managed_session_id: ManagedSessionId,
-        game_id: GameId,
-        source_id: SourceId,
-    ) {
-        self.pending_launch.borrow_mut().take();
-        if let Err(error) = self.begin_managed_session_at(
-            managed_session_id,
-            game_id,
-            &source_id,
-            Utc::now().timestamp(),
-        ) {
-            warn!(
-                session_id = managed_session_id.get(),
-                game_id = game_id.get(),
-                source = %source_id,
-                %error,
-                "managed activity session could not be persisted"
-            );
-        }
     }
 
     fn cancel_pending_launch(&self) {
@@ -1208,74 +1112,6 @@ mod tests {
             repository.sessions[0].duration().expect("duration").get(),
             45
         );
-    }
-
-    #[test]
-    fn managed_session_uses_managed_tracking_and_ignores_window_focus_changes() {
-        let repository = Rc::new(RefCell::new(FakeRepository::default()));
-        let service = ActivityService::new(Rc::clone(&repository));
-        let managed_id = ManagedSessionId::new(7).expect("managed session id");
-        let bottles = SourceId::new("bottles").expect("source id");
-
-        service.managed_session_started(managed_id, game_id(), bottles);
-        assert_eq!(repository.borrow().sessions.len(), 1);
-        assert_eq!(
-            repository.borrow().sessions[0].tracking_method(),
-            SessionTrackingMethod::ManagedSession
-        );
-
-        assert_eq!(
-            service
-                .handle_application_active_changed_at_millis(false, 100_000)
-                .expect("inactive"),
-            ActivitySessionTransition::None
-        );
-        assert_eq!(
-            service
-                .handle_application_active_changed_at_millis(true, 200_000)
-                .expect("active"),
-            ActivitySessionTransition::None
-        );
-        assert_eq!(
-            repository.borrow().sessions[0].state(),
-            PlaySessionState::Open
-        );
-
-        assert!(matches!(
-            service
-                .handle_managed_session_terminal(
-                    managed_id,
-                    &ManagedSessionTerminalState::Exited { exit_code: Some(0) },
-                )
-                .expect("managed completion"),
-            ActivitySessionTransition::Completed(_)
-        ));
-        assert_eq!(
-            repository.borrow().sessions[0].state(),
-            PlaySessionState::Completed
-        );
-    }
-
-    #[test]
-    fn lost_managed_session_is_interrupted_without_inventing_duration() {
-        let repository = Rc::new(RefCell::new(FakeRepository::default()));
-        let service = ActivityService::new(Rc::clone(&repository));
-        let managed_id = ManagedSessionId::new(8).expect("managed session id");
-
-        service.managed_session_started(managed_id, game_id(), source_id());
-        assert!(matches!(
-            service
-                .handle_managed_session_terminal(managed_id, &ManagedSessionTerminalState::Lost,)
-                .expect("managed interruption"),
-            ActivitySessionTransition::Interrupted(_)
-        ));
-
-        let repository = repository.borrow();
-        assert_eq!(
-            repository.sessions[0].state(),
-            PlaySessionState::Interrupted
-        );
-        assert_eq!(repository.sessions[0].duration(), None);
     }
 
     #[test]

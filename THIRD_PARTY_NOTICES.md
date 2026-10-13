@@ -153,8 +153,7 @@ The existing Apache-2.0 and MIT license texts cover these dual-licensed dependen
 - **zbus 5.x**
   - Upstream: https://github.com/z-galaxy/zbus
   - License: MIT
-  - Use in Horizon: narrow user-session D-Bus transport between the Flatpak and
-    the optional same-user `horizon-session-helper`.
+  - Use in Horizon: read-only system-bus status queries (network, battery).
   - Modification: none; consumed as a Cargo dependency.
 
 The existing MIT license text is included as `LICENSES/MIT.txt`.

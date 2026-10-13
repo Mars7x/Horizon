@@ -203,6 +203,8 @@ Do not merge these into one input/session state machine. Activity tracking must 
 
 ## Phase 9.5 managed-session input ownership
 
+> **Retired (2026-10-12):** the managed-session helper was removed (ADR 0046 superseded).
+
 Managed Gamescope sessions do not introduce a second controller-routing path. Horizon still consumes SDL navigation only while its own window is active. When Gamescope/the game owns foreground activation, Horizon suppresses semantic controller actions exactly as it does for an external launch. Bringing Horizon intentionally back to the foreground restores Horizon UI input even if the managed session is still running.
 
 Session lifecycle and input ownership remain independent: the host helper reports managed-session state to the launch/activity services, while `InputManager` continues to depend only on Horizon window activation.

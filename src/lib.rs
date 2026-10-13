@@ -11,5 +11,4 @@ pub mod persistence;
 pub mod platform;
 pub mod presentation;
 pub mod services;
-pub mod session_helper;
 pub mod sources;

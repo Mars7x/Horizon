@@ -50,6 +50,8 @@ The initial `ForegroundHandoff` tracking method is explicitly approximate. Its s
 
 ## Managed session tracking method
 
+> **Retired (2026-10-12):** the managed-session helper was removed (ADR 0046 superseded). The variant stays so stored `managed_session` history keeps loading; nothing creates it any more.
+
 `SessionTrackingMethod::ManagedSession` represents an activity interval whose
 lifecycle comes from Horizon's managed-session broker/Gamescope child rather
 than application focus.

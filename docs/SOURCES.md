@@ -100,6 +100,8 @@ The same authoritative-membership contract from ADR 0042 applies. A provider may
 
 ## Phase 9.5 managed-session capability
 
+> **Retired (2026-10-12):** the managed-session helper was removed (ADR 0046 superseded). `SourceCapability::ManagedSession` and `SourceManagedLaunchTarget` no longer exist.
+
 Normal provider launch and managed session launch are separate capabilities.
 
 ```text

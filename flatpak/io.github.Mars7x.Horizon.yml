@@ -31,10 +31,6 @@ finish-args:
   # Horizon needs evdev/input access for controller navigation.
   # Do not broaden this to --device=all.
   - --device=input
-  # Optional host-side managed-session broker. This grants access only to
-  # Horizon's narrow session D-Bus API; it does not expose flatpak-spawn or
-  # arbitrary host command execution.
-  - --talk-name=io.github.Mars7x.Horizon.Session1
   # The Shop installs, updates, uninstalls and opens Flathub apps with the
   # host's `flatpak` through `flatpak-spawn --host` (ADR 0181), and Flatpak
   # games are started (`flatpak run`) and watched (`flatpak ps`) the same

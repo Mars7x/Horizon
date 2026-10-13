@@ -5,16 +5,9 @@ use tracing::warn;
 
 use crate::{
     domain::{GameId, LibraryGame, SourceId},
-    services::{
-        runtime::{
-            RuntimeObservationEvent, RuntimeObservationExecutor, RuntimeObservationId,
-            RuntimeObservationStartOutcome, RuntimeObservationState,
-            RuntimeObservationTerminalState,
-        },
-        session::{
-            ManagedSessionCompletion, ManagedSessionExecutor, ManagedSessionId,
-            ManagedSessionState, ManagedSessionTerminalState, ManagedStartOutcome,
-        },
+    services::runtime::{
+        RuntimeObservationEvent, RuntimeObservationExecutor, RuntimeObservationId,
+        RuntimeObservationStartOutcome, RuntimeObservationState, RuntimeObservationTerminalState,
     },
     sources::{SourceCapability, SourceLaunchTarget, SourceRegistry},
 };
@@ -59,7 +52,6 @@ pub trait LaunchExecutor {
 pub enum GameLaunchMode {
     External,
     Observed(RuntimeObservationId),
-    Managed(ManagedSessionId),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,17 +93,10 @@ pub enum GameLaunchError {
 }
 
 /// Selects the best available launch path for a library game.
-///
-/// Managed sessions are capability-driven and optional. A missing/unavailable
-/// host helper falls back to the source's normal portal launch target. A
-/// managed-session error is logged and likewise falls back rather than making
-/// Gamescope a hard dependency for Horizon.
 pub struct GameLaunchService {
     registry: Rc<SourceRegistry>,
     executor: Rc<dyn LaunchExecutor>,
-    managed_executor: Option<Rc<dyn ManagedSessionExecutor>>,
     runtime_observer: Option<Rc<dyn RuntimeObservationExecutor>>,
-    active_managed_sessions: RefCell<BTreeSet<ManagedSessionId>>,
     active_runtime_observations: RefCell<BTreeSet<RuntimeObservationId>>,
     running_runtime_observations: RefCell<BTreeSet<RuntimeObservationId>>,
 }
@@ -121,17 +106,10 @@ impl GameLaunchService {
         Self {
             registry,
             executor,
-            managed_executor: None,
             runtime_observer: None,
-            active_managed_sessions: RefCell::new(BTreeSet::new()),
             active_runtime_observations: RefCell::new(BTreeSet::new()),
             running_runtime_observations: RefCell::new(BTreeSet::new()),
         }
-    }
-
-    pub fn with_managed_executor(mut self, executor: Rc<dyn ManagedSessionExecutor>) -> Self {
-        self.managed_executor = Some(executor);
-        self
     }
 
     pub fn with_runtime_observer(mut self, observer: Rc<dyn RuntimeObservationExecutor>) -> Self {
@@ -146,31 +124,6 @@ impl GameLaunchService {
             };
 
             let source_id = source.descriptor().id().clone();
-            if source
-                .descriptor()
-                .supports(SourceCapability::ManagedSession)
-                && let Some(managed_executor) = &self.managed_executor
-            {
-                match managed_executor.start_session(&source_id, source_ref.external_id()) {
-                    Ok(ManagedStartOutcome::Started(session_id)) => {
-                        self.active_managed_sessions.borrow_mut().insert(session_id);
-                        return Ok(GameLaunchReceipt::new(
-                            source_id,
-                            GameLaunchMode::Managed(session_id),
-                        ));
-                    }
-                    Ok(ManagedStartOutcome::Unsupported) | Ok(ManagedStartOutcome::Unavailable) => {
-                    }
-                    Err(error) => {
-                        warn!(
-                            source = %source_id,
-                            %error,
-                            "managed session could not start; falling back to normal launch"
-                        );
-                    }
-                }
-            }
-
             if !source.descriptor().supports(SourceCapability::Launch) {
                 continue;
             }
@@ -224,55 +177,6 @@ impl GameLaunchService {
         }
 
         Err(GameLaunchError::NoLaunchSource(game.game().id()))
-    }
-
-    pub fn poll_managed_sessions(&self) -> Vec<ManagedSessionCompletion> {
-        let Some(executor) = &self.managed_executor else {
-            return vec![];
-        };
-
-        let session_ids = self
-            .active_managed_sessions
-            .borrow()
-            .iter()
-            .copied()
-            .collect::<Vec<_>>();
-        let mut completed = Vec::new();
-
-        for session_id in session_ids {
-            let terminal = match executor.session_state(session_id) {
-                Ok(ManagedSessionState::Running) => continue,
-                Ok(ManagedSessionState::Exited { exit_code }) => {
-                    ManagedSessionTerminalState::Exited { exit_code }
-                }
-                Ok(ManagedSessionState::Failed { message }) => {
-                    ManagedSessionTerminalState::Failed { message }
-                }
-                Ok(ManagedSessionState::Unknown) => ManagedSessionTerminalState::Lost,
-                Err(error) => {
-                    warn!(
-                        session_id = session_id.get(),
-                        %error,
-                        "managed session status could not be queried; retaining session for retry"
-                    );
-                    continue;
-                }
-            };
-
-            self.active_managed_sessions
-                .borrow_mut()
-                .remove(&session_id);
-            if let Err(error) = executor.forget_session(session_id) {
-                warn!(
-                    session_id = session_id.get(),
-                    %error,
-                    "managed session helper could not forget terminal session"
-                );
-            }
-            completed.push(ManagedSessionCompletion::new(session_id, terminal));
-        }
-
-        completed
     }
 
     pub fn poll_runtime_observations(&self) -> Vec<RuntimeObservationEvent> {
@@ -381,19 +285,6 @@ impl GameLaunchService {
 
         events
     }
-
-    pub fn stop_managed_session(&self, session_id: ManagedSessionId) {
-        let Some(executor) = &self.managed_executor else {
-            return;
-        };
-        if let Err(error) = executor.stop_session(session_id) {
-            warn!(
-                session_id = session_id.get(),
-                %error,
-                "managed session stop request failed"
-            );
-        }
-    }
 }
 
 #[cfg(test)]
@@ -403,15 +294,9 @@ mod tests {
     use super::*;
     use crate::{
         domain::{ExternalGameId, Game, GameTitle, SourceGameRef},
-        services::{
-            runtime::{
-                RuntimeObservationError, RuntimeObservationExecutor,
-                RuntimeObservationStartOutcome, RuntimeObservationState,
-            },
-            session::{
-                ManagedSessionExecutionError, ManagedSessionExecutor, ManagedSessionState,
-                ManagedStartOutcome,
-            },
+        services::runtime::{
+            RuntimeObservationError, RuntimeObservationExecutor, RuntimeObservationStartOutcome,
+            RuntimeObservationState,
         },
         sources::{
             GameSource, SourceDescriptor, SourceDiscovery, SourceError, SourceLaunchTarget,
@@ -424,11 +309,8 @@ mod tests {
     }
 
     impl LaunchableSource {
-        fn new(id: &str, managed: bool, observed: bool) -> Self {
+        fn new(id: &str, observed: bool) -> Self {
             let mut capabilities = vec![SourceCapability::Launch];
-            if managed {
-                capabilities.push(SourceCapability::ManagedSession);
-            }
             if observed {
                 capabilities.push(SourceCapability::RuntimeObservation);
             }
@@ -473,41 +355,6 @@ mod tests {
     impl LaunchExecutor for RecordingExecutor {
         fn execute(&self, target: &SourceLaunchTarget) -> Result<(), LaunchExecutionError> {
             self.targets.borrow_mut().push(target.clone());
-            Ok(())
-        }
-    }
-
-    struct FakeManagedExecutor {
-        start: ManagedStartOutcome,
-    }
-
-    impl ManagedSessionExecutor for FakeManagedExecutor {
-        fn start_session(
-            &self,
-            _source_id: &SourceId,
-            _external_id: &ExternalGameId,
-        ) -> Result<ManagedStartOutcome, ManagedSessionExecutionError> {
-            Ok(self.start.clone())
-        }
-
-        fn session_state(
-            &self,
-            _session_id: ManagedSessionId,
-        ) -> Result<ManagedSessionState, ManagedSessionExecutionError> {
-            Ok(ManagedSessionState::Running)
-        }
-
-        fn stop_session(
-            &self,
-            _session_id: ManagedSessionId,
-        ) -> Result<(), ManagedSessionExecutionError> {
-            Ok(())
-        }
-
-        fn forget_session(
-            &self,
-            _session_id: ManagedSessionId,
-        ) -> Result<(), ManagedSessionExecutionError> {
             Ok(())
         }
     }
@@ -557,7 +404,7 @@ mod tests {
     fn launch_uses_registered_source_capability_without_source_name_branching() {
         let mut registry = SourceRegistry::new();
         registry
-            .register(LaunchableSource::new("provider", false, false))
+            .register(LaunchableSource::new("provider", false))
             .expect("register");
         let registry = Rc::new(registry);
         let executor = Rc::new(RecordingExecutor::default());
@@ -573,48 +420,10 @@ mod tests {
     }
 
     #[test]
-    fn managed_capability_prefers_managed_session_when_helper_starts_it() {
-        let mut registry = SourceRegistry::new();
-        registry
-            .register(LaunchableSource::new("provider", true, false))
-            .expect("register");
-        let registry = Rc::new(registry);
-        let external = Rc::new(RecordingExecutor::default());
-        let managed_id = ManagedSessionId::new(7).expect("session id");
-        let managed: Rc<dyn ManagedSessionExecutor> = Rc::new(FakeManagedExecutor {
-            start: ManagedStartOutcome::Started(managed_id),
-        });
-        let service =
-            GameLaunchService::new(registry, external.clone()).with_managed_executor(managed);
-
-        let receipt = service.launch_game(&game("provider")).expect("launch");
-        assert_eq!(receipt.mode(), GameLaunchMode::Managed(managed_id));
-        assert!(external.targets.borrow().is_empty());
-    }
-
-    #[test]
-    fn unavailable_managed_helper_falls_back_to_external_launch() {
-        let mut registry = SourceRegistry::new();
-        registry
-            .register(LaunchableSource::new("provider", true, false))
-            .expect("register");
-        let registry = Rc::new(registry);
-        let external = Rc::new(RecordingExecutor::default());
-        let managed: Rc<dyn ManagedSessionExecutor> = Rc::new(FakeManagedExecutor {
-            start: ManagedStartOutcome::Unavailable,
-        });
-        let service =
-            GameLaunchService::new(registry, external.clone()).with_managed_executor(managed);
-
-        let receipt = service.launch_game(&game("provider")).expect("launch");
-        assert_eq!(receipt.mode(), GameLaunchMode::External);
-        assert_eq!(external.targets.borrow().len(), 1);
-    }
-    #[test]
     fn runtime_observation_is_used_after_successful_external_dispatch() {
         let mut registry = SourceRegistry::new();
         registry
-            .register(LaunchableSource::new("provider", false, true))
+            .register(LaunchableSource::new("provider", true))
             .expect("register");
         let registry = Rc::new(registry);
         let external = Rc::new(RecordingExecutor::default());
