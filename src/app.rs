@@ -688,14 +688,32 @@ pub fn run(mode: SessionMode) -> Result<(), AppError> {
     // by the focused Slint window. Bind semantic controller ownership to the
     // window activation signal so a foreground game cannot also navigate the
     // background Horizon shell.
-    let activation_input = Rc::clone(&input);
     let activation_home = Rc::clone(&home);
     let activation_activity = Rc::clone(&activity_service);
     let activation_album = Rc::clone(&album);
     let activation_ui = ui.as_weak();
     let activation_sound = Rc::clone(&navigation_sound);
+    // In the session, gamescope also has to be showing Horizon: when a game
+    // closes, Horizon gets focus before the screen switches back.
+    let input_gate = Rc::new((Cell::new(true), Cell::new(true)));
+    let apply_input_gate = {
+        let input = Rc::clone(&input);
+        let gate = Rc::clone(&input_gate);
+        Rc::new(move || input.set_ui_input_enabled(gate.0.get() && gate.1.get()))
+    };
+    if let Some(front) = &session_front {
+        let gate = Rc::clone(&input_gate);
+        let apply = Rc::clone(&apply_input_gate);
+        front.on_horizon_shown(move |shown| {
+            gate.1.set(shown);
+            apply();
+        });
+    }
+    let activation_gate = Rc::clone(&input_gate);
+    let activation_apply = Rc::clone(&apply_input_gate);
     ui.on_application_active_changed(move |active| {
-        activation_input.set_ui_input_enabled(active);
+        activation_gate.0.set(active);
+        activation_apply();
         activation_sound.borrow_mut().set_foreground(active);
         if let Some(ui) = activation_ui.upgrade() {
             ui.global::<crate::Motion>().set_loops_paused(!active);

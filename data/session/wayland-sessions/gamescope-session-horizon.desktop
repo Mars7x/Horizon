@@ -1,0 +1,7 @@
+[Desktop Entry]
+Encoding=UTF-8
+Name=Horizon
+Comment=Horizon as the whole screen
+Exec=gamescope-session-plus horizon
+Type=Application
+DesktopNames=gamescope

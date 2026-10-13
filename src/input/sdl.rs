@@ -187,6 +187,7 @@ impl SdlGamepadInput {
             handheld: detect_handheld(),
             last_power_poll: Instant::now(),
             enabled: true,
+            enabled_since_ns: 0,
             analog_navigation: AnalogNavigation::default(),
             digital_navigation: DigitalNavigation::default(),
         };
@@ -258,6 +259,9 @@ struct SdlState {
     handheld: Handheld,
     last_power_poll: Instant,
     enabled: bool,
+    /// SDL's clock (ns) when Horizon last got input back; earlier controller
+    /// events happened while something else had it.
+    enabled_since_ns: u64,
     analog_navigation: AnalogNavigation,
     digital_navigation: DigitalNavigation,
 }
@@ -552,6 +556,11 @@ impl SdlState {
         }
 
         self.enabled = enabled;
+        if enabled {
+            // SDL stamps events in nanoseconds; its millisecond clock is
+            // close enough to tell a queued press from a new one.
+            self.enabled_since_ns = sdl3::timer::ticks().saturating_mul(1_000_000);
+        }
         // A controller may stay physically held while Horizon is inactive.
         // Never carry that held/repeat state across an input-ownership change.
         self.reset_navigation_state();
@@ -640,10 +649,26 @@ fn poll_gamepad_events(
                 state.reset_navigation_state();
                 status_changed |= removed;
             }
+            // SDL turns SIGTERM and SIGINT into this; Horizon has no SDL
+            // windows, so nothing else sends it. Stop the way closing the
+            // window would, also while a game is in front (the session's
+            // host script stops Horizon this way).
+            Event::Quit { .. } => {
+                info!("asked to quit");
+                if let Err(error) = slint::quit_event_loop() {
+                    warn!(%error, "couldn't stop the event loop");
+                }
+            }
             // Keep pumping SDL while Horizon is inactive so device topology
             // remains current, but background controller activity must never
             // become Horizon UI navigation.
             _ if !state.enabled => {}
+            // Pressed before Horizon got input back but read only now, such
+            // as the button that quit a game: it was the game's press.
+            Event::GamepadAxisMotion { timestamp, .. }
+            | Event::GamepadButtonDown { timestamp, .. }
+            | Event::GamepadButtonUp { timestamp, .. }
+                if timestamp < state.enabled_since_ns => {}
             // The other view of the same controller gives this input.
             Event::GamepadAxisMotion { which, .. }
             | Event::GamepadButtonDown { which, .. }

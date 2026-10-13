@@ -20,11 +20,27 @@ Horizon does not write its own compositor or display server.
    Horizon doesn't guess from the environment.
 2. **gamescope-session-plus** (ChimeraOS's framework, shipped by Bazzite)
    starts gamescope: display size, rotation, HDR, VRR and failed-start
-   recovery come from it. Horizon's host package adds two files:
+   recovery come from it. Horizon's host package adds three files, kept in
+   `data/session/`:
    - `/usr/share/gamescope-session-plus/sessions.d/horizon` (sets
-     `CLIENTCMD`, the command that starts Steam hidden and then Horizon);
+     `CLIENTCMD` to the host script);
+   - `/usr/libexec/horizon-gamescope-session` (the host script: systemd
+     environment, Steam hidden, Horizon with `--session`, restarts, Switch
+     to Desktop);
    - `/usr/share/wayland-sessions/gamescope-session-horizon.desktop` (the
-     login-screen entry, `DesktopNames=gamescope`).
+     login-screen entry, `Exec=gamescope-session-plus horizon`,
+     `DesktopNames=gamescope`).
+
+   How session-plus works (read from ChimeraOS's files, 2026-10-12): the
+   login entry runs `gamescope-session-plus horizon`, which starts the
+   systemd user unit `gamescope-session-plus@horizon.service`
+   (`BindsTo=graphical-session.target`, so the portals can start). That
+   unit sources the session file and runs gamescope with `--steam`, then
+   `CLIENTCMD`. It never restarts the client: when the client exits, the
+   session ends. Its launcher also switches the portals off
+   (`XDG_DESKTOP_PORTAL_DIR=""`) because the user's systemd environment has
+   no `DISPLAY`; the host script supplies `DISPLAY` and switches them back
+   on. Bazzite may ship its own variant; check there.
 3. **Any device that runs gamescope-session-plus**: a PC with a controller
    on a monitor or TV, or a handheld (Steam Deck, Odin 3 and similar). No
    device is the target; controls that need hardware (battery, brightness,
@@ -63,13 +79,16 @@ Horizon does not write its own compositor or display server.
     Mode.
 11. **Crashes:** `CLIENTCMD` is a small host script that restarts Horizon
     when it exits unexpectedly. A running game keeps running, because
-    gamescope stays up. After a few quick failures in a row, the session
-    ends for the desktop instead.
+    gamescope stays up. After 3 quick failures in a row (each under 30
+    seconds), the script gives up and the session ends. Horizon exiting
+    normally (status 0, e.g. on SIGTERM when the session is stopped) ends
+    the session too.
 12. **Switch to Desktop** ends the session and logs in to the desktop, as on
     Bazzite and SteamOS (asks first; games are closed). Horizon doesn't run
     the OS's session switcher itself (no host command beyond `flatpak_host`):
-    it exits with a "switch to desktop" exit code, and the host script runs
-    the switch (on Bazzite, its `steamos-session-select`).
+    it exits with status 3 ("switch to desktop"), and the host script runs
+    the switch (on Bazzite, its `steamos-session-select desktop`; without
+    it, the session just ends).
 13. **The power button:** where the hold time is reported, a short press
     sleeps and a long press opens Horizon's power menu (sleep, restart, shut
     down, Switch to Desktop); the long press stays well under the 4 seconds
@@ -385,10 +404,28 @@ Each step is built, tested and documented before the next.
    A Short Hike showed the game, closing it showed Home again. Found then:
    Horizon ignores SIGTERM (only SIGKILL stops it, probably SDL3's quit
    event going unhandled); fixed in step 5, which needs a clean stop.
-5. Session files in `data/session/`: session-plus `sessions.d/horizon`, the
-   login entry, the host script (systemd environment, helper restart,
-   Steam `-silent`, crash restarts, Switch to Desktop), and a dev script
-   to try it from a text console.
+5. **Done:** the session files in `data/session/`
+   (decision 2) and `scripts/session-dev.sh`, which does what session-plus
+   would on a machine without it (a session target bound to
+   `graphical-session.target`, gamescope `--steam`, the host script) from a
+   text console with the desktop logged out; `--dev` runs this checkout's
+   debug build in the SDK, `--stop` ends the session from another console.
+   Horizon now quits on SIGTERM and SIGINT (SDL's quit event), as the host
+   script needs. The host script's exit handling was tested with
+   stand-ins: status 0 ends the session, 3 switches to the desktop, a
+   crash restarts Horizon, three quick crashes end the session.
+   First console run (2026-10-12): A Short Hike launched and came to the
+   front, but quitting it relaunched it every time. The button press that
+   quit the game was still in SDL's queue when Horizon got focus back, and
+   counted as Accept. Fixed: Horizon ignores controller events stamped
+   before it got input back (desktop too), and in the session takes input
+   only while gamescope shows it (focus returns before the screen does).
+   FINAL FANTASY VII REMAKE exited after 2 seconds: its Steam launch
+   options set `PROTON_ENABLE_WAYLAND=1`, and the session has no Wayland.
+   Games forced to Wayland don't run in the session. Second console run:
+   A Short Hike, Hatsune Miku: Project DIVA Mega Mix+ and Geometry Dash
+   each came to the front and Home came back after quitting; `--stop`
+   ended the session and its cleanup ran.
 6. Power (logind, `--system-talk-name=org.freedesktop.login1`) and Switch
    to Desktop through the power menu.
 
