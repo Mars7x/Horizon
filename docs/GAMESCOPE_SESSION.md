@@ -152,9 +152,9 @@ build it:
 | Playtime | as today | as today; the session can also see what's in front |
 | Controllers, glyphs, swap | SDL | same (SDL reads devices, not windows) |
 | On-screen keyboard | Horizon's own | same (a touch screen may arrive as a mouse; the field's keyboard button covers it) |
-| Theme "System", clock format | desktop settings portal | no desktop behind it: fall back to defaults, hide "System" (Spike 4) |
-| Choose a profile picture | file chooser portal | needs a portal backend in the session (Spike 4) |
-| Opening links | OpenURI portal | needs a backend in the session (Spike 4) |
+| Theme "System", clock format | desktop settings portal | same, through the GTK portal backend (stored settings); no accent colour (Spike 4) |
+| Choose a profile picture | file chooser portal | GTK dialog; Horizon tags its window to show it (Spike 4) |
+| Opening links | OpenURI portal | opens the browser; Horizon tags its window to show it (Spike 4) |
 | Paste in text fields | Wayland clipboard | needs an X11 clipboard path |
 | Quick menu, power, volume, brightness, Wi-Fi, Bluetooth, performance | — | ✓ |
 | Battery, network, controller status | ✓ | ✓ |
@@ -224,6 +224,23 @@ build it:
 4. **Portals.** Which of OpenURI, FileChooser and Settings work in a bare
    gamescope session, and which backend (e.g. `xdg-desktop-portal-gtk`) the
    session must start.
+   **Result (main PC, embedded, GNOME logged out, 2026-10-12):** the portal
+   service only starts inside `graphical-session.target`
+   (`Requisite=graphical-session.target`); from a bare console login every
+   call failed until the script started that target, as a session does.
+   With it, and `XDG_CURRENT_DESKTOP=gamescope` and gamescope's `DISPLAY` in
+   the user's systemd environment, xdg-desktop-portal 1.22 picked the GTK
+   backend by itself (a `gamescope-portals.conf` with `default=gtk` changed
+   nothing). Calls from Horizon's sandbox: Settings returned
+   `color-scheme` and `clock-format` (the stored GNOME values) but no
+   `accent-color`; FileChooser opened a full-screen GTK dialog; OpenURI
+   opened Firefox. Both windows were hidden until tagged with the main
+   app's ID, like any other app's window. With no parent window given, the
+   GTK backend couldn't attach the dialog to one. Not captured: the
+   portals' Response codes. Still to check on Bazzite: that
+   session-plus starts `graphical-session.target` and the same backend.
+   Script: `scripts/spikes/gamescope-spike4.sh` (run with GNOME logged
+   out).
 5. **Screenshots.** Gamescope takes one on request; where does the file land,
    and can the Flatpak read it (the host's `/tmp` isn't shared)?
 6. **The power key.** Does it reach Horizon as an input device on the Deck

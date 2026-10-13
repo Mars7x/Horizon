@@ -84,6 +84,15 @@ running game, keeps drawing the game, and gives the overlay input.
 Panel-sized overlay windows and `GAMESCOPE_EXTERNAL_OVERLAY` were not drawn.
 Whether a game also reacts to the controller while it is up is still open.
 
+## Spike 4 result (2026-10-12)
+
+With GNOME logged out, portals worked in gamescope once
+`graphical-session.target` was active (the portal service requires it):
+the GTK backend was chosen without configuration, Settings returned the
+colour scheme and clock format, and FileChooser and OpenURI opened their
+windows. Those windows are hidden until Horizon tags them, like games'.
+The theme "System" setting can stay in the session.
+
 ## Consequences
 
 - One codebase gives the desktop and the session the same pages.
@@ -93,5 +102,6 @@ Whether a game also reacts to the controller while it is up is still open.
   X11 clipboard path.
 - Gamescope's Steam-shaped, thinly documented control surface is a risk;
   OpenGamepadUI is the main prior art.
-- Desktop-portal features (theme "System", file chooser, links) need a
-  backend in the session or a fallback.
+- Desktop-portal features (theme "System", file chooser, links) need
+  `graphical-session.target` and the GTK portal backend in the session, and
+  Horizon must tag the portal's and browser's windows (Spike 4).
