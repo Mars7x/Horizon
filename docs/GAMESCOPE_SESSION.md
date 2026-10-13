@@ -92,8 +92,14 @@ Horizon does not write its own compositor or display server.
     script puts gamescope's `DISPLAY` and `XDG_CURRENT_DESKTOP=gamescope`
     into the user's systemd environment, and restarts the Flatpak session
     helper, before Horizon starts, so `flatpak-spawn --host` runs games on
-    gamescope's display. `flatpak_host` is unchanged. To check with GNOME
-    logged out, as in spike 4.
+    gamescope's display. `flatpak_host` is unchanged. **Checked** (main PC,
+    embedded, GNOME logged out, 2026-10-12,
+    `scripts/spikes/gamescope-spike-display.sh`): after a fresh login the
+    helper wasn't running, so Horizon's first host command started it with
+    the new environment (`DISPLAY` of gamescope, no `WAYLAND_DISPLAY`), and
+    Azahar launched through `flatpak-spawn --host` opened in gamescope;
+    the same after restarting the helper. The restart stays as a safeguard
+    for a helper already running with an old environment.
 18. **Screenshots (after spike 5):** through gamescope's control socket.
     The manifest gains only `--filesystem=xdg-run/gamescope-0`, and
     `platform::gamescope` speaks gamescope's control protocol to save the

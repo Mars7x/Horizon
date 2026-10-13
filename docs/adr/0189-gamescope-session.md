@@ -47,7 +47,8 @@ Steam sets.
   block from `0x7F000000` (Horizon itself, then base + database `id` for
   Heroic and Flatpak games); the session's host script provides
   gamescope's `DISPLAY` to the user's systemd environment so
-  `flatpak_host` stays unchanged; screenshots go through gamescope's
+  `flatpak_host` stays unchanged (checked: Flatpak games launched through
+  it then open in gamescope); screenshots go through gamescope's
   control socket (`--filesystem=xdg-run/gamescope-0`).
 
 ## Spike 1 result (2026-10-12)
