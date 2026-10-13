@@ -16,7 +16,6 @@ use crate::{
     AppWindow, GlyphFamily, InputGlyphs, Wheel,
     appearance::store::AppearanceStore,
     audio::{UiSoundCue, UiSounds},
-    domain::{SessionCapabilities, SessionMode},
     error::AppError,
     input::{
         ControllerFamily, ControllerStatus, GlyphStyle, InputDevice, InputManager, UiAction,
@@ -25,7 +24,6 @@ use crate::{
     persistence::{SqliteLibraryRepository, settings::SettingsStore},
     platform::{
         data_paths,
-        gamescope::{self, Gamescope, SessionFront},
         launcher::PortalLaunchExecutor,
         session_helper::DbusManagedSessionExecutor,
         slint_backend,
@@ -73,7 +71,7 @@ use crate::{
 const APP_ID: &str = "io.github.Mars7x.Horizon";
 const SOURCE_PLAYTIME_REFRESH_INTERVAL: Duration = Duration::from_secs(20);
 
-pub fn run(mode: SessionMode) -> Result<(), AppError> {
+pub fn run() -> Result<(), AppError> {
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("horizon=info")),
@@ -113,12 +111,9 @@ pub fn run(mode: SessionMode) -> Result<(), AppError> {
     }
 
     let library_games = library.games()?;
-    let capabilities = SessionCapabilities::new(mode);
     info!(
         version = env!("CARGO_PKG_VERSION"),
         games = library_games.len(),
-        ?mode,
-        controls_gamescope = capabilities.controls_gamescope(),
         "Horizon started"
     );
 
@@ -143,26 +138,10 @@ pub fn run(mode: SessionMode) -> Result<(), AppError> {
 
     // Backend selection must happen before set_xdg_app_id(), AppWindow::new(),
     // or any other Slint operation that needs the platform.
-    slint_backend::initialize(mode)?;
+    slint_backend::initialize()?;
     slint::set_xdg_app_id(APP_ID)?;
 
     let ui = AppWindow::new()?;
-    let gamescope_timer = Rc::new(Timer::default());
-    let session_front = if capabilities.controls_gamescope() {
-        match Gamescope::connect() {
-            Ok(gamescope) => {
-                let front = SessionFront::new(gamescope);
-                take_gamescope_screen(&ui, &front, &gamescope_timer);
-                Some(front)
-            }
-            Err(error) => {
-                warn!(%error, "gamescope control unavailable; gamescope may show nothing");
-                None
-            }
-        }
-    } else {
-        None
-    };
     let appearance = AppearanceController::new(
         &ui,
         AppearanceStore::new(data_paths::appearance_settings_path()?),
@@ -253,10 +232,6 @@ pub fn run(mode: SessionMode) -> Result<(), AppError> {
     let runtime_observer: Rc<dyn RuntimeObservationExecutor> =
         Rc::new(SourceRuntimeObservationExecutor::new(Rc::clone(&registry)));
     launch_service = launch_service.with_runtime_observer(runtime_observer);
-    if let Some(front) = &session_front {
-        // In the session, launched games are brought to the front.
-        launch_service = launch_service.with_launch_listener(front.clone());
-    }
     let launch_service = Rc::new(launch_service);
     let launch_activity: Rc<dyn LaunchActivitySink> = activity_service.clone();
     let achievements_catalog = catalog
@@ -688,32 +663,14 @@ pub fn run(mode: SessionMode) -> Result<(), AppError> {
     // by the focused Slint window. Bind semantic controller ownership to the
     // window activation signal so a foreground game cannot also navigate the
     // background Horizon shell.
+    let activation_input = Rc::clone(&input);
     let activation_home = Rc::clone(&home);
     let activation_activity = Rc::clone(&activity_service);
     let activation_album = Rc::clone(&album);
     let activation_ui = ui.as_weak();
     let activation_sound = Rc::clone(&navigation_sound);
-    // In the session, gamescope also has to be showing Horizon: when a game
-    // closes, Horizon gets focus before the screen switches back.
-    let input_gate = Rc::new((Cell::new(true), Cell::new(true)));
-    let apply_input_gate = {
-        let input = Rc::clone(&input);
-        let gate = Rc::clone(&input_gate);
-        Rc::new(move || input.set_ui_input_enabled(gate.0.get() && gate.1.get()))
-    };
-    if let Some(front) = &session_front {
-        let gate = Rc::clone(&input_gate);
-        let apply = Rc::clone(&apply_input_gate);
-        front.on_horizon_shown(move |shown| {
-            gate.1.set(shown);
-            apply();
-        });
-    }
-    let activation_gate = Rc::clone(&input_gate);
-    let activation_apply = Rc::clone(&apply_input_gate);
     ui.on_application_active_changed(move |active| {
-        activation_gate.0.set(active);
-        activation_apply();
+        activation_input.set_ui_input_enabled(active);
         activation_sound.borrow_mut().set_foreground(active);
         if let Some(ui) = activation_ui.upgrade() {
             ui.global::<crate::Motion>().set_loops_paused(!active);
@@ -899,43 +856,10 @@ pub fn run(mode: SessionMode) -> Result<(), AppError> {
     let _live_activity_timer = live_activity_timer;
     let _activity_checkpoint_timer = activity_checkpoint_timer;
     let _managed_session_timer = managed_session_timer;
-    let _gamescope_timer = gamescope_timer;
-    let _session_front = session_front;
 
     ui.run()?;
 
     Ok(())
-}
-
-/// In the session, tags Horizon's window and makes gamescope show it, once
-/// winit has created the window.
-fn take_gamescope_screen(ui: &AppWindow, front: &Rc<SessionFront>, timer: &Rc<Timer>) {
-    let ui = ui.as_weak();
-    let front = Rc::downgrade(front);
-    let stop = Rc::downgrade(timer);
-    timer.start(TimerMode::Repeated, Duration::from_millis(50), move || {
-        let Some(window) = ui
-            .upgrade()
-            .and_then(|ui| gamescope::x11_window(ui.window()))
-        else {
-            return;
-        };
-        if let Some(front) = front.upgrade() {
-            match front.gamescope().show_horizon(window) {
-                Ok(()) => {
-                    info!(
-                        window,
-                        app_id = gamescope::HORIZON_APP_ID,
-                        "gamescope shows Horizon"
-                    )
-                }
-                Err(error) => warn!(%error, "couldn't make gamescope show Horizon"),
-            }
-        }
-        if let Some(timer) = stop.upgrade() {
-            timer.stop();
-        }
-    });
 }
 
 fn glyph_family(style: GlyphStyle) -> GlyphFamily {

@@ -469,11 +469,6 @@ impl GameSource for SteamSource {
         ))))
     }
 
-    /// Steam tags its games' windows with their app ID.
-    fn window_app_id(&self, external_id: &ExternalGameId) -> Option<u32> {
-        external_id.as_str().parse().ok()
-    }
-
     fn runtime_state(
         &self,
         external_id: &ExternalGameId,
@@ -1877,14 +1872,6 @@ mod tests {
             target,
             SourceLaunchTarget::Uri("steam://rungameid/570".into())
         );
-    }
-
-    #[test]
-    fn steam_tags_its_game_windows_with_the_app_id() {
-        let source = SteamSource::with_roots(vec![]).expect("source");
-        let id = |value: &str| ExternalGameId::new(value).expect("appid");
-        assert_eq!(source.window_app_id(&id("1055540")), Some(1_055_540));
-        assert_eq!(source.window_app_id(&id("not-a-number")), None);
     }
 
     #[test]

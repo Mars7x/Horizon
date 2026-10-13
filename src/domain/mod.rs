@@ -6,7 +6,6 @@
 pub mod activity;
 pub mod album;
 pub mod library;
-pub mod session_mode;
 
 pub use activity::{
     ActivityValidationError, PlaySession, PlaySessionId, PlaySessionState, PlaytimeSeconds,
@@ -16,6 +15,5 @@ pub use library::{
     DomainValidationError, ExternalGameId, Game, GameId, GameTitle, LibraryGame, SourceGameRef,
     SourceId,
 };
-pub use session_mode::{ArgsError, SessionCapabilities, SessionMode};
 
 pub mod settings;

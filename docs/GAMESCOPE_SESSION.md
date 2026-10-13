@@ -1,7 +1,12 @@
 # Horizon session (gamescope) — design
 
-> **Status: Phase 1 in progress** (see [Phases](#phases)); the spikes are
-> done. Decisions below were made on 2026-10-12 (ADR 0189, Proposed).
+> **Status: superseded (2026-10-12).** The gamescope session was cancelled
+> before Phase 1 finished: Horizon stays a desktop Flatpak and will embed
+> emulator cores instead (see the newer ADRs). The session code, session
+> files and spike scripts were removed; this page and ADR 0189 are kept as
+> the record of what was tried and found. Two fixes found here stayed:
+> Horizon quits on SIGTERM and SIGINT, and ignores controller events from
+> before it got input back.
 
 ## What it is
 

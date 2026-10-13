@@ -4,8 +4,9 @@ Date: 2026-10-12
 
 ## Status
 
-Proposed. Design only; see [GAMESCOPE_SESSION.md](../GAMESCOPE_SESSION.md).
-Nothing is final until its spikes have run on a device.
+Superseded (2026-10-12). The session was cancelled during Phase 1 in favour
+of embedding emulator cores in the desktop Flatpak; its code was removed.
+Kept as history; see [GAMESCOPE_SESSION.md](../GAMESCOPE_SESSION.md).
 
 ## Context
 
