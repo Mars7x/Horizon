@@ -76,6 +76,14 @@ its own when it closes, 769 to show Steam's login. Pressing Guide in a
 Steam game opened nothing, so the button is free for Horizon's quick menu;
 Steam Input follows gamescope's focused app, Horizon's window included.
 
+## Overlay spike result (2026-10-12)
+
+The quick menu can be a full-screen, mostly transparent X11 window tagged
+`STEAM_OVERLAY=1` and `STEAM_INPUT_FOCUS=1`: gamescope draws it over the
+running game, keeps drawing the game, and gives the overlay input.
+Panel-sized overlay windows and `GAMESCOPE_EXTERNAL_OVERLAY` were not drawn.
+Whether a game also reacts to the controller while it is up is still open.
+
 ## Consequences
 
 - One codebase gives the desktop and the session the same pages.

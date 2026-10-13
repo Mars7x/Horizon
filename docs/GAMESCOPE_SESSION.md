@@ -89,8 +89,9 @@ window properties, not Wayland:
 | `STEAM_GAME = 769` | Steam's windows | Set by Steam. Shown only while the base layer is 769, e.g. for Steam's login. |
 | `STEAM_GAME = <game>` | A game's window | Steam tags its games; Horizon tags Heroic and Flatpak games itself (Spike 2). |
 | `GAMESCOPECTRL_BASELAYER_APPID` | Root window | Which app is shown. Steam never sets it in this session; Horizon sets it to a game's ID when its window appears and back to its own ID when it closes. Nothing is shown while it names an app with no window (Spike 3). Also how the quick menu's "Home" and "Resume" switch. |
-| `STEAM_OVERLAY` / `GAMESCOPE_EXTERNAL_OVERLAY` | An overlay window | Drawn over the game (the quick menu). Little documented. |
-| `STEAM_INPUT_FOCUS` | — | Which window gets input while an overlay is up. |
+| `STEAM_OVERLAY = 1` | The quick menu's window | Drawn over the game only when the window is full-screen; it draws its panel itself and is transparent elsewhere. A panel-sized window isn't drawn (overlay spike). |
+| `STEAM_INPUT_FOCUS = 1` | The quick menu's window | Input goes to the overlay while it is up; the game stays visible and running beneath. On a panel-sized window gamescope stops drawing the game instead. |
+| `GAMESCOPE_EXTERNAL_OVERLAY` | — | Not drawn in any test; not used. |
 
 Gamescope accepts Wayland apps only with `--expose-wayland`, and focus for
 them is still being patched around in other projects.
@@ -168,7 +169,15 @@ build it:
    `gamescopectl focus_info` and one frame from gamescope's PipeWire stream
    at each step (`gamescopectl screenshot` saved nothing on 3.16.29).
    Embedded: the same, and a second Wayland window isn't shown even
-   without `-e`. Overlay still to do.
+   without `-e`. **Overlay** (`scripts/spikes/gamescope-spike-overlay.sh`,
+   nested and embedded, 2026-10-12): a full-screen X11 window, transparent
+   but for a right-hand panel, tagged `STEAM_OVERLAY=1` and
+   `STEAM_INPUT_FOCUS=1`, is drawn over a running game, the game keeps
+   drawing beneath it, and input goes to the overlay. On an ultrawide screen
+   the panel sits at the screen's edge, past the letterboxed game. Still to
+   check with a real game and Horizon: whether the game also reacts to the
+   controller while the quick menu is up (Horizon and many games read the
+   device directly).
 2. **Non-Steam windows.** Does gamescope show a Heroic or Flatpak game whose
    window has no `STEAM_GAME`? If not, Horizon tags new game windows itself.
    Does Heroic's own window appear when a game starts?
