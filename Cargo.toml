@@ -32,6 +32,9 @@ tokio = { version = "1", features = ["macros", "rt", "sync"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 jxl-oxide = { version = "0.12.6", default-features = false, features = ["image"] }
+# gamescope control in the session (platform::gamescope, ADR 0189): X11
+# window properties. Already in the build through winit's X11 backend.
+x11rb = "0.13.2"
 
 [build-dependencies]
 cc = "1"

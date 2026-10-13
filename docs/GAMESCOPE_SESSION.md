@@ -363,9 +363,14 @@ Each step is built, tested and documented before the next.
    `--socket=fallback-x11`. Paste shows "Couldn't paste" in the session
    until an X11 clipboard exists. Checked: the dev build with `--session`
    ran as an X11 window in nested gamescope and drew Home.
-3. `platform::gamescope`: X11 connection (`x11rb`, already in the build),
-   Horizon's window tagged `0x7F000000`, the base layer, the reserved-ID
-   rule.
+3. **Done:** `platform::gamescope` (`src/platform/gamescope.rs`): an X11
+   connection through `x11rb` (already in the build), window tags, the
+   base layer, and the reserved-ID rule (`game_app_id`: base plus
+   `games.id`, `None` once it would reach 2^31). With `--session`, `app.rs`
+   tags Horizon's window `0x7F000000` and sets the base layer as soon as
+   winit has created the window; if gamescope can't be reached it logs a
+   warning and carries on. Checked: the dev build with `--session` is
+   shown by gamescope in Steam mode (`-e`).
 4. Games in front and back: follow Steam's tag; tag the first new untagged
    window after a Heroic or Flatpak launch; return when its windows close.
 5. Session files in `data/session/`: session-plus `sessions.d/horizon`, the
