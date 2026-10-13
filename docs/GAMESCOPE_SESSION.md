@@ -1,8 +1,7 @@
 # Horizon session (gamescope) — design
 
-> **Status: design, nothing implemented.** Decisions below were made on
-> 2026-10-12 (ADR 0189, Proposed). Items marked **Spike** must be tried on a
-> device before the design is final.
+> **Status: Phase 1 in progress** (see [Phases](#phases)); the spikes are
+> done. Decisions below were made on 2026-10-12 (ADR 0189, Proposed).
 
 ## What it is
 
@@ -347,6 +346,29 @@ aarch64) with Fedora 44 Workstation (GNOME, Wayland, 4K pages).
    (session only).
 4. **Packaging** for the OSes that ship gamescope-session-plus (an image
    layer or system extension for immutable systems).
+
+### Phase 1 steps
+
+Each step is built, tested and documented before the next.
+
+1. **Done:** `--session` and `SessionCapabilities`
+   (`src/domain/session_mode.rs`). Any other argument is refused (exit
+   code 2). The capabilities say only whether Horizon controls gamescope;
+   each answer is added with the feature that needs it. Nothing changes on
+   the desktop.
+2. X11 in the session only: Slint's X11 backend, `--socket=fallback-x11`;
+   paste unavailable in the session until an X11 clipboard exists.
+3. `platform::gamescope`: X11 connection (`x11rb`, already in the build),
+   Horizon's window tagged `0x7F000000`, the base layer, the reserved-ID
+   rule.
+4. Games in front and back: follow Steam's tag; tag the first new untagged
+   window after a Heroic or Flatpak launch; return when its windows close.
+5. Session files in `data/session/`: session-plus `sessions.d/horizon`, the
+   login entry, the host script (systemd environment, helper restart,
+   Steam `-silent`, crash restarts, Switch to Desktop), and a dev script
+   to try it from a text console.
+6. Power (logind, `--system-talk-name=org.freedesktop.login1`) and Switch
+   to Desktop through the power menu.
 
 ## Open questions
 

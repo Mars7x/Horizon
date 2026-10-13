@@ -16,6 +16,7 @@ use crate::{
     AppWindow, GlyphFamily, InputGlyphs, Wheel,
     appearance::store::AppearanceStore,
     audio::{UiSoundCue, UiSounds},
+    domain::{SessionCapabilities, SessionMode},
     error::AppError,
     input::{
         ControllerFamily, ControllerStatus, GlyphStyle, InputDevice, InputManager, UiAction,
@@ -71,7 +72,7 @@ use crate::{
 const APP_ID: &str = "io.github.Mars7x.Horizon";
 const SOURCE_PLAYTIME_REFRESH_INTERVAL: Duration = Duration::from_secs(20);
 
-pub fn run() -> Result<(), AppError> {
+pub fn run(mode: SessionMode) -> Result<(), AppError> {
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("horizon=info")),
@@ -111,9 +112,12 @@ pub fn run() -> Result<(), AppError> {
     }
 
     let library_games = library.games()?;
+    let capabilities = SessionCapabilities::new(mode);
     info!(
         version = env!("CARGO_PKG_VERSION"),
         games = library_games.len(),
+        ?mode,
+        controls_gamescope = capabilities.controls_gamescope(),
         "Horizon started"
     );
 
