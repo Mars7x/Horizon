@@ -204,8 +204,14 @@ build it:
    the screen to Steam's main window; with its own ID, base layer 769 brought
    Steam's main window forward and the main app's ID hid it again, the
    mechanism for signing in. A game closed cleanly on `WM_DELETE_WINDOW`.
-   **Still open:** the Guide button (not pressed in the run) and Steam's
-   login and update windows. Script: `scripts/spikes/gamescope-spike3.sh`.
+   **Guide button** (embedded, 8BitDo Ultimate 2, A Short Hike): pressing
+   it opened nothing; no Steam overlay and no overlay window in gamescope.
+   Steam's controller log shows Steam Input following gamescope's focused
+   app (the game, the main app's own ID, 769), so Steam Input will also
+   apply to Horizon's window; check how Horizon sees the controller then.
+   The Guide button is free for Horizon's quick menu in this setup.
+   **Still open:** Steam's login and update windows (Steam was signed in).
+   Script: `scripts/spikes/gamescope-spike3.sh`.
 4. **Portals.** Which of OpenURI, FileChooser and Settings work in a bare
    gamescope session, and which backend (e.g. `xdg-desktop-portal-gtk`) the
    session must start.

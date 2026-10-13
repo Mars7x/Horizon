@@ -72,8 +72,9 @@ the game window, but the game is shown only once the base layer names it,
 and nothing is shown after it closes until the base layer is set back.
 Steam tags its own windows 769, so Horizon takes its own app ID (not 769)
 and drives the base layer itself: the game's ID when its window appears,
-its own when it closes, 769 to show Steam's login. The Guide button is
-still untested.
+its own when it closes, 769 to show Steam's login. Pressing Guide in a
+Steam game opened nothing, so the button is free for Horizon's quick menu;
+Steam Input follows gamescope's focused app, Horizon's window included.
 
 ## Consequences
 
