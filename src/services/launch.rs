@@ -100,6 +100,12 @@ pub enum GameLaunchError {
     },
 }
 
+/// Told about every launch that reached its source, with the app ID the
+/// source tags the game's window with, if it does (`GameSource::window_app_id`).
+pub trait LaunchListener {
+    fn game_launched(&self, game: GameId, window_app_id: Option<u32>);
+}
+
 /// Selects the best available launch path for a library game.
 ///
 /// Managed sessions are capability-driven and optional. A missing/unavailable
@@ -111,6 +117,7 @@ pub struct GameLaunchService {
     executor: Rc<dyn LaunchExecutor>,
     managed_executor: Option<Rc<dyn ManagedSessionExecutor>>,
     runtime_observer: Option<Rc<dyn RuntimeObservationExecutor>>,
+    launch_listener: Option<Rc<dyn LaunchListener>>,
     active_managed_sessions: RefCell<BTreeSet<ManagedSessionId>>,
     active_runtime_observations: RefCell<BTreeSet<RuntimeObservationId>>,
     running_runtime_observations: RefCell<BTreeSet<RuntimeObservationId>>,
@@ -123,6 +130,7 @@ impl GameLaunchService {
             executor,
             managed_executor: None,
             runtime_observer: None,
+            launch_listener: None,
             active_managed_sessions: RefCell::new(BTreeSet::new()),
             active_runtime_observations: RefCell::new(BTreeSet::new()),
             running_runtime_observations: RefCell::new(BTreeSet::new()),
@@ -139,13 +147,32 @@ impl GameLaunchService {
         self
     }
 
+    pub fn with_launch_listener(mut self, listener: Rc<dyn LaunchListener>) -> Self {
+        self.launch_listener = Some(listener);
+        self
+    }
+
     pub fn launch_game(&self, game: &LibraryGame) -> Result<GameLaunchReceipt, GameLaunchError> {
+        let (receipt, window_app_id) = self.dispatch(game)?;
+        if let Some(listener) = &self.launch_listener {
+            listener.game_launched(game.game().id(), window_app_id);
+        }
+        Ok(receipt)
+    }
+
+    /// Launches through the first source that can, returning the receipt and
+    /// that source's window app ID.
+    fn dispatch(
+        &self,
+        game: &LibraryGame,
+    ) -> Result<(GameLaunchReceipt, Option<u32>), GameLaunchError> {
         for source_ref in game.sources() {
             let Some(source) = self.registry.get(source_ref.source_id()) else {
                 continue;
             };
 
             let source_id = source.descriptor().id().clone();
+            let window_app_id = source.window_app_id(source_ref.external_id());
             if source
                 .descriptor()
                 .supports(SourceCapability::ManagedSession)
@@ -154,9 +181,9 @@ impl GameLaunchService {
                 match managed_executor.start_session(&source_id, source_ref.external_id()) {
                     Ok(ManagedStartOutcome::Started(session_id)) => {
                         self.active_managed_sessions.borrow_mut().insert(session_id);
-                        return Ok(GameLaunchReceipt::new(
-                            source_id,
-                            GameLaunchMode::Managed(session_id),
+                        return Ok((
+                            GameLaunchReceipt::new(source_id, GameLaunchMode::Managed(session_id)),
+                            window_app_id,
                         ));
                     }
                     Ok(ManagedStartOutcome::Unsupported) | Ok(ManagedStartOutcome::Unavailable) => {
@@ -203,9 +230,12 @@ impl GameLaunchService {
                         self.active_runtime_observations
                             .borrow_mut()
                             .insert(observation_id);
-                        return Ok(GameLaunchReceipt::new(
-                            source_id,
-                            GameLaunchMode::Observed(observation_id),
+                        return Ok((
+                            GameLaunchReceipt::new(
+                                source_id,
+                                GameLaunchMode::Observed(observation_id),
+                            ),
+                            window_app_id,
                         ));
                     }
                     Ok(RuntimeObservationStartOutcome::Unsupported)
@@ -220,7 +250,10 @@ impl GameLaunchService {
                 }
             }
 
-            return Ok(GameLaunchReceipt::new(source_id, GameLaunchMode::External));
+            return Ok((
+                GameLaunchReceipt::new(source_id, GameLaunchMode::External),
+                window_app_id,
+            ));
         }
 
         Err(GameLaunchError::NoLaunchSource(game.game().id()))
@@ -421,6 +454,7 @@ mod tests {
 
     struct LaunchableSource {
         descriptor: SourceDescriptor,
+        window_app_id: Option<u32>,
     }
 
     impl LaunchableSource {
@@ -439,6 +473,7 @@ mod tests {
                     capabilities,
                 )
                 .expect("descriptor"),
+                window_app_id: None,
             }
         }
     }
@@ -462,6 +497,21 @@ mod tests {
                 "test://{}",
                 external_id.as_str()
             ))))
+        }
+
+        fn window_app_id(&self, _external_id: &ExternalGameId) -> Option<u32> {
+            self.window_app_id
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingListener {
+        launches: RefCell<Vec<(GameId, Option<u32>)>>,
+    }
+
+    impl LaunchListener for RecordingListener {
+        fn game_launched(&self, game: GameId, window_app_id: Option<u32>) {
+            self.launches.borrow_mut().push((game, window_app_id));
         }
     }
 
@@ -551,6 +601,31 @@ mod tests {
                 ExternalGameId::new("42").expect("external id"),
             )],
         )
+    }
+
+    #[test]
+    fn listener_hears_launches_with_the_source_window_app_id() {
+        let mut tagging = LaunchableSource::new("tagging", false, false);
+        tagging.window_app_id = Some(70);
+        let mut registry = SourceRegistry::new();
+        registry.register(tagging).expect("register");
+        registry
+            .register(LaunchableSource::new("plain", false, false))
+            .expect("register");
+        let listener = Rc::new(RecordingListener::default());
+        let service =
+            GameLaunchService::new(Rc::new(registry), Rc::new(RecordingExecutor::default()))
+                .with_launch_listener(listener.clone());
+
+        service.launch_game(&game("tagging")).expect("launch");
+        service.launch_game(&game("plain")).expect("launch");
+        assert!(service.launch_game(&game("missing")).is_err());
+
+        let id = GameId::new(1).expect("id");
+        assert_eq!(
+            listener.launches.borrow().as_slice(),
+            &[(id, Some(70)), (id, None)]
+        );
     }
 
     #[test]

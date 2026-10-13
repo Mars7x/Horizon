@@ -375,6 +375,13 @@ pub trait GameSource: Send + Sync {
         Ok(None)
     }
 
+    /// The app ID the provider itself gives the game's window for gamescope
+    /// (`STEAM_GAME`), if it tags it. `None` means Horizon tags the window
+    /// in the gamescope session (ADR 0189).
+    fn window_app_id(&self, _external_id: &ExternalGameId) -> Option<u32> {
+        None
+    }
+
     /// Observe whether a source-owned game is currently running.
     ///
     /// Sources advertising `RuntimeObservation` must derive this from reliable
