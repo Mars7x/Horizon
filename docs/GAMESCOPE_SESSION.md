@@ -167,7 +167,8 @@ build it:
    [How gamescope is controlled](#how-gamescope-is-controlled)). Script:
    `scripts/spikes/gamescope-spike1.sh [steam|plain]`, which logs
    `gamescopectl focus_info` and one frame from gamescope's PipeWire stream
-   at each step (`gamescopectl screenshot` saved nothing on 3.16.29).
+   at each step (`gamescopectl screenshot` saved nothing while nothing was
+   on screen; see spike 5).
    Embedded: the same, and a second Wayland window isn't shown even
    without `-e`. **Overlay** (`scripts/spikes/gamescope-spike-overlay.sh`,
    nested and embedded, 2026-10-12): a full-screen X11 window, transparent
@@ -243,6 +244,19 @@ build it:
    out).
 5. **Screenshots.** Gamescope takes one on request; where does the file land,
    and can the Flatpak read it (the host's `/tmp` isn't shared)?
+   **Result (main PC, nested, 2026-10-12):** with a window on screen,
+   `gamescopectl screenshot <path>` saves a PNG (output size, RGBA) at any
+   path; without a path it fails ("Unsupported extension"). The root
+   properties `GAMESCOPECTRL_REQUEST_SCREENSHOT=1` (Steam's way) and
+   `GAMESCOPECTRL_DEBUG_REQUEST_SCREENSHOT=1` always write
+   `/tmp/gamescope.png`, overwriting it. With the quick-menu overlay up,
+   every method captures the game without the overlay. The property route
+   lands in the host's `/tmp`, out of the Flatpak's reach; the path route
+   can target Horizon's own data folder but goes through gamescope's
+   Wayland control socket (`gamescope-0`), which Horizon would need shared
+   (a narrow `--filesystem=xdg-run/gamescope-0`) and would have to speak.
+   That choice is open. Spike 1's empty screenshots had nothing on screen
+   to capture. Script: `scripts/spikes/gamescope-spike5.sh`.
 6. **The power key.** Does it reach Horizon as an input device on the Deck
    and the Odin 3, and does the inhibitor stop logind's own suspend?
 

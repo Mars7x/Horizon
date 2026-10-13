@@ -93,6 +93,14 @@ colour scheme and clock format, and FileChooser and OpenURI opened their
 windows. Those windows are hidden until Horizon tags them, like games'.
 The theme "System" setting can stay in the session.
 
+## Spike 5 result (2026-10-12)
+
+Gamescope screenshots work with a window on screen and leave out the
+quick-menu overlay. `gamescopectl screenshot <path>` writes a PNG anywhere;
+the root-property request always writes the host's `/tmp/gamescope.png`,
+which the Flatpak cannot read. How Horizon requests a screenshot it can
+read (gamescope's control socket, or another route) is still to decide.
+
 ## Consequences
 
 - One codebase gives the desktop and the session the same pages.
