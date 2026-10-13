@@ -21,12 +21,18 @@ finish-args:
   # Flatpak cannot restrict --share=network to a single host.
   - --share=network
   - --socket=wayland
+  # X11 only for the gamescope session (ADR 0189): gamescope shows only X11
+  # windows tagged with an app ID. Flatpak grants fallback-x11 only when no
+  # Wayland display is available, and the session starts Horizon without
+  # one, so the desktop stays Wayland-only.
+  - --socket=fallback-x11
   # All sound (UI sounds and Album video) is a native PipeWire stream:
   # low-latency UI sounds, and video timed by PipeWire's own clock. Nothing
   # uses PulseAudio, so its socket isn't granted. See ADR 0169.
   - --filesystem=xdg-run/pipewire-0
-  # Wayland-only UI. Do not add X11/XWayland socket permissions to work
-  # around missing GNOME Wayland clipboard support.
+  # On the desktop the UI is Wayland-only. Do not add the full x11 socket or
+  # other X11/XWayland permissions to work around missing GNOME Wayland
+  # clipboard support.
   - --device=dri
   # Horizon needs evdev/input access for controller navigation.
   # Do not broaden this to --device=all.

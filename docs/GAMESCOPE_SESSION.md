@@ -356,8 +356,13 @@ Each step is built, tested and documented before the next.
    code 2). The capabilities say only whether Horizon controls gamescope;
    each answer is added with the feature that needs it. Nothing changes on
    the desktop.
-2. X11 in the session only: Slint's X11 backend, `--socket=fallback-x11`;
-   paste unavailable in the session until an X11 clipboard exists.
+2. **Done:** X11 in the session only. Slint gains `backend-winit-x11`
+   (no new crates: they were already in `Cargo.lock`), and
+   `platform::slint_backend` pins winit to X11 with `--session`; the
+   desktop keeps winit's own choice. The manifest gains
+   `--socket=fallback-x11`. Paste shows "Couldn't paste" in the session
+   until an X11 clipboard exists. Checked: the dev build with `--session`
+   ran as an X11 window in nested gamescope and drew Home.
 3. `platform::gamescope`: X11 connection (`x11rb`, already in the build),
    Horizon's window tagged `0x7F000000`, the base layer, the reserved-ID
    rule.

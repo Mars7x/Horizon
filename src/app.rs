@@ -142,7 +142,7 @@ pub fn run(mode: SessionMode) -> Result<(), AppError> {
 
     // Backend selection must happen before set_xdg_app_id(), AppWindow::new(),
     // or any other Slint operation that needs the platform.
-    slint_backend::initialize()?;
+    slint_backend::initialize(mode)?;
     slint::set_xdg_app_id(APP_ID)?;
 
     let ui = AppWindow::new()?;
