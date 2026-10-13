@@ -11,7 +11,6 @@ pub mod launch;
 pub mod library;
 pub mod profile;
 pub mod runtime;
-pub mod session;
 pub mod source_playtime;
 pub mod steam_account;
 pub mod worker;

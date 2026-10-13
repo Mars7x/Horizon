@@ -1604,7 +1604,7 @@ mod tests {
     }
 
     #[test]
-    fn steam_advertises_runtime_observation_without_managed_session() {
+    fn steam_advertises_runtime_observation() {
         let source = SteamSource::with_roots(vec![]).expect("source");
         assert!(source.descriptor().supports(SourceCapability::Launch));
         assert!(
@@ -1613,11 +1613,6 @@ mod tests {
                 .supports(SourceCapability::RuntimeObservation)
         );
         assert!(source.descriptor().supports(SourceCapability::Artwork));
-        assert!(
-            !source
-                .descriptor()
-                .supports(SourceCapability::ManagedSession)
-        );
     }
 
     #[test]

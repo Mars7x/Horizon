@@ -143,6 +143,8 @@ Heroic now reports lifetime playtime through the source-neutral Activity service
 
 ## Managed sessions (Phase 9.5)
 
+> **Retired (2026-10-12):** the managed-session helper was removed (ADR 0046 superseded). No new managed sessions are recorded; existing `managed_session` rows still load and count in history.
+
 Schema v3 adds `managed_session` to the persisted tracking-method vocabulary.
 
 A managed session begins only after the host helper successfully starts a

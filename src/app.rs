@@ -25,7 +25,6 @@ use crate::{
     platform::{
         data_paths,
         launcher::PortalLaunchExecutor,
-        session_helper::DbusManagedSessionExecutor,
         slint_backend,
         system_status::{StatusMonitor, SystemStatus},
         video::FfmpegVideo,
@@ -60,7 +59,6 @@ use crate::{
         launch::GameLaunchService,
         library::LibraryService,
         runtime::{RuntimeObservationExecutor, SourceRuntimeObservationExecutor},
-        session::{ManagedSessionExecutor, ManagedSessionTerminalState},
         settings::SettingsService,
         source_playtime::SourcePlaytimeSync,
         steam_account::SteamAccountService,
@@ -211,23 +209,9 @@ pub fn run() -> Result<(), AppError> {
     ));
     let mut launch_service =
         GameLaunchService::new(Rc::clone(&registry), Rc::new(PortalLaunchExecutor));
-    match DbusManagedSessionExecutor::new() {
-        Ok(executor) => {
-            let available = executor.probe();
-            debug!(available, "session helper checked");
-            let executor: Rc<dyn ManagedSessionExecutor> = Rc::new(executor);
-            launch_service = launch_service.with_managed_executor(executor);
-        }
-        Err(error) => {
-            warn!(
-                %error,
-                "managed-session D-Bus client could not initialize; normal launch remains available"
-            );
-        }
-    }
-    // Source-runtime observation must work in the ordinary Flatpak without the
-    // optional host helper. Provider adapters expose only provider-owned state
-    // that is already readable through Horizon's narrow filesystem grants.
+    // Source-runtime observation must work in the ordinary Flatpak. Provider
+    // adapters expose only provider-owned state that is already readable
+    // through Horizon's narrow filesystem grants.
     // Steam uses its local gameprocess_log.txt rather than /proc.
     let runtime_observer: Rc<dyn RuntimeObservationExecutor> =
         Rc::new(SourceRuntimeObservationExecutor::new(Rc::clone(&registry)));
@@ -786,50 +770,6 @@ pub fn run() -> Result<(), AppError> {
         }
     });
 
-    let managed_session_timer = Timer::default();
-    let managed_launch_service = Rc::clone(&launch_service);
-    let managed_activity = Rc::clone(&activity_service);
-    let managed_home = Rc::clone(&home);
-    let managed_ui = ui.as_weak();
-    managed_session_timer.start(TimerMode::Repeated, Duration::from_millis(500), move || {
-        let completions = managed_launch_service.poll_managed_sessions();
-        if completions.is_empty() {
-            return;
-        }
-
-        let Some(ui) = managed_ui.upgrade() else {
-            return;
-        };
-        let mut refresh_activity = false;
-
-        for completion in completions {
-            let failed = !matches!(
-                completion.terminal(),
-                ManagedSessionTerminalState::Exited { .. }
-            );
-            managed_home.handle_managed_session_completion(&ui, completion.session_id(), failed);
-
-            match managed_activity
-                .handle_managed_session_terminal(completion.session_id(), completion.terminal())
-            {
-                Ok(transition) => {
-                    refresh_activity |= transition.changed();
-                }
-                Err(error) => {
-                    warn!(
-                        session_id = completion.session_id().get(),
-                        %error,
-                        "managed activity session transition could not be persisted"
-                    );
-                }
-            }
-        }
-
-        if refresh_activity {
-            ActivityController::refresh(&ui, &managed_activity);
-        }
-    });
-
     let keyboard_input = Rc::clone(&input);
     ui.on_raw_key_input(move |text, repeated| {
         keyboard_input.handle_keyboard(text.as_str(), repeated)
@@ -855,7 +795,6 @@ pub fn run() -> Result<(), AppError> {
     let _source_playtime_sync = source_playtime_sync;
     let _live_activity_timer = live_activity_timer;
     let _activity_checkpoint_timer = activity_checkpoint_timer;
-    let _managed_session_timer = managed_session_timer;
 
     ui.run()?;
 

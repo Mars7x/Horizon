@@ -237,6 +237,8 @@ See `SOURCES.md`, `BOTTLES.md`, `HEROIC.md`, ADR 0045, and ADR 0048.
 
 ## Phase 9.5 managed-session boundary
 
+> **Retired (2026-10-12):** the managed-session helper was removed (ADR 0046 superseded). Launches go through `LaunchExecutor` only.
+
 Managed sessions add one optional host boundary without reversing Horizon's
 dependency direction:
 

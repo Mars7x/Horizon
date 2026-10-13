@@ -1,6 +1,6 @@
 # ADR 0046: Optional host Gamescope session helper
 
-- Status: Accepted
+- Status: Superseded (2026-10-12): the helper and managed sessions were removed when Horizon moved to embedded emulator cores.
 - Phase: 9.5
 
 ## Context

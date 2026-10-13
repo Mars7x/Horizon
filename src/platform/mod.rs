@@ -5,7 +5,6 @@ pub mod file_chooser;
 pub mod flatpak_host;
 pub mod launcher;
 pub mod pipewire;
-pub mod session_helper;
 pub mod slint_backend;
 pub mod system_status;
 pub mod video;

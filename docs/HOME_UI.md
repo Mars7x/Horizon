@@ -291,6 +291,8 @@ If launch feedback is cancelled before that handoff (for example by abandoning t
 
 ## Phase 9.5 managed launch feedback
 
+> **Retired (2026-10-12):** the managed-session helper was removed (ADR 0046 superseded). The `Playing` pill follows runtime observation only.
+
 Home uses the separate source-neutral `Playing` pill after successful external or managed launch dispatch. A managed receipt adds only an opaque `ManagedSessionId` to Rust feedback so unusually early helper/session failure can clear or fail that acknowledgement; no helper, Gamescope, or provider command detail enters Slint.
 
 ## Phase 9.5.5 selected-title marquee polish

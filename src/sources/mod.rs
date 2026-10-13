@@ -72,40 +72,6 @@ pub enum SourceLaunchTarget {
     FlatpakApp(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum SourceManagedLaunchTargetError {
-    #[error("managed launch program must not be empty")]
-    EmptyProgram,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SourceManagedLaunchTarget {
-    program: String,
-    args: Vec<String>,
-}
-
-impl SourceManagedLaunchTarget {
-    pub fn new(
-        program: impl Into<String>,
-        args: Vec<String>,
-    ) -> Result<Self, SourceManagedLaunchTargetError> {
-        let program = program.into();
-        if program.trim().is_empty() {
-            return Err(SourceManagedLaunchTargetError::EmptyProgram);
-        }
-
-        Ok(Self { program, args })
-    }
-
-    pub fn program(&self) -> &str {
-        &self.program
-    }
-
-    pub fn args(&self) -> &[String] {
-        &self.args
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceRuntimeState {
     Running,
@@ -115,7 +81,6 @@ pub enum SourceRuntimeState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SourceCapability {
     Launch,
-    ManagedSession,
     RuntimeObservation,
     Artwork,
     LifetimePlaytime,
@@ -365,16 +330,6 @@ pub trait GameSource: Send + Sync {
         Ok(None)
     }
 
-    /// Prepare a direct host-side launch recipe that can be wrapped by a
-    /// managed compositor session. The recipe is resolved again by the host
-    /// helper; it is never sent across D-Bus as an arbitrary command.
-    fn managed_launch_target(
-        &self,
-        _external_id: &ExternalGameId,
-    ) -> Result<Option<SourceManagedLaunchTarget>, SourceError> {
-        Ok(None)
-    }
-
     /// Observe whether a source-owned game is currently running.
     ///
     /// Sources advertising `RuntimeObservation` must derive this from reliable
@@ -585,14 +540,6 @@ mod tests {
     }
 
     #[test]
-    fn managed_launch_target_rejects_an_empty_program() {
-        assert_eq!(
-            SourceManagedLaunchTarget::new("   ", vec![]).expect_err("empty program must fail"),
-            SourceManagedLaunchTargetError::EmptyProgram
-        );
-    }
-
-    #[test]
     fn descriptor_normalizes_capabilities_without_source_name_checks() {
         let descriptor = SourceDescriptor::new(
             source_id("example"),
@@ -608,7 +555,6 @@ mod tests {
         assert_eq!(descriptor.display_name(), "Example Store");
         assert!(descriptor.supports(SourceCapability::Launch));
         assert!(descriptor.supports(SourceCapability::Artwork));
-        assert!(!descriptor.supports(SourceCapability::ManagedSession));
         assert!(!descriptor.supports(SourceCapability::RuntimeObservation));
         assert!(!descriptor.supports(SourceCapability::LifetimePlaytime));
         assert_eq!(descriptor.capabilities().len(), 2);
