@@ -302,12 +302,15 @@ impl GameFront {
     }
 }
 
+type ShownCallback = Box<dyn Fn(bool)>;
+
 /// Applies [`GameFront`] to gamescope after each launch in the session.
 pub struct SessionFront {
     gamescope: Gamescope,
     front: RefCell<GameFront>,
     timer: Timer,
     this: Weak<SessionFront>,
+    on_shown: RefCell<Option<ShownCallback>>,
 }
 
 impl SessionFront {
@@ -317,7 +320,14 @@ impl SessionFront {
             front: RefCell::default(),
             timer: Timer::default(),
             this: this.clone(),
+            on_shown: RefCell::new(None),
         })
+    }
+
+    /// Called with `true` when gamescope shows Horizon again and `false`
+    /// when it shows a game instead.
+    pub fn on_horizon_shown(&self, callback: impl Fn(bool) + 'static) {
+        *self.on_shown.borrow_mut() = Some(Box::new(callback));
     }
 
     pub fn gamescope(&self) -> &Gamescope {
@@ -341,6 +351,9 @@ impl SessionFront {
                 }
                 FrontAction::BaseLayer(app_id) => {
                     info!(app_id, "gamescope shows a new app");
+                    if let Some(callback) = &*self.on_shown.borrow() {
+                        callback(app_id == HORIZON_APP_ID);
+                    }
                     self.gamescope.set_base_layer(app_id)
                 }
             };

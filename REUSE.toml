@@ -10,6 +10,7 @@ path = [
   "build.rs",
   "data/io.github.Mars7x.Horizon.desktop",
   "data/io.github.Mars7x.Horizon.svg",
+  "data/session/**",
   "docs/**",
   "flatpak/**",
   "rustfmt.toml",

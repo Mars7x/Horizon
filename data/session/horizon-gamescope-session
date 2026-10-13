@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# Horizon's gamescope session client (ADR 0189, docs/GAMESCOPE_SESSION.md).
+# Installed as /usr/libexec/horizon-gamescope-session and run by
+# gamescope-session-plus as CLIENTCMD (sessions.d/horizon), inside gamescope:
+# DISPLAY is gamescope's X11 display.
+#
+# 1. Gives the user's systemd environment gamescope's display, so Flatpak
+#    games and portals open in gamescope (decision 17), and turns the portals
+#    back on: gamescope-session-plus switches them off
+#    (XDG_DESKTOP_PORTAL_DIR="") because that environment had no DISPLAY.
+# 2. Starts Steam hidden, for steam:// launches and Steam Input.
+# 3. Runs Horizon with --session and starts it again after a crash. After 3
+#    quick failures in a row (each under 30 seconds) it gives up, which ends
+#    the session; gamescope-session-plus never restarts its client itself.
+# 4. Exit code 3 from Horizon means Switch to Desktop.
+#
+# HORIZON_RUN replaces the Horizon command for development
+# (scripts/session-dev.sh); it is not set in a real session.
+set -u
+
+APP_ID=io.github.Mars7x.Horizon
+STEAM_ID=com.valvesoftware.Steam
+SWITCH_TO_DESKTOP=3
+QUICK_FAILURE_SECONDS=30
+QUICK_FAILURES=3
+
+log() { echo "horizon-gamescope-session: $*" >&2; }
+
+if [[ -z "${DISPLAY:-}" ]]; then
+    log "no DISPLAY; run this inside gamescope"
+    exit 1
+fi
+
+systemctl --user set-environment "DISPLAY=$DISPLAY" XDG_CURRENT_DESKTOP=gamescope XDG_SESSION_TYPE=x11
+systemctl --user unset-environment WAYLAND_DISPLAY XDG_DESKTOP_PORTAL_DIR
+# Services started before this have the old environment.
+systemctl --user try-restart flatpak-session-helper.service xdg-desktop-portal.service
+
+steam_started=
+if flatpak info "$STEAM_ID" >/dev/null 2>&1; then
+    flatpak run "$STEAM_ID" -silent >/dev/null 2>&1 &
+    steam_started=flatpak
+elif command -v steam >/dev/null; then
+    steam -silent >/dev/null 2>&1 &
+    steam_started=native
+else
+    log "Steam isn't installed; Steam games won't launch"
+fi
+
+stop_steam() {
+    case "$steam_started" in
+        flatpak) flatpak run "$STEAM_ID" -shutdown >/dev/null 2>&1 ;;
+        native) steam -shutdown >/dev/null 2>&1 ;;
+    esac
+}
+
+switch_to_desktop() {
+    # Bazzite and SteamOS ship this; elsewhere the login screen comes back.
+    if command -v steamos-session-select >/dev/null; then
+        steamos-session-select desktop
+    else
+        log "no steamos-session-select; ending the session instead"
+    fi
+}
+
+read -r -a horizon <<< "${HORIZON_RUN:-flatpak run $APP_ID}"
+failures=0
+status=0
+while :; do
+    started=$SECONDS
+    env -u WAYLAND_DISPLAY "${horizon[@]}" --session
+    status=$?
+    case "$status" in
+        0)
+            log "Horizon quit"
+            break
+            ;;
+        "$SWITCH_TO_DESKTOP")
+            log "switching to the desktop"
+            stop_steam
+            switch_to_desktop
+            exit 0
+            ;;
+    esac
+    if (( SECONDS - started < QUICK_FAILURE_SECONDS )); then
+        failures=$((failures + 1))
+    else
+        failures=1
+    fi
+    log "Horizon stopped with status $status (quick failures: $failures)"
+    if (( failures >= QUICK_FAILURES )); then
+        log "giving up after $failures quick failures"
+        break
+    fi
+    sleep 1
+done
+
+stop_steam
+exit "$status"
