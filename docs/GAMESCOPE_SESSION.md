@@ -26,9 +26,12 @@ Horizon does not write its own compositor or display server.
      `CLIENTCMD`, the command that starts Steam hidden and then Horizon);
    - `/usr/share/wayland-sessions/gamescope-session-horizon.desktop` (the
      login-screen entry, `DesktopNames=gamescope`).
-3. **Targets handhelds first** (built-in screen, battery, sleep, brightness):
-   Steam Deck, Odin 3 and similar. **Bazzite** is the first test OS: it
-   already ships gamescope-session-plus.
+3. **Any device that runs gamescope-session-plus**: a PC with a controller
+   on a monitor or TV, or a handheld (Steam Deck, Odin 3 and similar). No
+   device is the target; controls that need hardware (battery, brightness,
+   the built-in screen's rotation) appear only where `SessionCapabilities`
+   finds it. **Bazzite** is the first test OS: it already ships
+   gamescope-session-plus.
 4. **Games run in the session's gamescope.** The per-game nested gamescope
    helper (ADR 0046, `src/session_helper.rs`) has no role in the session.
 5. **Steam runs hidden** in the session so `steam://` launches, Steam Input
@@ -257,14 +260,15 @@ build it:
    (a narrow `--filesystem=xdg-run/gamescope-0`) and would have to speak.
    That choice is open. Spike 1's empty screenshots had nothing on screen
    to capture. Script: `scripts/spikes/gamescope-spike5.sh`.
-6. **The power key.** Does it reach Horizon as an input device on the Deck
-   and the Odin 3, and does the inhibitor stop logind's own suspend?
+6. **The power key.** Does it reach Horizon as an input device (a PC's power
+   button or a handheld's), and does the inhibitor stop logind's own
+   suspend?
 
 ### Where the spikes run
 
-Until a Bazzite handheld is available, the spikes run on the development
-laptop: a Lenovo Yoga Slim 7x (Snapdragon X, aarch64) with Fedora 44
-Workstation (GNOME, Wayland, 4K pages).
+The spikes run on the development laptop and the main PC; there is no
+handheld to test on. The laptop is a Lenovo Yoga Slim 7x (Snapdragon X,
+aarch64) with Fedora 44 Workstation (GNOME, Wayland, 4K pages).
 
 - **Gamescope** comes from Fedora (`gamescope` 3.16.29, aarch64).
   gamescope-session-plus isn't packaged for Fedora, so a test script starts
@@ -286,8 +290,9 @@ Workstation (GNOME, Wayland, 4K pages).
   spike 3 also covers Flatpak Steam: `steam://` reaching it, and its games
   being tagged for gamescope from inside its sandbox. Gamescope there is
   3.16.29 (Fedora 44), layered and booted on 2026-10-12.
-- Handheld-only details (the Deck's and Odin's power keys, their screens'
-  rotation) wait for real devices.
+- Details only a handheld has (its own power key, built-in screen rotation,
+  battery and brightness on that hardware) stay unverified until someone
+  tries one.
 
 ## Phases
 
@@ -297,8 +302,8 @@ Workstation (GNOME, Wayland, 4K pages).
    volume, brightness, screenshot, performance, full Home; the power key.
 3. **System settings:** Wi-Fi, Bluetooth and performance in Settings
    (session only).
-4. **Packaging** for the handheld OSes (an image layer or system extension
-   for immutable systems).
+4. **Packaging** for the OSes that ship gamescope-session-plus (an image
+   layer or system extension for immutable systems).
 
 ## Open questions
 

@@ -9,8 +9,10 @@ Nothing is final until its spikes have run on a device.
 
 ## Context
 
-Horizon is a desktop Flatpak. On handhelds it should also be the whole
-screen, as Steam is in SteamOS's Game Mode, without writing a compositor.
+Horizon is a desktop Flatpak. On a PC with a controller or on a handheld it
+should also be able to be the whole screen, as Steam is in SteamOS's Game
+Mode, without writing a compositor. No device is the target; hardware
+controls appear where the hardware exists.
 Gamescope already does this job and is steered by X11 window properties that
 Steam sets.
 
