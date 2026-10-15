@@ -1625,7 +1625,6 @@ dependencies = [
  "slint",
  "slint-build",
  "smithay-clipboard",
- "steam-vdf-parser",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
@@ -4589,19 +4588,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
-name = "steam-vdf-parser"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae729373438271906eb7fe05df9682a83052f6b242e51b30fd7bcdd4d6addc38"
-dependencies = [
- "foldhash 0.2.0",
- "hex",
- "indexmap",
- "static_assertions",
- "winnow 0.7.15",
-]
-
-[[package]]
 name = "strict-num"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6051,15 +6037,6 @@ dependencies = [
  "x11-dl",
  "x11rb",
  "xkbcommon-dl",
-]
-
-[[package]]
-name = "winnow"
-version = "0.7.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
-dependencies = [
- "memchr",
 ]
 
 [[package]]

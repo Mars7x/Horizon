@@ -30,9 +30,9 @@ Flatpak chooses the local architecture (`aarch64` on ARM, `x86_64` on x86). Veri
 Respect the narrow declared filesystem/input/D-Bus permissions. There is no
 host command execution: Shop, Flatpak games and `flatpak_host` were removed.
 Steam/Heroic game sources are retired (ADR 0190); no Heroic or Legendary
-filesystem grants remain. Steam roots remain readable for Album screenshots
-and Steam Input controller naming, with the existing userdata write grants
-for user-confirmed screenshot deletion. Keep networking for Steam Web API and
+filesystem grants remain. All Steam filesystem grants are removed (ADR 0191). Album reads Horizon-owned
+captures only. Steam account access is network-backed profile pictures and
+friends; SteamGridDB remains independent. Keep networking for Steam Web API and
 SteamGridDB independent of local installation detection. Do not add broad
 home/host grants, `--device=all`, a session helper or compositor integration.
 

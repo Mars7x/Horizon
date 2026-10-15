@@ -8,7 +8,7 @@
 //! ```text
 //! data/    library.sqlite3  album/  profile.png  profile-animated  profile-steam.png  profile-steam-{frame,animated}
 //! config/  appearance.json  profile.json  steamgriddb.json  steam-account.json   (0700 dir)
-//! cache/   artwork/local/  artwork/steamgriddb/  achievements/  album/  (disposable)
+//! cache/   artwork/local/  artwork/steamgriddb/  album/  (disposable)
 //! ```
 //!
 //! Every cache folder holds a `.version` file. When a service changes its
@@ -130,11 +130,6 @@ pub fn local_artwork_cache_dir(version: &str) -> Option<PathBuf> {
 /// Cover art downloaded from SteamGridDB, with its provenance records.
 pub fn steamgriddb_cache_dir(version: &str) -> Option<PathBuf> {
     cache_dir("artwork/steamgriddb", version)
-}
-
-/// Per-account achievement snapshots and badge thumbnails.
-pub fn achievements_cache_dir(version: &str) -> Option<PathBuf> {
-    cache_dir("achievements", version)
 }
 
 /// Horizon's own screenshots and clips. Data, not cache: captures cannot be

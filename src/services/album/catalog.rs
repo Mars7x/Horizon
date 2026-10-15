@@ -244,6 +244,33 @@ mod tests {
     }
 
     #[test]
+    fn production_album_keeps_own_captures_without_reading_steam_screenshots() {
+        let root = temp_dir("horizon-only");
+        let album = HorizonAlbum::new(root.join("album"));
+        let now = Utc.with_ymd_and_hms(2026, 10, 15, 12, 0, 0).unwrap();
+        let own = album
+            .new_capture_path(None, "png", now)
+            .expect("capture path");
+        fs::write(&own, b"own capture").expect("capture");
+        let steam = root.join("Steam/userdata/123/760/remote/480/screenshots");
+        fs::create_dir_all(&steam).expect("Steam screenshots");
+        let external = steam.join("20261015120000_1.jpg");
+        fs::write(&external, b"Steam screenshot").expect("external capture");
+
+        let sources = crate::sources::production_capture_sources().expect("capture registry");
+        assert!(sources.is_empty());
+        let captures = scan_all(Some(&album), &sources);
+        assert_eq!(captures.len(), 1);
+        assert_eq!(captures[0].path(), own.as_path());
+        assert!(captures[0].origin().is_horizon());
+        assert_eq!(
+            fs::read(&external).expect("untouched screenshot"),
+            b"Steam screenshot"
+        );
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
     fn new_captures_are_filed_by_game_and_found_again_by_a_scan() {
         let root = temp_dir("round-trip");
         let album = HorizonAlbum::new(root.clone());

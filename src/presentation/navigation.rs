@@ -19,7 +19,6 @@ use crate::{
 
 use super::{
     CallbackSlot,
-    achievements::AchievementsController,
     activity::ActivityDetailsActions,
     album::{AlbumController, AlbumFeedback},
     home::HomeController,
@@ -42,7 +41,6 @@ pub struct NavigationController {
     action_sound: CallbackSlot<dyn Fn(UiSoundCue)>,
     activity_on_enter: CallbackSlot<dyn Fn(&AppWindow)>,
     activity_details: CallbackSlot<dyn ActivityDetailsActions>,
-    achievements: RefCell<Option<Rc<AchievementsController>>>,
     profile: RefCell<Option<Rc<ProfileController>>>,
     album: RefCell<Option<Rc<AlbumController>>>,
     keyboard: RefCell<Option<Rc<KeyboardController>>>,
@@ -65,7 +63,6 @@ impl NavigationController {
             action_sound: RefCell::new(None),
             activity_on_enter: RefCell::new(None),
             activity_details: RefCell::new(None),
-            achievements: RefCell::new(None),
             profile: RefCell::new(None),
             album: RefCell::new(None),
             keyboard: RefCell::new(None),
@@ -115,64 +112,6 @@ impl NavigationController {
         }
         self.cue(UiSoundCue::Ok);
         self.navigate_to(ui, AppRoute::Profile);
-    }
-
-    pub fn set_achievements(
-        self: &Rc<Self>,
-        controller: Rc<AchievementsController>,
-        ui: &AppWindow,
-    ) {
-        *self.achievements.borrow_mut() = Some(Rc::clone(&controller));
-        let weak = ui.as_weak();
-        let navigation = Rc::clone(self);
-        ui.on_achievements_select(move |index| {
-            if let Some(ui) = weak.upgrade()
-                && controller.choose_game(&ui, index)
-            {
-                navigation.cue(UiSoundCue::Ok);
-            }
-        });
-        let controller = self
-            .achievements
-            .borrow()
-            .as_ref()
-            .cloned()
-            .expect("Achievements controller is installed");
-        let weak = ui.as_weak();
-        let navigation = Rc::clone(self);
-        ui.on_achievements_back(move || {
-            if let Some(ui) = weak.upgrade()
-                && controller.exit_entries(&ui)
-            {
-                navigation.cue(UiSoundCue::Back);
-            }
-        });
-        let controller = self
-            .achievements
-            .borrow()
-            .as_ref()
-            .cloned()
-            .expect("Achievements controller is installed");
-        let weak = ui.as_weak();
-        ui.on_achievements_scroll_entries(move |delta| {
-            if let Some(ui) = weak.upgrade() {
-                controller.move_entries(&ui, delta);
-            }
-        });
-        let controller = self
-            .achievements
-            .borrow()
-            .as_ref()
-            .cloned()
-            .expect("Achievements controller is installed");
-        let weak = ui.as_weak();
-        let navigation = Rc::clone(self);
-        ui.on_achievements_cycle_source(move |direction| {
-            if let Some(ui) = weak.upgrade() {
-                navigation.cue(UiSoundCue::Ok);
-                controller.cycle_source(&ui, direction);
-            }
-        });
     }
 
     /// Pointer callbacks act only while Album is the current route, so a
@@ -289,11 +228,6 @@ impl NavigationController {
     /// Entering Activity through either a direct route or the Back stack is a
     /// new visit. Nested detail Back is not: that path preserves the cover.
     fn prepare_activity_visit(&self, ui: &AppWindow) {
-        // Populate the read-only Milestones preview even if the user has never
-        // opened the dedicated Achievements utility. Fetching stays off-thread.
-        if let Some(achievements) = self.achievements.borrow().as_ref() {
-            achievements.on_enter(ui);
-        }
         // Leaving Activity through Home/Menu can retain its nested details UI.
         // A new visit must show the overview, not that previous game's history.
         if ui.get_activity_details_visible()
@@ -374,11 +308,6 @@ impl NavigationController {
         if route == AppRoute::Library {
             self.library.on_enter(ui);
         }
-        if route == AppRoute::Utility(UtilityPage::Achievements)
-            && let Some(controller) = self.achievements.borrow().as_ref()
-        {
-            controller.start_new_visit(ui);
-        }
         if route == AppRoute::Utility(UtilityPage::Activity) {
             self.prepare_activity_visit(ui);
         }
@@ -426,17 +355,6 @@ impl NavigationController {
                     return;
                 }
             }
-        }
-        if self.current_route() == AppRoute::Utility(UtilityPage::Achievements)
-            && event.action == UiAction::Back
-            && self
-                .achievements
-                .borrow()
-                .as_ref()
-                .is_some_and(|c| c.exit_entries(ui))
-        {
-            self.cue(UiSoundCue::Back);
-            return;
         }
         if self.current_route() == AppRoute::Utility(UtilityPage::Album)
             && event.action == UiAction::Back
@@ -698,11 +616,6 @@ impl NavigationController {
             if to == AppRoute::Utility(UtilityPage::Settings) {
                 self.settings.on_enter(ui);
             }
-            if to == AppRoute::Utility(UtilityPage::Achievements)
-                && let Some(controller) = self.achievements.borrow().as_ref()
-            {
-                controller.start_new_visit(ui);
-            }
             if to == AppRoute::Utility(UtilityPage::Activity) {
                 self.prepare_activity_visit(ui);
             }
@@ -889,35 +802,8 @@ impl NavigationController {
         match self.current_route() {
             AppRoute::Home => self.home.handle_action(ui, event),
             AppRoute::Library => self.library.handle_action(ui, event),
-            AppRoute::Utility(UtilityPage::Achievements) => {
-                if let Some(controller) = self.achievements.borrow().as_ref() {
-                    if ui.get_achievements_viewing_entries() {
-                        match event.action {
-                            UiAction::Up => controller.move_entries(ui, -1),
-                            UiAction::Down => controller.move_entries(ui, 1),
-                            _ => {}
-                        }
-                    } else {
-                        match event.action {
-                            UiAction::Up => controller.move_game(ui, -1),
-                            UiAction::Down => controller.move_game(ui, 1),
-                            // Only A (or a click) opens a game; Right does nothing.
-                            UiAction::Accept if !event.repeated => {
-                                if controller.enter_entries(ui) {
-                                    self.cue(UiSoundCue::Ok);
-                                }
-                            }
-                            UiAction::LeftBumper if !event.repeated => {
-                                controller.cycle_source(ui, -1)
-                            }
-                            UiAction::RightBumper if !event.repeated => {
-                                controller.cycle_source(ui, 1)
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
+            // No achievement provider is configured yet; Back remains global.
+            AppRoute::Utility(UtilityPage::Achievements) => {}
             AppRoute::Utility(UtilityPage::Album) => {
                 let feedback = self
                     .album

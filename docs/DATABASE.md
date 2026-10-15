@@ -4,7 +4,7 @@ Horizon uses SQLite through `rusqlite`. SQL is confined to `src/persistence/`; p
 
 ## Current retirement policy — schema 0010
 
-Migrations 0009/0010 move Steam/Heroic membership into `retired_game_sources`, retaining original IDs, game IDs, external IDs and timestamps. All game metadata, observed sessions and lifetime counters survive, including unplayed titles. The archive references games with `ON DELETE RESTRICT`; authoritative reconciliation also explicitly protects archived identities. Active library/count/most-played queries continue to use `game_sources`. `SqliteLibraryRepository::retired_games` supplies metadata to Album and Achievements only. No account files or artwork caches are changed. Old migrations are immutable; their previous deletions cannot be undone by this transition. See ADR 0190.
+Migrations 0009/0010 move Steam/Heroic membership into `retired_game_sources`, retaining original IDs, game IDs, external IDs and timestamps. All game metadata, observed sessions and lifetime counters survive, including unplayed titles. The archive references games with `ON DELETE RESTRICT`; authoritative reconciliation also explicitly protects archived identities. Active library/count/most-played queries continue to use `game_sources`. `SqliteLibraryRepository::retired_games` supplies metadata for Horizon-owned Album capture titles only. Steam achievements no longer read these identities (ADR 0191). No account files or artwork caches are changed. Old migrations are immutable; their previous deletions cannot be undone by this transition. See ADR 0190.
 
 ## Location
 

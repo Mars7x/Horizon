@@ -111,9 +111,7 @@ export component AppWindow inherits Window {
         : root.current-route == AppRouteView.activity ? (root.activity-details-visible
             ? [{ button: "B", label: "Back" }]
             : [{ button: "B", label: "Back" }, { button: "A", label: "Details" }])
-        : root.current-route == AppRouteView.achievements ? (root.achievements-viewing-entries
-            ? [{ button: "B", label: "Back" }]
-            : [{ button: "B", label: "Back" }, { button: "A", label: "Open" }])
+        : root.current-route == AppRouteView.achievements ? [{ button: "B", label: "Back" }]
         // Fullscreen: Left/Right browse and LB/RB skip 10 s are not listed.
         // The Album's hints depend on its viewer, selection and capture
         // owners; its controller publishes them (`album-hints`).
@@ -206,8 +204,8 @@ export component AppWindow inherits Window {
     in property <string> activity-month-total: "0 min";
     in property <int> activity-selected-index: 0;
     in property <[AchievementEntryData]> activity-recent-achievements;
-    in property <string> activity-achievement-status: "Connect Steam in Settings";
-    in property <string> achievements-game-count: "0 games";
+    in property <string> activity-achievement-status: "Achievements unavailable";
+    in property <string> achievements-game-count: "Unavailable";
     in property <string> achievements-source-label: "All sources";
     in property <bool> achievements-has-source-choice: false;
     in property <string> achievements-selected-game-title: "Select a game";
@@ -217,7 +215,7 @@ export component AppWindow inherits Window {
     callback achievements-cycle-source(int);
     in property <[AchievementGameData]> achievement-games;
     in property <[AchievementEntryData]> achievement-entries;
-    in property <string> achievements-status: "Connect Steam in Settings";
+    in property <string> achievements-status: "Achievements unavailable";
     in property <bool> achievements-loading: false;
     in property <int> achievements-selected-index: 0;
     in property <int> achievements-visit-revision: 0;

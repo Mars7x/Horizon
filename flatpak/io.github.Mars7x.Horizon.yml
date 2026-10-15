@@ -37,23 +37,6 @@ finish-args:
   - --system-talk-name=org.freedesktop.UPower
   # Read-only Bluetooth controller Battery1 fallback. No configuration writes.
   - --system-talk-name=org.bluez
-  # Read only Steam-owned metadata locations. Native Steam stays limited to
-  # its XDG data roots. Flatpak Steam needs its app-data root exposed as one
-  # read-only subtree because real installations may resolve Steam metadata
-  # through links/paths spanning .local/share and data inside that app sandbox.
-  # This is still scoped to com.valvesoftware.Steam, not home/host generally.
-  - --filesystem=xdg-data/Steam:ro
-  - --filesystem=xdg-data/steam:ro
-  - --filesystem=~/.var/app/com.valvesoftware.Steam:ro
-  # The Album deletes Steam screenshots (the user chose this), so Steam's
-  # per-account userdata is writable; the rest of Steam stays read-only.
-  # Flatpak can't narrow it to the screenshot folders (the account id varies),
-  # so Horizon's code does: it deletes only media files directly inside
-  # userdata/<active account>/760/remote/<appid>/screenshots/, and their
-  # thumbnails. See ADR 0170.
-  - --filesystem=xdg-data/Steam/userdata
-  - --filesystem=xdg-data/steam/userdata
-  - --filesystem=~/.var/app/com.valvesoftware.Steam/.local/share/Steam/userdata
 
 modules:
   # Install the four canonical Google Fonts LINE Seed JP TTFs from one immutable

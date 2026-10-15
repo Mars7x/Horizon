@@ -29,7 +29,7 @@ go directly inside them, with no extra `io.github.Mars7x.Horizon` folder:
     │   ├── local/                   covers normalized from each source's files
     │   └── steamgriddb/             covers downloaded from SteamGridDB
     ├── achievements/
-    │   └── steam-<SteamID64>/       achievement snapshot and badge thumbnails
+    │   └── steam-<SteamID64>/       legacy Steam cache; no longer read or written
     └── album/                       capture thumbnails and video durations
 ```
 

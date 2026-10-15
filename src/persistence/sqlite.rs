@@ -55,7 +55,7 @@ impl SqliteLibraryRepository {
         migrations::current_schema_version(&self.connection)
     }
 
-    /// Retired metadata is available to Album and Achievements, never launch UI.
+    /// Retired metadata remains available for Horizon-owned capture titles.
     pub fn retired_games(&self) -> Result<Vec<LibraryGame>, PersistenceError> {
         let mut statement = self.connection.prepare(
             "SELECT g.id, g.title, gs.source_id, gs.external_id \
@@ -862,9 +862,6 @@ mod tests {
         assert_eq!(retained[0].game().id(), id);
         assert_eq!(retained[0].game().title().as_str(), "Remembered Game");
         assert_eq!(retained[0].sources()[0].external_id().as_str(), "480");
-        let achievements = crate::services::achievements::steam_games(&retained);
-        assert_eq!(achievements.len(), 1);
-        assert_eq!(achievements[0].app_id, 480);
     }
 
     #[test]
