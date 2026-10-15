@@ -17,6 +17,11 @@ cleanup must not discard them or reintroduce Steam installation scanning.
 perform lookup, downloading and refresh off the UI thread. Registered adapters
 may provide authoritative external catalog IDs; otherwise lookup uses conservative
 title matching. Do not infer Steam AppIDs from another provider's numeric IDs.
+GBA lookup omits known trailing region/language and numeric revision tags, without
+changing library titles or ROM recognition. Search and comparison fold Unicode
+diacritics, case, whitespace and colon/dash separators. A single matching catalog
+ID is required; editions, hacks, sequels and unknown tags remain distinct. See
+[ADR 0196](adr/0196-rom-artwork-title-matching.md).
 Eligible square grids rank by score with deterministic ties, not upload recency.
 
 Requests and public-image URLs use explicit HTTPS host validation, bounded

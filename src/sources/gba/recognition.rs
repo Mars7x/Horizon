@@ -1,4 +1,4 @@
-//! Local, review-first cartridge import. No ROM bytes leave the machine.
+//! Local cartridge recognition. No ROM bytes leave the machine.
 use quick_xml::{
     Reader,
     events::{BytesStart, Event},
@@ -24,7 +24,7 @@ pub enum RomImportError {
     Catalog,
     #[error("The folder is too large or nested too deeply; choose a smaller folder")]
     ScanLimit,
-    #[error("A selected ROM changed or became unavailable; scan and review again")]
+    #[error("A selected ROM changed or became unavailable; choose the folder again")]
     Changed,
 }
 

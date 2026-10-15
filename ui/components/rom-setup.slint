@@ -5,13 +5,12 @@ import { Theme, Metrics, Typography } from "../theme/theme.slint";
 export component RomSetupDialog inherits ModalDialog {
     in property <string> title;
     in property <string> detail;
-    in property <string> message;
     in property <[string]> labels;
     in property <int> focused;
     in property <bool> busy;
     callback choose(int);
-    card-width: 720px;
-    card-height: min(620px, root.area-height - Metrics.spacing-xl);
+    card-width: 480px;
+    card-height: root.labels.length > 1 ? 296px : root.labels.length == 1 ? 240px : 196px;
     VerticalLayout {
         padding: Metrics.spacing-lg;
         spacing: Metrics.spacing-sm;
@@ -28,7 +27,7 @@ export component RomSetupDialog inherits ModalDialog {
             font-size: Typography.body-size;
             wrap: word-wrap;
             overflow: elide;
-            min-height: 124px;
+            min-height: 64px;
             vertical-stretch: 1;
         }
         for button-label[index] in root.labels: ActionButton {
@@ -37,14 +36,6 @@ export component RomSetupDialog inherits ModalDialog {
             focused: root.focused == index;
             enabled: !root.busy;
             activated => { root.choose(index); }
-        }
-        Text {
-            text: root.message;
-            color: Theme.secondary-foreground;
-            font-size: Typography.body-size;
-            wrap: word-wrap;
-            overflow: elide;
-            min-height: 52px;
         }
     }
 }

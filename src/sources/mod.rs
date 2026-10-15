@@ -364,6 +364,12 @@ pub trait GameSource: Send + Sync {
         None
     }
 
+    /// Optional search title without source-specific release metadata. This
+    /// never changes the persisted/display title or supplies a catalog identity.
+    fn artwork_search_title(&self, _title: &str) -> Option<String> {
+        None
+    }
+
     /// Return provider-owned artwork candidates for one source-owned game.
     ///
     /// Sources only expose candidates and provenance. Selection, decoding, and

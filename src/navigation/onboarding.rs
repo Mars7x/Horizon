@@ -54,12 +54,14 @@ pub fn move_focus(step: SetupStep, focus: i32, avatar: u8, direction: Direction)
             _ => focus,
         },
         SetupStep::Library => match direction {
-            Up | Left => (focus - 1).max(0),
-            Down | Right => (focus + 1).min(2),
+            Left => (focus + 1).min(2),
+            Right => (focus - 1).max(0),
+            Up | Down => focus,
         },
         SetupStep::Ready => match direction {
-            Up | Left => 0,
-            Down | Right => 1,
+            Left => 1,
+            Right => 0,
+            Up | Down => focus,
         },
     }
 }
@@ -67,6 +69,28 @@ pub fn move_focus(step: SetupStep, focus: i32, avatar: u8, direction: Direction)
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bottom_action_rows_follow_visual_order_and_stop_at_edges() {
+        use Direction::*;
+        // Back is leftmost; the primary action is rightmost and starts focused.
+        for (step, visual_order) in [
+            (SetupStep::Library, vec![2, 1, 0]),
+            (SetupStep::Ready, vec![1, 0]),
+        ] {
+            for (position, &focus) in visual_order.iter().enumerate() {
+                assert_eq!(
+                    move_focus(step, focus, 0, Left),
+                    visual_order[position.saturating_sub(1)]
+                );
+                assert_eq!(
+                    move_focus(step, focus, 0, Right),
+                    visual_order[(position + 1).min(visual_order.len() - 1)]
+                );
+                assert_eq!(move_focus(step, focus, 0, Up), focus);
+                assert_eq!(move_focus(step, focus, 0, Down), focus);
+            }
+        }
+    }
     #[test]
     fn profile_reaches_every_control_and_restores_selected_avatar_row() {
         use Direction::*;

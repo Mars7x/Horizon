@@ -9,7 +9,7 @@ not onboarding, a roadmap or authorization to revive a feature.
 ## Product boundaries
 
 - Horizon is a Rust/Slint desktop Flatpak moving toward embedded emulator cores.
-  GBA has a reviewed folder importer; no core, BIOS manager or hosting architecture
+  GBA has an automatic folder importer; no core, BIOS manager or hosting architecture
   is implemented.
   Do not choose core/process APIs, resume compositor/session work or install host
   packages without explicit direction.

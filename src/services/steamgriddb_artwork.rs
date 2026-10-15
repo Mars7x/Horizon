@@ -27,7 +27,7 @@ use super::{
 };
 
 const CACHE_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
-// The v5 miss marker invalidates v2/v3/v4 results generated before the API URL fix.
+// Versioned miss markers let matching-policy changes retry old misses immediately.
 // Cache entries are written only for authoritative no-match or no-metadata
 // outcomes; CDN/network errors must never create negative-cache entries.
 const NEGATIVE_CACHE_AGE: Duration = Duration::from_secs(5 * 60);
@@ -428,8 +428,8 @@ fn read_cache(root: &Path) -> Option<(SquareArtwork, bool)> {
 }
 
 fn recent_miss(root: &Path) -> bool {
-    // v6 retries misses after adopting highest-score-first grid selection.
-    fs::metadata(root.with_extension("miss-v6"))
+    // v7 retries misses after release-tag and Unicode title normalization.
+    fs::metadata(root.with_extension("miss-v7"))
         .and_then(|m| m.modified())
         .ok()
         .and_then(|modified| SystemTime::now().duration_since(modified).ok())
@@ -440,7 +440,7 @@ fn write_miss(root: &Path) {
     if let Some(parent) = root.parent()
         && fs::create_dir_all(parent).is_ok()
     {
-        let _ = fs::write(root.with_extension("miss-v6"), b"");
+        let _ = fs::write(root.with_extension("miss-v7"), b"");
     }
 }
 
@@ -471,7 +471,7 @@ fn write_cache(
         // Metadata is the final commit marker; a mismatch checksum rejects any
         // interrupted write that left mixed PNG/JSON versions.
         fs::rename(&tmp_json, &json)?;
-        let _ = fs::remove_file(root.with_extension("miss-v6"));
+        let _ = fs::remove_file(root.with_extension("miss-v7"));
         Ok(())
     })();
     if result.is_err() {
@@ -561,6 +561,7 @@ mod tests {
         fs::write(root.with_extension("miss-v3"), b"").unwrap();
         fs::write(root.with_extension("miss-v4"), b"").unwrap();
         fs::write(root.with_extension("miss-v5"), b"").unwrap();
+        fs::write(root.with_extension("miss-v6"), b"").unwrap();
         assert!(!recent_miss(&root));
         write_miss(&root);
         assert!(recent_miss(&root));

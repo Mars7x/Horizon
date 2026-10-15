@@ -24,7 +24,7 @@ use std::{
     sync::mpsc::Receiver,
 };
 
-/// The shared review flow; setup does not own a separate importer.
+/// The shared folder importer; setup does not own a separate scan path.
 pub trait OnboardingImport {
     fn open(&self);
     fn set_finished(&self, callback: Rc<dyn Fn(bool)>);
@@ -418,7 +418,8 @@ mod tests {
         if std::env::var_os("HORIZON_SETUP_TEST_REDUCED").is_some() {
             ui.global::<crate::Motion>().set_reduced_motion(true);
         }
-        let keyboard = KeyboardController::new(&ui, Rc::new(Cell::new(InputDevice::Gamepad)));
+        let last_device = Rc::new(Cell::new(InputDevice::Gamepad));
+        let keyboard = KeyboardController::new(&ui, Rc::clone(&last_device));
         let profile = ProfileController::new(
             &ui,
             Rc::new(RefCell::new(
@@ -438,6 +439,24 @@ mod tests {
                 sound: Rc::new(|_| {}),
             },
         );
+        // Dispatch physical key events through Slint focus/bubbling, rather
+        // than testing only controller actions that bypass native focus.
+        let (key_controller, key_ui, key_device) = (
+            Rc::clone(&controller),
+            ui.as_weak(),
+            Rc::clone(&last_device),
+        );
+        ui.on_raw_key_input(move |text, repeated| {
+            let Some(action) = crate::input::action_for_key(&text, repeated) else {
+                return false;
+            };
+            let Some(ui) = key_ui.upgrade() else {
+                return false;
+            };
+            key_device.set(InputDevice::Keyboard);
+            key_controller.handle_action(&ui, UiActionEvent { action, repeated })
+        });
+        ui.on_raw_key_released(|text| crate::input::action_for_key(&text, false).is_some());
         ui.show().unwrap();
         let phase = Rc::new(Cell::new(0));
         let ticks = Rc::new(Cell::new(0));
@@ -467,7 +486,17 @@ mod tests {
                     return;
                 }
                 let act = |action| {
+                    last_device.set(InputDevice::Gamepad);
                     assert!(live.handle_action(&ui, UiActionEvent::fresh(action)));
+                };
+                let key = |key: slint::platform::Key| {
+                    use slint::platform::WindowEvent;
+                    ui.window()
+                        .dispatch_event_with_result(WindowEvent::KeyPressed { text: key.into() })
+                        .unwrap();
+                    ui.window()
+                        .dispatch_event_with_result(WindowEvent::KeyReleased { text: key.into() })
+                        .unwrap();
                 };
                 let snapshot = |name: &str| {
                     let buffer = ui.window().take_snapshot().unwrap();
@@ -520,11 +549,35 @@ mod tests {
                     3 => {
                         snapshot("profile");
                         act(UiAction::Down);
-                        act(UiAction::Accept);
+                        key(slint::platform::Key::Return);
                         phase_loop.set(4);
                     }
                     4 => {
                         assert_eq!(live.step.get(), SetupStep::Library);
+                        last_device.set(InputDevice::Gamepad);
+                        ui.window().request_redraw();
+                        phase_loop.set(5);
+                    }
+                    5 => {
+                        snapshot("library");
+                        assert_eq!(ui.get_onboarding_focus(), 0);
+                        key(slint::platform::Key::LeftArrow);
+                        assert_eq!(last_device.get(), InputDevice::Keyboard);
+                        assert_eq!(ui.get_onboarding_focus(), 1);
+                        key(slint::platform::Key::LeftArrow);
+                        assert_eq!(ui.get_onboarding_focus(), 2);
+                        key(slint::platform::Key::LeftArrow);
+                        assert_eq!(ui.get_onboarding_focus(), 2);
+                        // Switch to controller while Back is selected, then
+                        // return to keyboard without resetting semantic focus.
+                        act(UiAction::Right);
+                        assert_eq!(ui.get_onboarding_focus(), 1);
+                        act(UiAction::Right);
+                        assert_eq!(ui.get_onboarding_focus(), 0);
+                        key(slint::platform::Key::LeftArrow);
+                        assert_eq!(ui.get_onboarding_focus(), 1);
+                        act(UiAction::Right);
+                        assert_eq!(ui.get_onboarding_focus(), 0);
                         assert_eq!(profile.preferences().name, "Ariété Player");
                         assert_eq!(
                             profile.preferences().source,
@@ -536,19 +589,25 @@ mod tests {
                             callback(false);
                         }
                         assert_eq!(live.step.get(), SetupStep::Library);
-                        act(UiAction::Down);
-                        act(UiAction::Accept);
-                        phase_loop.set(5);
-                    }
-                    5 => {
-                        assert_eq!(live.step.get(), SetupStep::Ready);
-                        snapshot("ready");
-                        act(UiAction::Home);
-                        assert!(ui.get_onboarding_open());
-                        act(UiAction::Accept);
+                        assert_eq!(ui.get_onboarding_focus(), 0);
+                        key(slint::platform::Key::LeftArrow);
+                        assert_eq!(ui.get_onboarding_focus(), 1);
+                        key(slint::platform::Key::Return);
                         phase_loop.set(6);
                     }
                     6 => {
+                        assert_eq!(live.step.get(), SetupStep::Ready);
+                        snapshot("ready");
+                        key(slint::platform::Key::LeftArrow);
+                        assert_eq!(ui.get_onboarding_focus(), 1);
+                        act(UiAction::Right);
+                        assert_eq!(ui.get_onboarding_focus(), 0);
+                        act(UiAction::Home);
+                        assert!(ui.get_onboarding_open());
+                        act(UiAction::Accept);
+                        phase_loop.set(7);
+                    }
+                    7 => {
                         assert!(!ui.get_onboarding_open());
                         done_loop.set(true);
                         slint::quit_event_loop().unwrap();
