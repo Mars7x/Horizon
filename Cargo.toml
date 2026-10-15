@@ -30,6 +30,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 unicode-normalization = "0.1"
 jxl-oxide = { version = "0.12.6", default-features = false, features = ["image"] }
 libloading = "0.8"
+xbrz = { package = "xbrz-rs", version = "=0.1.0" }
 
 [build-dependencies]
 cc = "1"

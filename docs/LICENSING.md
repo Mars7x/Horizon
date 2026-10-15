@@ -34,6 +34,12 @@ permission to guess. New dependencies need a demonstrated consumer and review.
 and bundled-asset coverage. Removed direct dependencies may keep historical
 notices; that does not make them active build requirements.
 
+The Smooth pixel art filter uses unmodified xbrz-rs 0.1.0 under GPL-3.0-only,
+compatible with distribution of the combined application under GPLv3. The GBA
+sRGB colour profile is a CPU adaptation of the credited public-domain shader;
+its original license statement is retained alongside the GPLv3 text. See the
+video-treatment entries in the notices for authors, source and modifications.
+
 ## Distribution
 
 Flatpak installs project licenses, bundled license texts and notices alongside

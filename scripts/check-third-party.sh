@@ -23,6 +23,8 @@ required_licenses=(
   "CC-BY-SA-3.0-US.txt"
   "CC-BY-SA-4.0.txt"
   "GPL-3.0-or-later.txt"
+  "GPL-3.0-only.txt"
+  "LicenseRef-GBA-Color-Public-Domain.txt"
   "OFL-1.1.txt"
   "Apache-2.0.txt"
   "MIT.txt"
@@ -50,6 +52,9 @@ grep -Fq "zbus 5.x" "$notice" || { echo "zbus provenance missing from THIRD_PART
 grep -Fq "**FFmpeg**" "$notice" || { echo "FFmpeg provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
 grep -Fq "**PipeWire**" "$notice" || { echo "PipeWire provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
 grep -Fq "**jxl-oxide 0.12.x**" "$notice" || { echo "jxl-oxide provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
+
+grep -Fq '**xbrz-rs 0.1.0**' "$notice" || { echo "xBRZ provenance missing" >&2; exit 1; }
+grep -Fq "Pokefan531" "$notice" || { echo "GBA colour profile provenance missing" >&2; exit 1; }
 
 for license in "${required_licenses[@]}"; do
   test -s "$root/LICENSES/$license" || { echo "missing license text: $license" >&2; exit 1; }

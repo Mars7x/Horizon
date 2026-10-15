@@ -13,15 +13,24 @@ filters, selection and dialogs for [the page](../ui/pages/album.slint).
 The durable folder is `data/album/`, resolved by [data paths](../src/platform/data_paths.rs).
 Captures are filed by escaped source/game identity or the Horizon folder; old
 identity references can still supply titles without becoming active games.
-Writes use a temporary `.part` path then rename. The file is the record; no media
+Writes use a temporary `.part` path, published atomically only when complete. The file is the record; no media
 table is needed. External changes appear on the next visit. Thumbnails/durations
-are disposable caches, not the original media.
+are disposable caches, not the original media. Version 3 thumbnails are lossless
+PNG, preserving native screenshot colours/alpha. Small still images use nearest
+pixel sampling when enlarged in the grid, viewer, slide and landing layers;
+downscaled images and videos keep smooth sampling.
 
 Supported extensions include PNG, JPEG, GIF, JPEG XL, MP4, M4V, MKV, WebM and
 MOV; decoding follows content/runtime support. Animated GIFs play silently in
 place of stills; animated JPEG XL uses its first frame. FFmpeg video decoding
 and PipeWire audio use [native shims](../csrc/) behind the VideoBackend contract.
 No download or recorder implementation is implied by the viewer.
+
+The GBA pause panel's Take screenshot action captures the native unfiltered
+240×160 game frame. PNG encoding/writes run on the core worker through the shared
+HorizonAlbum path allocator, under the game's `gba` / SHA-256 source identity.
+No pause UI, speed badge or video filter is included. Complete captures appear
+on the next Album visit. Failed writes preserve existing media and report an error.
 
 ## Interaction
 

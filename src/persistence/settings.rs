@@ -27,7 +27,7 @@ pub enum SettingsStoreError {
         #[source]
         source: serde_json::Error,
     },
-    #[error("could not serialize third-party preferences: {0}")]
+    #[error("could not serialize preferences: {0}")]
     Serialize(#[from] serde_json::Error),
     #[error("could not save settings file {path}: {source}")]
     Write {
@@ -47,10 +47,16 @@ impl SettingsStore {
     }
 
     pub fn load(&self) -> Result<ThirdPartySettings, SettingsStoreError> {
+        self.load_value()
+    }
+
+    pub fn load_value<T: serde::de::DeserializeOwned + Default>(
+        &self,
+    ) -> Result<T, SettingsStoreError> {
         let bytes = match fs::read(&self.path) {
             Ok(bytes) => bytes,
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                return Ok(ThirdPartySettings::default());
+                return Ok(T::default());
             }
             Err(source) => {
                 return Err(SettingsStoreError::Read {
@@ -66,6 +72,10 @@ impl SettingsStore {
     }
 
     pub fn save(&self, settings: &ThirdPartySettings) -> Result<(), SettingsStoreError> {
+        self.save_value(settings)
+    }
+
+    pub fn save_value<T: serde::Serialize>(&self, settings: &T) -> Result<(), SettingsStoreError> {
         let bytes = serde_json::to_vec_pretty(settings)?;
         let parent = self.path.parent().expect("settings path has parent");
         fs::create_dir_all(parent).map_err(|source| SettingsStoreError::Write {

@@ -1,0 +1,92 @@
+import { Theme, Metrics, Typography } from "../theme/theme.slint";
+import { MarqueeText } from "marquee-text.slint";
+import { ListRow } from "list-row.slint";
+import { ActionButton } from "action-button.slint";
+import { HintBar } from "hint-bar.slint";
+
+component PauseAction inherits ListRow {
+    in property <string> value;
+    in property <bool> available: true;
+    compact: true;
+    trailing-width: Metrics.spacing-xxl * 2;
+    accessible-description: root.available ? root.value : "Not available yet";
+    opacity: root.available ? 1.0 : 0.48;
+    Text {
+        x: parent.width - Metrics.spacing-xxl * 2;
+        width: Metrics.spacing-xxl * 2 - Metrics.spacing-lg;
+        height: parent.height;
+        text: root.value;
+        color: root.focused ? Theme.accent : Theme.secondary-foreground;
+        font-size: Typography.body-size;
+        horizontal-alignment: right; vertical-alignment: center;
+    }
+}
+
+export component PausePanel inherits Rectangle {
+    in property <bool> open;
+    in property <length> footer-center: Metrics.hint-row-center-from-bottom - Metrics.spacing-lg;
+    in property <bool> busy;
+    in property <bool> fast-forward;
+    in property <bool> restart-confirm;
+    in property <int> restart-focus;
+    in property <int> focused;
+    in property <string> title;
+    in property <string> message;
+    callback choose(int);
+    callback restart-answer(int);
+    background: Theme.background;
+    border-radius: Metrics.radius-lg;
+    border-width: Theme.high-contrast ? 2px : 1px;
+    border-color: Theme.high-contrast ? Theme.foreground : Theme.divider;
+    Text {
+        x: Metrics.spacing-lg; y: Metrics.spacing-lg;
+        width: parent.width - Metrics.spacing-lg * 2; height: Metrics.compact-title-height;
+        text: "Paused"; color: Theme.secondary-foreground; font-size: Typography.caption-size;
+    }
+    MarqueeText {
+        active: root.open && !root.restart-confirm;
+        edge-color: Theme.background;
+        x: Metrics.spacing-lg; y: Metrics.spacing-lg + Metrics.compact-title-height;
+        width: parent.width - Metrics.spacing-lg * 2; height: Metrics.compact-row-height + Metrics.spacing-md;
+        text: root.title; text-color: Theme.foreground;
+        font-size: Typography.heading-size; font-weight: Typography.heading-weight;
+    }
+    if !root.restart-confirm : VerticalLayout {
+        x: Metrics.spacing-lg; y: Metrics.spacing-lg * 3 + Metrics.compact-title-height + Metrics.compact-row-height;
+        width: parent.width - Metrics.spacing-lg * 2;
+        height: Metrics.pause-row-height * 7 + Metrics.spacing-xs * 8 + Metrics.spacing-sm * 2;
+        spacing: Metrics.spacing-xs;
+        PauseAction { title: "Continue"; focused: root.focused == 0; enabled: root.open && !root.busy; activated => { root.choose(0); } }
+        PauseAction { title: "Playback speed"; value: root.fast-forward ? "2×" : "1×"; focused: root.focused == 1; enabled: root.open && !root.busy; activated => { root.choose(1); } }
+        Rectangle { height: Metrics.spacing-sm; background: transparent; }
+        PauseAction { title: "Save state"; value: "Later"; available: false; enabled: false; }
+        PauseAction { title: "Load state"; value: "Later"; available: false; enabled: false; }
+        Rectangle { height: Metrics.spacing-sm; background: transparent; }
+        PauseAction { title: "Take screenshot"; focused: root.focused == 4; enabled: root.open && !root.busy; activated => { root.choose(4); } }
+        PauseAction { title: "Restart"; focused: root.focused == 5; enabled: root.open && !root.busy; activated => { root.choose(5); } }
+        PauseAction { title: "Return to Horizon"; focused: root.focused == 6; enabled: root.open && !root.busy; activated => { root.choose(6); } }
+    }
+    if root.restart-confirm : VerticalLayout {
+        x: Metrics.spacing-lg; y: Metrics.spacing-lg * 3 + Metrics.compact-title-height + Metrics.compact-row-height;
+        width: parent.width - Metrics.spacing-lg * 2; height: Metrics.compact-row-height * 4 + Metrics.spacing-lg;
+        alignment: start; spacing: Metrics.spacing-lg;
+        Text { height: Metrics.compact-row-height + Metrics.spacing-md; text: "Restart from the beginning?\nBattery saves are kept"; wrap: word-wrap; color: Theme.foreground; font-size: Typography.body-size; }
+        ActionButton { height: Metrics.pause-row-height; label: "Cancel"; focused: root.restart-focus == 0; enabled: root.open && !root.busy; activated => { root.restart-answer(0); } }
+        ActionButton { height: Metrics.pause-row-height; label: "Restart game"; focused: root.restart-focus == 1; enabled: root.open && !root.busy; activated => { root.restart-answer(1); } }
+    }
+    Text {
+        x: Metrics.spacing-lg; y: parent.height - root.footer-center - Metrics.hint-row-height / 2 - Metrics.spacing-md - Metrics.hint-row-height;
+        width: parent.width - Metrics.spacing-lg * 2; height: Metrics.hint-row-height;
+        text: root.message; wrap: word-wrap; color: Theme.secondary-foreground; font-size: Typography.caption-size;
+    }
+    HintBar {
+        x: Metrics.spacing-lg; y: parent.height - root.footer-center - Metrics.hint-row-height / 2;
+        width: parent.width - Metrics.spacing-lg * 2; height: Metrics.hint-row-height;
+        hints: root.busy ? [] : [{ button: "B", label: root.restart-confirm ? "Cancel" : "Continue" }, { button: "A", label: "Select" }];
+        interactive: root.open && !root.busy;
+        activated(button) => {
+            if root.restart-confirm { root.restart-answer(button == "B" ? 0 : root.restart-focus); }
+            else { root.choose(button == "B" ? 0 : root.focused); }
+        }
+    }
+}

@@ -261,6 +261,8 @@ pub struct AlbumController {
     scan_running: Cell<bool>,
     warmed_up: Cell<bool>,
     state: RefCell<State>,
+    location_changed: crate::presentation::CallbackSlot<dyn Fn(crate::navigation::PageLocation)>,
+    published_location: RefCell<crate::navigation::PageLocation>,
     tiles: Rc<VecModel<AlbumTileData>>,
     /// The grid as it was before a Game or Type change, fading out.
     previous_tiles: Rc<VecModel<AlbumTileData>>,
@@ -333,6 +335,8 @@ impl AlbumController {
             scan_running: Cell::new(false),
             warmed_up: Cell::new(false),
             state: RefCell::new(State::default()),
+            location_changed: RefCell::new(None),
+            published_location: RefCell::new(crate::navigation::PageLocation::Root),
             tiles,
             previous_tiles,
             thumbnails: RefCell::new(ImageMemory::new(THUMBNAIL_MEMORY)),
@@ -599,6 +603,28 @@ impl AlbumController {
 
     /// B, in order: close the dialog, leave multi-select, close the viewer.
     /// False when the Album has nothing open (route Back applies).
+    pub fn set_location_changed(&self, callback: Rc<dyn Fn(crate::navigation::PageLocation)>) {
+        *self.location_changed.borrow_mut() = Some(callback);
+    }
+    pub fn has_transient(&self) -> bool {
+        let state = self.state.borrow();
+        state.dialog.is_some() || state.selecting
+    }
+    pub fn restore_viewer(&self, ui: &AppWindow, path: &Path) -> bool {
+        let mut state = self.state.borrow_mut();
+        let index = state
+            .order
+            .iter()
+            .position(|slot| state.captures[*slot].path() == path);
+        let Some(index) = index else {
+            return false;
+        };
+        state.selection = index;
+        state.viewing = false;
+        drop(state);
+        self.open_viewer(ui)
+    }
+
     pub fn back(&self, ui: &AppWindow) -> bool {
         if self.state.borrow().dialog.is_some() {
             self.choose_in_dialog(ui, 0);
@@ -1030,6 +1056,7 @@ impl AlbumController {
         let leaving = ui.get_album_viewer_has_image();
         ui.set_album_viewer_previous_has_image(leaving);
         if leaving {
+            ui.set_album_viewer_previous_is_video(ui.get_album_viewer_is_video());
             ui.set_album_viewer_previous_image(ui.get_album_viewer_image());
         }
         ui.set_album_slide_direction(delta.signum());
@@ -1249,6 +1276,24 @@ impl AlbumController {
     fn publish(&self, ui: &AppWindow) {
         self.publish_page(ui);
         self.publish_hints(ui);
+        let location = {
+            let state = self.state.borrow();
+            if state.viewing {
+                state
+                    .current()
+                    .map(|capture| {
+                        crate::navigation::PageLocation::Album(capture.path().to_owned())
+                    })
+                    .unwrap_or_default()
+            } else {
+                crate::navigation::PageLocation::Root
+            }
+        };
+        if self.published_location.replace(location.clone()) != location
+            && let Some(callback) = self.location_changed.borrow().as_ref()
+        {
+            callback(location);
+        }
     }
 
     /// The hint bar: X, B, A from left to right (A rightmost), each only

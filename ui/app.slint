@@ -10,8 +10,8 @@ export { InputGlyphs, GlyphFamily }
 import { ControllerArt } from "components/system-icons.slint";
 export { ControllerArt }
 
-import { GameCardData } from "models/game-card.slint";
-export { GameCardData }
+import { GameCardData, CardRect } from "models/game-card.slint";
+export { GameCardData, CardRect }
 import { LibraryCardData } from "models/library.slint";
 export { LibraryCardData }
 import { ActivityCoverData, ActivityDayData, ActivityHistoryRowData } from "models/activity.slint";
@@ -109,7 +109,7 @@ export component AppWindow inherits Window {
         // The on-screen keyboard needs no hints.
         root.keyboard-open ? []
         : root.rom-setup-open ? [{ button: "B", label: "Close" }, { button: "A", label: "Select" }]
-        : root.current-route == AppRouteView.library ? [{ button: "X", label: "Add games" }, { button: "B", label: "Back" }]
+        : root.current-route == AppRouteView.library ? [{ button: "B", label: "Back" }]
         : root.current-route == AppRouteView.activity ? (root.activity-details-visible
             ? [{ button: "B", label: "Back" }]
             : [{ button: "B", label: "Back" }, { button: "A", label: "Details" }])
@@ -250,6 +250,7 @@ export component AppWindow inherits Window {
     in property <string> album-viewer-text: "";
     in property <image> album-viewer-image;
     in property <bool> album-viewer-has-image: false;
+    in property <bool> album-viewer-previous-is-video;
     in property <image> album-viewer-previous-image;
     in property <bool> album-viewer-previous-has-image: false;
     in property <image> album-viewer-landing-image;
@@ -318,6 +319,14 @@ export component AppWindow inherits Window {
     in property <bool> settings-ui-sounds-enabled: true;
     in property <bool> settings-swap-confirm: false;
     in property <bool> settings-swap-hints: true;
+    in property <bool> settings-core-ready: false;
+    in property <bool> settings-core-freeze;
+    in property <bool> settings-core-color;
+    in property <string> settings-core-filter: "None";
+    in property <bool> settings-core-smoothing: false;
+    in property <int> settings-core-sunlight: 0;
+    in property <string> settings-core-feedback: "";
+    callback settings-core-decrease();
 
     in property <bool> settings-key-present: false;
     in property <string> settings-steam-identity: "Not set";
@@ -399,14 +408,35 @@ export component AppWindow inherits Window {
     in property <bool> onboarding-open: false;
     in property <bool> player-open: false;
     in property <bool> player-paused: false;
+    in property <bool> player-frozen: false;
+    in property <bool> player-fast-forward: false;
+    in property <bool> player-restart-confirm: false;
+    in property <int> player-restart-focus: 0;
+    callback player-restart-answer(int);
     in property <bool> player-busy: false;
     in property <bool> player-failed: false;
     in property <bool> player-has-frame: false;
+    in property <int> player-phase: 0; // waiting, expanding, playing, collapsing (Rust-owned)
+    in property <CardRect> player-origin;
+    out property <float> player-visual-progress: player-surface.progress;
+    out property <float> player-picture-opacity: player-surface.picture-opacity;
+    in property <int> library-launching-index: -1;
+    callback player-capture-origin() -> CardRect;
+    player-capture-origin => {
+        let rect = root.current-route == AppRouteView.library
+            ? library-page.selected-card-rect() : home-page.selected-card-rect();
+        let top = root.current-route == AppRouteView.home ? Metrics.top-chrome-height : 0px;
+        return { x: rect.x / (root.logical-width / 1px), y: (rect.y + top / 1px) / (root.logical-height / 1px),
+            width: rect.width / (root.logical-width / 1px), height: rect.height / (root.logical-height / 1px) };
+    }
+    in property <bool> player-smooth: false;
     in property <image> player-frame;
     in property <string> player-title;
     in property <string> player-message;
     in property <int> player-focus;
     callback player-choose(int);
+    callback player-paused-changed(bool);
+    changed player-paused => { root.player-paused-changed(root.player-paused); }
     callback player-open-changed(bool);
     changed player-open => { input-scope.focus(); root.player-open-changed(root.player-open); }
     in property <int> onboarding-step: 0;
@@ -572,7 +602,7 @@ export component AppWindow inherits Window {
                 outgoing: root.current-route != AppRouteView.home
                     && root.transition-from-route == AppRouteView.home;
 
-                HomePage {
+                home-page := HomePage {
                     width: parent.width;
                     height: parent.height;
                     games: root.games;
@@ -607,7 +637,7 @@ export component AppWindow inherits Window {
                 outgoing: root.current-route != AppRouteView.library
                     && root.transition-from-route == AppRouteView.library;
 
-                LibraryPage {
+                library-page := LibraryPage {
                     width: parent.width;
                     height: parent.height;
                     cards: root.library-cards;
@@ -618,6 +648,7 @@ export component AppWindow inherits Window {
                     previous-selected-index: root.library-previous-selected-index;
                     has-previous-grid: root.library-has-previous-grid;
                     selected-index: root.library-selected-index;
+                    launching-index: root.library-launching-index;
                     total-count: root.library-total-count;
                     collection-count: root.library-collection-count;
                     browse-sequence: root.library-browse-sequence;
@@ -680,6 +711,7 @@ export component AppWindow inherits Window {
                     viewer-image: root.album-viewer-image;
                     viewer-has-image: root.album-viewer-has-image;
                     viewer-previous-image: root.album-viewer-previous-image;
+                    viewer-previous-is-video: root.album-viewer-previous-is-video;
                     viewer-previous-has-image: root.album-viewer-previous-has-image;
                     viewer-landing-image: root.album-viewer-landing-image;
                     viewer-landing-has-image: root.album-viewer-landing-has-image;
@@ -888,6 +920,14 @@ export component AppWindow inherits Window {
                     ui-sounds-enabled: root.settings-ui-sounds-enabled;
                     swap-confirm: root.settings-swap-confirm;
                     swap-hints: root.settings-swap-hints;
+                    core-ready: root.settings-core-ready;
+                    core-filter: root.settings-core-filter;
+                    core-color: root.settings-core-color;
+                    core-freeze: root.settings-core-freeze;
+                    core-smoothing: root.settings-core-smoothing;
+                    core-sunlight: root.settings-core-sunlight;
+                    core-feedback: root.settings-core-feedback;
+                    core-decrease => { root.settings-core-decrease(); }
                     appearance-feedback: root.settings-appearance-feedback;
                     key-present: root.settings-key-present;
                     steam-identity: root.settings-steam-identity;
@@ -1063,10 +1103,14 @@ export component AppWindow inherits Window {
                 hint-activated(button) => { root.hint-activated(button); }
             }
 
-            GamePlayer {
+            player-surface := GamePlayer {
                 z: 30; width: parent.width; height: parent.height;
-                open: root.player-open; paused: root.player-paused; busy: root.player-busy;
-                failed: root.player-failed; has-frame: root.player-has-frame; frame: root.player-frame;
+                phase: root.player-phase; origin: root.player-origin;
+                fast-forward: root.player-fast-forward;
+                restart-confirm: root.player-restart-confirm; restart-focus: root.player-restart-focus;
+                restart-answer(choice) => { root.player-restart-answer(choice); }
+                open: root.player-open; paused: root.player-paused; frozen: root.player-frozen; busy: root.player-busy;
+                smooth: root.player-smooth; failed: root.player-failed; has-frame: root.player-has-frame; frame: root.player-frame;
                 title: root.player-title; message: root.player-message; focused: root.player-focus;
                 choose(index) => { root.player-choose(index); }
             }

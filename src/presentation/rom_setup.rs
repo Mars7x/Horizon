@@ -164,13 +164,6 @@ impl RomSetupController {
 
     pub fn handle_action(&self, ui: &AppWindow, event: UiActionEvent) -> bool {
         if !ui.get_rom_setup_blocking() {
-            if ui.get_current_route() == crate::AppRouteView::Library
-                && event.action == UiAction::Secondary
-                && !event.repeated
-            {
-                self.open();
-                return true;
-            }
             return false;
         }
         if !ui.get_rom_setup_open() || self.running.get() {

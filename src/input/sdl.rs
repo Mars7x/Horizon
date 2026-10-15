@@ -233,7 +233,7 @@ impl SdlGamepadInput {
             .map(|pad| pad.family)
     }
 
-    /// Raw held state for the embedded game, independent of menu repeat/swap.
+    /// Device-family held state for the embedded game; InputManager applies the saved A/B swap.
     pub fn gameplay_buttons(&self) -> u16 {
         let state = self.state.borrow();
         if !state.enabled {

@@ -480,6 +480,35 @@ pub fn nearest_game_for_x(
         .clamp(0.0, game_count.saturating_sub(1) as f32) as i32
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SettingsPage {
+    #[default]
+    Root,
+    Appearance,
+    Controller,
+    Cores,
+    Mgba,
+    // Third-Party lists one "Open" row per service; each service has its
+    // own sub-page so SteamGridDB and Steam work the same way.
+    ThirdParty,
+    SteamGridDb,
+    SteamAccount,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub enum PageLocation {
+    #[default]
+    Root,
+    Settings(SettingsPage),
+    Activity(crate::domain::GameId),
+    Album(std::path::PathBuf),
+}
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct Location {
+    route: AppRoute,
+    page: PageLocation,
+}
+
 /// Pure Rust navigation state for Horizon's routed shell.
 ///
 /// `navigate_to` behaves like pushing a destination onto a back stack. The
@@ -489,14 +518,41 @@ pub fn nearest_game_for_x(
 /// forward button) can reopen it; opening any page or going Home forgets it.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Navigator {
-    current: AppRoute,
-    back_stack: Vec<AppRoute>,
-    forward_stack: Vec<AppRoute>,
+    current: Location,
+    back_stack: Vec<Location>,
+    forward_stack: Vec<Location>,
 }
 
 impl Navigator {
     pub fn current(&self) -> AppRoute {
-        self.current
+        self.current.route
+    }
+    pub fn page(&self) -> PageLocation {
+        self.current.page.clone()
+    }
+    pub fn record_page(&mut self, page: PageLocation) {
+        if page == self.current.page {
+            return;
+        }
+        if page == PageLocation::Root
+            && self.current.page != PageLocation::Root
+            && self
+                .back_stack
+                .last()
+                .is_some_and(|location| location.route == self.current.route)
+        {
+            self.go_back();
+            return;
+        }
+        // Gallery siblings replace the viewer address, rather than stacking slides.
+        if !matches!(
+            (&self.current.page, &page),
+            (PageLocation::Album(_), PageLocation::Album(_))
+        ) {
+            self.back_stack.push(self.current.clone());
+        }
+        self.current.page = page;
+        self.forward_stack.clear();
     }
 
     pub fn back_stack_depth(&self) -> usize {
@@ -508,13 +564,16 @@ impl Navigator {
     /// Returns `true` only when the active route changes. Navigating to the
     /// already-active route is a no-op and does not grow history.
     pub fn navigate_to(&mut self, route: AppRoute) -> bool {
-        if route == self.current {
+        if route == self.current.route {
             return false;
         }
 
-        self.back_stack.push(self.current);
+        self.back_stack.push(self.current.clone());
         self.forward_stack.clear();
-        self.current = route;
+        self.current = Location {
+            route,
+            page: PageLocation::Root,
+        };
         true
     }
 
@@ -524,7 +583,7 @@ impl Navigator {
             return false;
         };
 
-        self.forward_stack.push(self.current);
+        self.forward_stack.push(self.current.clone());
         self.current = route;
         true
     }
@@ -535,15 +594,17 @@ impl Navigator {
             return false;
         };
 
-        self.back_stack.push(self.current);
+        self.back_stack.push(self.current.clone());
         self.current = route;
         true
     }
 
     /// Make Home the root route and discard prior route history.
     pub fn go_home(&mut self) -> bool {
-        let changed = self.current != AppRoute::Home || !self.back_stack.is_empty();
-        self.current = AppRoute::Home;
+        let changed = self.current.route != AppRoute::Home
+            || self.current.page != PageLocation::Root
+            || !self.back_stack.is_empty();
+        self.current = Location::default();
         self.back_stack.clear();
         self.forward_stack.clear();
         changed
@@ -556,6 +617,45 @@ mod tests {
         AppRoute, FocusSnapshot, Navigator, RouteFocusMemory, ShellFocus, ShellFocusRegion,
         TopUtility, UtilityPage, nearest_game_for_x, nearest_utility_for_x, utility_center_x,
     };
+
+    #[test]
+    fn nested_pages_share_multi_step_back_forward_and_branch_history() {
+        use super::{PageLocation as Page, SettingsPage as Settings};
+        let mut nav = Navigator::default();
+        nav.navigate_to(AppRoute::Utility(UtilityPage::Settings));
+        nav.record_page(Page::Settings(Settings::Cores));
+        nav.record_page(Page::Settings(Settings::Mgba));
+        nav.navigate_to(AppRoute::Utility(UtilityPage::Album));
+        nav.record_page(Page::Album("first.png".into()));
+        nav.record_page(Page::Album("second.png".into()));
+        let expected = [
+            Page::Root,
+            Page::Settings(Settings::Mgba),
+            Page::Settings(Settings::Cores),
+            Page::Root,
+            Page::Root,
+        ];
+        for page in expected {
+            assert!(nav.go_back());
+            assert_eq!(nav.page(), page);
+        }
+        assert_eq!(nav.current(), AppRoute::Home);
+        for _ in 0..5 {
+            assert!(nav.go_forward());
+        }
+        assert_eq!(nav.page(), Page::Album("second.png".into()));
+        nav.record_page(Page::Root); // closing a viewer records a Back, not a new branch
+        assert!(nav.go_forward());
+        assert_eq!(nav.page(), Page::Album("second.png".into()));
+        assert!(nav.go_back());
+        nav.navigate_to(AppRoute::Utility(UtilityPage::Activity));
+        nav.record_page(Page::Activity(crate::domain::GameId::new(7).unwrap()));
+        assert!(!nav.go_forward());
+        assert!(nav.go_back());
+        assert_eq!(nav.page(), Page::Root);
+        assert!(nav.go_forward());
+        assert!(matches!(nav.page(), Page::Activity(_)));
+    }
 
     #[test]
     fn only_home_uses_persistent_shell_chrome() {

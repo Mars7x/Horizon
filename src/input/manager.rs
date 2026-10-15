@@ -116,15 +116,17 @@ impl InputManager {
         })
     }
 
-    /// Swap confirm and back on controllers (not the keyboard).
+    /// Swap confirm/back and gameplay A/B on controllers (not the keyboard).
     pub fn set_swap_confirm(&self, swap: bool) {
         self.swap_confirm.set(swap);
     }
 
     pub fn gameplay_buttons(&self) -> u16 {
-        self.gamepad_input
+        let buttons = self
+            .gamepad_input
             .as_ref()
-            .map_or(0, SdlGamepadInput::gameplay_buttons)
+            .map_or(0, SdlGamepadInput::gameplay_buttons);
+        gameplay_mapping(buttons, self.swap_confirm.get())
     }
 
     pub fn mark_keyboard_used(&self) {
@@ -207,6 +209,15 @@ impl InputManager {
         }
         true
     }
+}
+
+/// Libretro joypad A/B follow the same controller preference as menu actions.
+fn gameplay_mapping(buttons: u16, swapped: bool) -> u16 {
+    if !swapped {
+        return buttons;
+    }
+    const AB: u16 = (1 << 8) | 1;
+    (buttons & !AB) | ((buttons & 1) << 8) | ((buttons >> 8) & 1)
 }
 
 /// A controller's action as Horizon acts on it: confirm and back exchanged
@@ -350,5 +361,24 @@ mod tests {
         let enter: SharedString = Key::Return.into();
         assert!(manager.handle_keyboard(enter.as_str(), false));
         assert_eq!(events.borrow()[0].action, UiAction::Accept);
+    }
+}
+
+#[cfg(test)]
+mod gameplay_tests {
+    use super::gameplay_mapping;
+    #[test]
+    fn swap_exchanges_held_a_b_and_preserves_other_controls() {
+        for buttons in 0..=u16::MAX {
+            assert_eq!(gameplay_mapping(buttons, false), buttons);
+            assert_eq!(
+                gameplay_mapping(gameplay_mapping(buttons, true), true),
+                buttons
+            );
+            assert_eq!(gameplay_mapping(buttons, true) & !257, buttons & !257);
+        }
+        assert_eq!(gameplay_mapping(256, true), 1);
+        assert_eq!(gameplay_mapping(1, true), 256);
+        assert_eq!(gameplay_mapping(257, true), 257);
     }
 }

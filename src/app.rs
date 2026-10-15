@@ -227,6 +227,8 @@ pub fn run() -> Result<(), AppError> {
             database: database_path.clone(),
             core: data_paths::gba_core_path(),
             saves: data_paths::gba_save_directory()?,
+            settings: data_paths::core_settings_path()?,
+            album: data_paths::album_dir()?,
         },
     );
     let close_player = Rc::clone(&player);
@@ -322,10 +324,13 @@ pub fn run() -> Result<(), AppError> {
         appearance.clone(),
         Rc::clone(&steam_account),
         data_paths::controller_settings_path()?,
+        data_paths::core_settings_path()?,
     );
     let navigation_sound = Rc::new(RefCell::new(UiSounds::new(
         appearance.preferences().ui_sounds_enabled,
     )));
+    let player_sounds = Rc::clone(&navigation_sound);
+    player.set_sound(Rc::new(move |cue| player_sounds.borrow_mut().play(cue)));
     // Give the window its first frame, then open the sound stream once while
     // idle, so the first menu cue doesn't pay for opening it.
     let warm_sounds = Rc::clone(&navigation_sound);
@@ -653,12 +658,24 @@ pub fn run() -> Result<(), AppError> {
             input.set_ui_input_enabled(false);
             input.set_ui_input_enabled(active.get());
         });
-        player_sound
-            .borrow_mut()
-            .set_foreground(!open && player_active.get());
+        player_sound.borrow_mut().set_foreground(
+            player_active.get()
+                && (!open || player_ui.upgrade().is_some_and(|ui| ui.get_player_paused())),
+        );
         if let Some(ui) = player_ui.upgrade() {
             ui.global::<crate::Motion>()
-                .set_loops_paused(open || !player_active.get());
+                .set_loops_paused((open && !ui.get_player_paused()) || !player_active.get());
+        }
+    });
+
+    let pause_sound = Rc::clone(&navigation_sound);
+    let pause_ui = ui.as_weak();
+    let pause_active = Rc::clone(&window_active);
+    ui.on_player_paused_changed(move |paused| {
+        if let Some(ui) = pause_ui.upgrade() {
+            let menu_active = pause_active.get() && (!ui.get_player_open() || paused);
+            pause_sound.borrow_mut().set_foreground(menu_active);
+            ui.global::<crate::Motion>().set_loops_paused(!menu_active);
         }
     });
 
@@ -709,16 +726,12 @@ pub fn run() -> Result<(), AppError> {
     let activation_player = Rc::clone(&player);
     ui.on_application_active_changed(move |active| {
         window_active.set(active);
-        if !active {
-            activation_player.pause();
-        }
+        activation_player.set_active(active);
         activation_input.set_ui_input_enabled(active);
-        activation_sound
-            .borrow_mut()
-            .set_foreground(active && !activation_player.is_open());
         if let Some(ui) = activation_ui.upgrade() {
-            ui.global::<crate::Motion>()
-                .set_loops_paused(!active || activation_player.is_open());
+            let menu_active = active && (!activation_player.is_open() || ui.get_player_paused());
+            activation_sound.borrow_mut().set_foreground(menu_active);
+            ui.global::<crate::Motion>().set_loops_paused(!menu_active);
         }
 
         // Activity observes the same OS activation boundary that owns

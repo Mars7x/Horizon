@@ -255,14 +255,7 @@ impl HomeController {
                 return;
             };
 
-            let before = ui.get_selected_index();
-            callback_controller.select_index(&ui, requested_index);
-            // A click that moves the selection sounds like a controller's move.
-            if ui.get_selected_index() != before
-                && let Some(sound) = callback_controller.sound.borrow().as_ref()
-            {
-                sound(UiSoundCue::Navigation);
-            }
+            callback_controller.activate_from_pointer(&ui, requested_index);
         });
 
         controller
@@ -530,6 +523,17 @@ impl HomeController {
         self.publish_selection(ui, selected_index);
     }
 
+    pub fn activate_from_pointer(&self, ui: &AppWindow, index: i32) {
+        if ui.get_current_route() != crate::AppRouteView::Home
+            || index < 0
+            || index as usize >= self.home_order.borrow().len()
+        {
+            return;
+        }
+        self.select_index(ui, index);
+        self.launch_selected(ui);
+    }
+
     /// Select a game from shell-level spatial focus transfer. Pointer and page
     /// navigation still converge on the same Rust-owned selection state.
     pub fn select_from_shell(&self, ui: &AppWindow, requested_index: i32) {
@@ -662,13 +666,19 @@ impl HomeController {
             },
         );
 
+        if ui.get_current_route() == crate::AppRouteView::Library {
+            ui.set_library_launching_index(ui.get_library_selected_index());
+        }
         match self.launch_service.launch_game(game) {
             Ok(receipt) => {
                 match receipt.mode() {
                     GameLaunchMode::Embedded => {
                         // The player shares this window, so no foreground
                         // handoff will arrive to release the legacy launch latch.
-                        self.set_launch_feedback(ui, LaunchFeedbackState::Idle);
+                        // Release the legacy latch, but let the player's first-frame
+                        // handoff release the visual press in sync with its zoom.
+                        *self.launch_feedback.borrow_mut() = LaunchFeedbackState::Idle;
+                        ui.set_launch_feedback_text("".into());
                         return;
                     }
                     GameLaunchMode::External => {
@@ -703,6 +713,7 @@ impl HomeController {
                 self.schedule_press_release(ui);
             }
             Err(error) => {
+                ui.set_library_launching_index(-1);
                 self.set_launch_feedback(ui, LaunchFeedbackState::Failed);
                 warn!(
                     game_id = game.game().id().get(),

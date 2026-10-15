@@ -5,10 +5,25 @@ the ROM's content hash and opens the bundled mGBA player inside the same window.
 Missing folder access or changed bytes require selecting the game folder again.
 Playback does not depend on hash-catalog recognition or SteamGridDB availability.
 
-The game uses its original aspect ratio with pixelated scaling and black bars as
-needed. Software frames are paced at the core's reported rate; audio goes through
+The game uses its original aspect ratio and black bars as needed. The default
+None filter preserves sharp pixels. Software frames are paced at the core's reported rate; audio goes through
 the existing native PipeWire boundary. mGBA's built-in BIOS implementation allows
 the first version to run without a BIOS setup screen or distributed BIOS file.
+
+## Launch and return motion
+
+The selected Home or Library card keeps its press/rebound. Once a real frame is
+ready, the rebound releases after a 125 ms press hold and the player expands
+from that card to the full viewport over 230 ms. A slow load may expand a black
+loading surface after 500 ms so progress/errors remain accessible. Content stays
+in its original aspect ratio; black bars grow with its surface. The origin uses
+the live carousel/grid camera and scales with the window.
+
+Return to Horizon keeps the last frame visible while saving. Only a successful stop
+starts the reverse 230 ms collapse; the card rebounds as the shell regains input.
+A save error stays paused with retry available. Input is consumed throughout
+both handoffs. Reduced Motion skips hold/zoom. Closing the application waits for
+saving and skips the decorative return animation.
 
 ## Controls
 
@@ -20,10 +35,54 @@ the first version to run without a BIOS setup screen or distributed BIOS file.
 | Start / Select | Enter / Backspace | Start / Back |
 | Pause | Escape or F10 | Guide or stick click |
 
-Pause offers Resume and Save and quit, using normal keyboard/controller focus.
-Back closes Pause. Window deactivation pauses the core and releases gameplay
-input; returning does not automatically resume. Menu confirm/back swapping is
-separate from game button mapping. Home/Library focus and route are retained.
+Pause opens a quiet side panel over the dimmed game. Continue is initially
+focused; Up/Down selects enabled actions, and Back continues. Save state and Load
+state are disabled placeholders, skipped by focus, with no state files created.
+
+Playback speed toggles 1×/2× for this loaded game (Left/Right also selects speed).
+At 2× the worker doubles its frame pace and plays audio twice as fast, one octave
+higher. A stereo low-pass filter prevents aliasing when reducing the doubled
+sample flow to the output rate. Buffered audio is cleared on speed changes and
+kept to at most 50 ms in the application queue; a small 2× badge
+appears during play. Returning to 1× clears queued audio before playback resumes.
+Restart retains the current speed; launching another game starts at 1×.
+
+Take screenshot writes the native unfiltered frame to Horizon's Album, without
+the pause panel, HUD or shader/grid treatment. It stays paused and reports success
+only after PNG publication. Restart asks for confirmation with Cancel focused,
+saves battery RAM before reset, restores it, then resumes. If storage fails it
+stays paused without resetting. Restart remains within the same observed session.
+Return to Horizon saves and closes the game through the card return animation.
+The last game picture fades into the existing card as it shrinks, before the
+card rebounds; there is no opaque picture swap at the end.
+The panel and hints support keyboard, controller and pointer, and respect Reduced
+Motion and appearance preferences. Errors remain visible in the panel.
+
+Window deactivation always releases gameplay input and never opens the quick
+menu. Freeze when unfocused defaults on: the worker freezes video/audio silently
+and automatically resumes on reactivation. Turning it off keeps the game and
+audio running in the background, with gameplay input blocked. A manually opened
+pause menu remains paused on return. Startup can produce its first frame before
+freezing; restart follows the same background policy. Swap Select and Back also exchanges controller
+gameplay A/B; keyboard bindings stay unchanged. Home/Library focus and route are retained.
+
+## Core preferences
+
+Settings → Cores → mGBA offers Audio smoothing, Sunlight level (0–10) for
+solar-sensor games, Video filter (None, LCD, Smooth or Smooth pixel art), and
+Colour correction and Freeze when unfocused. Defaults keep filter/correction off,
+sunlight zero and background freezing on. Saved choices are read on the game worker at launch; restart the game to
+apply changes. Invalid/unreadable settings are reported without overwriting the
+file. No hardware sensors or BIOS configuration are added.
+
+LCD applies an original subtle RGB subpixel/grid treatment at 3× on the core
+worker, then uses smooth scaling. Smooth uses native bilinear scaling without
+changing source pixels. Smooth pixel art uses the pinned xbrz-rs implementation
+at 3× to round pixel-art diagonals, with sharp final scaling. Colour correction
+independently applies the credited sRGB GBA display profile before any filter;
+it approximates the original screen rather than calibrating the user's display.
+All presets preserve aspect ratio. Native screenshots exclude these display
+treatments. No RetroArch shader runtime or imported presets are supported.
 
 ## Saves and sessions
 
@@ -31,7 +90,7 @@ Battery saves belong to Horizon under `saves/gba/<ROM-SHA-256>.sav`. Changing a
 filename does not change the save identity. Changed RAM is saved every five
 seconds and on quit. The previous valid save is retained as `.sav.bak`; invalid
 existing saves are preserved and reported. Save errors pause the game so the
-user can fix storage and retry Save and quit. Closing the window waits for normal
+user can fix storage and retry Return to Horizon. Closing the window waits for normal
 saving. A forced process/core loss can lose progress since the last checkpoint.
 See [storage](STORAGE.md).
 
@@ -50,6 +109,7 @@ the production Flatpak always uses its packaged path.
 
 The ignored `real_core_draws_responds_to_held_input_and_restores_battery_memory`
 test needs the built core. `real_player_window_input_pause_quit_and_relaunch`
-also needs Wayland/PipeWire and a fresh `HORIZON_GBA_TEST_DIR`. Both use generated
+also needs Wayland/PipeWire and a fresh `HORIZON_GBA_TEST_DIR`. Set
+`HORIZON_TEST_VIDEO_FILTER` to `none`, `lcd` or `smooth` to review each preset. Both use generated
 original homebrew, never personal ROMs or the production database. See
 [ADR 0198](adr/0198-first-gba-playback.md) and [licensing](LICENSING.md).

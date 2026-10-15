@@ -1,8 +1,8 @@
 # Settings
 
 [SettingsController](../src/presentation/settings.rs) and
-[the page](../ui/pages/settings.slint) expose Appearance, Controller and
-Third-Party. A fresh visit selects Appearance. Back from a sub-page restores its
+[the page](../ui/pages/settings.slint) expose Appearance, Controller,
+Third-Party and Cores. A fresh visit selects Appearance. Back from a sub-page restores its
 parent row; full departure/re-entry resets the root selection.
 
 ## Appearance and controller
@@ -13,8 +13,34 @@ atomically; a failed save must not silently replace the previous preference.
 Focus is distinct from the selected value. See [UI standards](UI_STANDARDS.md).
 
 Controller has Swap Select and Back, plus Swap Hints. The first changes controller
-actions only; the second determines whether hints follow the swap. Keyboard
+menu actions and gameplay A/B; the second determines whether hints follow the swap. Keyboard
 Enter/Escape remains unchanged. Values live in `controller.json`.
+
+## Cores
+
+Cores → mGBA contains Audio smoothing, Sunlight level (0–10), Video filter,
+Colour correction and Freeze when unfocused. Audio smoothing enables mGBA's low-pass filter at its default strength; sunlight is a
+manual value for games with a solar sensor, without requesting hardware sensor
+access. Both default to off/zero and apply on the next game launch. Video filter cycles between None (sharp pixels), LCD (subtle subpixel/grid effect),
+Smooth (bilinear scaling) and Smooth pixel art (3× xBRZ), with None as the default.
+Colour correction independently approximates the original GBA display using the
+credited sRGB profile; it defaults off. These are Horizon presets;
+RetroArch shader files are not supported. No BIOS, core download, advanced timing
+or developer controls are exposed.
+
+Freeze when unfocused defaults on. It freezes the game and audio without opening
+the quick menu and resumes automatically on return. Off allows background
+playback; input is always released/blocked while inactive. An explicit pause
+remains paused. Like the other preferences, it applies on the next game launch.
+
+Left/Right turns switches off/on or adjusts sunlight. Select toggles a switch
+or increases sunlight; the sunlight row also has a pointer decrement button.
+On Video filter, Left/Right cycles presets and Select/click chooses the next one.
+Back restores mGBA's row in Cores, then Cores' row in Settings. Preferences load
+and save on a serial worker using the shared atomic store in `cores.json`.
+Changes publish only after a successful save. Failed writes retain prior values;
+unreadable/invalid files are preserved and reported, not replaced with defaults.
+See [GBA playback](GBA_PLAYBACK.md) and [ADR 0199](adr/0199-curated-core-preferences.md).
 
 ## Third-party services
 

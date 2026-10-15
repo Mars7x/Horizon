@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-use image::{DynamicImage, RgbaImage, codecs::jpeg::JpegEncoder};
+use image::{DynamicImage, ImageEncoder, RgbaImage};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -21,12 +21,11 @@ use crate::{
 };
 
 /// Bump when the thumbnail format or size changes; the folder is cleared.
-// 2: a video's thumbnail is its first frame (was a second in).
-pub const ALBUM_CACHE_VERSION: &str = "2";
+// 3: lossless PNG thumbnails retain screenshot pixel colours and alpha.
+pub const ALBUM_CACHE_VERSION: &str = "3";
 /// Thumbnails fit inside this box. Large enough for a grid tile on a 4K
-/// screen; a few tens of KiB each as JPEG.
+/// screen. PNG preserves the pixels and alpha of native screenshots.
 pub const THUMBNAIL_SIZE: (u32, u32) = (480, 270);
-const THUMBNAIL_QUALITY: u8 = 85;
 
 #[derive(Debug, Error)]
 pub enum MediaError {
@@ -316,7 +315,7 @@ fn make_thumbnail(capture: &Capture, video: &dyn VideoBackend) -> Result<Thumbna
 }
 
 fn read_cached(dir: &Path, key: &str, kind: MediaKind) -> Option<Thumbnail> {
-    let image = decoding::decode_file(&dir.join(format!("{key}.jpg")))
+    let image = decoding::decode_file(&dir.join(format!("{key}.png")))
         .ok()?
         .into_rgba8();
     let duration = match kind {
@@ -346,11 +345,14 @@ fn write_cached(
             serde_json::to_writer(file, &info).map_err(std::io::Error::other)
         })?;
     }
-    // JPEG has no alpha; screenshots are opaque anyway.
-    let rgb = DynamicImage::ImageRgba8(thumbnail.image.clone()).into_rgb8();
-    write_atomically(&dir.join(format!("{key}.jpg")), |file| {
-        JpegEncoder::new_with_quality(file, THUMBNAIL_QUALITY)
-            .encode_image(&rgb)
+    write_atomically(&dir.join(format!("{key}.png")), |file| {
+        image::codecs::png::PngEncoder::new(file)
+            .write_image(
+                thumbnail.image.as_raw(),
+                thumbnail.image.width(),
+                thumbnail.image.height(),
+                image::ExtendedColorType::Rgba8,
+            )
             .map_err(std::io::Error::other)
     })
 }
@@ -512,6 +514,25 @@ mod tests {
             decode_photo(&small, (1920, 1080)).unwrap().dimensions(),
             (100, 50)
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn cached_pixel_art_retains_exact_colours_and_transparency() {
+        let dir = temp_dir("pixel-art");
+        let path = dir.join("pixels.png");
+        let image = RgbaImage::from_fn(32, 16, |x, y| {
+            image::Rgba(if (x + y) % 2 == 0 {
+                [255, 0, 255, 255]
+            } else {
+                [0, 255, 0, 64]
+            })
+        });
+        image.save(&path).unwrap();
+        let cache = ThumbnailCache::new(Some(dir.join("cache")));
+        let capture = photo(path);
+        assert_eq!(cache.thumbnail(&capture, &FixedVideo).unwrap().image, image);
+        assert_eq!(cache.thumbnail(&capture, &FixedVideo).unwrap().image, image);
         fs::remove_dir_all(dir).unwrap();
     }
 

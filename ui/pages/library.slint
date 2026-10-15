@@ -1,3 +1,4 @@
+import { CardRect } from "../models/game-card.slint";
 import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { FallbackCover } from "../components/fallback-cover.slint";
 import { FocusFrame } from "../components/focus-frame.slint";
@@ -25,6 +26,16 @@ export component LibraryPage inherits Rectangle {
     in property <bool> has-previous-grid: false;
     in property <int> selected-index: 0;
     in property <bool> focus-visible: true;
+    in property <int> launching-index: -1;
+    private property <bool> releasing-press: false;
+    changed launching-index => {
+        root.releasing-press = root.launching-index < 0;
+        release-timer.stop();
+        if root.releasing-press { release-timer.start(); }
+    }
+    release-timer := Timer { running: false; interval: Motion.launch-release-duration;
+        triggered => { self.stop(); root.releasing-press = false; }
+    }
     in property <string> filter-text: "All sources";
     in property <string> sort-text: "Alphabetical";
     in property <int> total-count: 0;
@@ -75,6 +86,17 @@ export component LibraryPage inherits Rectangle {
         root.presented-title = root.selected-title;
         root.presented-source = root.selected-source;
         root.metadata-swaps += 1;
+    }
+
+    public pure function selected-card-rect() -> CardRect {
+        let size = root.card-size * (root.launching-index == root.selected-index
+            ? Metrics.game-launch-pressed-scale : Metrics.game-selected-scale);
+        return {
+            x: (grid-viewport.x + root.gallery-x + root.grid-pad
+                + Math.mod(root.selected-index, root.grid-columns) * root.card-stride + (root.card-size - size) / 2) / 1px,
+            y: (grid-viewport.y + root.rows-top - root.camera + root.grid-pad
+                + Math.floor(root.selected-index / root.grid-columns) * root.row-stride + (root.card-size - size) / 2) / 1px,
+            width: size / 1px, height: size / 1px };
     }
 
     callback choose-card(int);
@@ -323,7 +345,8 @@ export component LibraryPage inherits Rectangle {
                     clip: false;
                     private property <bool> selected: root.focus-visible
                         && root.selected-index == row.absolute-index;
-                    private property <float> card-scale: self.selected ? Metrics.game-selected-scale : 1.0;
+                    private property <float> card-scale: self.selected
+                        ? (root.launching-index == row.absolute-index ? Metrics.game-launch-pressed-scale : Metrics.game-selected-scale) : 1.0;
 
                     // Selection size and focus outline now both follow Home's
                     // 1.10x focus rhythm instead of a separate 1.045x grid rule.
@@ -342,8 +365,9 @@ export component LibraryPage inherits Rectangle {
                         drop-shadow-blur: parent.selected ? 16px : 11px;
                         drop-shadow-color: Theme.shadow.with-alpha(parent.selected ? 0.90 : 0.68);
                         animate width, height {
-                            duration: Motion.focus-duration;
-                            easing: ease-out;
+                            duration: root.launching-index >= 0 ? Motion.launch-press-duration
+                                : root.releasing-press ? Motion.launch-release-duration : Motion.focus-duration;
+                            easing: root.releasing-press ? ease-out-back : ease-out;
                         }
 
                         artwork := Rectangle {

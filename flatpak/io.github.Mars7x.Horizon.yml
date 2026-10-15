@@ -91,6 +91,8 @@ modules:
       - install -Dm0644 data/io.github.Mars7x.Horizon.desktop /app/share/applications/io.github.Mars7x.Horizon.desktop
       - install -Dm0644 data/io.github.Mars7x.Horizon.metainfo.xml /app/share/metainfo/io.github.Mars7x.Horizon.metainfo.xml
       - install -Dm0644 data/io.github.Mars7x.Horizon.svg /app/share/icons/hicolor/scalable/apps/io.github.Mars7x.Horizon.svg
+      - install -Dm0644 LICENSES/GPL-3.0-only.txt /app/share/licenses/horizon/GPL-3.0-only.txt
+      - install -Dm0644 LICENSES/LicenseRef-GBA-Color-Public-Domain.txt /app/share/licenses/horizon/LicenseRef-GBA-Color-Public-Domain.txt
       - install -Dm0644 LICENSE /app/share/licenses/horizon/LICENSE
       - install -Dm0644 THIRD_PARTY_NOTICES.md /app/share/doc/horizon/THIRD_PARTY_NOTICES.md
       - install -Dm0644 LICENSES/CC0-1.0.txt /app/share/licenses/horizon/CC0-1.0.txt

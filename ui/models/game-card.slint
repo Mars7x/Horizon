@@ -10,3 +10,6 @@ export struct GameCardData {
     cover-secondary: color,
     cover-highlight: color,
 }
+
+// Page helpers use logical pixels; the frozen player origin uses viewport fractions.
+export struct CardRect { x: float, y: float, width: float, height: float }

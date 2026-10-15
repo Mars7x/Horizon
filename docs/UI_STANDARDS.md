@@ -6,8 +6,20 @@ feature work must not replace Home's focus geometry, selected scale or marquee.
 See [Home](HOME_UI.md) and [navigation](NAVIGATION.md).
 
 The embedded game surface is content: aspect-preserving software frames on a
-black background, without shell chrome. Its loading/error/pause controls use the
-shared ModalDialog and ActionButton components. Rust owns player mode and focus.
+black background, without shell chrome. Loading/errors use shared ModalDialog and
+ActionButton components. Pause uses a compact side panel over a dimmed frame,
+using the shared compact ListRow variant, button glyphs and action buttons.
+The panel uses Theme.background (true black in Black), shared typography/marquee,
+spacing and focus animation; hints share Home's footer baseline. Pointer and
+keyboard/controller actions use the same UI sound boundary. Speed changes update
+the value without progress/success text; only failures need feedback. Disabled save-state
+placeholders never take focus; restart confirmation defaults to Cancel. Rust owns player mode, handoff
+phases and focus. Launch/return use card-origin zooms with shared Motion tokens;
+keep the card press/rebound, preserve video aspect ratio, and hold the last frame
+until saving succeeds. The returning game picture crossfades into the existing
+card during its shrink; never replace a fully opaque frame at the endpoint.
+Reduced Motion bypasses these handoffs. Background freezing is independent of
+the quick menu: deactivation must not open it or change manual menu selection.
 
 ## Shared components
 

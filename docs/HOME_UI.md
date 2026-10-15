@@ -14,13 +14,14 @@ for the run. Rendering components forward intent rather than choose routes.
 The top row is the Profile avatar followed by Album, Activity, Achievements and
 Settings. It never wraps. The avatar opens Profile and has its own focus slot.
 There is no Shop, Friends or Web utility. The permanent final carousel tile opens
-Library even when no games exist. Menu/Start/F10 also opens Library.
+Library even when no games exist. Menu/Start/+ does not open Library. Clicking a game launches that title;
+recognized drags keep the existing scroll, inertia and catch behavior.
 
 When active games exist, Home shows at most 15: recently played or newly added
 games lead, with unplayed alphabetical fallback. Ordering comes from persisted
 facts, never guessed lifetime totals. Changes glide while retaining a valid
-selection. No production source currently populates the library, so the Library
-tile remains available without active covers.
+selection. Imported GBA games populate these slots; the Library tile also remains
+available without active covers.
 
 ## Focus, title and media
 
@@ -33,6 +34,11 @@ Profile pictures use Horizon's local copy or the configured Steam avatar,
 including existing animation support; initials are the fallback. See
 [Profile](PROFILE.md). Covers use the square/pixel-art contract in
 [Artwork](ARTWORK.md).
+
+Launching keeps the card's existing press/rebound. The live game expands from
+that card during its rebound; after saving, quitting reverses the zoom and
+restores card input. Geometry follows the visible carousel camera. Reduced Motion
+skips the handoff. See [GBA playback](GBA_PLAYBACK.md) for timing and failure behavior.
 
 ## Clock and status
 

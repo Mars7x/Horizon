@@ -1,8 +1,7 @@
 # ROM import
 
-Choose game folder → scan → library. Library → Add games (X / keyboard Delete /
-clickable hint) and [first-run setup](ONBOARDING.md) open the system folder picker
-directly. Selecting a folder starts the scan and imports readable supported games
+Choose game folder → scan → library. [First-run setup](ONBOARDING.md) opens the
+system folder picker directly. Library has no Add games action or importer shortcut. Selecting a folder starts the scan and imports readable supported games
 automatically. There is no catalog setup, per-file selection, review screen or
 second confirmation. Cancelling the picker leaves the library/setup unchanged.
 

@@ -1,4 +1,8 @@
-use std::{cell::RefCell, rc::Rc, time::Duration};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+    time::Duration,
+};
 
 use slint::{ComponentHandle, Model};
 use tracing::debug;
@@ -8,8 +12,9 @@ use crate::{
     audio::UiSoundCue,
     input::{UiAction, UiActionEvent},
     navigation::{
-        AppRoute, Navigator, RouteFocusMemory, ShellFocus, ShellFocusRegion, TopUtility,
-        UtilityPage, nearest_game_for_x, nearest_utility_for_x, utility_center_x,
+        AppRoute, Navigator, PageLocation, RouteFocusMemory, SettingsPage, ShellFocus,
+        ShellFocusRegion, TopUtility, UtilityPage, nearest_game_for_x, nearest_utility_for_x,
+        utility_center_x,
     },
     presentation::{
         keyboard::{KeyboardController, KeyboardFeedback},
@@ -33,6 +38,7 @@ use super::{
 /// page-local behavior.
 pub struct NavigationController {
     navigator: RefCell<Navigator>,
+    restoring_history: Cell<bool>,
     focus: RefCell<ShellFocus>,
     focus_memory: RefCell<RouteFocusMemory>,
     home: Rc<HomeController>,
@@ -55,6 +61,7 @@ impl NavigationController {
     ) -> Rc<Self> {
         let controller = Rc::new(Self {
             navigator: RefCell::new(Navigator::default()),
+            restoring_history: Cell::new(false),
             focus: RefCell::new(ShellFocus::default()),
             focus_memory: RefCell::new(RouteFocusMemory::default()),
             home,
@@ -70,6 +77,23 @@ impl NavigationController {
         controller.publish_route(ui);
         controller.publish_focus(ui);
         controller.bind_ui_callbacks(ui);
+        let weak = Rc::downgrade(&controller);
+        controller
+            .settings
+            .set_location_changed(Rc::new(move |page| {
+                if let Some(controller) = weak.upgrade() {
+                    controller.record_page(AppRoute::Utility(UtilityPage::Settings), page);
+                }
+            }));
+        let weak = Rc::downgrade(&controller);
+        let weak_ui = ui.as_weak();
+        ui.on_settings_back(move || {
+            if let (Some(controller), Some(ui)) = (weak.upgrade(), weak_ui.upgrade())
+                && controller.current_route() == AppRoute::Utility(UtilityPage::Settings)
+            {
+                controller.handle_action(&ui, UiActionEvent::fresh(UiAction::Back));
+            }
+        });
         controller
     }
 
@@ -117,6 +141,12 @@ impl NavigationController {
     /// Pointer callbacks act only while Album is the current route, so a
     /// page that is zooming away cannot be operated.
     pub fn set_album(self: &Rc<Self>, controller: Rc<AlbumController>, ui: &AppWindow) {
+        let weak = Rc::downgrade(self);
+        controller.set_location_changed(Rc::new(move |page| {
+            if let Some(nav) = weak.upgrade() {
+                nav.record_page(AppRoute::Utility(UtilityPage::Album), page);
+            }
+        }));
         *self.album.borrow_mut() = Some(Rc::clone(&controller));
         let on_album = |navigation: &Rc<Self>| {
             navigation.current_route() == AppRoute::Utility(UtilityPage::Album)
@@ -221,7 +251,13 @@ impl NavigationController {
         }
     }
 
-    pub fn set_activity_details(&self, actions: Rc<dyn ActivityDetailsActions>) {
+    pub fn set_activity_details(self: &Rc<Self>, actions: Rc<dyn ActivityDetailsActions>) {
+        let weak = Rc::downgrade(self);
+        actions.set_location_changed(Rc::new(move |page| {
+            if let Some(nav) = weak.upgrade() {
+                nav.record_page(AppRoute::Utility(UtilityPage::Activity), page);
+            }
+        }));
         *self.activity_details.borrow_mut() = Some(actions);
     }
 
@@ -280,6 +316,50 @@ impl NavigationController {
 
     /// Mouse forward button: reopen the page Back last left, as a fresh
     /// visit, exactly as if it had been opened again.
+    fn record_page(&self, route: AppRoute, page: PageLocation) {
+        if !self.restoring_history.get() && self.current_route() == route {
+            self.navigator.borrow_mut().record_page(page);
+        }
+    }
+    fn restore_history(&self, ui: &AppWindow, from: AppRoute) {
+        let to = self.current_route();
+        let page = self.navigator.borrow().page();
+        self.restoring_history.set(true);
+        if from != to {
+            self.open_route(ui, from, to);
+        }
+        match page {
+            PageLocation::Settings(view) => self.settings.restore_page(ui, view),
+            PageLocation::Activity(game) => {
+                if let Some(details) = self.activity_details.borrow().as_ref() {
+                    details.restore(ui, game);
+                }
+            }
+            PageLocation::Album(path) => {
+                if let Some(album) = self.album.borrow().as_ref() {
+                    album.restore_viewer(ui, &path);
+                }
+            }
+            PageLocation::Root => match to {
+                AppRoute::Utility(UtilityPage::Settings) => {
+                    self.settings.restore_page(ui, SettingsPage::Root)
+                }
+                AppRoute::Utility(UtilityPage::Activity) => {
+                    if let Some(details) = self.activity_details.borrow().as_ref() {
+                        details.close(ui);
+                    }
+                }
+                AppRoute::Utility(UtilityPage::Album) => {
+                    if let Some(album) = self.album.borrow().as_ref() {
+                        album.close_viewer(ui);
+                    }
+                }
+                _ => {}
+            },
+        }
+        self.restoring_history.set(false);
+    }
+
     fn handle_forward(&self, ui: &AppWindow) {
         let from = self.current_route();
         self.remember_focus_for_route(from);
@@ -287,7 +367,7 @@ impl NavigationController {
             let to = self.current_route();
             debug!(?from, ?to, "Forward reopened the route Back left");
             self.cue(UiSoundCue::Ok);
-            self.open_route(ui, from, to);
+            self.restore_history(ui, from);
         } else {
             debug!(route = ?from, "Forward ignored with nothing to reopen");
         }
@@ -357,15 +437,39 @@ impl NavigationController {
             }
         }
         if self.current_route() == AppRoute::Utility(UtilityPage::Album)
+            && event.action == UiAction::Forward
+            && self
+                .album
+                .borrow()
+                .as_ref()
+                .is_some_and(|album| album.has_transient())
+        {
+            return;
+        }
+        if self.current_route() == AppRoute::Utility(UtilityPage::Album)
             && event.action == UiAction::Back
             && self
                 .album
                 .borrow()
                 .as_ref()
-                .is_some_and(|album| album.back(ui))
+                .is_some_and(|album| album.has_transient() && album.back(ui))
         {
             self.cue(UiSoundCue::Back);
             return;
+        }
+        if self.current_route() == AppRoute::Utility(UtilityPage::Settings)
+            && !self.settings.has_transient(ui)
+        {
+            if event.action == UiAction::Forward {
+                self.handle_forward(ui);
+                return;
+            }
+            if event.action == UiAction::Back
+                && self.navigator.borrow().page() != PageLocation::Root
+            {
+                self.handle_back(ui);
+                return;
+            }
         }
         if self.current_route() == AppRoute::Utility(UtilityPage::Settings)
             && self.settings.handle_action(ui, event)
@@ -376,7 +480,7 @@ impl NavigationController {
             UiAction::Back => self.handle_back(ui),
             UiAction::Home => self.handle_home(ui),
             UiAction::Forward => self.handle_forward(ui),
-            UiAction::Menu => self.handle_menu(ui),
+            UiAction::Menu => {}
             UiAction::Accept
                 if !event.repeated
                     && self.current_route() == AppRoute::Home
@@ -449,6 +553,18 @@ impl NavigationController {
                 && controller.current_route() == AppRoute::Home
             {
                 controller.open_library(&ui);
+            }
+        });
+
+        let weak = ui.as_weak();
+        let controller = Rc::clone(self);
+        ui.on_select_game(move |index| {
+            if let Some(ui) = weak.upgrade()
+                && controller.current_route() == AppRoute::Home
+            {
+                controller.focus.borrow_mut().leave_utilities();
+                controller.publish_focus(&ui);
+                controller.home.activate_from_pointer(&ui, index);
             }
         });
 
@@ -593,8 +709,10 @@ impl NavigationController {
     }
 
     fn handle_back(&self, ui: &AppWindow) {
-        if self.current_route() == AppRoute::Utility(UtilityPage::Activity)
+        let from = self.current_route();
+        if from == AppRoute::Utility(UtilityPage::Activity)
             && ui.get_activity_details_visible()
+            && self.navigator.borrow().page() == PageLocation::Root
         {
             if let Some(details) = self.activity_details.borrow().as_ref() {
                 details.close(ui);
@@ -602,29 +720,11 @@ impl NavigationController {
             }
             return;
         }
-        let from = self.current_route();
         self.remember_focus_for_route(from);
-        if self.navigator.borrow_mut().go_back() {
-            let to = self.current_route();
-            debug!(?from, ?to, "Back restored previous route and focus");
-            self.leave_route(ui, from);
-            if to == AppRoute::Utility(UtilityPage::Album)
-                && let Some(album) = self.album.borrow().as_ref()
-            {
-                album.start_new_visit(ui);
-            }
-            if to == AppRoute::Utility(UtilityPage::Settings) {
-                self.settings.on_enter(ui);
-            }
-            if to == AppRoute::Utility(UtilityPage::Activity) {
-                self.prepare_activity_visit(ui);
-            }
-            // Queue feedback before potentially expensive route redraws.
+        let changed = self.navigator.borrow_mut().go_back();
+        if changed {
             self.cue(UiSoundCue::Back);
-            self.publish_route_change(ui, from, to);
-            self.restore_focus_for_route(ui, to);
-        } else {
-            debug!(route = ?from, "Back ignored at navigation root");
+            self.restore_history(ui, from);
         }
     }
 
@@ -653,11 +753,6 @@ impl NavigationController {
             self.leave_route(ui, from);
             self.publish_route_change(ui, from, AppRoute::Home);
         }
-    }
-
-    // Menu/Start provides the same direct destination as the Home Library tile.
-    fn handle_menu(&self, ui: &AppWindow) {
-        self.open_library(ui);
     }
 
     fn handle_utility_action(&self, ui: &AppWindow, event: UiActionEvent) {
@@ -928,5 +1023,298 @@ mod tests {
             route_view(AppRoute::Utility(UtilityPage::Achievements)) == AppRouteView::Achievements
         );
         assert!(route_view(AppRoute::Utility(UtilityPage::Settings)) == AppRouteView::Settings);
+    }
+}
+
+#[cfg(test)]
+mod runtime_tests {
+    use super::*;
+    use crate::{
+        appearance::store::AppearanceStore,
+        persistence::{SqliteLibraryRepository, settings::SettingsStore},
+        services::{
+            activity::{ActivityRepository, ActivityService},
+            artwork::ArtworkService,
+            launch::{GameLaunchService, LaunchExecutionError, LaunchExecutor},
+            library::LibraryRepository,
+            rom_import::{self, RomSetup},
+            settings::SettingsService,
+            steam_account::SteamAccountService,
+        },
+    };
+    struct CountLaunch(Rc<Cell<usize>>);
+    impl LaunchExecutor for CountLaunch {
+        fn execute(
+            &self,
+            _: &crate::sources::SourceLaunchTarget,
+        ) -> Result<(), LaunchExecutionError> {
+            self.0.set(self.0.get() + 1);
+            Ok(())
+        }
+    }
+    #[test]
+    #[ignore = "requires Wayland and a fresh HORIZON_NAVIGATION_TEST_DIR"]
+    fn mouse_history_drag_click_and_crisp_album() {
+        let directory =
+            std::path::PathBuf::from(std::env::var_os("HORIZON_NAVIGATION_TEST_DIR").unwrap());
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(
+            directory.join("homebrew.gba"),
+            crate::platform::gba_core::test_rom(),
+        )
+        .unwrap();
+        let mut repository =
+            SqliteLibraryRepository::open(directory.join("library.sqlite3")).unwrap();
+        let scan = rom_import::scan_folder(&directory, None).unwrap();
+        repository
+            .save_rom_import(&RomSetup::default(), &scan.candidates)
+            .unwrap();
+        let games = repository.list_games().unwrap();
+        let game = games[0].game().id();
+        let now = chrono::Utc::now().timestamp();
+        let session = repository
+            .begin_play_session(
+                game,
+                &crate::domain::SourceId::new("gba").unwrap(),
+                now - 120,
+                crate::domain::SessionTrackingMethod::SourceRuntime,
+            )
+            .unwrap();
+        repository.complete_play_session(session, now - 60).unwrap();
+        let ui = AppWindow::new().unwrap();
+        let registry = Rc::new(crate::sources::production_source_registry().unwrap());
+        let catalog = crate::presentation::catalog::Catalog::shared(games.clone());
+        let activity = Rc::new(ActivityService::new(Rc::new(RefCell::new(repository))));
+        let launches = Rc::new(Cell::new(0));
+        let launcher = Rc::new(GameLaunchService::new(
+            Rc::clone(&registry),
+            Rc::new(CountLaunch(Rc::clone(&launches))),
+        ));
+        let home = HomeController::new(
+            &ui,
+            Rc::clone(&catalog),
+            &[game],
+            &ArtworkService::new(Rc::clone(&registry), None, None),
+            &registry,
+            launcher,
+            activity.clone(),
+        );
+        let library = LibraryController::new(
+            &ui,
+            Rc::clone(&catalog),
+            Rc::clone(&registry),
+            Rc::clone(&home),
+            activity.clone(),
+        );
+        let appearance = crate::presentation::appearance::AppearanceController::new(
+            &ui,
+            AppearanceStore::new(directory.join("appearance.json")),
+        )
+        .unwrap();
+        let settings = SettingsController::new(
+            &ui,
+            SettingsService::load(SettingsStore::new(directory.join("artwork.json"))).unwrap(),
+            appearance,
+            Rc::new(RefCell::new(
+                SteamAccountService::load(directory.join("steam.json")).unwrap(),
+            )),
+            directory.join("controller.json"),
+            directory.join("cores.json"),
+        );
+        let navigation = NavigationController::new(&ui, home, library, settings);
+        let showcase = crate::presentation::activity::ActivityShowcaseController::new(
+            &ui,
+            catalog,
+            Rc::clone(&navigation.home),
+        );
+        let overview = activity.overview(10, 10).unwrap();
+        showcase.refresh(&ui, &overview);
+        let details =
+            crate::presentation::activity::ActivityDetailsController::new(activity, showcase);
+        navigation.set_activity_details(details);
+        let album_dir = directory.join("album");
+        std::fs::create_dir_all(album_dir.join("horizon")).unwrap();
+        let pixels = image::RgbaImage::from_fn(32, 16, |x, y| {
+            image::Rgba(if (x + y) % 2 == 0 {
+                [255, 0, 255, 255]
+            } else {
+                [0, 255, 0, 255]
+            })
+        });
+        pixels.save(album_dir.join("horizon/one.png")).unwrap();
+        pixels.save(album_dir.join("horizon/two.png")).unwrap();
+        let album = AlbumController::new(
+            &ui,
+            &games,
+            Some(album_dir),
+            Vec::new(),
+            Some(directory.join("cache")),
+            std::sync::Arc::new(crate::services::album::media::NoVideo(
+                "Test photos only".into(),
+            )),
+        );
+        navigation.set_album(Rc::clone(&album), &ui);
+        ui.global::<crate::Motion>().set_reduced_motion(true);
+        ui.show().unwrap();
+        let stage = Rc::new(Cell::new(0));
+        let count = Rc::new(Cell::new(0));
+        let progress = Rc::clone(&stage);
+        let ticks = Rc::clone(&count);
+        let weak = ui.as_weak();
+        let output = directory.clone();
+        let timer = slint::Timer::default();
+        timer.start(
+            slint::TimerMode::Repeated,
+            Duration::from_millis(250),
+            move || {
+                let ui = weak.upgrade().unwrap();
+                ticks.set(ticks.get() + 1);
+                assert!(
+                    ticks.get() < 60,
+                    "navigation runtime timed out at {}",
+                    progress.get()
+                );
+                let back = || navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Back));
+                let forward =
+                    || navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Forward));
+                match progress.get() {
+                    0 => {
+                        navigation.navigate_to(&ui, AppRoute::Utility(UtilityPage::Settings));
+                        ui.invoke_settings_activate(3);
+                        ui.invoke_settings_activate(0);
+                        assert_eq!(ui.get_settings_view(), 7);
+                        back();
+                        assert_eq!(ui.get_settings_view(), 6);
+                        back();
+                        assert_eq!(ui.get_settings_view(), 0);
+                        back();
+                        assert_eq!(navigation.current_route(), AppRoute::Home);
+                        forward();
+                        assert_eq!(ui.get_settings_view(), 0);
+                        forward();
+                        assert_eq!(ui.get_settings_view(), 6);
+                        forward();
+                        assert_eq!(ui.get_settings_view(), 7);
+                        ui.invoke_settings_back();
+                        assert_eq!(ui.get_settings_view(), 6);
+                        forward();
+                        assert_eq!(ui.get_settings_view(), 7);
+                        back();
+                        back();
+                        ui.invoke_settings_activate(2);
+                        assert_eq!(ui.get_settings_view(), 2);
+                        forward();
+                        assert_eq!(ui.get_settings_view(), 2);
+                        back();
+                        forward();
+                        assert_eq!(ui.get_settings_view(), 2);
+                        navigation.handle_home(&ui);
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Menu));
+                        assert_eq!(navigation.current_route(), AppRoute::Home);
+                        navigation.navigate_to(&ui, AppRoute::Utility(UtilityPage::Activity));
+                        navigation.begin_activity_details_open(&ui, 0);
+                        assert!(ui.get_activity_details_visible());
+                        back();
+                        assert!(!ui.get_activity_details_visible());
+                        forward();
+                        assert!(ui.get_activity_details_visible());
+                        back();
+                        back();
+                        assert_eq!(navigation.current_route(), AppRoute::Home);
+                        forward();
+                        forward();
+                        assert!(ui.get_activity_details_visible());
+                        navigation.navigate_to(&ui, AppRoute::Utility(UtilityPage::Album));
+                        progress.set(1);
+                    }
+                    1 if ui.get_album_total_count() == 2 => {
+                        assert!(album.choose(&ui, 0));
+                        progress.set(2);
+                    }
+                    2 if ui.get_album_viewer_has_image() => {
+                        let image = ui.window().take_snapshot().unwrap();
+                        for y in 200..500 {
+                            for x in 320..960 {
+                                let p = image.as_slice()[(y * image.width() + x) as usize];
+                                assert!(
+                                    [p.r, p.g, p.b] == [255, 0, 255]
+                                        || [p.r, p.g, p.b] == [0, 255, 0],
+                                    "smoothed pixel: {p:?}"
+                                );
+                            }
+                        }
+                        image::save_buffer(
+                            output.join("album-pixels.png"),
+                            image.as_bytes(),
+                            image.width(),
+                            image.height(),
+                            image::ColorType::Rgba8,
+                        )
+                        .unwrap();
+                        album.step(&ui, 1);
+                        let page = navigation.navigator.borrow().page();
+                        back();
+                        assert!(!ui.get_album_viewing());
+                        forward();
+                        assert!(ui.get_album_viewing());
+                        assert_eq!(navigation.navigator.borrow().page(), page);
+                        ui.invoke_album_close_viewer();
+                        assert!(!ui.get_album_viewing());
+                        forward();
+                        assert!(ui.get_album_viewing());
+                        navigation.handle_home(&ui);
+                        progress.set(3);
+                    }
+                    3 => {
+                        use slint::platform::{PointerEventButton, WindowEvent};
+                        let rect = ui.invoke_player_capture_origin();
+                        let position = slint::LogicalPosition::new(
+                            (rect.x + rect.width / 2.0) * 1280.0,
+                            (rect.y + rect.height / 2.0) * 720.0,
+                        );
+                        ui.window().dispatch_event(WindowEvent::PointerPressed {
+                            position,
+                            button: PointerEventButton::Left,
+                        });
+                        let moved = slint::LogicalPosition::new(position.x - 100.0, position.y);
+                        ui.window()
+                            .dispatch_event(WindowEvent::PointerMoved { position: moved });
+                        ui.window().dispatch_event(WindowEvent::PointerReleased {
+                            position: moved,
+                            button: PointerEventButton::Left,
+                        });
+                        assert_eq!(launches.get(), 0);
+                        progress.set(4);
+                    }
+                    4..=8 => progress.set(progress.get() + 1),
+                    9 => {
+                        use slint::platform::{PointerEventButton, WindowEvent};
+                        let rect = ui.invoke_player_capture_origin();
+                        let position = slint::LogicalPosition::new(
+                            (rect.x + rect.width / 2.0) * 1280.0,
+                            (rect.y + rect.height / 2.0) * 720.0,
+                        );
+                        ui.window().dispatch_event(WindowEvent::PointerPressed {
+                            position,
+                            button: PointerEventButton::Left,
+                        });
+                        ui.window().dispatch_event(WindowEvent::PointerReleased {
+                            position,
+                            button: PointerEventButton::Left,
+                        });
+                        assert_eq!(
+                            launches.get(),
+                            1,
+                            "click must dispatch one game launch after drag settles"
+                        );
+                        progress.set(10);
+                        slint::quit_event_loop().unwrap();
+                    }
+                    _ => {}
+                }
+            },
+        );
+        slint::run_event_loop().unwrap();
+        assert_eq!(stage.get(), 10);
     }
 }

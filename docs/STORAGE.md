@@ -12,7 +12,7 @@ development uses an `io.github.Mars7x.Horizon` subdirectory beneath the XDG root
 | --- | --- | --- |
 | data | library.sqlite3, album/, chosen/Steam profile images and animated originals | Durable user data |
 | data | saves/gba/ followed by the ROM SHA-256 and `.sav`; previous save in `.sav.bak` | Durable battery-save data |
-| config | appearance.json, controller.json, profile.json, steamgriddb.json, steam-account.json | Persistent preferences/credentials |
+| config | appearance.json, controller.json, cores.json, profile.json, steamgriddb.json, steam-account.json | Persistent preferences/credentials |
 | cache | artwork/local/, artwork/steamgriddb/, album/ | Disposable derived media/provenance |
 
 Config directories use owner-only permissions; sensitive files use mode 0600.
@@ -40,3 +40,7 @@ worker every five seconds and at normal quit. Temporary replacement files are
 flushed before rename; the previous valid save is retained as a backup. A failed
 save pauses the game and exposes retry through Save and quit. Save states and
 external-emulator save import are not implemented.
+
+`cores.json` stores the curated mGBA preferences. The settings worker serializes
+atomic writes; invalid files and failed writes preserve prior data. The player
+reads and validates this file on its worker before loading the core.

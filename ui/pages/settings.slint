@@ -99,6 +99,14 @@ export component SettingsPage inherits Rectangle {
     in property <bool> ui-sounds-enabled: true;
     in property <bool> swap-confirm: false;
     in property <bool> swap-hints: true;
+    in property <bool> core-ready;
+    in property <bool> core-freeze;
+    in property <bool> core-color;
+    in property <string> core-filter: "None";
+    in property <bool> core-smoothing;
+    in property <int> core-sunlight;
+    in property <string> core-feedback;
+    callback core-decrease();
     in property <string> appearance-feedback: "";
     in property <int> selection: 0;
     in property <bool> key-present: false;
@@ -192,7 +200,7 @@ export component SettingsPage inherits Rectangle {
     view-transition := TransitionDriver { key: root.view; }
     private property <bool> view-back: root.view-depth(root.view) < root.view-depth(view-transition.from-key);
     pure function view-depth(view: int) -> int {
-        return view == 0 ? 0 : (view <= 2 || view == 5 ? 1 : 2);
+        return view == 0 ? 0 : (view <= 2 || view == 5 || view == 6 ? 1 : 2);
     }
 
     settings-home := TransitionLayer {
@@ -236,6 +244,14 @@ export component SettingsPage inherits Rectangle {
                 trailing: "Open  ›";
                 focused: root.view == 0 && root.selection == 2;
                 activated => { if (root.view == 0 && !root.editing-key && !root.refresh-open) { root.activate(2); } }
+            }
+            SettingsRow {
+                width: parent.width;
+                title: "Cores";
+                subtitle: "Game playback preferences";
+                trailing: "Open  ›";
+                focused: root.view == 0 && root.selection == 3;
+                activated => { if (root.view == 0) { root.activate(3); } }
             }
         }
     }
@@ -431,6 +447,113 @@ export component SettingsPage inherits Rectangle {
         }
     }
 
+
+    cores := TransitionLayer {
+        x: Metrics.page-margin;
+        rest-y: Metrics.page-header-height;
+        width: root.content-width;
+        height: root.height - Metrics.page-header-height;
+        opaque: true;
+        active: root.view == 6;
+        outgoing: view-transition.from-key == 6;
+        returning: root.view-back;
+        phase: view-transition.phase;
+        Breadcrumb {
+            x: 0px; y: 0px; width: parent.width;
+            section: "Settings"; page: "Cores";
+            back => { if (root.view == 6) { root.go-back(); } }
+        }
+        SettingsRow {
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm;
+            width: parent.width;
+            title: "mGBA";
+            subtitle: "Game Boy Advance";
+            trailing: "Open  ›";
+            focused: root.view == 6 && root.selection == 0;
+            activated => { if (root.view == 6) { root.activate(0); } }
+        }
+    }
+
+    mgba := TransitionLayer {
+        x: Metrics.page-margin;
+        rest-y: Metrics.page-header-height;
+        width: root.content-width;
+        height: root.height - Metrics.page-header-height;
+        opaque: true;
+        active: root.view == 7;
+        outgoing: view-transition.from-key == 7;
+        returning: root.view-back;
+        phase: view-transition.phase;
+        Breadcrumb {
+            x: 0px; y: 0px; width: parent.width;
+            section: "Cores"; page: "mGBA";
+            back => { if (root.view == 7) { root.go-back(); } }
+        }
+        SettingsRow {
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm;
+            width: parent.width;
+            title: "Audio smoothing";
+            subtitle: "Soften sharp game audio";
+            toggle: true;
+            checked: root.core-smoothing;
+            enabled: root.view == 7 && root.core-ready;
+            focused: root.view == 7 && root.selection == 0;
+            activated => { if (root.view == 7) { root.activate(0); } }
+        }
+        SettingsRow {
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm + Metrics.list-row-height + Metrics.list-row-gap;
+            width: parent.width;
+            title: "Sunlight level";
+            subtitle: "For games that use a solar sensor";
+            trailing: "+   " + root.core-sunlight + " / 10";
+            secondary: "−";
+            enabled: root.view == 7 && root.core-ready;
+            focused: root.view == 7 && root.selection == 1;
+            activated => { if (root.view == 7) { root.activate(1); } }
+            secondary-activated => { if (root.view == 7) { root.core-decrease(); } }
+        }
+        SettingsRow {
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 2;
+            width: parent.width;
+            title: "Video filter";
+            subtitle: "Sharp, LCD, smooth scaling or smooth pixel art";
+            trailing: root.core-filter + "  ›";
+            enabled: root.view == 7 && root.core-ready;
+            focused: root.view == 7 && root.selection == 2;
+            activated => { if (root.view == 7) { root.activate(2); } }
+        }
+        SettingsRow {
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 3;
+            width: parent.width;
+            title: "Colour correction";
+            subtitle: "Approximate the original GBA display colours";
+            toggle: true;
+            checked: root.core-color;
+            enabled: root.view == 7 && root.core-ready;
+            focused: root.view == 7 && root.selection == 3;
+            activated => { if (root.view == 7) { root.activate(3); } }
+        }
+        SettingsRow {
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 4;
+            width: parent.width;
+            title: "Freeze when unfocused";
+            subtitle: "Resume automatically when you return";
+            toggle: true;
+            checked: root.core-freeze;
+            enabled: root.view == 7 && root.core-ready;
+            focused: root.view == 7 && root.selection == 4;
+            activated => { if (root.view == 7) { root.activate(4); } }
+        }
+        Text {
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 5;
+            width: parent.width; height: 60px;
+            text: root.core-feedback != "" ? root.core-feedback : "Applies next time you launch a game";
+            color: Theme.secondary-foreground;
+            font-size: Typography.caption-size;
+            wrap: word-wrap;
+        }
+    }
+
     controller := TransitionLayer {
         x: Metrics.page-margin;
         rest-y: Metrics.page-header-height;
@@ -451,7 +574,7 @@ export component SettingsPage inherits Rectangle {
             x: 0px; y: Metrics.breadcrumb-height + Metrics.spacing-sm;
             width: parent.width;
             title: "Swap Select and Back";
-            subtitle: "Select with the back button, go back with the select button";
+            subtitle: "Swap menu buttons and gameplay A/B";
             toggle: true;
             checked: root.swap-confirm;
             focused: root.view == 5 && root.selection == 0;

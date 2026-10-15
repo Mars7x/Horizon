@@ -208,6 +208,10 @@ fn retained_selected_index(previous: &[GameId], selected: i32, next: &[GameId]) 
 /// Controller boundary for the nested Activity game details view. Uses only the
 /// generic Activity repository and stable GameId. It cannot launch games.
 pub trait ActivityDetailsActions {
+    fn set_location_changed(&self, _callback: Rc<dyn Fn(crate::navigation::PageLocation)>) {}
+    fn restore(&self, _ui: &AppWindow, _game: crate::domain::GameId) -> bool {
+        false
+    }
     fn open(&self, ui: &AppWindow, cover_index: usize) -> bool;
     fn close(&self, ui: &AppWindow);
     fn scroll_rows(&self, ui: &AppWindow, delta: i32);
@@ -220,6 +224,7 @@ pub struct ActivityDetailsController<R: ActivityRepository> {
     showcase: Rc<ActivityShowcaseController>,
     rows: RefCell<Vec<ActivityHistoryRowData>>,
     active_game: Cell<Option<GameId>>,
+    location_changed: crate::presentation::CallbackSlot<dyn Fn(crate::navigation::PageLocation)>,
 }
 
 impl<R: ActivityRepository> ActivityDetailsController<R> {
@@ -232,6 +237,7 @@ impl<R: ActivityRepository> ActivityDetailsController<R> {
             showcase,
             rows: RefCell::new(Vec::new()),
             active_game: Cell::new(None),
+            location_changed: RefCell::new(None),
         })
     }
 
@@ -256,6 +262,21 @@ impl<R: ActivityRepository> ActivityDetailsController<R> {
 }
 
 impl<R: ActivityRepository + 'static> ActivityDetailsActions for ActivityDetailsController<R> {
+    fn set_location_changed(&self, callback: Rc<dyn Fn(crate::navigation::PageLocation)>) {
+        *self.location_changed.borrow_mut() = Some(callback);
+    }
+    fn restore(&self, ui: &AppWindow, game: GameId) -> bool {
+        let index = self
+            .showcase
+            .displayed_ids
+            .borrow()
+            .iter()
+            .position(|id| *id == game);
+        index.is_some_and(|index| {
+            ui.set_activity_selected_index(index as i32);
+            self.open(ui, index)
+        })
+    }
     fn open(&self, ui: &AppWindow, index: usize) -> bool {
         let Some((game_id, card, _catalog_index)) = self.showcase.game_at(index) else {
             return false;
@@ -337,6 +358,9 @@ impl<R: ActivityRepository + 'static> ActivityDetailsActions for ActivityDetails
         ui.set_activity_detail_first_row(0);
         self.publish_window(ui, 0);
         ui.set_activity_details_visible(true);
+        if let Some(callback) = self.location_changed.borrow().as_ref() {
+            callback(crate::navigation::PageLocation::Activity(game_id));
+        }
         true
     }
 
@@ -347,6 +371,9 @@ impl<R: ActivityRepository + 'static> ActivityDetailsActions for ActivityDetails
         // while the old page is still animating out.
         ui.set_activity_details_visible(false);
         self.active_game.set(None);
+        if let Some(callback) = self.location_changed.borrow().as_ref() {
+            callback(crate::navigation::PageLocation::Root);
+        }
     }
 
     fn scroll_rows(&self, ui: &AppWindow, delta: i32) {
