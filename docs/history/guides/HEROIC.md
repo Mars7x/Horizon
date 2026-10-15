@@ -1,6 +1,6 @@
 # Heroic — retired
 
-Heroic discovery, launch URIs, log-based runtime observation, lifetime ingestion and production registration are removed, together with Heroic/Legendary sandbox grants. Migration 0010 archives all identities and preserves games/history. No Heroic account feature is retained or added. See [ADR 0190](adr/0190-flatpak-embedded-emulator-direction.md).
+Heroic discovery, launch URIs, log-based runtime observation, lifetime ingestion and production registration are removed, together with Heroic/Legendary sandbox grants. Migration 0010 archives all identities and preserves games/history. No Heroic account feature is retained or added. See [ADR 0190](../../adr/0190-flatpak-embedded-emulator-direction.md).
 
 ## Historical implementation (retired)
 

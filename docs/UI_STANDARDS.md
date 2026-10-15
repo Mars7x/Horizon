@@ -1,302 +1,71 @@
 # UI standards
 
-Every full-screen page (everything except Home) is built from the same shared
-parts so the app reads as one product. Home keeps its own chrome (top
-utilities, footer) and is not changed by these rules. See
-[ADR 0163](adr/0163-shared-page-frame-and-ui-standards.md).
+Home keeps its own shell. Every other full-screen page uses the shared frame;
+feature work must not replace Home's focus geometry, selected scale or marquee.
+See [Home](HOME_UI.md) and [navigation](NAVIGATION.md).
 
-## Page frame
+## Shared components
 
-| Part | Rule | Code |
+| Element | Contract | Implementation |
 | --- | --- | --- |
-| Header | Title only, at `Metrics.page-title-y`, same on every page. The title is the section name (Library, Activity, Achievements, Settings); it does not change in sub-pages. | `PageHeader` in `ui/components/page-header.slint` |
-| Header values | Read-outs or pointer-clickable pickers sit on the title row, right-aligned: a small `label-size` caption over a bold value. Value changes slide and crossfade over `Motion.value-swap-duration`. | `HeaderValue` |
-| Content | Starts at `Metrics.page-header-height` and ends at the bottom bar. | — |
-| Bottom bar | `Metrics.page-bottom-bar-height`, equal to Home's footer height so the hint line is centred in the bar. Left: page context (Library's selected game). Keep it to the selection itself; no status text such as "Saved results" or "Updating…". Right: controller hints. Hints and context sit on one line, `Metrics.hint-row-center-from-bottom` (Home's footer midline), and end at the page margin, so Home's footer "A OK" (the same `HintBar`) lines up with every page. | `HintBar` in `ui/app.slint` and `ui/components/footer.slint` |
-| Sub-pages | Open with a clickable `‹  Section  /  Page` breadcrumb at the content top. Clicking it is Back. | `Breadcrumb` |
-| Route changes | The shared Zoom transition (below). Bottom-bar chrome (hints, bottom-bar context, the bottom scroll shadow) switches with the route instantly, so a leaving page never ghosts into Home's footer. | `focus-visible` / `active` on each page |
-| Scroll edges | Top shadow only once content has scrolled under the header; bottom shadow only while more content is below. Strength is `Scroll.edge` of the hidden pixels, from the animated camera. | `ScrollEdgeShadow`, `Scroll.edge` |
+| Header | Stable section title, shared title baseline and margins | [PageHeader](../ui/components/page-header.slint) |
+| Header values | Right-aligned read-outs/pickers with shared value transitions | [HeaderValue](../ui/components/page-header.slint) |
+| Sub-page | Breadcrumb in the content area; click means Back | [Breadcrumb](../ui/components/page-header.slint) |
+| Focusable rows | One exclusive animated outline; hover is not selection | [ListRow](../ui/components/list-row.slint), [SettingsRow](../ui/components/settings-row.slint) |
+| Read-only panels/history | Never focusable; scrolling is independent of selection | [Surface](../ui/components/list-row.slint) |
+| Covers/media | Home corner brackets follow animated selected geometry | [FocusFrame](../ui/components/focus-frame.slint) |
+| Hints | Bottom-bar baseline shared with Home; show working actions only | [HintBar](../ui/components/hint-bar.slint) |
+| Long text | Selected text may marquee; other text clips with soft edges | [MarqueeText](../ui/components/marquee-text.slint) |
 
+[Theme, Metrics, Motion and Typography](../ui/theme/theme.slint) own colors,
+spacing, sizes and animation timing. No ad-hoc layout constants or local font
+families. Authored SVG geometry/colors stay intact; generated chrome uses
+semantic tokens. Do not set hand cursors; hover color communicates clickability.
 
-## Writing
+## Motion and scrolling
 
-The UI is meant to be clean, so its words are few and plain.
+Use shared TransitionDriver/TransitionLayer for forward/back zoom and crossfade.
+Section headers stay fixed while content transitions. Incoming pages prewarm
+before timing starts. Only the active and immediate outgoing layers are needed;
+rapid navigation must not expose stale focus. Item-to-item Album viewing slides
+rather than changing the page transition contract.
 
-- **Short.** A subtitle is a few words ("Cover art · Connected", "Your Steam avatar"), not a sentence of how it works. Explanations belong in the docs, not on screen.
-- **No technical terms** where a plain one works: "Steam ID", not "SteamID64"; "Saved", not "Configured · key hidden". Names of services (Steam, SteamGridDB) and of things the user must type ("Web API key") stay.
-- **No confirmations for things that show themselves.** A new picture, a saved name or a removed key is visible; don't also say "Picture updated." Say something only when it went wrong ("Couldn't save", "Can't reach Steam right now").
-- **No ellipses**, and no full stops on one-line labels and messages. A loading state is quiet (empty) or a plain phrase ("Loading achievements").
-- **Removing is not a row.** Undoing what a row sets (a key, an account, a picture) is a small secondary button on that row (`SettingsRow.secondary`) and X on a controller, shown in the hints ("X Remove"). It asks first with `ConfirmDialog` (`components/confirm-dialog.slint`, also the Album's delete): a short question, Cancel focused, then the action. A line under the question only when it adds something real.
-- **No captions explaining a page.** A heading or breadcrumb names it; rows say their state. No "System matches your desktop" or "Saved on this device" lines.
-- **Unknown is not zero**, still: say what's missing ("Your Steam friends list is private"), never show it as none.
+Reduced Motion makes shared transitions immediate and stops marquee/pulsing.
+High Contrast suppresses idle focus pulses. Cover focus must follow the animated
+selected cover rather than its fixed grid slot. Do not revive segmented text
+masks or runtime gradient-percent coercions; validate against the installed
+Slint syntax and real rendering.
 
-## Controller hints
+Scroll-edge shadows follow the animated camera: no top shadow at offset zero,
+no bottom shadow once nothing remains below. Wheel/touchpad panning does not
+change selected items. Read-only history scrolls without manufacturing row focus.
+Inactive/outgoing pages must not accept pointer actions or retain bottom-bar
+hints. Clicks play the same navigation/OK/Back cue as equivalent input actions.
 
-`page-hints` in `ui/app.slint` is the single mapping from page state to hints,
-except the Album's, which its controller publishes (`album-hints`) because they
-depend on its viewer, selection and each capture's owner. Hints are
-display-only: they must not show anything the Rust handlers don't do
-(`NavigationController::handle_action`, `LibraryController::handle_action`,
-`SettingsController::handle_action`, `AlbumController`); change both
-together. The bar lists the page's actions, left to right **X, B, A** (A
-always rightmost, B beside it), not D-pad movement, and not fullscreen
-shortcuts (Album's Left/Right browse and LB/RB skip).
+## Appearance, typography and sound
 
-**Bumper pickers are not hints.** A value that LB/RB change (Library Source
-and Sort, Achievements Source, Album Game and Type) shows a compact glyph
-before its header label (`HeaderValue.button`, and `button2` for a value
-stepped both ways), so the button sits next to what it changes. Hints are also buttons: clicking one sends that
-button through the same Rust input path as a controller press (`hint-activated`
-→ `UiAction::from_hint`), so it does exactly what the controller would, for
-whatever is focused (Home's footer "A OK" included). A pair activates the
-glyph clicked and its label the first. A faded-out bar takes no clicks.
-Order, left to right: X, B, then A, always rightmost (as Home's footer "A OK"). Buttons: A (Accept), B (Back), X (`Secondary`; Album: Delete), LB/RB (only
-in headers). These are logical names: `ButtonGlyph` draws the keyboard key or controller button in use (Enter, ✕, L1, …; see INPUT.md and ADR 0185), so never write a device's label into a hint. A shared action can show two glyphs (`button2`). While a dialog is open the bar fades out with the page behind the backdrop; dialogs show their own focusable buttons.
+Theme choices are System, Light, Dark and Black; System follows light/dark only.
+Accent choice is independent: System plus nine presets, including White. Portal
+preferences are color-scheme, accent-color, contrast and reduced-motion. Missing
+preferences use deterministic fallbacks; UI colors are resolved in Rust.
+Focus/accent contrast is at least 4.5:1 on relevant surfaces, 7:1 in High Contrast.
+The stored choice and current focus have distinct visual states.
 
-## Lists and surfaces
+LINE Seed JP is the shared family: Regular 400 for interface text, Bold 700 for
+emphasis/game titles, ExtraBold 800 for clock digits. Flatpak bundles four
+unmodified static faces including Thin 100. Font packaging/provenance is in
+[Licensing](LICENSING.md) and the manifest. UI sounds are existing WAV assets
+played through PipeWire and controlled by the appearance preference.
 
-- **Focusable rows** (Settings, Achievements games) are `ListRow`: one height
-  (`Metrics.list-row-height`, gap `list-row-gap`), `Theme.surface`,
-  `radius-lg`, 1px divider border, hover to `surface-raised`, and the Settings
-  focus outline that fades in and out over `Motion.focus-duration`. Titles use
-  `heading-size`, subtitles `body-size`. Page-specific trailing content is passed
-  as children; it sits above the row's click area, so a trailing button (the
-  row's Remove) takes its own clicks.
-- **Panels and read-only rows** (Activity panels, session history, achievement
-  entries) are `Surface`: same colour, radius and border, never focusable.
-- **Game covers and media tiles** (Album captures) get the Home corner-bracket
-  `FocusFrame`; rows and buttons get the outline. Never mix them.
-- **No hand cursor.** Nothing sets `mouse-cursor: pointer`; hover colour shows
-  what's clickable. A text field keeps the text cursor.
-- **Clicks sound like presses.** A click plays the cue the same choice plays
-  from a controller (see [Appearance](APPEARANCE.md)); add one with any new
-  click handler.
+## Text and dialogs
 
-## Text
+Use short, plain labels without trailing full stops or visible ellipses. Do
+not expose implementation details, credentials, URLs containing secrets or
+unavailable data as zero. Missing achievement artwork uses a neutral fallback,
+never an invented badge. Match marquee edge color to the actual background.
 
-- No ellipsis anywhere. Long text uses `MarqueeText`: the focused item scrolls
-  with Home's pacing (2s hold, distance-based travel, 2.4s end hold, fade
-  reset); everything else is clipped with a soft edge fade. Reduced Motion keeps
-  text still.
-- `MarqueeText.edge-color` must match the colour behind the text
-  (`Theme.background`, `Theme.surface`, or `Theme.surface-raised`).
-- Missing achievement artwork is the neutral "◇", never a star or fake badge.
-
-## Transitions: Zoom
-
-Every page and sub-page change uses one transition, built from
-`TransitionDriver` and `TransitionLayer` in `ui/components/transition.slint`:
-
-- **Forward** (opening a page, a Settings section, a game's achievements,
-  Activity details): the new layer grows in from 94% as it fades in, while the
-  current one grows past to 106% and fades out.
-- **Back** mirrors it: the layer you return to settles in from 106%, while the
-  one you leave shrinks to 94% and fades.
-- Leaving Home is forward; returning to Home is Back. Inside a section, depth
-  decides the direction (Settings 0, Appearance/Third-Party 1, their pages 2).
-- Section headers stay still: sub-page layers are clear above
-  `Metrics.page-header-height` (`opaque` + `cover-from`).
-- Route changes first draw the incoming page once at near-zero opacity
-  (`prewarm`) and start timing only after that frame. A slow first frame
-  (artwork upload on a fresh start) delays the transition instead of
-  swallowing it.
-- Home's top bar and footer zoom and fade with Home, around the window centre;
-  hints appear once a page settles.
-- `TransitionDriver.phase` is derived from its `key`, so a transition is already in its first phase the instant the key changes. Bind `key`; never start transitions from `changed` handlers, which run a frame late and flash the settled state.
-- Duration is `Motion.page-duration`; Reduced Motion makes it instant.
-- Offscreen review renders use Slint's software renderer, which ignores
-  `transform-scale`: they show the fade but not the zoom. Check scaling in the
-  real app.
-
-## Slide (between items of the same kind)
-
-Stepping between siblings shown one at a time (Album's viewer) slides
-instead of zooming. The next item enters from the side of the button
-pressed, and the current one leaves the other way, a gap apart. It is driven
-by `TransitionDriver` with the step count as its `key`, over
-`Motion.page-duration`. Reduced Motion makes it instant. Opening and closing
-such a viewer is not: Album's fullscreen viewer grows out of the selected
-tile and shrinks back into it (a shared-element transition).
-
-## Fullscreen media
-
-Album's viewer is the one exception to the page frame: the capture fills the
-window on black, with no header or bottom bar. Its title, details, timeline
-and hints sit on top/bottom gradients that fade three seconds after the last
-input (`overlay-revision`, bumped by Rust on every viewer action). The hint
-bar draws in its `on-dark` style there.
-
-## Motion
-
-Every animation uses a `Motion` token (`ui/theme/theme.slint`), never a
-literal duration. Pick the token by **what happened**, and the easing by
-**what changes**:
-
-| What happened | Token | Examples |
-| --- | --- | --- |
-| Pointer hover | `hover-duration` (100 ms) | Row and button hover fills, hint hover, viewer edge arrows |
-| Selection moved | `focus-duration` (140 ms) | Tile lift, focus ring in and out, tick boxes, dimming while selecting |
-| A value changed | `value-swap-duration` (180 ms) | Header values, toggles, swatches, progress bars, chart bars, list rows arriving |
-| A grid's contents changed | `GridRefresh` (`components/grid-refresh.slint`) | Library Source and Sort, Album Game and Type: covers in both grids glide to their new places (260 ms, ease-out), leavers fade out (120 ms), newcomers fade in (170 ms after 90 ms); see ADR 0172 |
-| Carousel moved | `carousel-duration` (190 ms) | Home and Activity carousels; Home's shelf steps it per frame (`CameraGlide`, see HOME_UI) |
-| Page or view changed | `page-duration` (220 ms) | Zoom, Album slide and grow, hint bar and viewer overlay fades |
-| Dialog opened or closed | `dialog-duration` (180 ms), `dialog-rise` | Every modal (`ModalDialog`) |
-| Camera moved | `scroll-duration` (130 ms) | Every list and grid camera, the key field's text scroll |
-| Status appeared or left | `status-enter/exit-duration` | Battery, controller |
-
-Easing: **moves and resizes ease-out** (they answer input, so they start fast);
-**fades and colour changes ease-in-out**; **cameras and timelines are
-linear**. Home's launch release (`ease-out-back`) is the one spring. Loops
-(`caret-blink-cycle`, `spinner-cycle`, focus breathing) and the marquee
-rhythm (`marquee-*`) are tokens too.
-
-Every token is 0 under Reduced Motion; loops and marquees stop.
-
-**Dialogs** use `ModalDialog` (`components/modal-dialog.slint`): the
-component is the card (children lay out against it), over a backdrop that
-takes every click.
-
-**Choreography** that one `animate` can't express (the grid refresh,
-Library's title swap, Achievements' arriving rows) runs on a `Stopwatch`
-(`components/stopwatch.slint`). Never read `animation-tick()` in a binding
-that stays evaluated at rest: the window then redraws every frame forever.
-`Stopwatch` reads it only while running. The deliberate continuous loops are
-the focus breathing, the caret, the spinner and a playing video's clock.
-
-Slint's `Timer.restart()` does nothing on a stopped timer: use `stop()` then
-`start()`.
-
-An element hidden with `visible: false` must also hold its hidden value for any
-animated property (for example `opacity: 0`). Otherwise it animates from a stale
-value the moment it becomes visible (the hint bar once flashed in, faded out,
-then faded in again).
-
-A property's `animate` duration is read when the animated value is next
-evaluated (at draw time), not when its inputs change. To make one change
-instant (a fresh visit resetting a list to the top), keep the duration at 0
-until that change has been drawn, then restore it (Achievements uses a short
-timer after `visit-revision` changes).
-
-A list camera's `settle-key` changes only when the page is arrived at (a
-visit counter), never when it is left: a reset while leaving snaps a list
-scrolled between rows back onto a row as the page fades out.
-
-## Scrolling
-
-Every vertical list and grid (Library, Album, Achievements' two lists,
-Activity's session history) scrolls the same way, through one
-`ScrollCamera` (`ui/components/scroll.slint`):
-
-- **Focus:** the camera rests wherever it was left, to the pixel. Moving
-  focus to an item that is fully in view doesn't move it at all; moving to
-  one that is partly or wholly out of view moves it the least distance that
-  shows the item fully (its padding and focus frame included), with the
-  standard glide. It never snaps onto row boundaries. The wheel and touchpad
-  move it freely (below).
-- **Never past the end:** `Scroll.camera` clamps the camera to
-  `[0, content − viewport]`. At the end, the last row rests on the
-  viewport's bottom edge; there is never empty space under it. A short list
-  doesn't scroll at all.
-- **Motion:** `Motion.scroll-duration` (130 ms), linear, a little longer
-  than the 115 ms held-input repeat: each step retargets the glide before
-  it ends, and a retargeted linear glide settles to one constant speed, so
-  held steps never pause between rows. (At 110 ms it finished early and
-  stood still for a frame per row.) The glide steps every frame by the time
-  since the previous one (`ScrollCamera.step`), not as a Slint `animate`: a
-  focus move reaches the camera in a `changed` handler just before a frame
-  is drawn, and an animation started there doesn't move on that frame, so
-  every step began with a still frame.
-- **Fresh visits jump:** a `CameraSettle` keyed on the visit (or on opening
-  a sub-view) makes the reset instant instead of scrolling back.
-- **Peeking rows** are part of the content: clicking one selects it and
-  scrolls it into view.
-- **Long content** mounts only rows near the camera, plus three overscan
-  rows each side (Album, Library), so a glide never reveals unmounted space.
-
-Horizontal carousels (Home, Activity covers) are not lists and keep their
-own camera.
-
-## Mouse wheel and touchpad
-
-Wheel and touchpad input move the camera only, never selection or focus, and
-move it by **pixels, never from row to row or item to item**. Every
-`scroll-event` goes to `ScrollCamera.scroll()` (Home's carousel:
-`GameCarousel.pan()`), which uses `Wheel` (`ui/components/wheel.slint`) and
-so follows the desktop's natural/traditional scrolling setting:
-
-- **Touchpad:** the camera follows the fingers directly, 2.5 px per pixel of
-  travel. A swipe still moving when the fingers lift glides on and slows to a
-  stop (`Momentum`, `ui/components/momentum.slint`, the one glide every
-  touchpad and finger gesture uses): it starts at the swipe's speed,
-  averaged over its last frames (about 70 ms, so uneven input batches don't
-  make one flick throw hard and the next not at all), and halves every
-  160 ms. Fingers that stopped before lifting don't glide. The glide runs
-  frame by frame, so a list keeps mounting rows around it. A glide that
-  reaches an end runs on into the stretch, brakes hard and springs back, as
-  a pull does. New input, a touch (it catches the glide, and isn't a tap on
-  what's beneath) or a focus change stops it, where it is drawn. The glide
-  carries on from the last movement, not from the lift, so there is no
-  pause between them. Reduced Motion never glides.
-- **Even motion, no added delay** (`InputResample`,
-  `ui/components/input-resample.slint`, in `ScrollCamera` and Home's
-  carousel): touchpad and finger events come at their own rate (often
-  100–125 Hz), not the display's, so drawing the newest one moved the
-  camera unevenly (20, 20, 10 px a frame). Each frame instead draws where
-  the input was 4 ms before it, about the average age of the newest event,
-  so responsiveness is unchanged and every frame moves the same amount.
-  Between events it interpolates; when the next event hasn't arrived yet it
-  carries on at the last speed for no longer than the next event could
-  still be due (at most 6 ms), so fingers that stop dead overshoot by only a
-  few pixels and ease back. Event times are when each event reaches Horizon:
-  events read together are one sample and aren't predicted from, which
-  draws as evenly as before resampling or better. The glide that follows a
-  swipe is drawn the same way, so the handover doesn't jump.
-- **At an end, only a real stretch counts** (`Scroll.past`): stored lengths
-  round, so a camera clamped at an end can sit a fraction of a pixel off
-  it. Anything under half a pixel is no stretch; otherwise lifting the
-  fingers would spring back by nothing instead of gliding.
-- **Wheel notch** (a whole multiple of 60px): 180 px with the standard
-  130 ms linear glide. Spun fast, notches never put the destination more
-  than a row ahead of where the gliding camera is drawn, since the owner
-  mounts rows around the destination; otherwise rows on screen would
-  already be let go (blank rows near the bottom bar when scrolling up).
-- The camera stays where it was scrolled, between rows if need be, clamped
-  to the content. Whenever its top edge crosses into another row it tells
-  the owner (`scrolled(rows)`), so Rust can keep the mounted rows around it.
-- Focus moving afterwards follows the rule above: no movement if the item
-  is fully in view. Only the owner changing the row itself (Up/Down in a
-  read-only list, a fresh visit) puts the camera back on a row.
-- **Overscroll:** a touchpad pulling past either end stretches the content
-  with growing resistance (`Scroll.rubber`, at most 80 px), and when the
-  fingers lift (`Wheel.touching`, below) it springs back over
-  `Motion.overscroll-return-duration` (380 ms) from rest, like a critically
-  damped spring (`cubic-bezier(0.3, 0, 0.2, 1)`), so it doesn't jolt when a
-  glide braked into it. A wheel just stops
-  at the end. Reduced Motion turns it off. Home's carousel does the same.
-  A pull that starts while content is still springing back continues from
-  where it is.
-- **Which device, and when fingers lift:** Slint's scroll events carry
-  neither, so `app.rs` reads each winit scroll event first
-  (`input::mouse::scroll_input`) and sets `Wheel.source` (wheel or touchpad)
-  and `Wheel.touching` (false on Wayland's axis stop, which ends a touchpad
-  gesture). Without them (offscreen) a whole multiple of 60 px counts as a
-  notch, and a 600 ms timer ends a pull whose gesture end never arrives.
-
-Horizontal scrolling is used by Home only: it pans the carousel's camera the
-same way, clamped to the shelf's ends.
-
-A finger (or mouse) drag scrolls Home's shelf and every list and grid, all
-through `DragScroll` (`components/scroll.slint`, `vertical: false` on Home):
-wrap the viewport's contents in it, pass its movement to the camera's
-`drag-begin`, `drag-to` and `drag-end`, and bind `catching` to the camera's
-`gliding` and `caught` to its `catch`. The content follows the finger,
-stretches past an end, and glides or springs back on release. It takes the
-drag from a row or tile only once Slint recognises a swipe along its axis,
-so a tap still selects and sideways movement doesn't scroll a list; the
-content moves from that point, so it doesn't jump. A touch on gliding
-content stops it at once. It never moves focus.
-
-## Checking a change
-
-Render pages offscreen and compare before/after screenshots in light and dark
-themes. Keep Home pixel-identical unless the change is meant for Home.
+Secondary Remove/Disconnect actions live beside the item, with X as the
+controller equivalent. Confirm destructive actions with Cancel initially focused.
+Do not add a success message for a change already visible; show failures where
+they help recovery. Hints are ordered X, B, A, with A rightmost. Dialogs and the
+on-screen keyboard own input before the page beneath them.

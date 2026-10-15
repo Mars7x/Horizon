@@ -9,7 +9,7 @@ pub mod grid;
 pub mod keyboard;
 pub use edge_step::step_with_edge_wrap;
 
-/// Full-shell submenu pages opened from the five top utility icons.
+/// Full-shell submenu pages opened from the four top utility icons.
 ///
 /// These are real navigation destinations, not modal overlays. Grouping them
 /// under one type keeps the shell model explicit without pretending every
@@ -36,9 +36,9 @@ impl UtilityPage {
     }
 }
 
-/// Navigable destinations in Horizon's Phase 4 application shell.
+/// Navigable destinations in Horizon's application shell.
 ///
-/// Only Home uses persistent top/bottom shell chrome. Library and all five
+/// Only Home uses persistent top/bottom shell chrome. Library and all four
 /// utility destinations are durable full-shell routes with Back/Home history.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AppRoute {
@@ -84,7 +84,7 @@ pub enum ShellFocusRegion {
     TopUtilities,
 }
 
-/// Stable ordering of the five utility icons in the persistent header.
+/// Stable ordering of the four utility icons in the persistent header.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum TopUtility {
     Album,

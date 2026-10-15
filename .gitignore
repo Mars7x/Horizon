@@ -3,3 +3,8 @@
 /.flatpak-builder/
 *.flatpak
 .DS_Store
+
+# Local Python/tooling caches
+__pycache__/
+*.py[cod]
+.pytest_cache/

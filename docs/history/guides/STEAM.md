@@ -4,7 +4,7 @@ Steam account support is limited to profile pictures (including equipped animate
 
 SteamGridDB artwork remains a separate integration with its own key/settings/cache.
 
-Steam game launching, discovery, screenshots, achievement imports/badges/cache loading and automatic local controller-file lookup are retired. No Steam installation is read, and no Steam filesystem grants remain. SDL's existing device recognition/navigation is preserved; it does not require Horizon to search Steam directories. Previously stored sessions, identities, artwork, screenshots and old achievement cache files are not deleted. RetroAchievements is future work, not an active provider. See [ADR 0191](adr/0191-steam-profile-and-friends-only.md).
+Steam game launching, discovery, screenshots, achievement imports/badges/cache loading and automatic local controller-file lookup are retired. No Steam installation is read, and no Steam filesystem grants remain. SDL's existing device recognition/navigation is preserved; it does not require Horizon to search Steam directories. Previously stored sessions, identities, artwork, screenshots and old achievement cache files are not deleted. RetroAchievements is future work, not an active provider. See [ADR 0191](../../adr/0191-steam-profile-and-friends-only.md).
 
 ## Historical implementation (retired)
 

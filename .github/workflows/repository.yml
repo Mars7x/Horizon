@@ -1,0 +1,16 @@
+name: Repository checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  repository:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check documentation, repository contracts, SQL and attribution
+        run: bash scripts/check-repository.sh

@@ -4,7 +4,7 @@ Steam achievement integration is retired: no game-stat/schema requests, badge do
 
 The Achievements utility and Activity Milestones keep their established layouts and show “Achievements unavailable”. No provider/filter choice is active, no counts are fabricated, and Back remains available. RetroAchievements is the intended future provider; authentication, game matching, unlock tracking and cache design require separately authorized work. No RetroAchievements backend is implemented here.
 
-Old Steam cache files are left on disk and ignored; database identities, activity sessions and lifetime counters remain unchanged. No migration or credential reset is needed. See [ADR 0191](adr/0191-steam-profile-and-friends-only.md).
+Old Steam cache files are left on disk and ignored; database identities, activity sessions and lifetime counters remain unchanged. No migration or credential reset is needed. See [ADR 0191](../../adr/0191-steam-profile-and-friends-only.md).
 
 ## Historical Steam implementation (retired)
 
@@ -51,11 +51,11 @@ See [SETTINGS.md](SETTINGS.md), [ACTIVITY.md](ACTIVITY.md), ADR 0156 and ADR 015
 
 The game list now follows Settings-style focus outlines and progress bars; the achievements detail list follows Activity's read-only scroll convention. Each displayed game and unlock identifies its real provider. Presentation structs in `ui/models/achievements.slint` are source-neutral; Steam translation happens in `src/presentation/achievements.rs`. Future Epic/GOG/etc. providers need their **own authenticated service adapter and explicit provenance**, not conversion of Heroic external IDs to Steam AppIDs. Source identity and unreadable/private/unavailable states must remain distinct from a legitimate zero-unlock count.
 
-See [ADR 0158](adr/0158-source-neutral-achievements-ui-and-badge-pipeline.md).
+See [ADR 0158](../adr/0158-source-neutral-achievements-ui-and-badge-pipeline.md).
 
 ## Phase 10.4.3 — Full-width game browsing and cache
 
-See [ADR 0159](adr/0159-vertical-achievement-browsing-and-private-cache.md). The former two-column game/details pane is retired. No source adapter other than Steam is added. Cache validity is account-bound and time-bound, with credential data deliberately excluded. Page navigation uses Settings-style focus and Library-style scroll-edge shading; lists are read-only in their detail view.
+See [ADR 0159](../adr/0159-vertical-achievement-browsing-and-private-cache.md). The former two-column game/details pane is retired. No source adapter other than Steam is added. Cache validity is account-bound and time-bound, with credential data deliberately excluded. Page navigation uses Settings-style focus and Library-style scroll-edge shading; lists are read-only in their detail view.
 
 ## Phase 10.4.3.1 — Navigation and header parity (pending build verification)
 
@@ -71,7 +71,7 @@ See [ADR 0159](adr/0159-vertical-achievement-browsing-and-private-cache.md). The
 - The **Games** and **individual game Achievements** lists have a fully transparent top scroll-edge shadow when their respective animated camera is at position zero. An 11px, full-shell-width penumbra progressively appears during the first row of downward movement, stays present while scrolled, and fades out on returning to the first row. *(Bottom shadow added by [UI standards](UI_STANDARDS.md).)*
 - Both views continue to use their existing Settings-family crossfade and 12px settle. Achievement rows remain read-only and unfocusable; selection/focus is only for choosing a game in the games view. Reduced Motion makes camera transitions immediate rather than creating extra animation.
 
-See [ADR 0161](adr/0161-scroll-driven-header-elevation-and-exclusive-game-focus.md).
+See [ADR 0161](../adr/0161-scroll-driven-header-elevation-and-exclusive-game-focus.md).
 
 ## Phase 10.4.3.3 — Input, entry reset, and on-demand badge hydration (pending build verification)
 
@@ -81,4 +81,4 @@ See [ADR 0161](adr/0161-scroll-driven-header-elevation-and-exclusive-game-focus.
 - Game-row focus uses the **Settings row focus reveal**: the outline fades in on the new row and out on the old one over `Motion.focus-duration` (140ms; immediate under Reduced Motion). At the 115ms repeat cadence only the previous row can still be partly faded, exactly as in Settings. This supersedes the Phase 10.4.3.2 "immediate, index-owned outline" rule above.
 - Steam's initial import prefetches a **bounded seven badges per game**, explaining why later records previously showed a generic star. Opening a game's achievements now starts a separate nonblocking background fetch for its remaining badges using the documented Steam schema, storing verified thumbnails in the existing account-scoped cache. Badge cache files are keyed by **locked/unlocked state** as well as AppID and API name, because Steam serves different artwork for each; an unlock therefore fetches the unlocked icon instead of reusing a cached grey one. Thumbnails cached under the earlier state-less names are ignored and re-fetched on demand. Cached thumbnails display immediately; missing/private/broken artwork remains a neutral fallback (never a fabricated badge). This does not add an achievement source or new authentication.
 
-See [ADR 0162](adr/0162-achievement-input-and-lazy-badge-parity.md).
+See [ADR 0162](../adr/0162-achievement-input-and-lazy-badge-parity.md).

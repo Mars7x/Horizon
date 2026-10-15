@@ -91,7 +91,7 @@ Corresponding license texts are included in `LICENSES/`:
 
 ## Rust and native dependencies
 
-Horizon also uses third-party software dependencies declared in `Cargo.toml` and the Flatpak manifest. Their own upstream licenses remain applicable. Before a public release, Horizon must commit a resolved `Cargo.lock` and generate a complete dependency-license report from that exact dependency graph. See `docs/LICENSING.md`.
+Horizon also uses third-party software dependencies declared in `Cargo.toml` and the Flatpak manifest. Their own upstream licenses remain applicable. Cargo.lock is committed. Before a public release, Horizon must generate a complete dependency-license report from that exact dependency graph. See `docs/LICENSING.md`.
 
 This notice is intended to preserve provenance and attribution. It does not replace the applicable license texts.
 
@@ -111,7 +111,7 @@ This notice is intended to preserve provenance and attribution. It does not repl
 The applicable license text is included as `LICENSES/OFL-1.1.txt`.
 
 
-### Phase 5 database dependencies
+### Database dependencies
 
 - **rusqlite / libsqlite3-sys**
   - Upstream: https://github.com/rusqlite/rusqlite
@@ -126,7 +126,7 @@ The applicable license text is included as `LICENSES/OFL-1.1.txt`.
 
 The exact resolved Cargo dependency-license inventory remains a release gate and will be generated from the committed `Cargo.lock` before public release.
 
-### Formerly: Phase 7 Steam metadata parser
+### Formerly: Steam metadata parser
 
 - **steam-vdf-parser 0.1.2**
   - Upstream: https://github.com/mexus/steam-vdf-parser
@@ -137,18 +137,18 @@ The exact resolved Cargo dependency-license inventory remains a release gate and
 
 The Apache-2.0 and MIT license texts are included as `LICENSES/Apache-2.0.txt` and `LICENSES/MIT.txt`. The exact resolved Cargo dependency-license inventory remains a release gate and will be generated from the committed `Cargo.lock` before public release.
 
-### Phase 9 metadata format dependencies
+### Serialization dependencies
 
 - **serde 1.x / serde_json 1.x**
   - Upstream: https://github.com/serde-rs/serde and https://github.com/serde-rs/json
   - License: Apache-2.0 OR MIT
-  - Use in Horizon: deserialize provider-owned local metadata for the Heroic adapter.
+  - Use in Horizon: serialize configuration, cache records and retained service API data.
   - Modification: none; consumed as Cargo dependencies.
 
 The existing Apache-2.0 and MIT license texts cover these dual-licensed dependencies. The exact resolved Cargo dependency-license inventory remains a release gate and will be generated from the committed `Cargo.lock` before public release.
 
 
-### Phase 9.5 D-Bus dependency
+### D-Bus dependency
 
 - **zbus 5.x**
   - Upstream: https://github.com/z-galaxy/zbus
@@ -177,28 +177,27 @@ compatible with Horizon's GPL-3.0-or-later. Horizon's own C shims over them
 crates (MIT OR Apache-2.0), consumed as Cargo build dependencies without
 modification.
 
-**Gamescope is not bundled by Horizon.** Phase 9.5 may use an independently
-installed host Gamescope executable through the optional helper. Horizon neither
-redistributes Gamescope nor copies its source in this phase.
+**Gamescope is not bundled by Horizon.** The former optional session integration
+was removed. Its provenance remains in [documentation history](docs/history/INDEX.md);
+Horizon no longer launches or depends on a compositor/session helper.
 
-
-### Phase 9.5.29 artwork dependencies
+### Image decoding and retired artwork containers
 
 - **image 0.25.x**
   - Upstream: https://github.com/image-rs/image
   - License: MIT OR Apache-2.0
-  - Use in Horizon: decode provider-owned local Steam JPG/PNG/ICO artwork and
-    normalize presentation pixels to Horizon's square-artwork contract.
+  - Use in Horizon: decode supported profile, Album and artwork images and
+    normalize presentation pixels to the relevant square-artwork contract.
   - Modification: none; consumed as a Cargo dependency.
-- **zip 8.6.x**
+- **zip 8.6.x (retired direct dependency)**
   - Upstream: https://github.com/zip-rs/zip2
   - License: MIT
-  - Use in Horizon: read local Steam `linuxclienticon` ZIP containers and feed
+  - Historical use: read local Steam `linuxclienticon` ZIP containers and feed
     their PNG representations into the generic artwork decoder.
   - Modification: none; consumed as a Cargo dependency with Deflate support.
 
-Steam game artwork is not bundled with Horizon. Horizon reads images already
-present in the user's Steam installation/cache and displays them locally. The
+Steam game artwork is not bundled with Horizon. Earlier releases read images
+from local Steam caches; that integration is removed. The
 artwork remains owned/licensed by its respective game publisher/developer.
 
 The existing MIT and Apache-2.0 license texts cover these dependencies. The exact
@@ -222,13 +221,13 @@ The existing MIT and Apache-2.0 license texts cover these dependencies; the
 BSD-3-Clause allocator crates carry their notice in their own sources. The exact
 resolved Cargo dependency-license inventory remains a release gate.
 
-### Phase 9.5.37 multi-resolution ICO dependency
+### Formerly: multi-resolution ICO dependency
 
-- **ico 0.5.x**
+- **ico 0.5.x (retired direct dependency)**
   - Upstream: https://github.com/mdsteele/rust-ico
   - License: MIT
-  - Use in Horizon: enumerate and decode every representation in Steam's local
-    `clienticon` ICO containers so Horizon can explicitly choose the largest
+  - Historical use: enumerate and decode every representation in Steam's local
+    `clienticon` ICO containers so Horizon could explicitly choose the largest
     true-square frame instead of relying on a generic decoder's implicit frame
     selection.
   - Modification: none; consumed as a Cargo dependency.
@@ -236,7 +235,7 @@ resolved Cargo dependency-license inventory remains a release gate.
 The existing MIT license text covers this dependency. The exact resolved Cargo
 dependency-license inventory remains a release gate.
 
-### Phase 9.5.40 SteamGridDB API transport
+### SteamGridDB API transport
 
 - **reqwest 0.12.x**
   - Upstream: https://github.com/seanmonstar/reqwest

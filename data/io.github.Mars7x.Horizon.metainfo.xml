@@ -6,7 +6,9 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
   <description>
-    <p>Horizon is an early-development console-style library for launching games through their existing Linux applications.</p>
+    <p>Horizon is an early-development console-style gaming application for Linux.
+    It provides a controller-friendly interface, local media viewing and profile
+    features. Embedded emulation is planned; game execution is not available yet.</p>
   </description>
   <launchable type="desktop-id">io.github.Mars7x.Horizon.desktop</launchable>
   <provides>

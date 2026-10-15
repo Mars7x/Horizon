@@ -31,7 +31,7 @@ Home's launch release used `Timer.restart()`, which does nothing on a stopped ti
 - **One grid refresh** (`GridRefresh`) for every in-place grid change. It is Library's former Source animation; the separate Sort animation is gone, and Album's Game and Type filters gain it (the user chose this). **Superseded by ADR 0172:** covers now glide to their new places instead.
 - Fix the release timer (`stop()` + `start()`).
 
-See [UI standards: Motion](../UI_STANDARDS.md#motion).
+See [UI standards: Motion](../guides/UI_STANDARDS.md#motion).
 
 ## Consequences
 

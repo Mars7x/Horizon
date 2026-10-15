@@ -2,7 +2,7 @@
 
 > **Status: superseded (2026-10-12).** The gamescope session was cancelled
 > before Phase 1 finished: Horizon stays a desktop Flatpak and will embed
-> emulator cores instead (see [ADR 0190](adr/0190-flatpak-embedded-emulator-direction.md)). The session code, session
+> emulator cores instead (see [ADR 0190](../../adr/0190-flatpak-embedded-emulator-direction.md)). The session code, session
 > files and spike scripts were removed; this page and ADR 0189 are kept as
 > the record of what was tried and found. Two fixes found here stayed:
 > Horizon quits on SIGTERM and SIGINT, and ignores controller events from

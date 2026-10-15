@@ -6,7 +6,7 @@ Date: 2026-10-12
 
 Superseded (2026-10-12). The session was cancelled during Phase 1 in favour
 of embedding emulator cores in the desktop Flatpak; its code was removed.
-Superseded by [ADR 0190](0190-flatpak-embedded-emulator-direction.md). Kept as history; see [GAMESCOPE_SESSION.md](../GAMESCOPE_SESSION.md).
+Superseded by [ADR 0190](../../adr/0190-flatpak-embedded-emulator-direction.md). Kept as history; see [GAMESCOPE_SESSION.md](../guides/GAMESCOPE_SESSION.md).
 
 ## Context
 
@@ -64,7 +64,7 @@ to the X11 fallback.
 Embedded on the same PC: Steam mode is the same. Without `-e`, a second
 Wayland window leaves gamescope with no focus while it is open; X11 windows
 work in every mode. The Wayland/X11 decision above is revised accordingly.
-See [GAMESCOPE_SESSION.md](../GAMESCOPE_SESSION.md).
+See [GAMESCOPE_SESSION.md](../guides/GAMESCOPE_SESSION.md).
 
 ## Spike 2 result (2026-10-12)
 
