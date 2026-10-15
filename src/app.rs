@@ -77,6 +77,7 @@ pub fn run() -> Result<(), AppError> {
     let database_path = data_paths::library_database_path()?;
     let repository = SqliteLibraryRepository::open(&database_path)?;
     let schema_version = repository.schema_version()?;
+    let retired_games = repository.retired_games()?;
     let mut library = LibraryService::new(repository);
     debug!(
         path = %database_path.display(),
@@ -210,17 +211,17 @@ pub fn run() -> Result<(), AppError> {
     // Source-runtime observation must work in the ordinary Flatpak. Provider
     // adapters expose only provider-owned state that is already readable
     // through Horizon's narrow filesystem grants.
-    // Steam uses its local gameprocess_log.txt rather than /proc.
     let runtime_observer: Rc<dyn RuntimeObservationExecutor> =
         Rc::new(SourceRuntimeObservationExecutor::new(Rc::clone(&registry)));
     launch_service = launch_service.with_runtime_observer(runtime_observer);
     let launch_service = Rc::new(launch_service);
     let launch_activity: Rc<dyn LaunchActivitySink> = activity_service.clone();
-    let achievements_catalog = catalog
+    let mut achievements_catalog = catalog
         .borrow()
         .iter()
         .map(|(_, game)| game.clone())
         .collect::<Vec<_>>();
+    achievements_catalog.extend(retired_games);
     let album_catalog = achievements_catalog.clone();
     let recent_ids = activity_service.recent_game_ids(HOME_RECENT_LIMIT)?;
     let home = HomeController::new(
@@ -238,8 +239,7 @@ pub fn run() -> Result<(), AppError> {
     activity_showcase.refresh(&ui, &activity_overview);
     debug!(recent_games = recent_ids.len(), "home ready");
     // Changes are discovered from durable sessions, never by guessing on launch.
-    // A small read-only DB query is cheap and keeps Home current after returns
-    // from Steam/Heroic and when a source-owned session completes.
+    // A small read-only DB query keeps Home current after a session completes.
     let recent_refresh_timer = Timer::default();
     let recents_home = Rc::clone(&home);
     let recents_activity = Rc::clone(&activity_service);
@@ -646,7 +646,7 @@ pub fn run() -> Result<(), AppError> {
         }
     });
 
-    // External URI launchers (Steam/Heroic) can bounce activation back
+    // An external application can bounce activation back
     // to Horizon briefly during startup. ActivityService treats that as a
     // candidate return; confirm it only after the candidate remains stable.
     let foreground_return_timer = Timer::default();
@@ -668,8 +668,7 @@ pub fn run() -> Result<(), AppError> {
     });
 
     // Source-owned runtime observation is independent of Horizon window focus.
-    // Steam derives exact AppID-scoped running-list transitions from its local
-    // gameprocess_log.txt, so this works in the normal Flatpak without a helper.
+    // The generic observer stays idle while no game providers are registered.
     let runtime_observation_timer = Timer::default();
     let runtime_launch_service = Rc::clone(&launch_service);
     let runtime_activity = Rc::clone(&activity_service);

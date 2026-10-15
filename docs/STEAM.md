@@ -1,4 +1,8 @@
-# Steam source
+# Steam integration
+
+Steam is no longer a game source. The recovered `src/sources/steam.rs` retains active-account screenshot access/deletion, root discovery, VDF account selection, timestamps and Steam Input controller naming. Shared account/API services, profile, friends, achievements and SteamGridDB remain separate. Existing account configuration uses a manual SteamID64 and API key; interactive sign-in is not implemented. Migration 0009 archives all imported Steam identities for Album titles and achievement lookup without active launch membership. See [ADR 0190](adr/0190-flatpak-embedded-emulator-direction.md).
+
+## Historical implementation (retired)
 
 Phase 7 is Horizon's first concrete source vertical slice. Steam is implemented as a normal `GameSource`; generic import, persistence, presentation, and launch services do not branch on the string `"steam"`.
 

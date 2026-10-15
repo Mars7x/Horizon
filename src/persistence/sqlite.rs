@@ -55,6 +55,55 @@ impl SqliteLibraryRepository {
         migrations::current_schema_version(&self.connection)
     }
 
+    /// Retired metadata is available to Album and Achievements, never launch UI.
+    pub fn retired_games(&self) -> Result<Vec<LibraryGame>, PersistenceError> {
+        let mut statement = self.connection.prepare(
+            "SELECT g.id, g.title, gs.source_id, gs.external_id \
+             FROM games AS g \
+             INNER JOIN retired_game_sources AS gs ON gs.game_id = g.id \
+             ORDER BY g.id, gs.source_id, gs.external_id",
+        )?;
+        Self::read_games(&mut statement)
+    }
+
+    fn read_games(
+        statement: &mut rusqlite::Statement<'_>,
+    ) -> Result<Vec<LibraryGame>, PersistenceError> {
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?;
+
+        let mut result: Vec<LibraryGame> = Vec::new();
+        for row in rows {
+            let (raw_id, raw_title, raw_source_id, raw_external_id) = row?;
+            let game_id = Self::domain_value("games.id", GameId::new(raw_id))?;
+            let title = Self::domain_value("games.title", GameTitle::new(raw_title))?;
+            let source_id =
+                Self::domain_value("game_sources.source_id", SourceId::new(raw_source_id))?;
+            let external_id = Self::domain_value(
+                "game_sources.external_id",
+                ExternalGameId::new(raw_external_id),
+            )?;
+            let source = SourceGameRef::new(source_id, external_id);
+
+            if let Some(last) = result.last_mut()
+                && last.game().id() == game_id
+            {
+                last.push_source(source);
+                continue;
+            }
+
+            result.push(LibraryGame::new(Game::new(game_id, title), vec![source]));
+        }
+
+        Ok(result)
+    }
+
     fn domain_value<T>(
         field: &'static str,
         result: Result<T, DomainValidationError>,
@@ -190,6 +239,8 @@ impl LibraryRepository for SqliteLibraryRepository {
             "DELETE FROM games WHERE NOT EXISTS (\
              SELECT 1 FROM game_sources WHERE game_sources.game_id = games.id\
              ) AND NOT EXISTS (\
+             SELECT 1 FROM retired_game_sources WHERE retired_game_sources.game_id = games.id\
+             ) AND NOT EXISTS (\
              SELECT 1 FROM play_sessions WHERE play_sessions.game_id = games.id\
              ) AND NOT EXISTS (\
              SELECT 1 FROM source_lifetime_playtime WHERE source_lifetime_playtime.game_id = games.id\
@@ -209,39 +260,7 @@ impl LibraryRepository for SqliteLibraryRepository {
              ORDER BY g.id, gs.source_id, gs.external_id",
         )?;
 
-        let rows = statement.query_map([], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-            ))
-        })?;
-
-        let mut result: Vec<LibraryGame> = Vec::new();
-        for row in rows {
-            let (raw_id, raw_title, raw_source_id, raw_external_id) = row?;
-            let game_id = Self::domain_value("games.id", GameId::new(raw_id))?;
-            let title = Self::domain_value("games.title", GameTitle::new(raw_title))?;
-            let source_id =
-                Self::domain_value("game_sources.source_id", SourceId::new(raw_source_id))?;
-            let external_id = Self::domain_value(
-                "game_sources.external_id",
-                ExternalGameId::new(raw_external_id),
-            )?;
-            let source = SourceGameRef::new(source_id, external_id);
-
-            if let Some(last) = result.last_mut()
-                && last.game().id() == game_id
-            {
-                last.push_source(source);
-                continue;
-            }
-
-            result.push(LibraryGame::new(Game::new(game_id, title), vec![source]));
-        }
-
-        Ok(result)
+        Self::read_games(&mut statement)
     }
 
     fn game_count(&self) -> Result<usize, Self::Error> {
@@ -820,6 +839,32 @@ mod tests {
             .query_row("PRAGMA foreign_keys", [], |row| row.get::<_, i64>(0))
             .expect("foreign key status");
         assert_eq!(foreign_keys, 1);
+    }
+
+    #[test]
+    fn retired_metadata_stays_out_of_library_and_survives_reconciliation() {
+        let mut repository = SqliteLibraryRepository::open_in_memory().expect("repository");
+        let id = seed_game(&mut repository, "Remembered Game", "steam", "480");
+        repository
+            .connection
+            .execute_batch(
+                "INSERT INTO retired_game_sources SELECT * FROM game_sources;
+                 DELETE FROM game_sources;",
+            )
+            .expect("archive identity");
+        repository
+            .synchronize_source_snapshot(&SourceId::new("example").expect("source"), &[], &[])
+            .expect("reconcile another source");
+        assert!(repository.list_games().expect("active games").is_empty());
+        assert_eq!(repository.game_count().expect("active count"), 0);
+        let retained = repository.retired_games().expect("retained metadata");
+        assert_eq!(retained.len(), 1);
+        assert_eq!(retained[0].game().id(), id);
+        assert_eq!(retained[0].game().title().as_str(), "Remembered Game");
+        assert_eq!(retained[0].sources()[0].external_id().as_str(), "480");
+        let achievements = crate::services::achievements::steam_games(&retained);
+        assert_eq!(achievements.len(), 1);
+        assert_eq!(achievements[0].app_id, 480);
     }
 
     #[test]

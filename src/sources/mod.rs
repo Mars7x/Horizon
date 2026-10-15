@@ -17,7 +17,6 @@ use crate::domain::{
     DomainValidationError, ExternalGameId, GameTitle, PlaytimeSeconds, SourceId, album::MediaKind,
 };
 
-pub mod heroic;
 pub mod steam;
 mod support;
 
@@ -430,15 +429,10 @@ pub enum SourceRegistryBuildError {
     Registry(#[from] SourceRegistryError),
 }
 
-/// Build the production source registry used by every Horizon process.
-///
-/// Keeping this composition in the source layer prevents the application and
-/// host helper from drifting to different provider sets/capabilities.
+/// No game sources are registered during the embedded-emulator transition.
+/// Shared library services remain available; core hosting is not implemented.
 pub fn production_source_registry() -> Result<SourceRegistry, SourceRegistryBuildError> {
-    let mut registry = SourceRegistry::new();
-    registry.register(steam::SteamSource::new()?)?;
-    registry.register(heroic::HeroicSource::new()?)?;
-    Ok(registry)
+    Ok(SourceRegistry::new())
 }
 
 #[derive(Default)]
@@ -521,14 +515,14 @@ mod tests {
     }
 
     #[test]
-    fn production_registry_excludes_retired_lutris_source() {
+    fn production_registry_has_no_external_game_sources() {
         let registry = production_source_registry().expect("production registry");
 
-        assert_eq!(registry.len(), 2);
+        assert!(registry.is_empty());
         assert!(registry.get(&source_id("flatpak")).is_none());
-        assert!(registry.get(&source_id("steam")).is_some());
+        assert!(registry.get(&source_id("steam")).is_none());
         assert!(registry.get(&source_id("bottles")).is_none());
-        assert!(registry.get(&source_id("heroic")).is_some());
+        assert!(registry.get(&source_id("heroic")).is_none());
         assert!(registry.get(&source_id("lutris")).is_none());
     }
 

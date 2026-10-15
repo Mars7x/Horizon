@@ -1,5 +1,8 @@
 # Steam achievements and Activity Milestones
 
+> **Architecture transition (ADR 0190):** Steam game-source retirement preserves imported Steam identities in the database archive and feeds them to the existing achievement controller. Account-scoped cache, badges and real unlocks remain. Fresh installs have no achievement game catalog yet. No new provider or account-library API is implemented. Older references to installed/imported eligibility describe the previous source architecture.
+
+
 **Current implementation:** Phase 10.4.3 presents a full-width vertical game list with per-game details, consistent motion and a private account-scoped cache. Phase 10.4.2 introduced source-neutral presentation, separate Steam account settings and bounded genuine badges. Steam remains the **only implemented achievement provider**. See [PROJECT_STATE.md](PROJECT_STATE.md) for verification status.
 
 ## Feature contract

@@ -54,16 +54,6 @@ finish-args:
   - --filesystem=xdg-data/Steam/userdata
   - --filesystem=xdg-data/steam/userdata
   - --filesystem=~/.var/app/com.valvesoftware.Steam/.local/share/Steam/userdata
-  # Additional provider metadata is read-only and scoped to each launcher's
-  # own native XDG tree or Flatpak app-data tree. Do not replace these with
-  # broad home/host access.
-  - --filesystem=xdg-config/heroic:ro
-  - --filesystem=xdg-config/legendary:ro
-  # Heroic 2.x keeps game launch logs under host XDG_STATE_HOME rather than
-  # XDG_CONFIG_HOME. Flatpak has no xdg-state filesystem alias, so grant only
-  # the standard native path, not the host state directory as a whole.
-  - --filesystem=~/.local/state/Heroic/logs:ro
-  - --filesystem=~/.var/app/com.heroicgameslauncher.hgl:ro
 
 modules:
   # Install the four canonical Google Fonts LINE Seed JP TTFs from one immutable

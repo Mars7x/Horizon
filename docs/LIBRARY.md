@@ -1,5 +1,8 @@
 # Phase 10 — Library UX
 
+Current transition: no production game sources are registered. Retired identities stay in `retired_game_sources`, outside Home/Library and installed-most-played slots. Library layout, sort/filter controls, focus and the Home tile are retained. No emulator importer is implemented. Older source/launch examples below describe historical behavior; see [ADR 0190](adr/0190-flatpak-embedded-emulator-direction.md).
+
+
 > **Current-state guide:** Library is now a **full-shell** route; it is not hosted beneath Home’s utility header. Selected-game scaling and focus spacing should match Home while leaving Home unchanged. The phase-by-phase notes below are the change history, not independent current specs; see [NAVIGATION.md](NAVIGATION.md).
 
 
@@ -13,9 +16,9 @@ The page uses the exact imported `LibraryGame` identities and artwork model alre
 
 The first milestone is deliberately a functional browse surface, not the end of Phase 10. Search (including keyboard entry), favorites/hide, list view, duplicate resolution, and bulk library management are future Phase 10 milestones. Home recent-played ordering was added in Phase 10.1.0; the full Library grid will be visually redesigned in Phase 10.2.0.
 
-An empty collection shows an import/install hint. An empty filter shows a distinct no-results message. Source filtering never deletes games or edits provider records. Source artwork updates and playing-state changes propagate to visible Library cards through a lightweight card-change observer.
+An empty collection shows “No games yet”. An empty filter shows a distinct no-results message. Source filtering never deletes games or edits provider records. Source artwork updates and playing-state changes propagate to visible Library cards through a lightweight card-change observer.
 
-## Validation checklist
+## Historical validation checklist (external launchers retired; ADR 0190)
 
 - Start with Steam and Heroic games, select Home’s final Library tile, B returns to Home
 - Move left/right/up/down across rows; held and fresh inputs traverse row edges but never wrap first-to-last

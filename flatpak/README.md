@@ -27,6 +27,14 @@ Flatpak chooses the local architecture (`aarch64` on ARM, `x86_64` on x86). Veri
 
 ## Flatpak permissions and source access
 
-Respect the narrow declared filesystem/input/D-Bus permissions. The one exception is `--talk-name=org.freedesktop.Flatpak`, which lets the Shop run the host's `flatpak` to install and manage apps (ADR 0181); it is confined to `src/platform/flatpak_host.rs`. Steam and Heroic local discovery paths are source-specific; do not replace them with broad host filesystem or `--device=all` access to solve an import problem. Treat achievement Web API network access and optional Steam-account storage separately from local Steam installation detection.
+Respect the narrow declared filesystem/input/D-Bus permissions. There is no
+host command execution: Shop, Flatpak games and `flatpak_host` were removed.
+Steam/Heroic game sources are retired (ADR 0190); no Heroic or Legendary
+filesystem grants remain. Steam roots remain readable for Album screenshots
+and Steam Input controller naming, with the existing userdata write grants
+for user-confirmed screenshot deletion. Keep networking for Steam Web API and
+SteamGridDB independent of local installation detection. Do not add broad
+home/host grants, `--device=all`, a session helper or compositor integration.
 
-For local build/install, see `bash scripts/build-flatpak.sh` from the repository root. Use GNOME Builder for the normal iterative developer workflow.
+For local build/install, see `bash scripts/build-flatpak.sh` from the repository
+root. Use GNOME Builder for the normal iterative developer workflow.

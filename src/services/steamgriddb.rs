@@ -618,20 +618,12 @@ mod tests {
     }
 
     #[test]
-    fn steam_source_publishes_authoritative_id_for_lookup_plan() {
-        let mut registry = SourceRegistry::new();
-        registry
-            .register(crate::sources::steam::SteamSource::new().unwrap())
-            .unwrap();
+    fn retired_source_uses_title_lookup_without_a_registered_adapter() {
+        let registry = SourceRegistry::new();
         let reference = game("Demo", "steam", "480");
         let lookup = SteamGridDbLookup::for_game(&reference, &registry);
-        assert_eq!(
-            lookup.external_ids,
-            vec![ExternalArtworkId::SteamAppId(480)]
-        );
-        // Steam's app ID is always attempted first; only a missing mapping
-        // can fall back to a unique exact-title match.
-        assert!(!lookup.external_ids.is_empty());
+        assert!(lookup.external_ids.is_empty());
+        assert_eq!(lookup.title, "Demo");
     }
 
     /// Exercise request path, credential header, status classification and
