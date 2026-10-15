@@ -1,9 +1,11 @@
 # Activity and playtime
 
+> **Current Steam scope (ADR 0191):** Milestones has no active provider and shows “Achievements unavailable”. Steam achievement fetching, cache loading and badges are removed; RetroAchievements is planned only. Activity sessions, totals and historic lifetime counters are unchanged.
+
 > **Architecture transition (ADR 0190):** Steam/Heroic external monitoring and lifetime ingestion are retired. Stored sessions, checkpoints and lifetime values remain; startup still recovers interrupted sessions. Retired games leave installed-most-played slots but totals/recent history remain. Source-neutral tracking is preserved for later evaluation; no emulator sessions are implemented.
 
 
-> **Current-state guide:** The sections below include chronological implementation notes beginning in Phase 8. The present Activity overview shows Horizon-observed totals, most-played imported games, a weekly chart, and an unfocusable read-only per-game session history. Its **Milestones** area now previews up to three recent **real provider-attributed achievement unlocks**, currently from Steam, with Steam badge artwork when available and a neutral fallback, not artificial Horizon playtime challenges; see [ACHIEVEMENTS.md](ACHIEVEMENTS.md). Steam lifetime and Horizon-observed session time must never be added.
+> **Current-state guide:** The sections below include chronological implementation notes beginning in Phase 8. The present Activity overview shows Horizon-observed totals, most-played imported games, a weekly chart, and an unfocusable read-only per-game session history. Its **Milestones** area is retained as an unavailable placeholder until a future achievement provider is implemented; never invent playtime challenges or unlocks; see [ACHIEVEMENTS.md](ACHIEVEMENTS.md). Steam lifetime and Horizon-observed session time must never be added.
 
 
 Phase 8 adds Horizon's first durable play-history model and replaces the Activity placeholder with persisted data.

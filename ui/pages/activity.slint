@@ -8,7 +8,7 @@ import { MarqueeText } from "../components/marquee-text.slint";
 import { Surface, BadgeIcon } from "../components/list-row.slint";
 
 // Phase 10.3.0: one controller focus region, shared cover/focus design from
-// Home, and two quiet informational panels. Recent unlocks are Steam-derived.
+// Home, and two quiet informational panels. No achievement provider is configured yet.
 export component ActivityPage inherits Rectangle {
     in property <[ActivityCoverData]> covers;
     in property <[ActivityDayData]> days;
@@ -19,7 +19,7 @@ export component ActivityPage inherits Rectangle {
     in property <string> week-total: "0 min";
     in property <string> month-total: "0 min";
     in property <[AchievementEntryData]> recent-achievements;
-    in property <string> achievement-status: "Connect Steam in Settings";
+    in property <string> achievement-status: "Achievements unavailable";
     callback choose-game(int);
     background: Theme.background;
 

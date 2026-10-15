@@ -31,14 +31,14 @@ export component AchievementsPage inherits Rectangle {
     }
     in property <int> first-entry: 0;
     in property <bool> viewing-entries: false;
-    in property <string> game-count: "0 games";
+    in property <string> game-count: "Unavailable";
     in property <string> selected-game-title: "Select a game";
     in property <string> selected-game-provider: "";
     in property <string> selected-game-progress: "";
     in property <float> selected-game-fraction: 0.0;
     in property <string> source-label: "All sources";
     in property <bool> has-source-choice: false;
-    in property <string> status: "Connect Steam in Settings";
+    in property <string> status: "Achievements unavailable";
     in property <bool> loading: false;
     // False while this page is fading out: bottom-bar chrome (the bottom
     // shadows) switches with the route like the hint bar.

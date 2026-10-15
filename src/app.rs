@@ -30,7 +30,6 @@ use crate::{
         video::FfmpegVideo,
     },
     presentation::{
-        achievements::AchievementsController,
         activity::{
             ActivityController, ActivityDetailsActions, ActivityDetailsController,
             ActivityShowcaseController,
@@ -48,7 +47,6 @@ use crate::{
         wake::drain_notify,
     },
     services::{
-        achievements::ACHIEVEMENTS_CACHE_VERSION,
         activity::{ActivityService, ActivitySessionTransition, LaunchActivitySink},
         album::{ALBUM_CACHE_VERSION, NoVideo, VideoBackend},
         artwork::{self, ArtworkService},
@@ -216,13 +214,12 @@ pub fn run() -> Result<(), AppError> {
     launch_service = launch_service.with_runtime_observer(runtime_observer);
     let launch_service = Rc::new(launch_service);
     let launch_activity: Rc<dyn LaunchActivitySink> = activity_service.clone();
-    let mut achievements_catalog = catalog
+    let mut album_catalog = catalog
         .borrow()
         .iter()
         .map(|(_, game)| game.clone())
         .collect::<Vec<_>>();
-    achievements_catalog.extend(retired_games);
-    let album_catalog = achievements_catalog.clone();
+    album_catalog.extend(retired_games);
     let recent_ids = activity_service.recent_game_ids(HOME_RECENT_LIMIT)?;
     let home = HomeController::new(
         &ui,
@@ -334,20 +331,9 @@ pub fn run() -> Result<(), AppError> {
     settings.set_artwork_refresh(Rc::new(move |preferences| {
         refresh_home.force_refresh_steamgriddb(preferences);
     }));
-    let achievements = AchievementsController::new(
-        &ui,
-        &achievements_catalog,
-        Rc::clone(&steam_account),
-        data_paths::achievements_cache_dir(ACHIEVEMENTS_CACHE_VERSION),
-    );
-    // Read achievements now, in the background, so Activity's Milestones
-    // are already there the first time it opens.
-    achievements.preload(&ui);
-    let achievement_updates = Rc::clone(&achievements);
-    let achievement_ui = ui.as_weak();
+    let profile_ui = ui.as_weak();
     settings.set_steam_account_changed(Rc::new(move || {
-        if let Some(ui) = achievement_ui.upgrade() {
-            achievement_updates.account_changed(&ui);
+        if let Some(ui) = profile_ui.upgrade() {
             profile.steam_account_changed(&ui);
         }
     }));
@@ -358,7 +344,6 @@ pub fn run() -> Result<(), AppError> {
         Rc::clone(&library_controller),
         settings,
     );
-    navigation.set_achievements(achievements, &ui);
     navigation.set_profile(Rc::clone(&profile_page), &ui);
     // What the user last used decides whether a text field brings up the
     // on-screen keyboard (a controller or a touch screen does).

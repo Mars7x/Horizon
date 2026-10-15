@@ -17,9 +17,6 @@ use crate::domain::{
     DomainValidationError, ExternalGameId, GameTitle, PlaytimeSeconds, SourceId, album::MediaKind,
 };
 
-pub mod steam;
-mod support;
-
 /// Source-owned authoritative identifier in an external artwork catalog.
 /// This does not couple generic services to source ID strings.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -392,7 +389,7 @@ pub struct SourceCapture {
     pub deletable: bool,
 }
 
-/// Lists captures a source keeps (Steam's screenshots). Separate from
+/// Lists captures a source keeps. Separate from
 /// `GameSource`: the Album scans on its own worker thread, and capture
 /// discovery never affects the library. Read-only; files stay the source's.
 pub trait CaptureSource: Send + Sync {
@@ -402,7 +399,7 @@ pub trait CaptureSource: Send + Sync {
     fn captures(&self) -> Vec<SourceCapture>;
 
     /// Deletes one of this source's captures, with the source's own copies
-    /// of it (Steam's thumbnail). Refuses anything it didn't list as
+    /// of it. Refuses anything it did not list as
     /// deletable. Sources that keep their captures read-only don't override.
     fn delete(&self, _path: &std::path::Path) -> std::io::Result<()> {
         Err(std::io::ErrorKind::Unsupported.into())
@@ -412,7 +409,7 @@ pub trait CaptureSource: Send + Sync {
 /// The capture sources Horizon reads, built like `production_source_registry`.
 pub fn production_capture_sources()
 -> Result<Vec<std::sync::Arc<dyn CaptureSource>>, SourceInitializationError> {
-    Ok(vec![std::sync::Arc::new(steam::SteamCaptures::new()?)])
+    Ok(Vec::new())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

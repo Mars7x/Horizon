@@ -26,7 +26,6 @@ zbus = "5.19"
 slint = { version = "~1.18", default-features = false, features = ["compat-1-18", "std", "backend-winit-wayland", "renderer-skia", "unstable-winit-030"] }
 smithay-clipboard = "0.7.3"
 sdl3 = { version = "0.20", default-features = false, features = ["use-pkg-config"] }
-steam-vdf-parser = "0.1.2"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt", "sync"] }
 tracing = "0.1"

@@ -212,9 +212,6 @@ impl SdlGamepadInput {
 
         debug!(
             poll_interval_ms = POLL_INTERVAL.as_millis(),
-            // Steam sets it for what it launches; SDL reads it to name the
-            // real controllers behind Steam Input's virtual pads.
-            steam_virtual_gamepad_info = std::env::var_os("SteamVirtualGamepadInfo").is_some(),
             "gamepad input started"
         );
 

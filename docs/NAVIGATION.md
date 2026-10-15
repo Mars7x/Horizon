@@ -2,6 +2,12 @@
 
 Navigation decisions are Rust-owned. The original Phase 4 routing architecture has since been expanded; treat the earlier Phase 4 ADRs as historical rationale, not a limit on today's features.
 
+Achievements currently has no provider (ADR 0191): its existing page shell shows
+“Achievements unavailable”, offers Back only, and performs no account/API/cache
+work. The game/detail navigation described later is retained UI history for a
+future provider; no games can currently be opened there. Activity Milestones
+likewise shows an unavailable state. Home's four utility positions are unchanged.
+
 ## Route ownership
 
 ```text

@@ -52,7 +52,7 @@ Look for `aarch64` on that machine. Download failures such as `Could not resolve
 - **Rust/controller/navigation changes:** test Home/Back history, repeated D-pad/analog input, disconnected/reconnected controllers, pointer vs Accept parity, rapid route changes and page focus restoration.
 - **Slint/layout changes:** test 720p, 1080p, ultrawide, and short windows, active vs contracted focus geometry, selected cover scaling, long-title fade/marquee, full-shell boundaries, and Reduced Motion. Respect Slint 1.18 syntax; static brace checks do not compile Slint.
 - **Source/database changes:** test no-installed-games state, partial/unavailable snapshots, duplicates, historical/uninstalled titles, existing data upgrades and lifetime-vs-observed time separation. Released SQL migration files remain immutable.
-- **Achievements/account changes:** test no credentials, invalid SteamID/key, private/unavailable profiles, account replacement/removal, stale in-flight responses, offline mode, and preservation of other settings. Never paste actual credentials in issues or screenshots.
+- **Steam profile/friends/account changes:** test no credentials, invalid SteamID/key, private/unavailable profiles, account replacement/removal, stale in-flight responses, offline mode, and preservation of other settings. Never paste actual credentials in issues or screenshots.
 - **Assets/licenses:** verify SVG crispness at fullscreen scaling, native colors, and `bash scripts/check-third-party.sh`.
 
 ## Known boundaries for contributors

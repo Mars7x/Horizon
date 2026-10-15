@@ -1,9 +1,14 @@
-# Steam achievements and Activity Milestones
+# Achievements
 
-> **Architecture transition (ADR 0190):** Steam game-source retirement preserves imported Steam identities in the database archive and feeds them to the existing achievement controller. Account-scoped cache, badges and real unlocks remain. Fresh installs have no achievement game catalog yet. No new provider or account-library API is implemented. Older references to installed/imported eligibility describe the previous source architecture.
+Steam achievement integration is retired: no game-stat/schema requests, badge downloads, cache loading, startup preloads or account-change workers remain. Steam account settings now serve profile pictures and friends only.
 
+The Achievements utility and Activity Milestones keep their established layouts and show “Achievements unavailable”. No provider/filter choice is active, no counts are fabricated, and Back remains available. RetroAchievements is the intended future provider; authentication, game matching, unlock tracking and cache design require separately authorized work. No RetroAchievements backend is implemented here.
 
-**Current implementation:** Phase 10.4.3 presents a full-width vertical game list with per-game details, consistent motion and a private account-scoped cache. Phase 10.4.2 introduced source-neutral presentation, separate Steam account settings and bounded genuine badges. Steam remains the **only implemented achievement provider**. See [PROJECT_STATE.md](PROJECT_STATE.md) for verification status.
+Old Steam cache files are left on disk and ignored; database identities, activity sessions and lifetime counters remain unchanged. No migration or credential reset is needed. See [ADR 0191](adr/0191-steam-profile-and-friends-only.md).
+
+## Historical Steam implementation (retired)
+
+Everything below records prior behavior, not current functionality. The former Steam achievement service/controller files no longer exist.
 
 ## Feature contract
 

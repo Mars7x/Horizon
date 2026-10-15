@@ -1,11 +1,9 @@
 # Album
 
-> **Architecture transition (ADR 0190):** Steam game-source retirement does not remove its capture source. Archived game identities supply known titles; unknown games keep the existing honest fallback. Local Steam screenshot access and user-confirmed deletion permissions remain unchanged.
+> **Current scope (ADR 0191):** Album reads Horizon-owned captures only. Steam screenshot discovery, viewing, thumbnail access and deletion are removed, along with all Steam filesystem grants. No existing screenshot files are deleted. Archived identities still name Horizon-owned game captures.
 
 
-The Album shows every screenshot and video clip Horizon can find, newest
-first: Horizon's own captures and the captures sources keep (Steam's
-screenshots). See [ADR 0166](adr/0166-album-captures-and-media-pipeline.md).
+The Album shows Horizon's own screenshots and video clips, newest first. See [ADR 0166](adr/0166-album-captures-and-media-pipeline.md).
 
 ## Using it
 
@@ -58,13 +56,8 @@ game starts). Leaving the Album stops playback.
   Folder names are `encode_path_segment` of the ids (unsafe characters become
   `%XX`). The stamp is `YYYYMMDD-HHMMSS-mmm` in UTC, with `-2`, `-3`… for
   captures in the same millisecond.
-- **Sources** implement `CaptureSource` (`src/sources/mod.rs`): a read-only
-  directory listing, no decoding, on the scan thread. Steam lists
-  `userdata/<account>/760/remote/<appid>/screenshots/` for the active account
-  only (the one `loginusers.vdf` marks most recent, or the only one), so
-  another person's screenshots on a shared PC never appear. Steam's own
-  `thumbnails/` copy is offered as a preview. Horizon never changes source
-  files.
+- The generic `CaptureSource` boundary remains available, but no production
+  capture sources are registered. No Steam installation is scanned.
 
 Supported formats are listed by extension: PNG, JPEG, GIF and JPEG XL (`.jxl`)
 photos; MP4, M4V, MKV, WebM and MOV videos (whatever the runtime's FFmpeg can
@@ -82,21 +75,10 @@ decode). Photos are then decoded by their content, whatever the name says
 
 ## Deleting
 
-Each capture is deleted by its owner, after the confirmation dialog:
-
-- **Horizon's own:** `HorizonAlbum::delete` refuses any path outside
-  Horizon's album folder, removes the file and tidies empty game folders.
-- **Steam's screenshots:** `SteamCaptures::delete` removes the screenshot and
-  Steam's thumbnail of it. It accepts only a media file directly inside
-  `userdata/<active account>/760/remote/<appid>/screenshots/` of a known Steam
-  root, after resolving links. Steam's `screenshots.vdf` index is left to
-  Steam. The dialog says the files go "from Steam too".
-
-A source's capture is deletable only when the source supports it and its
-folder is actually writable (`access()`, which honours a read-only sandbox
-mount). The Flatpak makes Steam's `userdata` writable for this; everything
-else in Steam stays read-only. Captures that can't be deleted dim while
-selecting. If a file can't be deleted, the bottom bar says so.
+Horizon-owned captures are deleted after the confirmation dialog.
+`HorizonAlbum::delete` refuses paths outside Horizon's album folder, removes
+the selected files and tidies empty game folders. Deletion failures are
+reported in the bottom bar. Steam screenshots are neither listed nor deleted.
 
 ## Video timeline
 
@@ -185,4 +167,4 @@ media extension, so a half-written file never appears. Pass the game's
 ## Not yet
 
 - Taking screenshots and recordings: that comes with the gamescope work.
-- Steam game recordings, HDR/AVIF captures, and captions.
+- HDR/AVIF captures and captions. Steam media integration is retired.

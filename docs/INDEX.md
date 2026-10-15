@@ -2,7 +2,7 @@
 
 **For a new coding agent:** read [../AGENTS.md](../AGENTS.md), then [PROJECT_STATE.md](PROJECT_STATE.md), then [DEVELOPMENT.md](DEVELOPMENT.md). Use feature documentation for local invariants and inspect the code before patching. The blank repository-root `README.md` is deliberate.
 
-Horizon is a desktop Flatpak transitioning toward embedded emulator cores; no cores or production game sources are implemented in this recovery. See [ADR 0190](adr/0190-flatpak-embedded-emulator-direction.md).
+Horizon is a desktop Flatpak transitioning toward embedded emulator cores; no cores or production game sources are implemented in this recovery. See [ADR 0190](adr/0190-flatpak-embedded-emulator-direction.md) and [ADR 0191](adr/0191-steam-profile-and-friends-only.md) for the narrower Steam scope.
 
 ## Current entry points
 
@@ -16,7 +16,7 @@ Horizon is a desktop Flatpak transitioning toward embedded emulator cores; no co
 | How must every other page look? | [UI standards](UI_STANDARDS.md) | `ui/components/page-header.slint`, `list-row.slint`, `marquee-text.slint`, `hint-bar.slint` |
 | Library focus, sources, sorting? | [Library](LIBRARY.md) | `src/presentation/library.rs`, `ui/pages/library.slint` |
 | Observed playtime and session history? | [Activity](ACTIVITY.md) | `src/services/activity.rs`, `src/presentation/activity.rs` |
-| Steam achievements and recent unlocks? | [Achievements](ACHIEVEMENTS.md) | `src/services/achievements.rs`, `src/presentation/achievements.rs` |
+| Achievement placeholder and future provider direction? | [Achievements](ACHIEVEMENTS.md) | `ui/pages/achievements.slint`, `ui/pages/activity.slint` |
 | Screenshots, clips, video playback? | [Album](ALBUM.md) | `src/services/album/`, `src/presentation/album.rs`, `src/platform/video.rs`, `ui/pages/album.slint` |
 | External credentials or appearance? | [Settings](SETTINGS.md), [Appearance](APPEARANCE.md) | `src/services/steam_account.rs`, `src/presentation/settings.rs` |
 | Browsing and installing from Flathub? | [Shop, retired](SHOP.md) | removed 2026-10-12 |

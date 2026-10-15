@@ -16,7 +16,7 @@ Read this file **before** editing Horizon. It describes rules for the current re
 - **Steam friends** are a read-only list on the Profile page through the shared Steam account/API boundary (`services::friends`, `SteamWebApiClient::friends`). A private friend list is reported as private, never as no friends. No messaging, invites or other credential workflow.
 - Shop, Flatpak games and host Flatpak execution are retired. Do not reintroduce them. Keep normal desktop portals, fullscreen and Wayland integration.
 - **Steam account settings belong in Settings → Third-Party → Steam Account**, not in Achievements. Never place credentials, secret values, or request URLs containing secrets in UI state, logs, docs, screenshots, or commits. Local file permissions are not encryption.
-- **Activity Milestones shows recent real Steam achievement unlocks**, not invented Horizon playtime challenges. Unavailable or private Steam data must not be represented as zero. Achievement lookup is read-only.
+- **Steam scope is limited to profile pictures and read-only friends through the existing account settings.** SteamGridDB is independent and remains. No Steam screenshot access, achievement API/cache loading or local Steam installation lookup. Achievements and Activity Milestones have no provider until separately authorized RetroAchievements work; unavailable is not zero.
 - Source-reported lifetime playtime and Horizon-observed session playtime are **different measurements**. Never sum them. Keep the known limitations of foreground handoff and recovered/checkpointed sessions visible.
 - Every full-screen page except Home uses the shared page frame (header, header values, breadcrumb, list rows, marquee text, hint bar): follow [docs/UI_STANDARDS.md](docs/UI_STANDARDS.md) rather than hand-building layout.
 - All new animation must respect Reduced Motion; keyboard, mouse and controller behavior must remain coherent. Route/history/focus decisions belong in Rust, not in Slint.
@@ -27,7 +27,7 @@ Read this file **before** editing Horizon. It describes rules for the current re
 - **Rust 2024**, minimum version from `Cargo.toml` (`rust-version = 1.92` in this snapshot); **Slint ~1.18**; SDL3, SQLite/rusqlite, XDG portals, Flatpak and Wayland-first Slint Winit/Skia.
 - `src/domain/`: source-neutral identities, rules; no SQL, UI, SDL or platform types.
 - `src/services/`: library/import/launch/activity/artwork/achievements/account coordination. Extend a shared boundary rather than duplicating provider logic.
-- `src/sources/`: no production game adapters are registered. Steam remains a capture source and supplies Steam Input controller naming. Generic source boundaries remain available; do not restore retired launchers.
+- `src/sources/`: no production game adapters are registered. No production capture sources are registered either; Album reads Horizon-owned captures only. Generic source boundaries remain available; do not restore retired launchers.
 - `src/persistence/`: durable data and numbered immutable migrations. Never edit an already deployed migration to change schema.
 - `src/platform/`: portals, backend startup, data paths, status, host integration. Never assume host paths/programs are available inside Flatpak. `data_paths.rs` is the only code that chooses file locations; follow [docs/STORAGE.md](docs/STORAGE.md) (no `io.github.Mars7x.Horizon` subfolder inside Flatpak's private directories).
 - `src/input/` and `src/navigation/`: device normalization, route and focus policy; `src/presentation/`: Rust→Slint projections/controllers.
@@ -42,9 +42,9 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed layer boundaries, 
 - Focus-frame spacing must follow an **animated selected cover** rather than a fixed grid slot; match Home without modifying it. Route-local focus restoration is different from global Home reset.
 - Activity carousel titles: no visible ellipsis; unselected long titles are clipped with a soft edge; only selected titles marquee. Game-details history rows are **read-only and unfocusable**; Up/Down scrolls the history viewport. Activity opens at its first cover on a fresh visit, but Back from game details restores the current cover.
 - DB imports are atomic per successful source; incomplete scans must not delete installed identities. Uninstalled games may retain historical sessions but must not occupy active-library or installed-most-played slots.
-- Retained lifetime counters are **not** Horizon-observed playtime. Steam Web API achievements and account credentials remain independent of retired Steam/Heroic game discovery.
+- Retained lifetime counters are **not** Horizon-observed playtime. Steam account credentials serve profile pictures and friends only; Steam achievements are retired.
 - Treat a blank/unavailable data source as unknown, not as a real zero. Protect prior user artwork and persisted settings; do not make network fetching a UI-thread operation.
-- Avoid broad Flatpak filesystem, D-Bus, or device grants. There is no host-execution path; `flatpak_host` was removed. Retain Steam access for Album and controller naming, not game discovery.
+- Avoid broad Flatpak filesystem, D-Bus, or device grants. There is no host-execution path; `flatpak_host` was removed. No Steam filesystem grants are required; profile pictures/friends use the shared network account boundary.
 - Home, Library and Activity share one `presentation::catalog::Catalog` whose indices never move during a run (a reload appends and marks removals); index only slots from `iter`/`position` or a change list.
 - Rust standard `PartialEq` implementations for tuples stop at 12 items; avoid giant state-comparison tuples (the Phase 10.4.1.1 E0369 hotfix).
 

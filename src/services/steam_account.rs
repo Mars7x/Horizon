@@ -1,4 +1,4 @@
-//! Shared, opt-in Steam Web API identity for Achievements and future providers.
+//! Shared, opt-in Steam Web API identity for profile pictures and friends.
 //!
 //! The Web API key is *not* a Steam login or OAuth token. Like Horizon's
 //! SteamGridDB settings, this is private local storage (0600), NOT encryption.
@@ -30,8 +30,8 @@ const AVATAR_HOSTS: &[&str] = &[
     "avatars.cloudflare.steamstatic.com",
     "steamcdn-a.akamaihd.net",
 ];
-/// Where Steam serves achievement badges.
-const BADGE_HOSTS: &[&str] = &[
+/// Steam hosts used for equipped animated profile pictures.
+const PROFILE_IMAGE_HOSTS: &[&str] = &[
     "cdn.cloudflare.steamstatic.com",
     "cdn.akamai.steamstatic.com",
     "steamcdn-a.akamaihd.net",
@@ -229,16 +229,6 @@ impl SteamWebApiClient {
             account,
         })
     }
-    /// Download a public Steam achievement badge with no API-key query string.
-    /// This is an allowlisted image transport, not a generic URL fetcher.
-    pub fn download_badge(&self, url: &str) -> Option<Vec<u8>> {
-        let bytes = self.download_public_image(url, BADGE_HOSTS, 256 * 1024)?;
-        let image = crate::services::image::decode(&bytes, None).ok()?;
-        let badge = image
-            .resize_exact(56, 56, image::imageops::FilterType::CatmullRom)
-            .to_rgba8();
-        Some(badge.into_raw())
-    }
     /// The account's profile picture (Steam's largest, 184 px): the image
     /// file's bytes, checked to be a picture of sane size but not decoded.
     pub fn profile_avatar(&self) -> Result<Vec<u8>, SteamAvatarError> {
@@ -262,7 +252,7 @@ impl SteamWebApiClient {
         Ok(
             match self.download_public_image(
                 &format!("{ITEM_IMAGES}{path}"),
-                BADGE_HOSTS,
+                PROFILE_IMAGE_HOSTS,
                 8 * 1024 * 1024,
             ) {
                 Some(bytes) => ProfileItem::Downloaded(bytes),
@@ -341,7 +331,7 @@ impl SteamWebApiClient {
         Some(bytes.to_vec())
     }
 
-    pub fn get(
+    fn get(
         &self,
         endpoint: &'static str,
         params: &[(&str, &str)],

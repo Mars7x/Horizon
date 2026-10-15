@@ -1,6 +1,6 @@
 //! The Album: finding captures, and decoding them off the UI thread.
 //!
-//! - `catalog`: Horizon's capture folder and the capture sources (Steam).
+//! - `catalog`: Horizon's capture folder and optional capture-source boundary.
 //! - `media`: photo decoding, the thumbnail cache, the video backend contract.
 //! - `loader`: worker threads that decode what the screen currently needs.
 pub mod catalog;

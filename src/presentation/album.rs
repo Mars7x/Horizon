@@ -672,12 +672,6 @@ impl AlbumController {
                     .find(|c| c.path() == path)
                     .map(Capture::kind)
             };
-            // A source's captures are deleted from the source too: say so.
-            let from_steam = targets.iter().any(|path| {
-                s.captures
-                    .iter()
-                    .any(|c| c.path() == path && !c.origin().is_horizon())
-            });
             match targets.as_slice() {
                 [one] => (
                     match kind(one) {
@@ -685,22 +679,9 @@ impl AlbumController {
                         _ => "Delete this screenshot?",
                     }
                     .to_owned(),
-                    if from_steam {
-                        "It's deleted from Steam too"
-                    } else {
-                        ""
-                    }
-                    .to_owned(),
+                    String::new(),
                 ),
-                many => (
-                    format!("Delete {} captures?", many.len()),
-                    if from_steam {
-                        "They're deleted from Steam too"
-                    } else {
-                        ""
-                    }
-                    .to_owned(),
-                ),
+                many => (format!("Delete {} captures?", many.len()), String::new()),
             }
         };
         self.set_playing(ui, false);

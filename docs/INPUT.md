@@ -231,16 +231,13 @@ Joy-Cons, Steam Deck for Valve's Deck controller (vendor `0x28de`, product
 `0x1205`), Odin for the AYN Odin 3's own controls, and Xbox for everything
 else.
 
-**Behind Steam Input** (a game launched from Steam, Game Mode) every
-controller is a Steam virtual pad. Steam names the real controller behind each
-in a file it points to with `SteamVirtualGamepadInfo` (under Steam's
-`config/`, which Horizon's read-only Steam grants cover), and SDL then reports
-the real controller's IDs, name and type, so each gets its own family and
-drawing. If the variable is missing (Horizon started some other way, or it
-didn't reach the sandbox), `main` points it at the newest
-`config/virtualgamepadinfo.txt` in the Steam roots before SDL starts. Only a
-pad SDL still can't resolve stays Steam's (`28de:11ff`); on a Deck (DMI board
-`Jupiter`/`Galileo`) or an Odin 3 it's taken for the handheld's own controls.
+SDL may report a virtual controller's underlying IDs/name/type when that
+information is available from its own input backend. Horizon no longer searches
+Steam roots or sets `SteamVirtualGamepadInfo`; all local Steam filesystem grants
+are removed (ADR 0191). An unresolved virtual pad (`28de:11ff`) keeps the existing
+handheld-aware fallback: Deck on DMI `Jupiter`/`Galileo`, or the Odin 3's own
+controls when that handheld is detected. Controller navigation and SDL hardware
+recognition remain independent of Steam account services.
 
 The Odin 3 is recognised by its device tree (model "AYN Odin 3", which sysfs
 shows in `/sys/devices/soc0/machine` inside Flatpak; compatible `ayn,odin3`

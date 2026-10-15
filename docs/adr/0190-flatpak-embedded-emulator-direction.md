@@ -4,6 +4,8 @@ Date: 2026-10-14
 
 ## Status
 
+Steam screenshot/achievement/controller-file preservation is superseded by [ADR 0191](0191-steam-profile-and-friends-only.md); the rest of this direction remains.
+
 Accepted direction; recovery implementation prepared, pending Rust/Slint and
 Flatpak build verification. Supersedes the game-launcher direction and ADR 0189.
 ADRs 0046, 0181 and 0183 were already retired in earlier commits.

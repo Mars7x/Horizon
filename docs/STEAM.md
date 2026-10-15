@@ -1,6 +1,10 @@
 # Steam integration
 
-Steam is no longer a game source. The recovered `src/sources/steam.rs` retains active-account screenshot access/deletion, root discovery, VDF account selection, timestamps and Steam Input controller naming. Shared account/API services, profile, friends, achievements and SteamGridDB remain separate. Existing account configuration uses a manual SteamID64 and API key; interactive sign-in is not implemented. Migration 0009 archives all imported Steam identities for Album titles and achievement lookup without active launch membership. See [ADR 0190](adr/0190-flatpak-embedded-emulator-direction.md).
+Steam account support is limited to profile pictures (including equipped animated avatars) and the Profile page's read-only friends list. Both use `services::steam_account`, preserving its credential storage, account switching and disconnect behavior. Settings still uses manual SteamID64/Web API-key configuration; interactive Steam sign-in is not implemented.
+
+SteamGridDB artwork remains a separate integration with its own key/settings/cache.
+
+Steam game launching, discovery, screenshots, achievement imports/badges/cache loading and automatic local controller-file lookup are retired. No Steam installation is read, and no Steam filesystem grants remain. SDL's existing device recognition/navigation is preserved; it does not require Horizon to search Steam directories. Previously stored sessions, identities, artwork, screenshots and old achievement cache files are not deleted. RetroAchievements is future work, not an active provider. See [ADR 0191](adr/0191-steam-profile-and-friends-only.md).
 
 ## Historical implementation (retired)
 

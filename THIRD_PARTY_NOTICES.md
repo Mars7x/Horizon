@@ -126,13 +126,13 @@ The applicable license text is included as `LICENSES/OFL-1.1.txt`.
 
 The exact resolved Cargo dependency-license inventory remains a release gate and will be generated from the committed `Cargo.lock` before public release.
 
-### Phase 7 Steam metadata parser
+### Formerly: Phase 7 Steam metadata parser
 
 - **steam-vdf-parser 0.1.2**
   - Upstream: https://github.com/mexus/steam-vdf-parser
   - Copyright: Copyright 2026 steam-vdf-parser contributors
   - License: Apache-2.0 OR MIT
-  - Use in Horizon: parse Steam text VDF metadata and current binary `appinfo.vdf` v40/v41 data inside the Steam source adapter.
+  - Historical use: parsed local Steam metadata. The dependency and local Steam reader were removed in ADR 0191; attribution and license texts are retained.
   - Modification: none; consumed as a Cargo dependency.
 
 The Apache-2.0 and MIT license texts are included as `LICENSES/Apache-2.0.txt` and `LICENSES/MIT.txt`. The exact resolved Cargo dependency-license inventory remains a release gate and will be generated from the committed `Cargo.lock` before public release.
