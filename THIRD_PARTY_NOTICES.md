@@ -14,6 +14,28 @@ Horizon includes or derives small portions of artwork and other resources from t
   bundled. Names/hashes are retained verbatim, apart from lowercase hash encoding
   and deterministic ordering. The generated metadata retains `CC-BY-SA-4.0`.
 
+## mGBA embedded core
+
+- Source: mGBA 0.10.5 by Vicki Pfau and contributors,
+  https://github.com/mgba-emu/mgba/tree/0.10.5. The pinned source archive and
+  checksum are in the Flatpak manifest. Core source copyright notices, including
+  earlier author credits, are retained. The source is built without modification.
+- License: `MPL-2.0`; full text in `LICENSES/MPL-2.0.txt` and the packaged
+  `/app/share/licenses/mgba/` directory. Source is available at the release link.
+- The core includes inih by Ben Hoyt (`BSD-3-Clause`, retained upstream notice
+  in `LICENSES/mGBA-inih-BSD-3-Clause.txt`) and blip-buf by Shay Green
+  (`LGPL-2.1-or-later`, `LICENSES/LGPL-2.1-or-later.txt`). These notices/licenses
+  are installed alongside the unmodified core. mGBA also credits the public-domain
+  MurmurHash3 implementation by Austin Appleby. Optional external codec, scripting,
+  desktop frontend and database integrations are disabled for this build.
+- Horizon uses the libretro v1 C interface to this core. No RetroArch UI, ROM,
+  Nintendo BIOS or commercial game data is bundled.
+- The libretro API header is MIT-licensed, copyright (C) 2010–2020 The RetroArch
+  team; its full notice is in `LICENSES/libretro-header-MIT.txt` and the packaged
+  upstream header. Rust libloading 0.8.9 (https://github.com/nagisa/rust_libloading),
+  copyright © 2015 Simonas Kazlauskas, is used under ISC to load the core;
+  `LICENSES/libloading-ISC.txt` is installed with Horizon.
+
 ## Kenney Input Prompts
 
 ### Controllers — `ui/assets/controllers/`

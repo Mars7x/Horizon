@@ -26,6 +26,11 @@ required_licenses=(
   "OFL-1.1.txt"
   "Apache-2.0.txt"
   "MIT.txt"
+  "MPL-2.0.txt"
+  "LGPL-2.1-or-later.txt"
+  "mGBA-inih-BSD-3-Clause.txt"
+  "libretro-header-MIT.txt"
+  "libloading-ISC.txt"
 )
 
 for asset in "${required_assets[@]}"; do

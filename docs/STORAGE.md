@@ -11,6 +11,7 @@ development uses an `io.github.Mars7x.Horizon` subdirectory beneath the XDG root
 | Root | Contents | Lifetime |
 | --- | --- | --- |
 | data | library.sqlite3, album/, chosen/Steam profile images and animated originals | Durable user data |
+| data | saves/gba/ followed by the ROM SHA-256 and `.sav`; previous save in `.sav.bak` | Durable battery-save data |
 | config | appearance.json, controller.json, profile.json, steamgriddb.json, steam-account.json | Persistent preferences/credentials |
 | cache | artwork/local/, artwork/steamgriddb/, album/ | Disposable derived media/provenance |
 
@@ -32,3 +33,10 @@ local Steam directories. No other application's files are scanned or deleted.
 Any new durable file needs a data_paths function, a row here, defined ownership
 and error behavior. Schema changes follow [Database](DATABASE.md); assets follow
 [Licensing](LICENSING.md).
+
+GBA save locations are selected by data_paths. The player reads bounded existing
+save files, preserves invalid/unreadable saves and writes changed RAM on its
+worker every five seconds and at normal quit. Temporary replacement files are
+flushed before rename; the previous valid save is retained as a backup. A failed
+save pauses the game and exposes retry through Save and quit. Save states and
+external-emulator save import are not implemented.

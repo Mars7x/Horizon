@@ -121,6 +121,17 @@ impl InputManager {
         self.swap_confirm.set(swap);
     }
 
+    pub fn gameplay_buttons(&self) -> u16 {
+        self.gamepad_input
+            .as_ref()
+            .map_or(0, SdlGamepadInput::gameplay_buttons)
+    }
+
+    pub fn mark_keyboard_used(&self) {
+        self.last_device.set(InputDevice::Keyboard);
+        self.glyphs.set(GlyphStyle::Keyboard);
+    }
+
     /// Enable or suspend semantic UI input according to Horizon window ownership.
     ///
     /// SDL continues pumping device/hotplug events while suspended, but it must
@@ -175,8 +186,7 @@ impl InputManager {
                 self.keyboard_repeat.set(Some(state));
             }
         }
-        self.last_device.set(InputDevice::Keyboard);
-        self.glyphs.set(GlyphStyle::Keyboard);
+        self.mark_keyboard_used();
         (self.action_sink)(UiActionEvent { action, repeated });
         true
     }

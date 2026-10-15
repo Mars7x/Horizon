@@ -226,7 +226,7 @@ impl RomSetupController {
             ),
             View::PlaybackUnavailable => (
                 "Playback unavailable",
-                "Playback will arrive with the first emulator.".into(),
+                "Playback is not available for this game yet.".into(),
                 vec!["Back"],
             ),
         };

@@ -1,4 +1,5 @@
 import { OnboardingPage } from "pages/onboarding.slint";
+import { GamePlayer } from "pages/game-player.slint";
 import { RomSetupDialog } from "components/rom-setup.slint";
 import { Theme, Metrics, Typography, Motion } from "theme/theme.slint";
 export { Theme, Metrics, Typography, Motion }
@@ -396,6 +397,18 @@ export component AppWindow inherits Window {
 
     callback select-game(int);
     in property <bool> onboarding-open: false;
+    in property <bool> player-open: false;
+    in property <bool> player-paused: false;
+    in property <bool> player-busy: false;
+    in property <bool> player-failed: false;
+    in property <bool> player-has-frame: false;
+    in property <image> player-frame;
+    in property <string> player-title;
+    in property <string> player-message;
+    in property <int> player-focus;
+    callback player-choose(int);
+    callback player-open-changed(bool);
+    changed player-open => { input-scope.focus(); root.player-open-changed(root.player-open); }
     in property <int> onboarding-step: 0;
     in property <int> onboarding-focus: 0;
     in property <int> onboarding-avatar: 0;
@@ -1048,6 +1061,14 @@ export component AppWindow inherits Window {
                 name-focused => { root.onboarding-name-focused(); }
                 show-keyboard => { root.onboarding-name-focused(); root.keyboard-show(2); }
                 hint-activated(button) => { root.hint-activated(button); }
+            }
+
+            GamePlayer {
+                z: 30; width: parent.width; height: parent.height;
+                open: root.player-open; paused: root.player-paused; busy: root.player-busy;
+                failed: root.player-failed; has-frame: root.player-has-frame; frame: root.player-frame;
+                title: root.player-title; message: root.player-message; focused: root.player-focus;
+                choose(index) => { root.player-choose(index); }
             }
 
             rom-dialog := RomSetupDialog {

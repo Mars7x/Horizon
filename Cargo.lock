@@ -1608,6 +1608,7 @@ dependencies = [
  "futures-util",
  "image",
  "jxl-oxide",
+ "libloading",
  "pkg-config",
  "quick-xml",
  "reqwest",

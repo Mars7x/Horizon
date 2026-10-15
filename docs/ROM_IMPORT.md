@@ -35,7 +35,8 @@ in place and are never modified, moved or deleted.
 Portal paths and catalog provenance remain in SQLite, preserving raw Unix path
 bytes. Missing/revoked access requires selecting the folder again; failed or
 incomplete scans never prune existing games. A later core must verify content at
-launch. No emulator/BIOS setup, achievement hash or launch is implemented.
+launch. [GBA playback](GBA_PLAYBACK.md) performs this check and runs the bundled
+core. BIOS setup and achievement hashing remain unimplemented.
 See [database](DATABASE.md), [storage](STORAGE.md) and
 [ADR 0195](adr/0195-automatic-folder-import.md).
 

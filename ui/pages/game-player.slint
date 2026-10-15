@@ -1,0 +1,42 @@
+import { Theme, Metrics, Typography } from "../theme/theme.slint";
+import { ActionButton } from "../components/action-button.slint";
+import { ModalDialog } from "../components/modal-dialog.slint";
+
+export component GamePlayer inherits Rectangle {
+    in property <bool> open;
+    in property <bool> paused;
+    in property <bool> busy;
+    in property <bool> failed;
+    in property <bool> has-frame;
+    in property <image> frame;
+    in property <string> title;
+    in property <string> message;
+    in property <int> focused;
+    callback choose(int);
+    visible: root.open;
+    background: #000;
+    TouchArea {width:parent.width;height:parent.height;}
+    Image {
+        width: parent.width; height: parent.height;
+        source: root.frame;
+        visible: root.has-frame;
+        image-fit: contain;
+        image-rendering: pixelated;
+    }
+    ModalDialog {
+        open: root.paused || root.busy || root.failed;
+        area-width: parent.width; area-height: parent.height;
+        card-width: 520px; card-height: root.message == "" ? 196px : 272px;
+        VerticalLayout {
+            padding: Metrics.spacing-lg; spacing: Metrics.spacing-md;
+            Text {text:root.failed ? "Game unavailable" : root.paused ? root.title : "Starting game";color:Theme.foreground;font-size:Typography.heading-size;overflow:elide;min-height:36px;}
+            if root.message != "" : Text {text:root.message;color:Theme.secondary-foreground;font-size:Typography.body-size;wrap:word-wrap;min-height:64px;}
+            if !root.busy : HorizontalLayout {
+                height: 48px;
+                spacing: Metrics.spacing-md;
+                ActionButton {label:root.failed ? "Back" : "Resume";focused:root.focused==0;activated=>{root.choose(0);}}
+                if !root.failed : ActionButton {label:"Save and quit";focused:root.focused==1;activated=>{root.choose(1);}}
+            }
+        }
+    }
+}

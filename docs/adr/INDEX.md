@@ -10,6 +10,7 @@
 | [0195](0195-automatic-folder-import.md) | Direct folder selection with automatic scanning and import |
 | [0196](0196-rom-artwork-title-matching.md) | Source-aware release tags and normalized unique artwork title matching |
 | [0197](0197-offline-hash-title-recognition.md) | Offline ROM-hash catalog naming for new and existing imports |
+| [0198](0198-first-gba-playback.md) | In-process mGBA libretro worker for the first embedded GBA player |
 
 Earlier decisions and their supporting phase notes are in
 [history](../history/INDEX.md). Their numbered identifiers remain reserved.

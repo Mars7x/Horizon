@@ -28,6 +28,13 @@ SDL may identify underlying virtual devices itself. Horizon does not search a
 Steam installation or set Steam controller-file paths. Generic hardware
 recognition is separate from Steam account services.
 
+During [GBA playback](GBA_PLAYBACK.md), held buttons and key releases drive the
+core independently of menu repeats. Keyboard: arrows move, Z/X are A/B, A/S are
+L/R, Enter is Start and Backspace is Select. Escape/F10, Guide or a stick click
+opens Pause. Controller face-button conventions follow the device family;
+Start/Back are game Start/Select. Menu confirm/back swapping does not swap game
+buttons. Pause, window deactivation and player entry/exit release held state.
+
 ## Mouse and touch
 
 Pointer activation must match controller activation and feedback. Hover is not

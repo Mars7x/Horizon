@@ -25,6 +25,10 @@ permission to guess. New dependencies need a demonstrated consumer and review.
 - FFmpeg, PipeWire, SDL3, SQLite and all resolved Rust dependencies need their
   upstream license obligations respected. Hand-written notices are not a full
   lockfile-derived release inventory.
+- The separately bundled mGBA 0.10.5 core is built from unchanged source under
+  MPL-2.0, with its inih, blip-buf and libretro-header notices/licenses retained.
+  Source release and build checksum are recorded in the manifest and notices.
+  The dynamic libloading dependency is used only for the packaged core ABI.
 
 [The attribution check](../scripts/check-third-party.sh) verifies required texts
 and bundled-asset coverage. Removed direct dependencies may keep historical

@@ -226,14 +226,6 @@ component SetupStep inherits Rectangle {
             enabled: root.active && !root.busy;
             activated => { root.choose(0); }
         }
-        if root.step == 3 : Text {
-            y: 136px; width: parent.width; height: 40px;
-            text: "Playback will arrive with the first emulator.";
-            font-size: Typography.caption-size;
-            color: Theme.secondary-foreground;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
     }
     if root.step != 0 && !root.keyboard-open : Rectangle {
         x: Metrics.page-margin; y: root.height - Metrics.page-bottom-bar-height - 64px;

@@ -43,13 +43,14 @@ impl Error for LaunchExecutionError {
 /// Platform boundary for executing a normal source-neutral launch target.
 ///
 /// Services decide which registered source owns the launch. Platform adapters
-/// decide how the target is handed to the desktop/session.
+/// decide how an embedded player or desktop session receives the target.
 pub trait LaunchExecutor {
     fn execute(&self, target: &SourceLaunchTarget) -> Result<(), LaunchExecutionError>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameLaunchMode {
+    Embedded,
     External,
     Observed(RuntimeObservationId),
 }
@@ -153,6 +154,10 @@ impl GameLaunchService {
                     source_id: source_id.clone(),
                     source,
                 })?;
+
+            if matches!(target, SourceLaunchTarget::EmbeddedGba { .. }) {
+                return Ok(GameLaunchReceipt::new(source_id, GameLaunchMode::Embedded));
+            }
 
             if source
                 .descriptor()
@@ -424,6 +429,32 @@ mod tests {
         assert_eq!(
             executor.targets.borrow().as_slice(),
             &[SourceLaunchTarget::Uri("test://42".into())]
+        );
+    }
+
+    #[test]
+    fn gba_dispatch_uses_embedded_content_identity_without_external_handoff() {
+        let mut registry = SourceRegistry::new();
+        registry
+            .register(crate::sources::gba::GbaSource::new().unwrap())
+            .unwrap();
+        let executor = Rc::new(RecordingExecutor::default());
+        let service = GameLaunchService::new(Rc::new(registry), executor.clone());
+        let sha256 = "a".repeat(64);
+        let game = LibraryGame::new(
+            Game::new(GameId::new(1).unwrap(), GameTitle::new("GBA").unwrap()),
+            vec![SourceGameRef::new(
+                SourceId::new("gba").unwrap(),
+                ExternalGameId::new(format!("sha256:{sha256}")).unwrap(),
+            )],
+        );
+        assert_eq!(
+            service.launch_game(&game).unwrap().mode(),
+            GameLaunchMode::Embedded
+        );
+        assert_eq!(
+            *executor.targets.borrow(),
+            vec![SourceLaunchTarget::EmbeddedGba { sha256 }]
         );
     }
 
