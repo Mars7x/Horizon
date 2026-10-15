@@ -229,6 +229,7 @@ impl Default for State {
 /// absolute game identities while the Slint model only mounts visible rows.
 pub struct LibraryController {
     catalog: SharedCatalog,
+    registry: Rc<crate::sources::SourceRegistry>,
     sources: RefCell<Vec<String>>,
     home: Rc<HomeController>,
     activity: Rc<ActivityService<SqliteLibraryRepository>>,
@@ -241,6 +242,7 @@ impl LibraryController {
     pub fn new(
         ui: &AppWindow,
         catalog: SharedCatalog,
+        registry: Rc<crate::sources::SourceRegistry>,
         home: Rc<HomeController>,
         activity: Rc<ActivityService<SqliteLibraryRepository>>,
     ) -> Rc<Self> {
@@ -249,6 +251,7 @@ impl LibraryController {
         let sources = library_sources(&catalog.borrow());
         let controller = Rc::new(Self {
             catalog,
+            registry,
             sources: RefCell::new(sources),
             home,
             activity,
@@ -259,6 +262,14 @@ impl LibraryController {
         controller.refresh_metrics();
         controller.rebuild(ui, None);
         controller
+    }
+
+    fn source_title(&self, id: &str) -> String {
+        self.registry
+            .iter()
+            .find(|source| source.descriptor().id().as_str() == id)
+            .map(|source| source.descriptor().display_name().to_owned())
+            .unwrap_or_else(|| source_title(id))
     }
 
     /// Every visit to Library is fresh: the first game, scrolled to the top.
@@ -442,7 +453,7 @@ impl LibraryController {
                         source: self.catalog.borrow()[original]
                             .sources()
                             .iter()
-                            .map(|source| source_title(source.source_id().as_str()))
+                            .map(|source| self.source_title(source.source_id().as_str()))
                             .collect::<Vec<_>>()
                             .join(" · ")
                             .into(),
@@ -466,7 +477,7 @@ impl LibraryController {
                     self.catalog.borrow()[index]
                         .sources()
                         .iter()
-                        .map(|source| source_title(source.source_id().as_str()))
+                        .map(|source| self.source_title(source.source_id().as_str()))
                         .collect::<Vec<_>>()
                         .join(" · "),
                 )
@@ -479,7 +490,7 @@ impl LibraryController {
                 self.sources
                     .borrow()
                     .get(index)
-                    .map(|source| source_title(source))
+                    .map(|source| self.source_title(source))
             })
             .unwrap_or_else(|| "All sources".to_owned());
         let sort = s.sort.label();

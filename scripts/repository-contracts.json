@@ -9,7 +9,9 @@
     "0007_remove_bottles_source.sql": "5984132c7242b0e77fce4ee56cd29808ed8875c48953d1c788500ded6265c64e",
     "0008_remove_flatpak_source.sql": "91a5e1e0e43c90da4343f3448a91d13820c2b327c1546662ca193900f352523d",
     "0009_retire_steam_games.sql": "4fa71ab000d8210076d3b59ff300f99170ba44f53e119cb651ec6952f2ee5133",
-    "0010_retire_heroic_games.sql": "608902af578f773ce2c39fee02ef0441ed30a55375b8a51b0705d33051429436"
+    "0010_retire_heroic_games.sql": "608902af578f773ce2c39fee02ef0441ed30a55375b8a51b0705d33051429436",
+    "0011_rom_import.sql": "7fff7561b47fbf576568a4fd16dec499569c72226133b4d34173e5cad5d92d78",
+    "0012_onboarding.sql": "7a179045ee11cc05d44d587ea1e5270c0d62d2b444779801f4bd8cf53d490718"
   },
   "flatpak_finish_args": [
     "--require-version=1.16.0",

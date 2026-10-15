@@ -36,6 +36,7 @@ pub enum TextTarget {
     SettingsKey,
     /// The Profile name editor.
     ProfileName,
+    OnboardingName,
 }
 
 impl TextTarget {
@@ -43,6 +44,7 @@ impl TextTarget {
         match index {
             0 => Some(Self::SettingsKey),
             1 => Some(Self::ProfileName),
+            2 => Some(Self::OnboardingName),
             _ => None,
         }
     }
@@ -50,7 +52,7 @@ impl TextTarget {
     fn limit(self) -> usize {
         match self {
             Self::SettingsKey => 512,
-            Self::ProfileName => NAME_LIMIT,
+            Self::ProfileName | Self::OnboardingName => NAME_LIMIT,
         }
     }
 
@@ -58,6 +60,7 @@ impl TextTarget {
         match self {
             Self::SettingsKey => ui.get_settings_key_draft(),
             Self::ProfileName => ui.get_profile_name_draft(),
+            Self::OnboardingName => ui.get_onboarding_name_draft(),
         }
         .into()
     }
@@ -66,6 +69,10 @@ impl TextTarget {
         match self {
             Self::SettingsKey => ui.set_settings_key_draft(text.into()),
             Self::ProfileName => ui.set_profile_name_draft(text.into()),
+            Self::OnboardingName => {
+                ui.set_onboarding_name_draft(text.into());
+                ui.invoke_onboarding_name_edited();
+            }
         }
     }
 
@@ -75,6 +82,7 @@ impl TextTarget {
         match self {
             Self::SettingsKey => ui.invoke_settings_save_key(text.into()),
             Self::ProfileName => ui.invoke_profile_save_name(text.into()),
+            Self::OnboardingName => ui.invoke_onboarding_name_done(),
         }
     }
 }
@@ -180,7 +188,8 @@ impl KeyboardController {
     fn show(&self, ui: &AppWindow, target: TextTarget) {
         let text = target.text(ui);
         // A name opens selected: the first key replaces it.
-        let replace = target == TextTarget::ProfileName && !text.is_empty();
+        let replace = matches!(target, TextTarget::ProfileName | TextTarget::OnboardingName)
+            && !text.is_empty();
         *self.state.borrow_mut() = State {
             target: Some(target),
             layer: Layer::Letters,

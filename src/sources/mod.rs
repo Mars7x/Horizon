@@ -3,6 +3,8 @@
 //! Provider-specific parsing and host integration terminate behind `GameSource`.
 //! Services consume only normalized source metadata and discovery snapshots.
 
+pub mod gba;
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
@@ -426,10 +428,11 @@ pub enum SourceRegistryBuildError {
     Registry(#[from] SourceRegistryError),
 }
 
-/// No game sources are registered during the embedded-emulator transition.
-/// Shared library services remain available; core hosting is not implemented.
+/// GBA is import-only until an embedded emulator is implemented.
 pub fn production_source_registry() -> Result<SourceRegistry, SourceRegistryBuildError> {
-    Ok(SourceRegistry::new())
+    let mut registry = SourceRegistry::new();
+    registry.register(gba::GbaSource::new()?)?;
+    Ok(registry)
 }
 
 #[derive(Default)]
@@ -515,7 +518,8 @@ mod tests {
     fn production_registry_has_no_external_game_sources() {
         let registry = production_source_registry().expect("production registry");
 
-        assert!(registry.is_empty());
+        assert_eq!(registry.len(), 1);
+        assert!(registry.get(&source_id("gba")).is_some());
         assert!(registry.get(&source_id("flatpak")).is_none());
         assert!(registry.get(&source_id("steam")).is_none());
         assert!(registry.get(&source_id("bottles")).is_none());

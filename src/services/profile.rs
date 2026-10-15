@@ -45,6 +45,8 @@ pub enum ProfileSource {
     Steam,
     /// A built-in avatar, by its [`Avatar::id`].
     Avatar { id: String },
+    /// Temporary choices until Horizon has authored profile pictures.
+    Placeholder { index: u8 },
 }
 
 /// A Horizon-made avatar compiled into the app. Its picture is a PNG or
@@ -104,6 +106,16 @@ pub fn monogram(name: &str) -> String {
         .find(|c| c.is_alphanumeric())
         .map(|c| c.to_uppercase().collect())
         .unwrap_or_else(|| "H".to_owned())
+}
+
+/// Placeholder glyphs are text stand-ins, never game/third-party artwork.
+pub fn placeholder_monogram(source: &ProfileSource, name: &str) -> String {
+    match source {
+        ProfileSource::Placeholder { index: 1 } => "●".into(),
+        ProfileSource::Placeholder { index: 2 } => "■".into(),
+        ProfileSource::Placeholder { index: 3 } => "◆".into(),
+        _ => monogram(name),
+    }
 }
 
 /// The saved preferences; anything unreadable is the default.
@@ -314,6 +326,10 @@ mod tests {
                 source: ProfileSource::Avatar {
                     id: "astronaut".into(),
                 },
+            },
+            ProfilePreferences {
+                name: "Placeholder".into(),
+                source: ProfileSource::Placeholder { index: 2 },
             },
             ProfilePreferences {
                 name: "Ana".into(),

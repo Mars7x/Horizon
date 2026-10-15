@@ -8,7 +8,7 @@ fit this separation; no hosting API or in-process/child-process choice is made h
 | Domain | Validated identities, session states, settings and media concepts | [domain](../src/domain/) |
 | Services | Library, import, launch/activity, artwork, media, account and friend coordination | [services](../src/services/) |
 | Persistence | SQLite repositories, atomic writes, private settings and migrations | [persistence](../src/persistence/) |
-| Source boundaries | Capability-driven game/capture interfaces; empty production registries | [sources](../src/sources/mod.rs) |
+| Source boundaries | Capability-driven interfaces; GBA recognition and import-only adapter | [sources](../src/sources/mod.rs) |
 | Platform | Data paths, portals, Winit/Skia, native media and read-only host status | [platform](../src/platform/) |
 | Input/navigation | Semantic actions, repeat, routes, history and focus | [input](../src/input/), [navigation](../src/navigation/) |
 | Presentation | Controllers, workers, shared catalog and Rust→Slint projections | [presentation](../src/presentation/) |
@@ -22,7 +22,7 @@ not string checks spread through presentation.
 ## Composition and workers
 
 [Startup](../src/app.rs) resolves paths, opens/migrates SQLite, constructs the
-empty source registry and reads the active library. Runtime services share the
+GBA import-only registry and reads the active library. Runtime services share the
 repository. Home, Library and Activity share an append-only catalog whose indices
 never move during a run; reloads append and mark removals.
 

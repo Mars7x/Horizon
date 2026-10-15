@@ -297,3 +297,14 @@ only on explicit Save; key content and clipboard data must not be logged.
   Confirm permission with the asset owner before a public release.
 - **Use:** Successful menu confirmation and actual back/dismissal only. The
   existing navigation sound is unchanged. The UI Sounds setting mutes all cues.
+
+## Local ROM recognition
+
+- **quick-xml 0.41.x** (MIT): parses user-selected XML DAT catalogs.
+- **ring 0.17.x**: computes catalog-compatible SHA-1 and content-identity SHA-256.
+  This existing transitive dependency is now used directly; its upstream license
+  and bundled third-party notices remain applicable.
+
+No ROMs or No-Intro catalogs are bundled. Catalog names are provenance supplied
+by the selected local DAT, not a statement of redistribution rights. The exact
+resolved dependency-license inventory remains a release gate.

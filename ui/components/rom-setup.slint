@@ -1,0 +1,50 @@
+import { ModalDialog } from "modal-dialog.slint";
+import { ActionButton } from "action-button.slint";
+import { Theme, Metrics, Typography } from "../theme/theme.slint";
+
+export component RomSetupDialog inherits ModalDialog {
+    in property <string> title;
+    in property <string> detail;
+    in property <string> message;
+    in property <[string]> labels;
+    in property <int> focused;
+    in property <bool> busy;
+    callback choose(int);
+    card-width: 720px;
+    card-height: min(620px, root.area-height - Metrics.spacing-xl);
+    VerticalLayout {
+        padding: Metrics.spacing-lg;
+        spacing: Metrics.spacing-sm;
+        Text {
+            text: root.title;
+            color: Theme.foreground;
+            font-size: Typography.heading-size;
+            font-weight: Typography.heading-weight;
+            min-height: 36px;
+        }
+        Text {
+            text: root.detail;
+            color: Theme.secondary-foreground;
+            font-size: Typography.body-size;
+            wrap: word-wrap;
+            overflow: elide;
+            min-height: 124px;
+            vertical-stretch: 1;
+        }
+        for button-label[index] in root.labels: ActionButton {
+            label: button-label;
+            height: 40px;
+            focused: root.focused == index;
+            enabled: !root.busy;
+            activated => { root.choose(index); }
+        }
+        Text {
+            text: root.message;
+            color: Theme.secondary-foreground;
+            font-size: Typography.body-size;
+            wrap: word-wrap;
+            overflow: elide;
+            min-height: 52px;
+        }
+    }
+}

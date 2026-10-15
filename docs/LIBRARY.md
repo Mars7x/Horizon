@@ -2,8 +2,8 @@
 
 Library is a full-shell route, reached by Home's final tile or Menu/Start/F10.
 Its established responsive square-cover grid, Source/Sort controls and scrolling
-are retained. No production game source is registered, so the current page shows
-“No games yet”; no emulator importer or substitute launch target is implemented.
+are retained. Library → Add games opens the [GBA importer](ROM_IMPORT.md). Imported games
+appear immediately and persist across restarts. Playback requires a future core.
 Empty-state labels reserve a full-height line box so glyph descenders remain
 visible at different UI scales, including the empty-filter message.
 

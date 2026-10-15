@@ -50,5 +50,6 @@ D-pad/stick moves keys; A/click/tap types; X deletes; LB/RB move the caret;
 stick-click shifts; Start means Done. Shift can capitalize once or lock on a
 quick double tap. Keys edit the same draft as physical typing, replace selected
 text, preserve Unicode caret offsets and obey the editor's validation. The
-profile name is normalized and capped at 32 characters. Dialog lift keeps fields
+profile name, including [first-run creation](ONBOARDING.md), is normalized and
+capped at 32 characters. Dialog lift keeps fields
 above the keyboard. Sound and reduced-motion preferences still apply.
