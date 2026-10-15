@@ -469,11 +469,7 @@ impl LibraryController {
         let (title, source) = selected
             .map(|index| {
                 (
-                    self.catalog.borrow()[index]
-                        .game()
-                        .title()
-                        .as_str()
-                        .to_owned(),
+                    super::titles::game_title(self.catalog.borrow()[index].game().title().as_str()),
                     self.catalog.borrow()[index]
                         .sources()
                         .iter()

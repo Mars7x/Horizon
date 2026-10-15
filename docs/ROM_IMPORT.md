@@ -15,8 +15,10 @@ the skipped count. No supported readable files means no database write.
 
 Recognition remains behind the source boundary. A bundled offline No-Intro/Libretro
 GBA catalog matches full-file SHA-1 plus byte size. Exactly one matching title is
-required, regardless of the ROM's filename. Catalog release names retain their
-region/revision tags. Ambiguous/unmatched files use filename metadata marked
+required, regardless of the ROM's filename. Stored catalog release names retain their
+region/revision tags. Displayed titles omit recognized parenthesized region labels
+(for example, `(USA, Europe)`), including for existing imports; edition, language
+and revision labels remain intact. Ambiguous/unmatched files use filename metadata marked
 unverified internally; no catalog title is guessed. SteamGridDB supplies artwork
 only and cannot name or identify a ROM.
 
