@@ -261,6 +261,7 @@ pub fn run() -> Result<(), AppError> {
     let library_controller = crate::presentation::library::LibraryController::new(
         &ui,
         Rc::clone(&catalog),
+        Rc::clone(&registry),
         Rc::clone(&home),
         Rc::clone(&activity_service),
     );
@@ -351,7 +352,7 @@ pub fn run() -> Result<(), AppError> {
     let keyboard = KeyboardController::new(&ui, Rc::clone(&last_device));
     let keyboard_sound = Rc::clone(&navigation_sound);
     keyboard.set_sound(Rc::new(move |cue| keyboard_sound.borrow_mut().play(cue)));
-    navigation.set_keyboard(keyboard);
+    navigation.set_keyboard(Rc::clone(&keyboard));
     let video: Arc<dyn VideoBackend> = match FfmpegVideo::new() {
         Ok(video) => Arc::new(video),
         Err(error) => {
@@ -392,6 +393,52 @@ pub fn run() -> Result<(), AppError> {
         cue_sounds.borrow_mut().play(cue);
     }));
 
+    let rom_setup_state = runtime_repository.borrow().rom_setup()?;
+    let reloader = crate::presentation::library_reload::LibraryReloader::new(
+        &ui,
+        crate::presentation::library_reload::LibraryReloadParts {
+            catalog: Rc::clone(&catalog),
+            repository: Rc::clone(&runtime_repository),
+            activity: Rc::clone(&activity_service),
+            registry: Rc::clone(&registry),
+            artwork: Rc::clone(&artwork_service),
+            home: Rc::clone(&home),
+            library: Rc::clone(&library_controller),
+            showcase: Rc::clone(&activity_showcase),
+            album: Rc::clone(&album),
+            artwork_preferences: {
+                let settings = Rc::clone(&settings_for_controller);
+                Rc::new(move || settings.artwork_preferences())
+            },
+        },
+    );
+    let rom_setup = crate::presentation::rom_setup::RomSetupController::new(
+        &ui,
+        database_path.clone(),
+        rom_setup_state,
+        reloader,
+    );
+    let import_sounds = Rc::clone(&navigation_sound);
+    rom_setup.set_sound(Rc::new(move |cue| import_sounds.borrow_mut().play(cue)));
+    let onboarding_progress = runtime_repository.borrow().onboarding_progress()?;
+    let onboarding = crate::presentation::onboarding::OnboardingController::new(
+        &ui,
+        crate::presentation::onboarding::OnboardingParts {
+            database: database_path.clone(),
+            profile_path: data_paths::profile_settings_path()?,
+            progress: onboarding_progress,
+            profile: Rc::clone(&profile_page),
+            importer: rom_setup.clone(),
+            keyboard: Rc::clone(&keyboard),
+            sound: {
+                let sounds = Rc::clone(&navigation_sound);
+                Rc::new(move |cue| sounds.borrow_mut().play(cue))
+            },
+        },
+    );
+    let action_onboarding = Rc::clone(&onboarding);
+    let action_setup = Rc::clone(&rom_setup);
+
     let ui_weak = ui.as_weak();
     let action_navigation = Rc::clone(&navigation);
     let action_sound = Rc::clone(&navigation_sound);
@@ -399,6 +446,9 @@ pub fn run() -> Result<(), AppError> {
         let Some(ui) = ui_weak.upgrade() else {
             return;
         };
+        if action_setup.handle_action(&ui, event) || action_onboarding.handle_action(&ui, event) {
+            return;
+        }
         // Snapshot semantic focus, not raw key presses: blocked directions and
         // unchanged focus should never make a navigation cue. OK/Back are
         // emitted by the semantic menu handlers; game launching stays silent.

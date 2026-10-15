@@ -5,6 +5,10 @@ local name/picture plus a read-only Steam friends panel. It is a full-shell rout
 Back/Forward use normal history. A new visit closes editors and resets the
 friends viewport.
 
+[First-run setup](ONBOARDING.md) creates a local name and placeholder picture
+before entering Home. Placeholder shapes are temporary text stand-ins, not final
+avatar artwork.
+
 ## Local profile and pictures
 
 The avatar is the page's one focus. A/click opens Edit profile; Up/Down scrolls

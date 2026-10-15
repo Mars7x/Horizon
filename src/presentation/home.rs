@@ -192,7 +192,7 @@ impl HomeController {
         let card_data = library_games
             .iter()
             .zip(artwork_service.square_artworks(&library_games))
-            .map(|(game, artwork)| game_card(game, artwork))
+            .map(|(game, artwork)| game_card(game, artwork, registry))
             .collect::<Vec<_>>();
         let titles = card_data.iter().map(|game| game.title.clone()).collect();
         let artwork_lookup_jobs = library_games
@@ -409,7 +409,7 @@ impl HomeController {
         };
         let artworks = artwork_service.square_artworks(&games);
         for ((index, game), artwork) in reread.into_iter().zip(&games).zip(artworks) {
-            let card = game_card(game, artwork);
+            let card = game_card(game, artwork, registry);
             let job = lookup_job(index, game, registry);
             if index < self.cards.row_count() {
                 self.source_cards.borrow_mut()[index] = card.clone();
@@ -643,6 +643,11 @@ impl HomeController {
             return;
         };
 
+        if !self.launch_service.can_launch(game) {
+            ui.invoke_playback_unavailable();
+            return;
+        }
+
         let visual_index = self
             .home_order
             .borrow()
@@ -856,7 +861,11 @@ fn needs_external_artwork(prefer_external: bool, has_source_artwork: bool) -> bo
     prefer_external || !has_source_artwork
 }
 
-fn game_card(game: &LibraryGame, square_artwork: Option<SquareArtwork>) -> GameCardData {
+fn game_card(
+    game: &LibraryGame,
+    square_artwork: Option<SquareArtwork>,
+    registry: &crate::sources::SourceRegistry,
+) -> GameCardData {
     let title = game.game().title().as_str();
     let (primary, secondary, highlight) = fallback_palette(game.game().id().get(), title);
     let pixelated_artwork = square_artwork
@@ -867,7 +876,14 @@ fn game_card(game: &LibraryGame, square_artwork: Option<SquareArtwork>) -> GameC
 
     GameCardData {
         title: title.into(),
-        platform: "PC".into(),
+        platform: game
+            .sources()
+            .iter()
+            .filter_map(|reference| registry.get(reference.source_id()))
+            .map(|source| source.descriptor().display_name())
+            .collect::<Vec<_>>()
+            .join(" · ")
+            .into(),
         monogram: monogram(title).into(),
         artwork: artwork.unwrap_or_default(),
         has_artwork,

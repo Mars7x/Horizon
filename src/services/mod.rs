@@ -18,3 +18,5 @@ pub mod settings;
 pub mod steamgriddb;
 
 pub mod steamgriddb_artwork;
+
+pub mod rom_import;

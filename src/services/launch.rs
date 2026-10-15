@@ -117,6 +117,14 @@ impl GameLaunchService {
         self
     }
 
+    pub fn can_launch(&self, game: &LibraryGame) -> bool {
+        game.sources().iter().any(|reference| {
+            self.registry
+                .get(reference.source_id())
+                .is_some_and(|source| source.descriptor().supports(SourceCapability::Launch))
+        })
+    }
+
     pub fn launch_game(&self, game: &LibraryGame) -> Result<GameLaunchReceipt, GameLaunchError> {
         for source_ref in game.sources() {
             let Some(source) = self.registry.get(source_ref.source_id()) else {

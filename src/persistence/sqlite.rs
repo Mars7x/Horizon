@@ -66,6 +66,113 @@ impl SqliteLibraryRepository {
         Self::read_games(&mut statement)
     }
 
+    pub fn onboarding_progress(&self) -> Result<(i32, bool), PersistenceError> {
+        self.connection
+            .query_row(
+                "SELECT step, completed FROM onboarding WHERE id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(Into::into)
+    }
+
+    pub fn save_onboarding_progress(
+        &self,
+        step: i32,
+        completed: bool,
+    ) -> Result<(), PersistenceError> {
+        self.connection.execute(
+            "UPDATE onboarding SET step = ?1, completed = ?2 WHERE id = 1",
+            params![step, completed],
+        )?;
+        Ok(())
+    }
+
+    pub fn rom_setup(&self) -> Result<crate::services::rom_import::RomSetup, PersistenceError> {
+        use std::{ffi::OsString, os::unix::ffi::OsStringExt, path::PathBuf};
+        self.connection
+            .query_row(
+                "SELECT completed, folder, catalog_path FROM rom_setup WHERE id = 1",
+                [],
+                |row| {
+                    let path = |bytes: Option<Vec<u8>>| {
+                        bytes.map(|bytes| PathBuf::from(OsString::from_vec(bytes)))
+                    };
+                    Ok(crate::services::rom_import::RomSetup {
+                        completed: row.get(0)?,
+                        folder: path(row.get(1)?),
+                        catalog_path: path(row.get(2)?),
+                    })
+                },
+            )
+            .map_err(Into::into)
+    }
+
+    /// Both registration and setup completion commit together. A repeat import
+    /// reuses content identity, never title; unavailable folders never prune games.
+    pub fn save_rom_import(
+        &mut self,
+        setup: &crate::services::rom_import::RomSetup,
+        candidates: &[crate::services::rom_import::RomCandidate],
+    ) -> Result<(), PersistenceError> {
+        use std::os::unix::ffi::OsStrExt;
+        let transaction = self.connection.transaction()?;
+        for candidate in candidates.iter().filter(|candidate| candidate.selected) {
+            let Some(hash) = &candidate.fingerprint else {
+                return Err(PersistenceError::InvalidRomImport(
+                    "selected file has no fingerprint",
+                ));
+            };
+            let discovered = DiscoveredGame::new(
+                SourceId::new("gba").map_err(|source| {
+                    PersistenceError::InvalidStoredDomainValue {
+                        field: "ROM source",
+                        source,
+                    }
+                })?,
+                ExternalGameId::new(format!("sha256:{}", hash.sha256)).map_err(|source| {
+                    PersistenceError::InvalidStoredDomainValue {
+                        field: "ROM identity",
+                        source,
+                    }
+                })?,
+                GameTitle::new(candidate.title.clone()).map_err(|source| {
+                    PersistenceError::InvalidStoredDomainValue {
+                        field: "ROM title",
+                        source,
+                    }
+                })?,
+            );
+            // An unverified filename must never overwrite an earlier catalog title.
+            let existing: Option<i64> = transaction
+                .query_row(
+                    "SELECT game_id FROM game_sources WHERE source_id = ?1 AND external_id = ?2",
+                    params!["gba", discovered.external_id().as_str()],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            let game_id = match existing {
+                Some(id) if candidate.catalog.is_none() => id,
+                _ => Self::upsert_in_transaction(&transaction, &discovered)?,
+            };
+            transaction.execute("INSERT INTO rom_files(path, game_id, sha1, sha256, size, catalog_name, imported_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, unixepoch()) ON CONFLICT(path, sha256) DO UPDATE SET game_id=excluded.game_id, sha1=excluded.sha1, sha256=excluded.sha256, size=excluded.size, catalog_name=excluded.catalog_name, imported_at=excluded.imported_at",
+                params![candidate.path.as_os_str().as_bytes(),game_id,hash.sha1,hash.sha256,hash.size,candidate.catalog])?;
+        }
+        transaction.execute(
+            "UPDATE rom_setup SET completed = ?1, folder = ?2, catalog_path = ?3 WHERE id = 1",
+            params![
+                setup.completed,
+                setup.folder.as_ref().map(|p| p.as_os_str().as_bytes()),
+                setup
+                    .catalog_path
+                    .as_ref()
+                    .map(|p| p.as_os_str().as_bytes())
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn read_games(
         statement: &mut rusqlite::Statement<'_>,
     ) -> Result<Vec<LibraryGame>, PersistenceError> {
@@ -1519,5 +1626,99 @@ mod tests {
             910,
             "the global observed total retains the retired game's history"
         );
+    }
+}
+
+#[cfg(test)]
+mod rom_import_tests {
+    use super::*;
+    use crate::services::rom_import::{RomCandidate, RomFingerprint, RomSetup};
+
+    fn candidate(path: &str, title: &str, hash: &str, verified: bool) -> RomCandidate {
+        RomCandidate {
+            path: path.into(),
+            title: title.into(),
+            selected: true,
+            fingerprint: Some(RomFingerprint {
+                sha1: "a".repeat(40),
+                sha256: hash.repeat(64),
+                size: 192,
+            }),
+            catalog: verified.then(|| "GBA catalog".into()),
+            status: String::new(),
+        }
+    }
+
+    #[test]
+    fn content_identity_survives_duplicates_and_filename_fallbacks() {
+        let mut repository = SqliteLibraryRepository::open_in_memory().unwrap();
+        let setup = RomSetup {
+            completed: true,
+            folder: Some("/roms".into()),
+            catalog_path: None,
+        };
+        repository
+            .save_rom_import(
+                &setup,
+                &[
+                    candidate("/roms/first.gba", "Catalog (USA)", "1", true),
+                    candidate("/roms/copy.gba", "Wrong filename", "1", false),
+                    candidate("/roms/other.gba", "Catalog (USA)", "2", true),
+                ],
+            )
+            .unwrap();
+        let games = repository.list_games().unwrap();
+        assert_eq!(games.len(), 2);
+        assert!(
+            games
+                .iter()
+                .all(|g| g.game().title().as_str() == "Catalog (USA)")
+        );
+        let id = games[0].game().id();
+        repository
+            .save_rom_import(
+                &setup,
+                &[candidate("/roms/copy.gba", "Wrong filename", "1", false)],
+            )
+            .unwrap();
+        assert_eq!(repository.list_games().unwrap()[0].game().id(), id);
+        assert!(repository.rom_setup().unwrap().completed);
+    }
+
+    #[test]
+    fn onboarding_progress_resumes_without_affecting_imports() {
+        let repository = SqliteLibraryRepository::open_in_memory().unwrap();
+        assert_eq!(repository.onboarding_progress().unwrap(), (0, false));
+        repository.save_onboarding_progress(2, false).unwrap();
+        assert_eq!(repository.onboarding_progress().unwrap(), (2, false));
+        assert!(repository.save_onboarding_progress(2, true).is_err());
+        assert_eq!(repository.onboarding_progress().unwrap(), (2, false));
+        repository.save_onboarding_progress(3, true).unwrap();
+        assert_eq!(repository.onboarding_progress().unwrap(), (3, true));
+        assert!(repository.save_onboarding_progress(4, false).is_err());
+        assert_eq!(repository.game_count().unwrap(), 0);
+    }
+
+    #[test]
+    fn invalid_review_rolls_back_games_files_and_setup() {
+        let mut repository = SqliteLibraryRepository::open_in_memory().unwrap();
+        let setup = RomSetup {
+            completed: true,
+            ..Default::default()
+        };
+        let mut invalid = candidate("/bad.gba", "Bad", "2", false);
+        invalid.fingerprint = None;
+        assert!(
+            repository
+                .save_rom_import(&setup, &[candidate("/one.gba", "One", "1", true), invalid])
+                .is_err()
+        );
+        assert_eq!(repository.game_count().unwrap(), 0);
+        assert!(!repository.rom_setup().unwrap().completed);
+        let count: i64 = repository
+            .connection
+            .query_row("SELECT COUNT(*) FROM rom_files", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
     }
 }

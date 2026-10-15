@@ -1,6 +1,6 @@
 # Database
 
-Latest schema: `10`
+Latest schema: `12`
 
 [SqliteLibraryRepository](../src/persistence/sqlite.rs) owns SQL and the shared
 connection. Data lives in `library.sqlite3` at the location chosen by
@@ -27,6 +27,8 @@ checksums. Never “fix” a deployed file or its checksum to bypass a failure.
 | 0008 | Flatpak game membership retirement |
 | 0009 | Archive Steam identities without deleting games/history |
 | 0010 | Archive Heroic identities without deleting games/history |
+| 0011 | Reviewed ROM content, file locations and import preferences |
+| 0012 | Confirmed first-run setup progress and completion |
 
 ## Identities and membership
 
@@ -41,7 +43,7 @@ Reconciliation must preserve archived identities and games with session/lifetime
 history. Successful source batches are atomic. Partial/unavailable snapshots
 cannot prune prior membership. Earlier retirement migrations retain their
 original behavior; later archives cannot restore data those earlier versions
-deleted. No production source currently imports a snapshot.
+deleted. GBA uses explicit reviewed imports; its startup snapshot is empty and partial.
 
 ## History and checks
 
@@ -54,3 +56,8 @@ Rust tests cover repository behavior and migration policy. The toolchain-free
 [retirement SQL checks](../scripts/check-retirement-migrations.py) exercise fresh
 schema, upgrades, retention and failure rollback using in-memory databases only.
 They do not establish Rust compilation or access user data.
+
+ROM identity uses GBA plus SHA-256; SHA-1 and size support catalog matching.
+`rom_files` retains path bytes and catalog provenance. A changed file at the same
+path retains both content records; a future launch must validate content again.
+Import preferences and reviewed files commit together. No automatic pruning runs.

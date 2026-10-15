@@ -11,10 +11,12 @@ these guides describe the current contracts. The root README is intentionally bl
 | [Development](DEVELOPMENT.md) | Toolchain, checks, builds and verification limits |
 | [Maintenance](MAINTENANCE.md) | Documentation lifecycle and repository checks |
 | [UI standards](UI_STANDARDS.md) | Shared page frame, motion, typography and appearance |
+| [First-run setup](ONBOARDING.md) | Welcome, local profile creation, controller/keyboard setup and completion |
 | [Home](HOME_UI.md) | Protected carousel, utility row and shell status |
 | [Navigation](NAVIGATION.md) | Routes, focus, history and page entry |
 | [Input](INPUT.md) | Controller/keyboard/mouse behavior and on-screen keyboard |
 | [Library](LIBRARY.md) | Catalog, grid, sorting and current empty state |
+| [ROM import](ROM_IMPORT.md) | GBA catalogs, folder access and reviewed imports |
 | [Activity](ACTIVITY.md) | Observed sessions, lifetime records and history |
 | [Album](ALBUM.md) | Horizon-owned media, playback and deletion |
 | [Settings](SETTINGS.md) | Appearance, controllers and third-party configuration |

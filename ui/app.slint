@@ -1,3 +1,5 @@
+import { OnboardingPage } from "pages/onboarding.slint";
+import { RomSetupDialog } from "components/rom-setup.slint";
 import { Theme, Metrics, Typography, Motion } from "theme/theme.slint";
 export { Theme, Metrics, Typography, Motion }
 import { Wheel } from "components/wheel.slint";
@@ -105,9 +107,8 @@ export component AppWindow inherits Window {
         // Order: X, then B, with A always rightmost.
         // The on-screen keyboard needs no hints.
         root.keyboard-open ? []
-        : root.current-route == AppRouteView.library ? (root.library-total-count > 0
-            ? [{ button: "B", label: "Back" }, { button: "A", label: "Play" }]
-            : [{ button: "B", label: "Back" }])
+        : root.rom-setup-open ? [{ button: "B", label: "Close" }, { button: "A", label: "Select" }]
+        : root.current-route == AppRouteView.library ? [{ button: "X", label: "Add games" }, { button: "B", label: "Back" }]
         : root.current-route == AppRouteView.activity ? (root.activity-details-visible
             ? [{ button: "B", label: "Back" }]
             : [{ button: "B", label: "Back" }, { button: "A", label: "Details" }])
@@ -394,6 +395,31 @@ export component AppWindow inherits Window {
     in property <string> clock-suffix: "";
 
     callback select-game(int);
+    in property <bool> onboarding-open: false;
+    in property <int> onboarding-step: 0;
+    in property <int> onboarding-focus: 0;
+    in property <int> onboarding-avatar: 0;
+    in property <bool> onboarding-avatar-changed: false;
+    in property <string> onboarding-initial: "P";
+    in property <string> onboarding-monogram: "P";
+    in-out property <string> onboarding-name-draft;
+    in property <bool> onboarding-busy: false;
+    in property <string> onboarding-message;
+    callback onboarding-choose(int);
+    callback onboarding-navigate(int);
+    callback onboarding-name-done();
+    callback onboarding-name-edited();
+    callback onboarding-name-focused();
+    in property <bool> rom-setup-open: false;
+    in property <bool> rom-setup-busy: false;
+    in property <string> rom-setup-title;
+    in property <string> rom-setup-detail;
+    in property <string> rom-setup-message;
+    in property <[string]> rom-setup-labels;
+    in property <int> rom-setup-focus: 0;
+    out property <bool> rom-setup-blocking: rom-dialog.visible;
+    callback rom-setup-choose(int);
+    callback playback-unavailable();
     callback open-library();
     callback library-select(int);
     callback library-cycle-filter();
@@ -984,6 +1010,50 @@ export component AppWindow inherits Window {
                 clock-time: root.clock-time;
                 clock-suffix: root.clock-suffix;
                 hint-activated(button) => { root.hint-activated(button); }
+            }
+
+            OnboardingPage {
+                z: 15;
+                width: parent.width; height: parent.height;
+                open: root.onboarding-open;
+                step: root.onboarding-step;
+                focused: root.onboarding-focus;
+                avatar: root.onboarding-avatar;
+                avatar-changed: root.onboarding-avatar-changed;
+                initial: root.onboarding-initial;
+                monogram: root.onboarding-monogram;
+                profile-name: root.profile-name;
+                picture: root.profile-picture;
+                has-picture: root.profile-has-picture;
+                name-draft <=> root.onboarding-name-draft;
+                busy: root.onboarding-busy;
+                message: root.onboarding-message;
+                keyboard-open: root.keyboard-open;
+                keyboard-inset: root.keyboard-inset;
+                keyboard-edit: root.keyboard-edit;
+                keyboard-caret: root.keyboard-caret;
+                hints: [{ button: "B", label: "Back" }, { button: "A", label: "Select" }];
+                choose(index) => { root.onboarding-choose(index); }
+                navigate(index) => { root.onboarding-navigate(index); }
+                name-done => { root.onboarding-name-done(); }
+                name-edited => { root.onboarding-name-edited(); }
+                name-focused => { root.onboarding-name-focused(); }
+                show-keyboard => { root.onboarding-name-focused(); root.keyboard-show(2); }
+                hint-activated(button) => { root.hint-activated(button); }
+            }
+
+            rom-dialog := RomSetupDialog {
+                z: 20;
+                open: root.rom-setup-open;
+                area-width: parent.width;
+                area-height: parent.height;
+                title: root.rom-setup-title;
+                detail: root.rom-setup-detail;
+                message: root.rom-setup-message;
+                labels: root.rom-setup-labels;
+                focused: root.rom-setup-focus;
+                busy: root.rom-setup-busy;
+                choose(index) => { root.rom-setup-choose(index); }
             }
 
         }

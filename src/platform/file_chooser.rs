@@ -1,7 +1,7 @@
 //! Choosing a file through the XDG FileChooser portal, the only way a
 //! Flatpak app reads a file the user picks without a broad filesystem grant.
 //! The portal returns a path the sandbox can read (often under the document
-//! portal), valid for this session.
+//! portal). Grants can persist across sessions; unavailable paths need reselection.
 
 use std::{ffi::OsString, os::unix::ffi::OsStringExt, path::PathBuf};
 
@@ -54,6 +54,35 @@ pub fn choose_image(title: &str) -> Result<Option<PathBuf>, FileChooserError> {
     file_path(uri.as_str())
         .map(Some)
         .ok_or(FileChooserError::NotLocal)
+}
+
+/// Folder/catalog requests block; use a worker, just as for images.
+pub fn choose_rom_input(directory: bool) -> Result<Option<PathBuf>, FileChooserError> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let response = runtime.block_on(async {
+        let request = SelectedFiles::open_file()
+            .title(if directory {
+                "Choose GBA ROM folder"
+            } else {
+                "Choose GBA XML DAT catalog"
+            })
+            .modal(true)
+            .multiple(false)
+            .directory(directory);
+        request.send().await?.response()
+    });
+    let files = match response {
+        Ok(files) => files,
+        Err(ashpd::Error::Response(ResponseError::Cancelled)) => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    files
+        .uris()
+        .first()
+        .map(|uri| file_path(uri.as_str()).ok_or(FileChooserError::NotLocal))
+        .transpose()
 }
 
 /// `file:///a%20b` → `/a b`. Only local files (an empty or `localhost` host).

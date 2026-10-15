@@ -62,3 +62,23 @@ reconnection, keyboard/mouse parity, Back/Home/Forward, rapid route changes,
 720p/1080p/ultrawide resizing, fullscreen, high contrast and reduced motion.
 Verify profile account switching, private friends, SteamGridDB failures and
 Album seeking/deletion without exposing credentials in logs or screenshots.
+
+## First-run runtime smoke test
+
+In a Wayland-enabled SDK shell, run the opt-in setup test with throwaway paths:
+
+```sh
+onboarding_test_dir=$(mktemp -d /tmp/horizon-setup-test.XXXXXX)
+env XDG_DATA_HOME="$onboarding_test_dir/data" \
+    XDG_CONFIG_HOME="$onboarding_test_dir/config" \
+    XDG_CACHE_HOME="$onboarding_test_dir/cache" \
+    HORIZON_SETUP_TEST_DIR="$onboarding_test_dir" \
+    cargo test --lib controller_setup_keyboard_and_restart_smoke \
+    --offline --locked -- --ignored --nocapture --test-threads=1
+```
+
+Use a fresh directory for each run. The test writes synthetic profile/library
+state and PNG captures into it; it does not launch a ROM or use real credentials.
+`HORIZON_SETUP_TEST_DARK=1` exercises dark appearance and
+`HORIZON_SETUP_TEST_REDUCED=1` disables motion. Hardware gamepad input, reconnects,
+portal interaction and packaged Flatpak behavior still need manual checks.

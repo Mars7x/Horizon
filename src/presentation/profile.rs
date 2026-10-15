@@ -734,6 +734,20 @@ impl ProfileController {
         self.save_preferences();
     }
 
+    pub fn preferences(&self) -> ProfilePreferences {
+        ProfilePreferences {
+            name: self.name.borrow().clone(),
+            source: self.source.borrow().clone(),
+        }
+    }
+
+    /// Called only after the onboarding worker durably saves the profile.
+    pub fn apply_saved_preferences(&self, ui: &AppWindow, preferences: ProfilePreferences) {
+        *self.name.borrow_mut() = preferences.name;
+        *self.source.borrow_mut() = preferences.source;
+        self.publish(ui);
+    }
+
     fn save_preferences(&self) {
         let preferences = ProfilePreferences {
             name: self.name.borrow().clone(),
@@ -821,6 +835,7 @@ impl ProfileController {
     fn current(&self) -> Option<Image> {
         match &*self.source.borrow() {
             ProfileSource::Chosen => self.chosen.borrow().clone(),
+            ProfileSource::Placeholder { .. } => None,
             ProfileSource::Steam => self
                 .animated
                 .borrow()
@@ -860,7 +875,7 @@ impl ProfileController {
                 .borrow()
                 .as_ref()
                 .map(|moving| moving.frames.clone()),
-            ProfileSource::Avatar { .. } => None,
+            ProfileSource::Avatar { .. } | ProfileSource::Placeholder { .. } => None,
         };
         ui.set_profile_picture_frames(
             frames.unwrap_or_else(|| ModelRc::new(VecModel::<ProfileFrameData>::default())),
@@ -870,7 +885,7 @@ impl ProfileController {
         ui.set_profile_page_feedback(self.feedback.borrow().clone().into());
         let name = self.name.borrow();
         ui.set_profile_name(name.as_str().into());
-        ui.set_profile_monogram(profile::monogram(&name).into());
+        ui.set_profile_monogram(profile::placeholder_monogram(&self.source.borrow(), &name).into());
         let page = self.page.borrow();
         ui.set_profile_edit_open(page.edit_open);
         ui.set_profile_edit_selection(page.edit_selection);

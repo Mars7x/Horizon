@@ -147,6 +147,11 @@ impl LibraryReloader {
             }
         };
 
+        self.accept_games(fresh);
+    }
+
+    pub fn accept_games(&self, fresh: Vec<crate::domain::LibraryGame>) {
+        let parts = &self.parts;
         let changes = parts.catalog.borrow_mut().merge(fresh);
         if changes.is_empty() {
             debug!("library reloaded; nothing changed");

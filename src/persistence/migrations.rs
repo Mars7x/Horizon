@@ -59,9 +59,19 @@ const MIGRATIONS: &[Migration] = &[
         name: "retire_heroic_games",
         sql: include_str!("migrations/0010_retire_heroic_games.sql"),
     },
+    Migration {
+        version: 11,
+        name: "rom_import",
+        sql: include_str!("migrations/0011_rom_import.sql"),
+    },
+    Migration {
+        version: 12,
+        name: "onboarding",
+        sql: include_str!("migrations/0012_onboarding.sql"),
+    },
 ];
 
-pub(crate) const LATEST_SCHEMA_VERSION: i64 = 10;
+pub(crate) const LATEST_SCHEMA_VERSION: i64 = 12;
 
 const MIGRATION_LEDGER_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -242,7 +252,9 @@ mod tests {
         };
         assert_eq!(count("SELECT COUNT(*) FROM games"), 5);
         assert_eq!(
-            count("SELECT COUNT(*) FROM retired_game_sources WHERE first_seen_at = 11 AND last_seen_at = 22"),
+            count(
+                "SELECT COUNT(*) FROM retired_game_sources WHERE first_seen_at = 11 AND last_seen_at = 22"
+            ),
             4
         );
         assert_eq!(

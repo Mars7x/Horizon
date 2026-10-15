@@ -39,6 +39,8 @@ pub enum PersistenceError {
     },
     #[error("database returned an invalid library/activity count: {0}")]
     InvalidCount(i64),
+    #[error("invalid reviewed ROM: {0}")]
+    InvalidRomImport(&'static str),
     #[error("play session {0} is not open")]
     SessionNotOpen(i64),
     #[error(

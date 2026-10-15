@@ -1,16 +1,20 @@
 # Project state
 
 Horizon is an early-development Rust/Slint Linux desktop Flatpak. Its approved
-direction is embedded emulator cores. No emulator core, ROM importer, BIOS
-manager or core-hosting implementation exists yet. Process isolation and the
-permanent core API remain undecided.
+direction is embedded emulator cores. GBA folder import supports local hash
+catalogs and explicit review. No emulator core, BIOS manager or core-hosting
+implementation exists yet. Process isolation and the permanent core API remain
+undecided.
+
+First launch presents [Welcome/Profile setup](ONBOARDING.md), then optional game
+import and Ready. Completed setup is skipped; unfinished confirmed steps resume.
 
 ## Current surfaces
 
 | Surface | Current behavior |
 | --- | --- |
 | Home | Established cover carousel, Library tile, four utilities and profile avatar |
-| Library | Full-shell grid/sort/filter implementation; no active games after source retirement |
+| Library | Full-shell grid/sort/filter; Library → Add games imports raw GBA ROMs |
 | Activity | Retained session totals, recent history and distinct lifetime counters |
 | Album | Horizon-owned pictures/clips, viewer, video playback and confirmed deletion |
 | Achievements | Retained page and Milestones layout; no provider, “Achievements unavailable” |
@@ -24,9 +28,11 @@ RetroAchievements is intended future work, not an available backend.
 
 ## Inactive boundaries
 
-No production game or capture sources are registered. Generic import, reload,
-launch, runtime-observation, artwork and session services remain for later
-assessment. No production source currently generates launches or cover-fetch jobs.
+GBA is registered as an import-only source; no capture sources are registered.
+Generic reload, launch, runtime-observation, artwork and session services remain
+for later assessment. No production source currently generates launches. Optional
+SteamGridDB lookup can supply covers for imported games. The reusable importer
+opens from first-run setup and Library.
 The shared append-only catalog and historical SQLite identities remain intact.
 
 There is no Shop, external launcher integration, Steam screenshot/achievement
