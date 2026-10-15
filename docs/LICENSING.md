@@ -20,6 +20,8 @@ permission to guess. New dependencies need a demonstrated consumer and review.
   and credited designers retained. Font URLs/revisions live in the packaging
   installer/manifest, not duplicated across feature guides.
 - UI WAVs and native media test fixtures retain their documented attribution.
+- The offline GBA hash/title catalog is derived from pinned No-Intro/Libretro
+  metadata under CC-BY-SA-4.0, with its license and derivation in the notices.
 - FFmpeg, PipeWire, SDL3, SQLite and all resolved Rust dependencies need their
   upstream license obligations respected. Hand-written notices are not a full
   lockfile-derived release inventory.

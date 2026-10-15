@@ -108,6 +108,61 @@ impl SqliteLibraryRepository {
             .map_err(Into::into)
     }
 
+    /// Recognize earlier filename imports from their saved full-file hashes.
+    /// A conflicting/unknown hash or existing catalog provenance is untouched.
+    pub fn recognize_saved_rom_titles(
+        &mut self,
+        catalog: &crate::services::rom_import::GbaCatalog,
+    ) -> Result<usize, PersistenceError> {
+        let transaction = self.connection.transaction()?;
+        let mut titles = std::collections::BTreeMap::<i64, Option<String>>::new();
+        {
+            let mut statement = transaction.prepare(
+                "SELECT DISTINCT r.game_id, r.sha1, r.size FROM rom_files r \
+                 INNER JOIN game_sources gs ON gs.game_id = r.game_id \
+                 AND gs.source_id = 'gba' AND gs.external_id = 'sha256:' || r.sha256 \
+                 WHERE NOT EXISTS (SELECT 1 FROM rom_files verified \
+                 WHERE verified.game_id = r.game_id AND verified.catalog_name IS NOT NULL)",
+            )?;
+            let rows = statement.query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, u64>(2)?,
+                ))
+            })?;
+            for row in rows {
+                let (id, sha1, size) = row?;
+                let title = catalog.title_for_hash(&sha1, size).map(str::to_owned);
+                titles
+                    .entry(id)
+                    .and_modify(|known| {
+                        if *known != title {
+                            *known = None;
+                        }
+                    })
+                    .or_insert(title);
+            }
+        }
+        let mut recognized = 0;
+        for (id, title) in titles {
+            let Some(title) = title else {
+                continue;
+            };
+            transaction.execute(
+                "UPDATE games SET title = ?1, updated_at = unixepoch() WHERE id = ?2",
+                params![title, id],
+            )?;
+            transaction.execute(
+                "UPDATE rom_files SET catalog_name = ?1 WHERE game_id = ?2",
+                params![catalog.name, id],
+            )?;
+            recognized += 1;
+        }
+        transaction.commit()?;
+        Ok(recognized)
+    }
+
     /// Both registration and setup completion commit together. A repeat import
     /// reuses content identity, never title; unavailable folders never prune games.
     pub fn save_rom_import(
@@ -1647,6 +1702,63 @@ mod rom_import_tests {
             catalog: verified.then(|| "GBA catalog".into()),
             status: String::new(),
         }
+    }
+
+    #[test]
+    fn bundled_hash_titles_upgrade_old_filenames_but_preserve_verified_and_unknown_games() {
+        let mut repository = SqliteLibraryRepository::open_in_memory().unwrap();
+        let catalog = crate::services::rom_import::GbaCatalog::bundled().unwrap();
+        let mut recognized = candidate("/roms/completely-wrong.gba", "Wrong filename", "1", false);
+        recognized.fingerprint.as_mut().unwrap().sha1 =
+            "f3ae088181bf583e55daf962a92bb46f4f1d07b7".into();
+        recognized.fingerprint.as_mut().unwrap().size = 16_777_216;
+        let mut verified = recognized.clone();
+        verified.path = "/roms/custom.gba".into();
+        verified.title = "Previously verified title".into();
+        verified.catalog = Some("Custom XML DAT".into());
+        verified.fingerprint.as_mut().unwrap().sha256 = "2".repeat(64);
+        let unknown = candidate("/roms/homebrew.gba", "Homebrew", "3", false);
+        let mut wrong_size = recognized.clone();
+        wrong_size.path = "/roms/wrong-size.gba".into();
+        wrong_size.title = "Size mismatch".into();
+        wrong_size.fingerprint.as_mut().unwrap().sha256 = "4".repeat(64);
+        wrong_size.fingerprint.as_mut().unwrap().size = 192;
+        repository
+            .save_rom_import(
+                &RomSetup::default(),
+                &[recognized, verified, unknown, wrong_size],
+            )
+            .unwrap();
+        let before = repository.list_games().unwrap();
+        assert_eq!(repository.recognize_saved_rom_titles(&catalog).unwrap(), 1);
+        let after = repository.list_games().unwrap();
+        assert_eq!(
+            before.iter().map(|g| g.game().id()).collect::<Vec<_>>(),
+            after.iter().map(|g| g.game().id()).collect::<Vec<_>>()
+        );
+        let titles = after
+            .iter()
+            .map(|g| g.game().title().as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            titles,
+            vec![
+                "Pokemon - Emerald Version (USA, Europe)",
+                "Previously verified title",
+                "Homebrew",
+                "Size mismatch"
+            ]
+        );
+        assert_eq!(repository.recognize_saved_rom_titles(&catalog).unwrap(), 0);
+        let provenance: String = repository
+            .connection
+            .query_row(
+                "SELECT catalog_name FROM rom_files WHERE path = ?1",
+                [b"/roms/completely-wrong.gba".as_slice()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(provenance, catalog.name);
     }
 
     #[test]

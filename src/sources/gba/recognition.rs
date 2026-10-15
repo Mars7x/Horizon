@@ -75,6 +75,20 @@ fn attribute(
 }
 
 impl GbaCatalog {
+    /// Pinned, attributed metadata only. No ROM bytes or runtime download.
+    pub fn bundled() -> Result<Self, RomImportError> {
+        Self::parse(include_bytes!("../../../data/catalogs/gba.xml").as_slice())
+    }
+
+    /// A title is recognized only when SHA-1 and size have one catalog title.
+    pub fn title_for_hash(&self, sha1: &str, size: u64) -> Option<&str> {
+        let titles = self.entries.get(&(sha1.to_ascii_lowercase(), size))?;
+        if titles.len() != 1 {
+            return None;
+        }
+        titles.first().map(String::as_str)
+    }
+
     pub fn load(path: &Path) -> Result<Self, RomImportError> {
         let file = File::open(path)?;
         if file.metadata()?.len() > MAX_DAT {
@@ -278,6 +292,7 @@ mod tests {
     fn catalog_matches_size_and_hash_and_retains_ambiguity() {
         let xml = br#"<datafile><header><name>Nintendo - Game Boy Advance</name></header><game name="One (USA)"><rom size="192" sha1="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"/></game><game name="Two (Europe)"><rom size="192" sha1="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"/></game></datafile>"#;
         let catalog = GbaCatalog::parse(&xml[..]).unwrap();
+        assert_eq!(catalog.title_for_hash(&"a".repeat(40), 192), None);
         assert_eq!(catalog.entries[&("a".repeat(40), 192)].len(), 2);
         assert!(!catalog.entries.contains_key(&("a".repeat(40), 193)));
         assert!(
@@ -287,6 +302,32 @@ mod tests {
             .is_err()
         );
         assert!(GbaCatalog::parse(&b"not XML"[..]).is_err());
+    }
+    #[test]
+    fn bundled_catalog_recognizes_known_release_hashes_without_filenames() {
+        let catalog = GbaCatalog::bundled().unwrap();
+        assert_eq!(
+            catalog.entries.values().map(BTreeSet::len).sum::<usize>(),
+            3503
+        );
+        for (sha1, expected) in [
+            (
+                "574fa542ffebb14be69902d1d36f1ec0a4afd71e",
+                "Pokemon - LeafGreen Version (USA, Europe)",
+            ),
+            (
+                "f3ae088181bf583e55daf962a92bb46f4f1d07b7",
+                "Pokemon - Emerald Version (USA, Europe)",
+            ),
+        ] {
+            assert_eq!(catalog.title_for_hash(sha1, 16_777_216), Some(expected));
+            assert_eq!(
+                catalog.title_for_hash(&sha1.to_uppercase(), 16_777_216),
+                Some(expected)
+            );
+            assert_eq!(catalog.title_for_hash(sha1, 192), None);
+        }
+        assert_eq!(catalog.title_for_hash(&"0".repeat(40), 16_777_216), None);
     }
     #[test]
     fn exact_matching_uses_bytes_instead_of_filename() {

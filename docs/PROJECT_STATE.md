@@ -2,8 +2,9 @@
 
 Horizon is an early-development Rust/Slint Linux desktop Flatpak. Its approved
 direction is embedded emulator cores. Game folder selection automatically scans and imports
-supported files; GBA is the first backend. Existing local hash catalogs support
-exact recognition, with unverified filename fallbacks. No emulator core, BIOS manager or core-hosting
+supported files; GBA is the first backend. A bundled offline hash catalog provides
+exact title recognition, with unverified filename fallbacks for unknown files.
+Existing local XML catalogs remain supported. No emulator core, BIOS manager or core-hosting
 implementation exists yet. Process isolation and the permanent core API remain
 undecided.
 

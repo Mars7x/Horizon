@@ -62,3 +62,7 @@ ROM identity uses GBA plus SHA-256; SHA-1 and size support catalog matching.
 `rom_files` retains path bytes and catalog provenance. A changed file at the same
 path retains both content records; a future launch must validate content again.
 Import preferences and selected files commit together. No automatic pruning runs.
+At startup, exact bundled SHA-1/size matches can replace earlier unverified
+filename titles and record catalog provenance in one transaction. Existing
+verified titles and unknown/conflicting hashes are preserved; GameIds, paths,
+sessions and source identities do not change. No schema change is needed.
