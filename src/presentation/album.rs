@@ -308,9 +308,12 @@ impl AlbumController {
         let titles = library
             .iter()
             .flat_map(|game| {
-                game.sources()
-                    .iter()
-                    .map(|source| (source.clone(), game.game().title().as_str().to_owned()))
+                game.sources().iter().map(|source| {
+                    (
+                        source.clone(),
+                        super::titles::game_title(game.game().title().as_str()),
+                    )
+                })
             })
             .collect();
         let tiles = Rc::new(VecModel::from(Vec::<AlbumTileData>::new()));
@@ -357,7 +360,10 @@ impl AlbumController {
         let mut titles = self.titles.borrow_mut();
         for game in games {
             for source in game.sources() {
-                titles.insert(source.clone(), game.game().title().as_str().to_owned());
+                titles.insert(
+                    source.clone(),
+                    super::titles::game_title(game.game().title().as_str()),
+                );
             }
         }
     }

@@ -872,8 +872,9 @@ fn game_card(
     square_artwork: Option<SquareArtwork>,
     registry: &crate::sources::SourceRegistry,
 ) -> GameCardData {
-    let title = game.game().title().as_str();
-    let (primary, secondary, highlight) = fallback_palette(game.game().id().get(), title);
+    let title = super::titles::game_title(game.game().title().as_str());
+    let (primary, secondary, highlight) =
+        fallback_palette(game.game().id().get(), game.game().title().as_str());
     let pixelated_artwork = square_artwork
         .as_ref()
         .is_some_and(SquareArtwork::pixelated);
@@ -881,7 +882,7 @@ fn game_card(
     let has_artwork = artwork.is_some();
 
     GameCardData {
-        title: title.into(),
+        title: title.as_str().into(),
         platform: game
             .sources()
             .iter()
@@ -890,7 +891,7 @@ fn game_card(
             .collect::<Vec<_>>()
             .join(" · ")
             .into(),
-        monogram: monogram(title).into(),
+        monogram: monogram(&title).into(),
         artwork: artwork.unwrap_or_default(),
         has_artwork,
         pixelated_artwork,

@@ -210,7 +210,7 @@ impl GbaPlayer {
             while let Ok(event) = game.events.try_recv() {
                 match event {
                     Event::Ready(title) | Event::Started(title) => {
-                        ui.set_player_title(title.into());
+                        ui.set_player_title(super::titles::game_title(&title).into());
                         ui.set_player_busy(false);
                         ui.set_player_message("".into());
                     }
@@ -371,7 +371,7 @@ mod runtime_tests {
         );
         std::fs::create_dir_all(&directory).unwrap();
         let rom = crate::platform::gba_core::test_rom();
-        std::fs::write(directory.join("Horizon homebrew.gba"), rom).unwrap();
+        std::fs::write(directory.join("Horizon homebrew (USA, Europe).gba"), rom).unwrap();
         let database = directory.join("library.sqlite3");
         let mut repository = SqliteLibraryRepository::open(&database).unwrap();
         let scan = rom_import::scan_folder(&directory, None).unwrap();
@@ -476,6 +476,7 @@ mod runtime_tests {
             };
             match progress.get() {
                 0 if ui.get_player_has_frame() && !ui.get_player_busy() => {
+                    assert_eq!(ui.get_player_title(), "Horizon homebrew");
                     key("z".into(), true);
                     progress.set(1);
                 }

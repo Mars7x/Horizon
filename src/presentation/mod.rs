@@ -14,6 +14,7 @@ pub mod profile;
 
 pub mod settings;
 pub mod status;
+pub(crate) mod titles;
 pub mod wake;
 
 /// An optional hook (callback or trait object) installed after a controller is built.
