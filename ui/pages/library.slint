@@ -180,16 +180,22 @@ export component LibraryPage inherits Rectangle {
     }
 
     if root.collection-count == 0 : Text {
-        x: Metrics.page-margin; y: root.height / 2;
+        x: Metrics.page-margin; y: (root.height - self.height) / 2;
         width: parent.width - Metrics.page-margin * 2;
+        // A full line box leaves room for the font's ascenders and descenders.
+        height: Typography.body-size * 2;
         horizontal-alignment: center;
+        vertical-alignment: center;
         text: "No games yet";
         color: Theme.secondary-foreground; font-size: Typography.body-size;
     }
     if root.collection-count > 0 && root.total-count == 0 : Text {
-        x: Metrics.page-margin; y: root.height / 2;
+        x: Metrics.page-margin; y: (root.height - self.height) / 2;
         width: parent.width - Metrics.page-margin * 2;
+        // A full line box leaves room for the font's ascenders and descenders.
+        height: Typography.body-size * 2;
         horizontal-alignment: center;
+        vertical-alignment: center;
         text: "No games here";
         color: Theme.secondary-foreground; font-size: Typography.body-size;
     }

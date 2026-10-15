@@ -3,9 +3,9 @@
 //!
 //! It appears when a text field opens and the last input was a controller
 //! or a touch screen, and on request (A on the field, or the field's
-//! keyboard button, for a touch screen that arrives as a mouse, as it can
-//! under gamescope). It writes straight into the editor's draft, so the
-//! field, Save and the editor's own rules see the same text either way.
+//! keyboard button, for a touch screen that arrives as a mouse). It writes
+//! straight into the editor's draft, so the field, Save and validation see
+//! the same text either way.
 //! While open it takes controller input: the D-pad moves, A presses, X
 //! deletes, L3 or R3 is Shift, + (Start) is Done, and B closes it (the editor
 //! stays open). It plays the UI sounds itself (OK for a key, Shift or Done,

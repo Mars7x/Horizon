@@ -32,8 +32,8 @@ pub enum InputDevice {
     #[default]
     Keyboard,
     Gamepad,
-    /// A mouse or touchpad. Under gamescope a touch screen can arrive as
-    /// this too, so nothing may depend on telling the two apart.
+    /// A mouse, touchpad or touch screen reported as pointer input.
+    /// Nothing may depend on telling these devices apart.
     Pointer,
     Touch,
 }

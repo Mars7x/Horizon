@@ -6,8 +6,8 @@
 //! shared with every other program, so Horizon uses an `<app-id>` subfolder.
 //!
 //! ```text
-//! data/    library.sqlite3  album/  profile.png  profile-animated  profile-steam.png  profile-steam-{frame,animated}
-//! config/  appearance.json  profile.json  steamgriddb.json  steam-account.json   (0700 dir)
+//! data/    library.sqlite3  album/  profile.png  profile-animated  profile-steam.png  profile-steam-animated
+//! config/  appearance.json  controller.json  profile.json  steamgriddb.json  steam-account.json   (0700 dir)
 //! cache/   artwork/local/  artwork/steamgriddb/  album/  (disposable)
 //! ```
 //!

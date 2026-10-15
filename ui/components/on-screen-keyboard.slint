@@ -3,8 +3,7 @@ import { SelectionFocusSurface } from "selection-focus-surface.slint";
 import { KeyboardKeyData } from "../models/keyboard.slint";
 
 // Horizon's on-screen keyboard, for a controller or a touch screen. It is
-// drawn in Horizon's own window, not a system keyboard, so it behaves the
-// same on a desktop and inside gamescope. Layout, focus, Shift and what each
+// drawn in Horizon's own window. Layout, focus, Shift and what each
 // key does are Rust-owned (navigation/keyboard.rs, presentation/keyboard.rs);
 // this draws the keys and reports clicks and taps.
 //
@@ -115,7 +114,7 @@ export component OnScreenKeyboard inherits Rectangle {
 }
 
 // A text field's keyboard button: opens the on-screen keyboard by pointer,
-// for a touch screen that arrives as a mouse (as under gamescope).
+// for a touch screen that arrives as a mouse.
 export component KeyboardButton inherits Rectangle {
     callback activated();
     width: 36px;

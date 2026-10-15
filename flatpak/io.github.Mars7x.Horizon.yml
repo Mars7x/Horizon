@@ -69,10 +69,9 @@ modules:
       env:
         CARGO_HOME: /run/build/horizon/cargo
     build-commands:
-      # Phase 3 development builds intentionally allow Cargo to resolve/fetch
-      # dependencies. Before Flathub/release packaging, commit Cargo.lock,
-      # generate cargo-sources.json, and switch this back to --offline --locked.
-      - cargo build --release
+      # Development builds can fetch missing locked dependencies. Release
+      # packaging still needs generated, checksum-pinned offline Cargo sources.
+      - cargo build --release --locked
       - install -Dm0755 target/release/horizon /app/bin/horizon
       - install -Dm0644 data/io.github.Mars7x.Horizon.desktop /app/share/applications/io.github.Mars7x.Horizon.desktop
       - install -Dm0644 data/io.github.Mars7x.Horizon.metainfo.xml /app/share/metainfo/io.github.Mars7x.Horizon.metainfo.xml

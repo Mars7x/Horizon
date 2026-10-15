@@ -1,8 +1,7 @@
 //! The on-screen keyboard's layout and focus policy.
 //!
-//! Drawn by Horizon in its own window, never a system keyboard, so it works
-//! the same on a desktop and inside gamescope. Five rows, each 12 units wide, so keys line up in columns and Up/Down
-//! land where the eye expects. Two layers share the frame: letters (with
+//! Drawn in Horizon's own window. Five rows, each 12 units wide, keep keys
+//! aligned in columns so Up/Down lands where the eye expects. Two layers share the frame: letters (with
 //! Shift for capitals) and symbols. Focus is a (row, key) position; Left and
 //! Right follow the shared edge rule (a held press stops at the end, a fresh
 //! one wraps), and Up and Down go to the key in the next row whose centre is

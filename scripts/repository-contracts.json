@@ -1,0 +1,52 @@
+{
+  "immutable_migrations": {
+    "0001_initial_library.sql": "96ff5af600c2f67b56ce4070366b3dfb030ec6affeb69148852a765ea1638a63",
+    "0002_activity_sessions.sql": "d6d2226e4d377636a61eb6fc3c7215051e7ba5e2bde8a6bf9e3e6a6a4d1b8580",
+    "0003_managed_session_tracking.sql": "2ba2e29ff2dfe3c2e13e47d950dcc39e1a36bc04e76796fdbf90605522c7ad00",
+    "0004_source_runtime_tracking.sql": "0c018334af02e21588785c42de5bfcd9a4595daad50a003ec7d427af2996fd4b",
+    "0005_remove_lutris_source.sql": "083b420aaa4bc9f85fdc9b06da33fe1b2aa656735e0697d614ba7009ffb500bd",
+    "0006_activity_session_checkpoints.sql": "34a31b9edbf7dd6a1cfe1c4eddfc4b6f2425bc8db7586d94b1e8638758c9d3f8",
+    "0007_remove_bottles_source.sql": "5984132c7242b0e77fce4ee56cd29808ed8875c48953d1c788500ded6265c64e",
+    "0008_remove_flatpak_source.sql": "91a5e1e0e43c90da4343f3448a91d13820c2b327c1546662ca193900f352523d",
+    "0009_retire_steam_games.sql": "4fa71ab000d8210076d3b59ff300f99170ba44f53e119cb651ec6952f2ee5133",
+    "0010_retire_heroic_games.sql": "608902af578f773ce2c39fee02ef0441ed30a55375b8a51b0705d33051429436"
+  },
+  "flatpak_finish_args": [
+    "--require-version=1.16.0",
+    "--share=ipc",
+    "--share=network",
+    "--socket=wayland",
+    "--filesystem=xdg-run/pipewire-0",
+    "--device=dri",
+    "--device=input",
+    "--system-talk-name=org.freedesktop.NetworkManager",
+    "--system-talk-name=org.freedesktop.UPower",
+    "--system-talk-name=org.bluez"
+  ],
+  "retired_dependencies": [
+    "steam-vdf-parser"
+  ],
+  "retired_files": [
+    "src/sources/steam.rs",
+    "src/sources/heroic.rs",
+    "src/sources/flatpak.rs",
+    "src/platform/flatpak_host.rs",
+    "src/platform/gamescope.rs",
+    "src/session_helper.rs",
+    "src/sources/bottles.rs",
+    "src/sources/lutris.rs",
+    "src/presentation/shop.rs",
+    "src/services/flathub.rs",
+    "ui/pages/shop.slint",
+    "ui/models/shop.slint"
+  ],
+  "retired_source_tokens": [
+    "GetPlayerAchievements",
+    "GetSchemaForGame",
+    "steam://rungameid/",
+    "heroic://",
+    "SteamCaptures",
+    "GAMESCOPECTRL_BASELAYER_APPID"
+  ],
+  "dependency_usage_exemptions": {}
+}

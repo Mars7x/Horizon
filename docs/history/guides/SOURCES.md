@@ -1,6 +1,6 @@
 # Source boundaries
 
-No production game sources are registered. Steam, Heroic, Flatpak games, Lutris and Bottles are retired. Generic library/import/artwork/lifecycle boundaries remain for later evaluation; emulator hosting is not implemented. No production capture sources are registered. Steam integration is limited to network-backed profile pictures and friends; see ADR 0191. See [ADR 0190](adr/0190-flatpak-embedded-emulator-direction.md).
+No production game sources are registered. Steam, Heroic, Flatpak games, Lutris and Bottles are retired. Generic library/import/artwork/lifecycle boundaries remain for later evaluation; emulator hosting is not implemented. No production capture sources are registered. Steam integration is limited to network-backed profile pictures and friends; see ADR 0191. See [ADR 0190](../../adr/0190-flatpak-embedded-emulator-direction.md).
 
 ## Historical implementation (retired)
 

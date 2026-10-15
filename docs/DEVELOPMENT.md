@@ -1,63 +1,64 @@
-# Developing and testing Horizon
+# Development
 
-This document gives reproducible commands for the source snapshot described in [PROJECT_STATE.md](PROJECT_STATE.md). It does not replace GNOME Builder's build output or claim that all targets have been verified.
+Minimum Rust: `1.92`
+Rust edition: `2024`
+Flatpak runtime: `26.08`
 
-## Recovery SQL validation
+[Cargo.toml](../Cargo.toml) and the
+[Flatpak manifest](../flatpak/io.github.Mars7x.Horizon.yml) are authoritative.
+Use GNOME Builder with that manifest for the normal iterative build. Native
+builds also need SDL3, a C compiler, pkg-config, FFmpeg development libraries
+(libavformat, libavcodec, libavutil, libswscale, libswresample) and PipeWire
+(libpipewire-0.3). Slint uses Winit/Skia, not Qt.
 
-`python3 scripts/check-retirement-migrations.py` runs five temporary in-memory
-SQLite checks: fresh schema, v8/v9 upgrades, exact metadata/history retention,
-archive protection during reconciliation, and failure rollback without ledger
-advancement. It never opens the application database. This supplements the Rust
-migration/repository tests; it does not compile Rust or Slint.
+## Checks
 
-## Toolchain and location
+The offline repository gate requires Python 3.11+ and Bash, with no additional
+Python packages or network access:
 
-- `Cargo.toml` specifies Rust edition **2024** and `rust-version = "1.92"`; the project uses Slint **~1.18** with Winit/Skia, SDL3 (`pkg-config`), SQLite and XDG portals.
-- The primary Flatpak manifest is `flatpak/io.github.Mars7x.Horizon.yml`: Freedesktop Platform/SDK **26.08** plus the **26.08 Rust stable SDK extension**. The Flatpak build includes SDL3, and the runtime provides FFmpeg and PipeWire (Album video and all sound); direct host builds need SDL3 plus FFmpeg (`libavformat`, `libavcodec`, `libavutil`, `libswscale`, `libswresample`) and `libpipewire-0.3` development packages, and a C compiler for the shims in `csrc/`.
-- The application ID is `io.github.Mars7x.Horizon`. Keep app IDs, data paths and desktop-entry values coordinated; do not rename them incidentally.
-- Use the actual repository root containing `Cargo.toml`. The intended workflow is GNOME Builder with the Flatpak manifest; no Qt, GTK or Electron shell is involved.
+```sh
+bash scripts/check-repository.sh
+```
 
-## Quality gate
+It validates current documentation, source/manifest contracts, migration
+integrity, its own regression tests, retirement SQL and attribution. CI runs
+this gate on pushes and pull requests. It does not compile Rust or Slint.
 
-From the repository root:
+The full developer gate requires a supported Rust toolchain, rustfmt, Clippy
+and native dependencies:
+
+```sh
+bash scripts/check.sh
+```
+
+That runs the repository gate plus:
 
 ```sh
 cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
-bash scripts/check-third-party.sh
 ```
 
-Or invoke all of the above with `bash scripts/check.sh`. The first three require a working host toolchain/dependencies; the final attribution check can be run independently. The codebase is rustfmt-formatted (settings in `rustfmt.toml`) and `cargo fmt --check` is enforced: run `cargo fmt` before committing Rust changes. The one-time reformat commit is listed in `.git-blame-ignore-revs`; enable it locally with `git config blame.ignoreRevsFile .git-blame-ignore-revs`.
+A missing tool, old edition support or missing native library is a failed or
+unavailable check, never a pass. Do not weaken edition/minimum-version settings
+to accommodate an outdated local installation.
 
-Without a host Rust toolchain, the same checks run inside the Flatpak SDK (`org.freedesktop.Sdk//26.08` with the `rust-stable` extension: put `/usr/lib/sdk/rust-stable/bin` on `PATH`). FFmpeg, PipeWire and a C compiler are in the SDK; SDL3 is not: build the manifest's pinned SDL3 tarball with CMake into a local prefix and point `PKG_CONFIG_PATH`/`LD_LIBRARY_PATH` at it.
+## Flatpak and architecture verification
 
-Build the Flatpak with `bash scripts/build-flatpak.sh` when the host has `flatpak-builder` and its dependencies. The helper currently installs locally (`--user`) and uses the manifest. GNOME Builder's own Flatpak build/run also works when the matching SDK is present.
+[Packaging notes](../flatpak/README.md) describe SDK setup and source-generation
+limits. `bash scripts/build-flatpak.sh` builds and installs the development
+Flatpak for the local architecture. It can install SDK dependencies, so read
+the helper before invoking it. Successful SDK installation is not compilation.
 
-## ARM (`aarch64`) GNOME Builder setup
+Build and exercise both x86_64 and aarch64 before claiming support. Record the
+first compiler/Slint error when a build fails; DNS/download failures are separate
+from compilation. Historic build claims, including the legacy tuple-comparison
+fix, require actual build evidence rather than inference from source cleanup.
 
-The runtime architecture is chosen by Flatpak/Builder on the machine; do **not** edit the manifest's SDK branch to silence a missing-SDK error. On the ARM laptop, install the matching runtimes from Flathub:
+## Runtime review
 
-```sh
-flatpak install flathub org.freedesktop.Sdk//26.08 \
-  org.freedesktop.Platform//26.08 \
-  org.freedesktop.Sdk.Extension.rust-stable//26.08
-flatpak list --runtime --columns=application,arch,branch
-```
-
-Look for `aarch64` on that machine. Download failures such as `Could not resolve hostname` or `Timeout was reached` are network/Flathub issues, not evidence of a Rust build failure. Retry once connectivity is restored. If SDK installation succeeds but compilation fails, capture the **first compiler error** and the source line, not only Builder's final failure summary.
-
-## Architecture-sensitive testing
-
-- **Rust/controller/navigation changes:** test Home/Back history, repeated D-pad/analog input, disconnected/reconnected controllers, pointer vs Accept parity, rapid route changes and page focus restoration.
-- **Slint/layout changes:** test 720p, 1080p, ultrawide, and short windows, active vs contracted focus geometry, selected cover scaling, long-title fade/marquee, full-shell boundaries, and Reduced Motion. Respect Slint 1.18 syntax; static brace checks do not compile Slint.
-- **Source/database changes:** test no-installed-games state, partial/unavailable snapshots, duplicates, historical/uninstalled titles, existing data upgrades and lifetime-vs-observed time separation. Released SQL migration files remain immutable.
-- **Steam profile/friends/account changes:** test no credentials, invalid SteamID/key, private/unavailable profiles, account replacement/removal, stale in-flight responses, offline mode, and preservation of other settings. Never paste actual credentials in issues or screenshots.
-- **Assets/licenses:** verify SVG crispness at fullscreen scaling, native colors, and `bash scripts/check-third-party.sh`.
-
-## Known boundaries for contributors
-
-- SDL3 comes from the Flatpak module; a direct host `cargo` build is not equivalent to a Flatpak build.
-- The Flatpak development recipe may allow network access during **build** to fetch Cargo crates; this should be hardened into locked/offline sources before a public release. Network used by the running application for supported services is separate from build-network access.
-- No build passed simply because source formatting, ZIP integrity, documentation links, or grep checks passed. Record exactly which tests ran and on which architecture.
-- Do not add a token, Steam Web API key, private config JSON, `target/`, Builder output, or `.git/` to a patch archive.
+Check startup, missing/private data, existing-database upgrades, controller
+reconnection, keyboard/mouse parity, Back/Home/Forward, rapid route changes,
+720p/1080p/ultrawide resizing, fullscreen, high contrast and reduced motion.
+Verify profile account switching, private friends, SteamGridDB failures and
+Album seeking/deletion without exposing credentials in logs or screenshots.

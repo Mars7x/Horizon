@@ -1,27 +1,45 @@
-# Current project state — architecture recovery
+# Project state
 
-This describes the prepared working-tree source for the transition in [ADR 0190](adr/0190-flatpak-embedded-emulator-direction.md). Cargo remains at `0.1.0`; this is not a release claim.
+Horizon is an early-development Rust/Slint Linux desktop Flatpak. Its approved
+direction is embedded emulator cores. No emulator core, ROM importer, BIOS
+manager or core-hosting implementation exists yet. Process isolation and the
+permanent core API remain undecided.
 
-## Implemented now
+## Current surfaces
 
-- Rust 2024 and Slint desktop Flatpak, application ID `io.github.Mars7x.Horizon`, runtime/SDK 26.08. Linux x86_64 and aarch64 remain targets; neither architecture is newly build-verified by this recovery.
-- Home retains its carousel, selected cover, focus frame, motion, marquee, theme, input behavior and Library tile. Four utilities: **Album, Activity, Achievements, Settings**. Profile opens from the avatar. Library remains full-shell.
-- No production game sources are registered. Steam and Heroic game discovery, URI launches, runtime monitoring, local lifetime ingestion and source artwork scanning are retired. No emulator core, game importer or playable replacement is implemented yet; Home/Library have no active games after retirement.
-- Album shows Horizon-owned captures only, retaining its viewer, user-confirmed deletion, video playback and PipeWire audio. Steam screenshot discovery/viewing/deletion and automatic local controller-file lookup are removed (ADR 0191). SDL hardware recognition and controller navigation remain.
-- Steam Account settings, Web API credentials, profile/avatar and read-only friends remain. This is manual SteamID64/API-key configuration, **not OAuth or interactive Steam login**; no such login was implemented to preserve.
-- Steam achievements, badge downloads, cache loading and startup/route/account-change workers are removed. Achievements and Activity Milestones retain their layouts with “Achievements unavailable”; no provider is active. RetroAchievements is planned, not implemented. Existing Steam achievement cache files are left untouched and ignored.
-- SteamGridDB keys, preferences, title lookup, downloading, caching and refresh remain, along with existing artwork files and provenance. With no active games there are no cover jobs. Source-owned Steam icon-cache scanning is retired.
-- Historic observed sessions and source lifetime counters remain separate. Activity retains totals, recent sessions and durable records; installed-most-played slots exclude retired games. Generic lifecycle/recovery services remain but have no production launcher to observe.
-- SDL3 input, controller glyphs/naming, select/back settings, keyboard/mouse input, reduced motion, scaling, fullscreen and normal desktop lifecycle handling remain.
+| Surface | Current behavior |
+| --- | --- |
+| Home | Established cover carousel, Library tile, four utilities and profile avatar |
+| Library | Full-shell grid/sort/filter implementation; no active games after source retirement |
+| Activity | Retained session totals, recent history and distinct lifetime counters |
+| Album | Horizon-owned pictures/clips, viewer, video playback and confirmed deletion |
+| Achievements | Retained page and Milestones layout; no provider, “Achievements unavailable” |
+| Settings | Appearance, Controller, Third-Party → SteamGridDB and Steam Account |
+| Profile | Local name/picture, Steam profile picture and read-only Steam friends |
 
-## Persistence and sandbox
+Utilities are **Album, Activity, Achievements, Settings**, in that order.
+Steam account setup uses a SteamID64 and Web API key; interactive Steam login
+is not implemented. SteamGridDB is independent of Steam account features.
+RetroAchievements is intended future work, not an available backend.
 
-Schema is **0010**. Immutable migrations 0001–0008 remain. Migration 0009 creates `retired_game_sources` and archives Steam membership; 0010 archives Heroic. Neither deletes games, identities, sessions or lifetime counters. Active-library queries continue to use `game_sources`; Album can read archived titles for Horizon-owned captures. No achievement code reads the archive. Reconciliation protects archived game rows. Older retirement migrations retain their original behavior; this cannot recover data already deleted by those earlier versions.
+## Inactive boundaries
 
-Heroic/Legendary and all Steam filesystem grants are removed. Steam profile pictures and friends need network account access only. No local Steam installation is read. Networking, portals, graphics, controller input, PipeWire and read-only status permissions remain. There is no host command execution, session helper or compositor integration. Gamescope implementation was already removed in `bf87675` and `06756c5`; its plans/ADR remain historical.
+No production game or capture sources are registered. Generic import, reload,
+launch, runtime-observation, artwork and session services remain for later
+assessment. No production source currently generates launches or cover-fetch jobs.
+The shared append-only catalog and historical SQLite identities remain intact.
 
-## Validation boundary
+There is no Shop, external launcher integration, Steam screenshot/achievement
+integration, host command execution, dedicated session or compositor support.
+Normal Wayland, fullscreen, scaling, SDL input, desktop portals and application
+lifecycle handling remain. Linux x86_64 and aarch64 remain targets; compatibility
+requires real builds and core-by-core assessment when cores are introduced.
 
-Recovery environment: Cargo, rustc and rustfmt are unavailable; `/usr/bin/flatpak` resolves to an unavailable host-execution wrapper, and flatpak-builder is absent. Rust/Slint compilation, Clippy, Rust tests, Flatpak builds and interactive UI checks cannot be claimed. Run the repository quality gate and actual x86_64/aarch64 Flatpak builds before release. In particular, Phase 10.4.1.1 remains unverified without the user's successful build report.
+## Verification
 
-SQL migration checks use temporary in-memory SQLite databases, not user data. See [Development](DEVELOPMENT.md) for reproducible validation and [ADR 0190](adr/0190-flatpak-embedded-emulator-direction.md) for intentionally deferred core decisions.
+A source snapshot or SDK installation does not prove a successful build. Record
+actual commands, toolchain, failures and tested architecture when delivering a
+change. See [Development](DEVELOPMENT.md). Current decisions are in
+[ADR 0190](adr/0190-flatpak-embedded-emulator-direction.md),
+[ADR 0191](adr/0191-steam-profile-and-friends-only.md) and
+[ADR 0192](adr/0192-repository-maintenance.md).

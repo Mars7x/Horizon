@@ -34,7 +34,6 @@ SPDX-License-Identifier = "CC0-1.0"
 
 [[annotations]]
 path = [
-  "ui/assets/orange-friends.svg",
   "ui/assets/blue-album.svg",
   "ui/assets/teal-activity.svg",
   "ui/assets/gold-achievements.svg",

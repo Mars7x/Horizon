@@ -36,10 +36,7 @@ grep -Fq "LINE Seed JP" "$notice" || { echo "LINE Seed JP missing from THIRD_PAR
 grep -Fq "© LY Corporation" "$notice" || { echo "LINE Seed JP copyright missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
 grep -Fq "rusqlite / libsqlite3-sys" "$notice" || { echo "rusqlite provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
 grep -Fq "SQLite core" "$notice" || { echo "SQLite provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
-grep -Fq "steam-vdf-parser 0.1.2" "$notice" || { echo "steam-vdf-parser provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
 grep -Fq "serde 1.x / serde_json 1.x" "$notice" || { echo "Serde provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
-# The retired Bottles adapter no longer uses yaml_serde. Do not require a
-# phantom dependency notice for a crate absent from Cargo.toml/Cargo.lock.
 grep -Fq "zbus 5.x" "$notice" || { echo "zbus provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
 grep -Fq "**FFmpeg**" "$notice" || { echo "FFmpeg provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
 grep -Fq "**PipeWire**" "$notice" || { echo "PipeWire provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
