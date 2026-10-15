@@ -20,7 +20,7 @@ these guides describe the current contracts. The root README is intentionally bl
 | [GBA playback](GBA_PLAYBACK.md) | Embedded mGBA, gameplay controls, battery saves and lifecycle |
 | [Activity](ACTIVITY.md) | Observed sessions, lifetime records and history |
 | [Album](ALBUM.md) | Horizon-owned media, playback and deletion |
-| [Settings](SETTINGS.md) | Appearance, controllers and third-party configuration |
+| [Settings](SETTINGS.md) | Appearance, controllers, core preferences and third-party configuration |
 | [Profile](PROFILE.md) | Local profile, Steam pictures and read-only friends |
 | [Artwork](ARTWORK.md) | Square-image contract, SteamGridDB, caches and provenance |
 | [Database](DATABASE.md) | Schema, immutable migrations and retained identities |

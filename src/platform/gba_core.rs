@@ -1,4 +1,5 @@
 //! Narrow mGBA libretro host. All core calls and callbacks stay on one worker.
+use crate::domain::core_settings::MgbaPreferences;
 use libloading::Library;
 use std::{
     cell::RefCell,
@@ -16,16 +17,20 @@ pub struct Frame {
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<u8>,
+    pub smooth: bool,
 }
 pub type LatestFrame = Arc<Mutex<Option<Frame>>>;
 pub type AudioBuffer = Arc<Mutex<std::collections::VecDeque<f32>>>;
-const MAX_AUDIO: usize = 32768 * 2 / 4;
 
 struct Callbacks {
     frame: LatestFrame,
     audio: AudioBuffer,
     buttons: Arc<AtomicU16>,
     pixel_format: u32,
+    preferences: MgbaPreferences,
+    raw_frame: Option<Frame>,
+    audio_speed: super::gba_audio::SpeedAudio,
+    max_audio_samples: usize,
     frames: Arc<AtomicU64>,
 }
 thread_local! { static CALLBACKS: RefCell<Option<Callbacks>> = const { RefCell::new(None) }; }
@@ -53,6 +58,7 @@ pub struct Core {
     // Function pointers cannot outlive this library. Drop deinitializes first.
     _library: Library,
     run: unsafe extern "C" fn(),
+    reset: unsafe extern "C" fn(),
     unload: unsafe extern "C" fn(),
     deinit: unsafe extern "C" fn(),
     memory: unsafe extern "C" fn(u32) -> *mut c_void,
@@ -65,6 +71,7 @@ impl Core {
     pub fn load(
         path: &Path,
         rom: &[u8],
+        preferences: MgbaPreferences,
         frame: LatestFrame,
         audio: AudioBuffer,
         buttons: Arc<AtomicU16>,
@@ -104,6 +111,7 @@ impl Core {
                 symbol(&library, b"retro_set_input_state\0")?;
             let mut core = Self {
                 run: symbol(&library, b"retro_run\0")?,
+                reset: symbol(&library, b"retro_reset\0")?,
                 unload: symbol(&library, b"retro_unload_game\0")?,
                 deinit: symbol(&library, b"retro_deinit\0")?,
                 memory: symbol(&library, b"retro_get_memory_data\0")?,
@@ -118,6 +126,10 @@ impl Core {
                     audio,
                     buttons,
                     pixel_format: 0,
+                    preferences,
+                    raw_frame: None,
+                    audio_speed: super::gba_audio::SpeedAudio::default(),
+                    max_audio_samples: 32768 * 2 / 20,
                     frames: Arc::clone(&core.frames),
                 })
             });
@@ -145,8 +157,34 @@ impl Core {
             {
                 return Err("mGBA returned invalid playback timing".into());
             }
+            CALLBACKS.with(|state| {
+                if let Some(state) = state.borrow_mut().as_mut() {
+                    state.max_audio_samples = (core.av.sample_rate as usize / 20) * 2;
+                }
+            });
             Ok(core)
         }
+    }
+    pub fn restart(&mut self) {
+        // SAFETY: same worker and retained library as every other core call.
+        unsafe { (self.reset)() }
+    }
+    pub fn set_fast_forward(&mut self, enabled: bool) {
+        CALLBACKS.with(|state| {
+            if let Some(state) = state.borrow_mut().as_mut() {
+                state.audio_speed.set_fast_forward(enabled);
+            }
+        });
+    }
+    pub fn capture_frame(&self) -> Result<Frame, String> {
+        CALLBACKS
+            .with(|state| {
+                state
+                    .borrow()
+                    .as_ref()
+                    .and_then(|state| state.raw_frame.clone())
+            })
+            .ok_or_else(|| "No game frame is available yet".into())
     }
     pub fn run_frame(&mut self) {
         unsafe { (self.run)() }
@@ -229,8 +267,25 @@ extern "C" fn environment(command: u32, data: *mut c_void) -> bool {
                 variable.value = c"ON".as_ptr();
                 true
             } else {
-                variable.value = ptr::null();
-                false
+                let value = CALLBACKS.with(|state| {
+                    let state = state.borrow();
+                    let preferences = state.as_ref()?.preferences;
+                    match CStr::from_ptr(variable.key).to_bytes() {
+                        b"mgba_audio_low_pass_filter" => Some(if preferences.audio_smoothing {
+                            c"enabled"
+                        } else {
+                            c"disabled"
+                        }),
+                        b"mgba_solar_sensor_level" => Some(
+                            [
+                                c"0", c"1", c"2", c"3", c"4", c"5", c"6", c"7", c"8", c"9", c"10",
+                            ][usize::from(preferences.sunlight.level())],
+                        ),
+                        _ => None,
+                    }
+                });
+                variable.value = value.map_or(ptr::null(), CStr::as_ptr);
+                value.is_some()
             }
         },
         17 => {
@@ -272,10 +327,10 @@ extern "C" fn video(data: *const c_void, width: u32, height: u32, pitch: usize) 
         return;
     }
     CALLBACKS.with(|state| {
-        let Ok(state) = state.try_borrow() else {
+        let Ok(mut state) = state.try_borrow_mut() else {
             return;
         };
-        let Some(state) = state.as_ref() else {
+        let Some(state) = state.as_mut() else {
             return;
         };
         let bpp = if state.pixel_format == 1 { 4 } else { 2 };
@@ -325,12 +380,19 @@ extern "C" fn video(data: *const c_void, width: u32, height: u32, pitch: usize) 
                     .copy_from_slice(&color);
             }
         }
+        let mut raw = Frame {
+            width,
+            height,
+            rgba,
+            smooth: false,
+        };
+        state.raw_frame = Some(raw.clone());
+        if state.preferences.color_correction {
+            super::gba_video::correct_color(&mut raw);
+        }
+        let filtered = super::gba_video::apply(raw, state.preferences.video_filter);
         if let Ok(mut frame) = state.frame.lock() {
-            *frame = Some(Frame {
-                width,
-                height,
-                rgba,
-            });
+            *frame = Some(filtered);
             state.frames.fetch_add(1, Ordering::Release);
         }
     });
@@ -344,17 +406,25 @@ extern "C" fn audio_batch(data: *const i16, frames: usize) -> usize {
         return 0;
     }
     CALLBACKS.with(|state| {
-        let Ok(state) = state.try_borrow() else {
+        let Ok(mut state) = state.try_borrow_mut() else {
             return;
         };
-        let Some(state) = state.as_ref() else {
+        let Some(state) = state.as_mut() else {
             return;
         };
         if let Ok(mut audio) = state.audio.lock() {
             let samples = unsafe { std::slice::from_raw_parts(data, frames * 2) };
-            if audio.len() + samples.len() <= MAX_AUDIO {
-                audio.extend(samples.iter().map(|sample| f32::from(*sample) / 32768.0));
+            for stereo in samples.as_chunks::<2>().0 {
+                if let Some(output) = state.audio_speed.process([
+                    f32::from(stereo[0]) / 32768.0,
+                    f32::from(stereo[1]) / 32768.0,
+                ]) {
+                    audio.extend(output);
+                }
             }
+            // Prefer recent complete stereo frames over delayed audio after a stall.
+            let excess = audio.len().saturating_sub(state.max_audio_samples);
+            audio.drain(..excess);
         }
     });
     frames
@@ -424,6 +494,88 @@ pub(crate) fn test_rom() -> Vec<u8> {
 mod tests {
     use super::*;
     #[test]
+    #[ignore = "requires the built pinned mGBA core"]
+    fn real_core_applies_curated_audio_and_sunlight_options() {
+        let path = std::env::var_os("HORIZON_GBA_CORE").unwrap();
+        let capture = |preferences: MgbaPreferences| {
+            let audio = Arc::new(Mutex::new(std::collections::VecDeque::new()));
+            let mut core = Core::load(
+                Path::new(&path),
+                &test_rom(),
+                preferences,
+                Arc::new(Mutex::new(None)),
+                Arc::clone(&audio),
+                Arc::new(AtomicU16::new(0)),
+            )
+            .unwrap();
+            #[repr(C)]
+            struct Variable {
+                key: *const c_char,
+                value: *const c_char,
+            }
+            let mut variable = Variable {
+                key: c"mgba_solar_sensor_level".as_ptr(),
+                value: ptr::null(),
+            };
+            assert!(environment(15, (&mut variable as *mut Variable).cast()));
+            assert_eq!(
+                unsafe { CStr::from_ptr(variable.value) }.to_str().unwrap(),
+                preferences.sunlight.level().to_string()
+            );
+            for _ in 0..10 {
+                core.run_frame();
+            }
+            let samples: Vec<f32> = audio.lock().unwrap().drain(..).collect();
+            samples
+        };
+        let unfiltered = capture(MgbaPreferences::default());
+        let filtered = capture(MgbaPreferences {
+            audio_smoothing: true,
+            sunlight: 7.try_into().unwrap(),
+            ..MgbaPreferences::default()
+        });
+        assert_eq!(unfiltered.len(), filtered.len());
+        assert!(unfiltered.iter().any(|sample| sample.abs() > 0.001));
+        assert!(
+            unfiltered
+                .iter()
+                .zip(filtered)
+                .any(|(a, b)| (*a - b).abs() > 0.001)
+        );
+    }
+
+    #[test]
+    #[ignore = "requires the built pinned mGBA core"]
+    fn real_core_combines_colour_and_pixel_art_without_changing_capture() {
+        let path = std::env::var_os("HORIZON_GBA_CORE").unwrap();
+        let frame = Arc::new(Mutex::new(None));
+        let mut core = Core::load(
+            Path::new(&path),
+            &test_rom(),
+            MgbaPreferences {
+                color_correction: true,
+                video_filter: crate::domain::core_settings::VideoFilter::Xbrz,
+                ..MgbaPreferences::default()
+            },
+            Arc::clone(&frame),
+            Arc::new(Mutex::new(std::collections::VecDeque::new())),
+            Arc::new(AtomicU16::new(0)),
+        )
+        .unwrap();
+        for _ in 0..6 {
+            core.run_frame();
+        }
+        let display = frame.lock().unwrap().clone().unwrap();
+        let raw = core.capture_frame().unwrap();
+        assert_eq!((display.width, display.height), (720, 480));
+        assert_eq!((raw.width, raw.height), (240, 160));
+        assert!(raw.rgba[1] > 240 && raw.rgba[0] < 20);
+        let centre = ((240 * 720 + 360) * 4) as usize;
+        assert!(display.rgba[centre] > 50);
+        assert!(display.rgba[centre + 1] < raw.rgba[1]);
+    }
+
+    #[test]
     #[ignore = "requires the built mGBA core (HORIZON_GBA_CORE)"]
     fn real_core_draws_responds_to_held_input_and_restores_battery_memory() {
         let path = std::env::var_os("HORIZON_GBA_CORE").expect("set HORIZON_GBA_CORE");
@@ -434,6 +586,7 @@ mod tests {
         let mut core = Core::load(
             Path::new(&path),
             &rom,
+            MgbaPreferences::default(),
             Arc::clone(&frame),
             Arc::clone(&audio),
             Arc::clone(&buttons),
@@ -468,8 +621,39 @@ mod tests {
                 .iter()
                 .any(|sample| sample.abs() > 0.01)
         );
+        audio.lock().unwrap().clear();
+        core.set_fast_forward(true);
+        for _ in 0..3 {
+            core.run_frame();
+        }
+        assert!(
+            audio
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|sample| sample.abs() > 0.01)
+        );
+        let capture = core.capture_frame().unwrap();
+        assert_eq!((capture.width, capture.height), (240, 160));
+        assert!(capture.rgba[1] > 200);
+        core.restart();
+        core.restore_save(&saved).unwrap();
+        assert_eq!(core.save_ram().unwrap()[0], 31);
+        core.set_fast_forward(false);
+        for _ in 0..3 {
+            core.run_frame();
+        }
+        assert!(!audio.lock().unwrap().is_empty());
         drop(core);
-        let mut reopened = Core::load(Path::new(&path), &rom, frame, audio, buttons).unwrap();
+        let mut reopened = Core::load(
+            Path::new(&path),
+            &rom,
+            MgbaPreferences::default(),
+            frame,
+            audio,
+            buttons,
+        )
+        .unwrap();
         reopened.restore_save(&saved).unwrap();
         assert_eq!(reopened.save_ram().unwrap()[0], 31);
     }

@@ -32,18 +32,30 @@ pub struct PlayerPaths {
     pub database: PathBuf,
     pub core: PathBuf,
     pub saves: PathBuf,
+    pub settings: PathBuf,
+    pub album: PathBuf,
 }
 pub enum Command {
     Pause(bool),
     Stop,
     Shutdown,
+    FastForward(bool),
+    Screenshot,
+    Restart,
 }
 pub enum Event {
-    Ready(String),
+    Ready {
+        title: String,
+        freeze_when_unfocused: bool,
+    },
     Started(String),
     Stopped,
     Failed(String),
     SaveFailed(String),
+    SpeedChanged(bool),
+    ScreenshotSaved,
+    Restarted,
+    ActionFailed(String),
 }
 pub struct RunningGame {
     pub commands: Sender<Command>,
@@ -177,9 +189,13 @@ fn play(
         return Err(failure);
     };
     let audio: AudioBuffer = Arc::new(Mutex::new(std::collections::VecDeque::with_capacity(32768)));
+    let preferences = crate::persistence::settings::SettingsStore::new(paths.settings)
+        .load_value::<crate::domain::core_settings::CorePreferences>()
+        .map_err(|_| "Could not read core settings. Check cores.json before playing.".to_owned())?;
     let mut core = Core::load(
         &paths.core,
         &rom,
+        preferences.mgba,
         frame,
         Arc::clone(&audio),
         Arc::clone(&buttons),
@@ -215,22 +231,72 @@ fn play(
     let mut deadline = Instant::now();
     let mut checkpoint = Instant::now();
     let mut paused = false;
+    let mut fast_forward = false;
     let mut pending = None;
     let mut session = None;
     let mut frame_attempts = 0u32;
-    let _ = events.send(Event::Ready(location.title.clone()));
+    let _ = events.send(Event::Ready {
+        title: location.title.clone(),
+        freeze_when_unfocused: preferences.mgba.freeze_when_unfocused,
+    });
     let result = (|| -> Result<(), String> {
         loop {
             while let Some(command) = pending.take().or_else(|| commands.try_recv().ok()) {
                 match command {
                     Command::Pause(value) => {
                         paused = value;
+                        core.set_fast_forward(fast_forward);
                         buttons.store(0, Ordering::Release);
                         stream.set_active(!value);
                         if let Ok(mut audio) = audio.lock() {
                             audio.clear();
                         }
                         deadline = Instant::now();
+                    }
+                    Command::FastForward(enabled) => {
+                        fast_forward = enabled;
+                        core.set_fast_forward(enabled);
+                        stream.set_active(!paused);
+                        if let Ok(mut audio) = audio.lock() {
+                            audio.clear();
+                        }
+                        deadline = Instant::now();
+                        let _ = events.send(Event::SpeedChanged(enabled));
+                    }
+                    Command::Screenshot => {
+                        let result = core
+                            .capture_frame()
+                            .and_then(|frame| write_screenshot(&paths.album, sha256, &frame));
+                        let _ = events.send(match result {
+                            Ok(()) => Event::ScreenshotSaved,
+                            Err(error) => Event::ActionFailed(error),
+                        });
+                    }
+                    Command::Restart => {
+                        if let Err(error) = save_current(&core, &save_path, &mut last_save) {
+                            paused = true;
+                            stream.set_active(false);
+                            let _ = events.send(Event::SaveFailed(error));
+                            continue;
+                        }
+                        core.restart();
+                        core.set_fast_forward(fast_forward);
+                        if !last_save.is_empty()
+                            && let Err(error) = core.restore_save(&last_save)
+                        {
+                            paused = true;
+                            stream.set_active(false);
+                            let _ = events.send(Event::ActionFailed(error));
+                            continue;
+                        }
+                        buttons.store(0, Ordering::Release);
+                        if let Ok(mut audio) = audio.lock() {
+                            audio.clear();
+                        }
+                        paused = false;
+                        stream.set_active(true);
+                        deadline = Instant::now();
+                        let _ = events.send(Event::Restarted);
                     }
                     Command::Stop | Command::Shutdown => {
                         let stopping = matches!(command, Command::Stop);
@@ -270,7 +336,7 @@ fn play(
                     );
                     let _ = events.send(Event::Started(location.title.clone()));
                 }
-                deadline += interval;
+                deadline += if fast_forward { interval / 2 } else { interval };
                 if Instant::now().saturating_duration_since(deadline) > Duration::from_millis(100) {
                     deadline = Instant::now();
                 }
@@ -313,6 +379,51 @@ fn play(
     }
     if result.is_ok() {
         let _ = events.send(Event::Stopped);
+    }
+    result
+}
+
+fn write_screenshot(
+    album: &Path,
+    sha256: &str,
+    frame: &crate::platform::gba_core::Frame,
+) -> Result<(), String> {
+    use crate::{
+        domain::{ExternalGameId, SourceGameRef},
+        services::album::catalog::{HorizonAlbum, part_path},
+    };
+    use image::ImageEncoder;
+    let game = SourceGameRef::new(
+        SourceId::new("gba").map_err(|e| e.to_string())?,
+        ExternalGameId::new(format!("sha256:{sha256}")).map_err(|e| e.to_string())?,
+    );
+    let path = HorizonAlbum::new(album.to_owned())
+        .new_capture_path(Some(&game), "png", chrono::Utc::now())
+        .map_err(|_| "Could not prepare the screenshot in Album".to_owned())?;
+    let partial = part_path(&path);
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&partial)
+        .map_err(|_| "Could not create the screenshot".to_owned())?;
+    let result = (|| -> Result<(), String> {
+        image::codecs::png::PngEncoder::new(&mut file)
+            .write_image(
+                &frame.rgba,
+                frame.width,
+                frame.height,
+                image::ExtendedColorType::Rgba8,
+            )
+            .map_err(|_| "Could not encode the screenshot".to_owned())?;
+        file.sync_all()
+            .map_err(|_| "Could not save the screenshot".to_owned())?;
+        fs::hard_link(&partial, &path)
+            .map_err(|_| "Could not publish the screenshot in Album".to_owned())?;
+        Ok(())
+    })();
+    if let Err(error) = fs::remove_file(&partial) {
+        tracing::warn!(%error, "could not remove screenshot partial file");
     }
     result
 }
@@ -373,7 +484,7 @@ pub fn write_save(path: &Path, bytes: &[u8]) -> Result<(), String> {
         replace(&path.with_extension("sav.bak"), &previous)
             .map_err(|_| "Could not preserve the previous save".to_owned())?;
     }
-    replace(path,bytes).map_err(|_| "Could not write the game save. Free storage or restore folder access, then try Quit again.".to_owned())
+    replace(path,bytes).map_err(|_| "Could not write the game save. Free storage or restore folder access, then try returning to Horizon again.".to_owned())
 }
 
 #[cfg(test)]
@@ -423,6 +534,28 @@ mod tests {
             fs::read(path.with_extension("sav.bak")).unwrap(),
             vec![1; 512]
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn screenshots_publish_native_pixels_and_preserve_unavailable_album_data() {
+        let dir = directory("screenshots");
+        let frame = crate::platform::gba_core::Frame {
+            width: 2,
+            height: 1,
+            rgba: vec![255, 0, 0, 255, 0, 255, 0, 255],
+            smooth: false,
+        };
+        write_screenshot(&dir, &"a".repeat(64), &frame).unwrap();
+        let shots = crate::services::album::catalog::HorizonAlbum::new(dir.clone()).scan();
+        assert_eq!(shots.len(), 1);
+        assert_eq!(
+            image::open(shots[0].path()).unwrap().to_rgba8().as_raw(),
+            &frame.rgba
+        );
+        let blocked = dir.join("unavailable");
+        fs::write(&blocked, b"preserved").unwrap();
+        assert!(write_screenshot(&blocked, &"a".repeat(64), &frame).is_err());
+        assert_eq!(fs::read(blocked).unwrap(), b"preserved");
         fs::remove_dir_all(dir).unwrap();
     }
 }

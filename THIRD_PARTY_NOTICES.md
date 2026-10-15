@@ -36,6 +36,26 @@ Horizon includes or derives small portions of artwork and other resources from t
   copyright © 2015 Simonas Kazlauskas, is used under ISC to load the core;
   `LICENSES/libloading-ISC.txt` is installed with Horizon.
 
+## GBA video treatments
+
+- **xbrz-rs 0.1.0**, by Thomas Bell and Zenju, is the Rust port of Zenju's
+  xBRZ 1.8 pixel-art scaler: https://github.com/bell345/xbrz-rs.
+  SPDX: `GPL-3.0-only`; upstream license text retained unmodified in
+  `LICENSES/GPL-3.0-only.txt`. The checksum-pinned crate in Cargo.lock is used
+  without modification for Horizon's 3× Smooth pixel art filter. Its existing
+  bytemuck, parking_lot and rayon dependencies were already in the lockfile.
+- The sRGB GBA display matrix and gamma profile in `src/platform/gba_video.rs`
+  are adapted from Pokefan531's GBA colour shader, based on Color Mangler by
+  hunterk and optimized by crashGG:
+  https://github.com/libretro/slang-shaders/blob/master/handheld/shaders/color/gba-color.slang.
+  Upstream declares it public domain; the exact retained license statement is
+  `LICENSES/LicenseRef-GBA-Color-Public-Domain.txt` (SPDX identifier
+  `LicenseRef-GBA-Color-Public-Domain`). Horizon converts the default sRGB
+  profile to CPU RGBA processing with lookup tables, retains alpha, omits
+  configurable darkening/wide-gamut profiles, and combines it with any filter.
+  The adaptation is GPL-3.0-or-later. It approximates display colour response;
+  it is not per-device calibration or a bundled RetroArch shader runtime.
+
 ## Kenney Input Prompts
 
 ### Controllers — `ui/assets/controllers/`

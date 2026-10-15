@@ -62,6 +62,7 @@ component AlbumTile inherits Rectangle {
         if root.tile.has-thumbnail : Image {
             width: parent.width; height: parent.height;
             source: root.tile.thumbnail;
+            image-rendering: !root.tile.is-video && root.tile.thumbnail.width * 1px < self.width ? ImageRendering.pixelated : ImageRendering.smooth;
             image-fit: cover;
             // Captures that can't be deleted step back while selecting.
             opacity: root.selecting && !root.tile.deletable ? 0.35 : 1.0;
@@ -159,6 +160,7 @@ export component AlbumPage inherits Rectangle {
     in property <string> viewer-text: "";
     in property <image> viewer-image;
     in property <bool> viewer-has-image: false;
+    in property <bool> viewer-previous-is-video;
     in property <image> viewer-previous-image;
     in property <bool> viewer-previous-has-image: false;
     // The open capture's grid thumbnail, for landing back in the grid.
@@ -486,6 +488,7 @@ export component AlbumPage inherits Rectangle {
             x: slide.phase >= 2 ? -parent.travel : 0px;
             animate x { duration: slide.phase == 2 ? Motion.page-duration : 0ms; easing: ease-out; }
             source: root.viewer-previous-image;
+            image-rendering: !root.viewer-previous-is-video && root.viewer-previous-image.width * 1px < self.width ? ImageRendering.pixelated : ImageRendering.smooth;
             image-fit: contain;
         }
         frame := Rectangle {
@@ -506,11 +509,13 @@ export component AlbumPage inherits Rectangle {
             if root.viewer-landing-has-image : Image {
                 width: parent.width; height: parent.height;
                 source: root.viewer-landing-image;
+                image-rendering: !root.viewer-is-video && root.viewer-landing-image.width * 1px < self.width ? ImageRendering.pixelated : ImageRendering.smooth;
                 image-fit: cover;
             }
             if root.viewer-has-image : Image {
                 width: parent.width; height: parent.height;
                 source: root.viewer-image;
+                image-rendering: !root.viewer-is-video && root.viewer-image.width * 1px < self.width ? ImageRendering.pixelated : ImageRendering.smooth;
                 image-fit: cover;
                 opacity: root.viewing || !root.viewer-landing-has-image ? 1.0 : root.reveal;
             }

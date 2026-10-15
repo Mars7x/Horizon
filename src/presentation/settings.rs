@@ -25,18 +25,7 @@ use crate::{
     },
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum SettingsView {
-    #[default]
-    Root,
-    Appearance,
-    Controller,
-    // Third-Party lists one "Open" row per service; each service has its
-    // own sub-page so SteamGridDB and Steam work the same way.
-    ThirdParty,
-    SteamGridDb,
-    SteamAccount,
-}
+use crate::navigation::SettingsPage as SettingsView;
 
 // SteamGridDB is a separate service; the shared prefix is not redundant.
 #[allow(clippy::enum_variant_names)]
@@ -66,12 +55,19 @@ struct PageState {
 
 pub struct SettingsController {
     page: RefCell<PageState>,
+    location_changed: CallbackSlot<dyn Fn(crate::navigation::PageLocation)>,
+    published_view: Cell<SettingsView>,
     service: RefCell<SettingsService>,
     steam_account: Rc<RefCell<SteamAccountService>>,
     steam_account_changed: CallbackSlot<dyn Fn()>,
     appearance: AppearanceController,
     controller: Cell<ControllerPreferences>,
     controller_path: PathBuf,
+    cores: crate::services::core_settings::CoreSettings,
+    core_values: Cell<crate::domain::core_settings::CorePreferences>,
+    core_ready: Cell<bool>,
+    core_busy: Cell<bool>,
+    core_feedback: RefCell<String>,
     controller_changed: CallbackSlot<dyn Fn(ControllerPreferences)>,
     artwork_changed: CallbackSlot<dyn Fn(ArtworkPreferences)>,
     artwork_refresh: CallbackSlot<dyn Fn(ArtworkPreferences)>,
@@ -88,15 +84,29 @@ impl SettingsController {
         appearance: AppearanceController,
         steam_account: Rc<RefCell<SteamAccountService>>,
         controller_path: PathBuf,
+        core_path: PathBuf,
     ) -> Rc<Self> {
+        let weak_ui = ui.as_weak();
+        let (notify, drain) = super::wake::drain_notify(move |controller: &Self| {
+            if let Some(ui) = weak_ui.upgrade() {
+                controller.drain_cores(&ui);
+            }
+        });
         let controller = Rc::new(Self {
             page: RefCell::new(PageState::default()),
+            location_changed: RefCell::new(None),
+            published_view: Cell::new(SettingsView::Root),
             service: RefCell::new(service),
             steam_account,
             steam_account_changed: RefCell::new(None),
             appearance,
             controller: Cell::new(controller_settings::load_preferences(&controller_path)),
             controller_path,
+            cores: crate::services::core_settings::CoreSettings::new(core_path, notify),
+            core_values: Cell::default(),
+            core_ready: Cell::new(false),
+            core_busy: Cell::new(false),
+            core_feedback: RefCell::new("Loading…".into()),
             controller_changed: RefCell::new(None),
             artwork_changed: RefCell::new(None),
             artwork_refresh: RefCell::new(None),
@@ -105,9 +115,69 @@ impl SettingsController {
             wayland_clipboard: RefCell::new(None),
             paste_generation: Arc::new(AtomicU64::new(0)),
         });
+        drain.bind(&controller);
         controller.publish(ui);
         controller.bind_callbacks(ui);
         controller
+    }
+
+    fn drain_cores(&self, ui: &AppWindow) {
+        for result in self.cores.results.try_iter() {
+            self.core_busy.set(false);
+            match result {
+                Ok(values) => {
+                    let was_ready = self.core_ready.replace(true);
+                    self.core_values.set(values);
+                    self.core_feedback.borrow_mut().clear();
+                    if was_ready {
+                        self.cue(UiSoundCue::Ok);
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "core preferences unavailable");
+                    *self.core_feedback.borrow_mut() = if self.core_ready.get() {
+                        "Couldn't save. Previous settings retained.".into()
+                    } else {
+                        "Couldn't load core settings. Check cores.json and restart.".into()
+                    };
+                }
+            }
+        }
+        self.publish(ui);
+    }
+
+    fn change_core(&self, ui: &AppWindow, row: i32, direction: Option<bool>) {
+        if !self.core_ready.get() || self.core_busy.get() {
+            return;
+        }
+        let mut next = self.core_values.get();
+        match row {
+            0 => next.mgba.audio_smoothing = direction.unwrap_or(!next.mgba.audio_smoothing),
+            1 => {
+                next.mgba.sunlight =
+                    next.mgba
+                        .sunlight
+                        .step(if direction == Some(false) { -1 } else { 1 })
+            }
+            2 => next.mgba.video_filter = next.mgba.video_filter.step(direction != Some(false)),
+            3 => next.mgba.color_correction = direction.unwrap_or(!next.mgba.color_correction),
+            4 => {
+                next.mgba.freeze_when_unfocused =
+                    direction.unwrap_or(!next.mgba.freeze_when_unfocused)
+            }
+            _ => return,
+        }
+        if next == self.core_values.get() {
+            return;
+        }
+        match self.cores.requests.send(next) {
+            Ok(()) => {
+                self.core_busy.set(true);
+                *self.core_feedback.borrow_mut() = "Saving…".into();
+            }
+            Err(_) => *self.core_feedback.borrow_mut() = "Couldn't save core settings".into(),
+        }
+        self.publish(ui);
     }
 
     pub fn set_steam_account_changed(&self, changed: Rc<dyn Fn()>) {
@@ -217,6 +287,25 @@ impl SettingsController {
         if let Some(callback) = self.artwork_changed.borrow().as_ref() {
             callback(self.artwork_preferences());
         }
+    }
+
+    pub fn set_location_changed(&self, callback: Rc<dyn Fn(crate::navigation::PageLocation)>) {
+        *self.location_changed.borrow_mut() = Some(callback);
+    }
+    pub fn has_transient(&self, ui: &AppWindow) -> bool {
+        let page = self.page.borrow();
+        page.editing_key || page.confirm.is_some() || ui.get_settings_refresh_open()
+    }
+    pub fn restore_page(&self, ui: &AppWindow, view: SettingsView) {
+        let mut page = self.page.borrow_mut();
+        let selected = settings_parent(page.view)
+            .filter(|(parent, _)| *parent == view)
+            .map_or(0, |(_, row)| row);
+        page.view = view;
+        page.selected = selected;
+        page.feedback.clear();
+        drop(page);
+        self.publish(ui);
     }
 
     pub fn on_enter(&self, ui: &AppWindow) {
@@ -349,6 +438,10 @@ impl SettingsController {
                 } else if page.view == SettingsView::Appearance && page.selected == 14 {
                     drop(page);
                     self.set_ui_sounds_enabled(ui, action == UiAction::Right);
+                } else if page.view == SettingsView::Mgba {
+                    let row = page.selected;
+                    drop(page);
+                    self.change_core(ui, row, Some(action == UiAction::Right));
                 } else if page.view == SettingsView::Controller {
                     let row = page.selected;
                     drop(page);
@@ -380,6 +473,15 @@ impl SettingsController {
     }
 
     fn bind_callbacks(self: &Rc<Self>, ui: &AppWindow) {
+        let core = Rc::downgrade(self);
+        let weak = ui.as_weak();
+        ui.on_settings_core_decrease(move || {
+            if let (Some(core), Some(ui)) = (core.upgrade(), weak.upgrade())
+                && core.page.borrow().view == SettingsView::Mgba
+            {
+                core.change_core(&ui, 1, Some(false));
+            }
+        });
         let weak = ui.as_weak();
         let controller = Rc::clone(self);
         ui.on_settings_activate(move |index| {
@@ -508,6 +610,23 @@ impl SettingsController {
                     self.cue(UiSoundCue::Ok);
                 }
                 self.publish(ui);
+                return;
+            }
+            SettingsView::Cores => {
+                if selected != 0 {
+                    return;
+                }
+                let mut page = self.page.borrow_mut();
+                page.view = SettingsView::Mgba;
+                page.selected = 0;
+                drop(page);
+                self.cue(UiSoundCue::Ok);
+                self.publish(ui);
+                return;
+            }
+            SettingsView::Mgba => {
+                self.page.borrow_mut().selected = selected.clamp(0, 2);
+                self.change_core(ui, selected, None);
                 return;
             }
             SettingsView::Controller => {
@@ -882,7 +1001,16 @@ impl SettingsController {
             SettingsView::SteamAccount => 3,
             SettingsView::SteamGridDb => 4,
             SettingsView::Controller => 5,
+            SettingsView::Cores => 6,
+            SettingsView::Mgba => 7,
         });
+        ui.set_settings_core_ready(self.core_ready.get() && !self.core_busy.get());
+        ui.set_settings_core_filter(self.core_values.get().mgba.video_filter.label().into());
+        ui.set_settings_core_color(self.core_values.get().mgba.color_correction);
+        ui.set_settings_core_freeze(self.core_values.get().mgba.freeze_when_unfocused);
+        ui.set_settings_core_smoothing(self.core_values.get().mgba.audio_smoothing);
+        ui.set_settings_core_sunlight(i32::from(self.core_values.get().mgba.sunlight.level()));
+        ui.set_settings_core_feedback(self.core_feedback.borrow().as_str().into());
         let prefs = self.appearance.preferences();
         ui.set_settings_theme_index(prefs.theme_index());
         ui.set_settings_accent_index(prefs.accent_index());
@@ -925,6 +1053,18 @@ impl SettingsController {
                 self.secondary_label(page.view, page.selected)
             };
         ui.set_settings_secondary_label(secondary.into());
+        let view = page.view;
+        drop(page);
+        drop(settings);
+        if self.published_view.replace(view) != view
+            && let Some(callback) = self.location_changed.borrow().as_ref()
+        {
+            callback(if view == SettingsView::Root {
+                crate::navigation::PageLocation::Root
+            } else {
+                crate::navigation::PageLocation::Settings(view)
+            });
+        }
     }
 }
 
@@ -933,6 +1073,8 @@ impl SettingsController {
 fn settings_parent(view: SettingsView) -> Option<(SettingsView, i32)> {
     match view {
         SettingsView::Root => None,
+        SettingsView::Cores => Some((SettingsView::Root, 3)),
+        SettingsView::Mgba => Some((SettingsView::Cores, 0)),
         SettingsView::Appearance => Some((SettingsView::Root, 0)),
         SettingsView::Controller => Some((SettingsView::Root, 1)),
         SettingsView::ThirdParty => Some((SettingsView::Root, 2)),
@@ -944,7 +1086,9 @@ fn settings_parent(view: SettingsView) -> Option<(SettingsView, i32)> {
 /// Keep controller focus within visible/enabled Third-Party actions.
 fn selection_count(view: SettingsView) -> i32 {
     match view {
-        SettingsView::Root => 3,
+        SettingsView::Root => 4,
+        SettingsView::Cores => 1,
+        SettingsView::Mgba => 5,
         SettingsView::Appearance => 15,
         SettingsView::Controller => 2,
         SettingsView::ThirdParty => 2,
@@ -983,6 +1127,7 @@ fn root_destination(index: i32) -> Option<SettingsView> {
         0 => Some(SettingsView::Appearance),
         1 => Some(SettingsView::Controller),
         2 => Some(SettingsView::ThirdParty),
+        3 => Some(SettingsView::Cores),
         _ => None,
     }
 }
@@ -1099,7 +1244,7 @@ mod editor_navigation_tests {
 
     #[test]
     fn refresh_row_is_included_only_with_saved_key() {
-        assert_eq!(super::selection_count(SettingsView::Root), 3);
+        assert_eq!(super::selection_count(SettingsView::Root), 4);
         assert_eq!(super::selection_count(SettingsView::Controller), 2);
         assert_eq!(super::selection_count(SettingsView::Appearance), 15);
         assert_eq!(super::selection_count(SettingsView::ThirdParty), 2);
@@ -1213,6 +1358,205 @@ mod root_activation_regressions {
         assert_eq!(root_destination(1), Some(SettingsView::Controller));
         assert_eq!(root_destination(2), Some(SettingsView::ThirdParty));
         assert_eq!(root_destination(-1), None);
-        assert_eq!(root_destination(3), None);
+        assert_eq!(root_destination(3), Some(SettingsView::Cores));
+        assert_eq!(root_destination(4), None);
+        assert_eq!(
+            settings_parent(SettingsView::Mgba),
+            Some((SettingsView::Cores, 0))
+        );
+        assert_eq!(
+            settings_parent(SettingsView::Cores),
+            Some((SettingsView::Root, 3))
+        );
+    }
+}
+
+#[cfg(test)]
+mod core_runtime_tests {
+    use super::*;
+    use crate::{appearance::store::AppearanceStore, persistence::settings::SettingsStore};
+    #[test]
+    #[ignore = "requires Wayland and a fresh HORIZON_CORE_SETTINGS_TEST_DIR"]
+    fn core_settings_navigation_save_and_restore() {
+        let directory = PathBuf::from(std::env::var_os("HORIZON_CORE_SETTINGS_TEST_DIR").unwrap());
+        std::fs::create_dir_all(&directory).unwrap();
+        let ui = AppWindow::new().unwrap();
+        ui.set_current_route(crate::AppRouteView::Settings);
+        ui.global::<crate::Motion>().set_reduced_motion(true);
+        let appearance =
+            AppearanceController::new(&ui, AppearanceStore::new(directory.join("appearance.json")))
+                .unwrap();
+        let controller = SettingsController::new(
+            &ui,
+            SettingsService::load(SettingsStore::new(directory.join("artwork.json"))).unwrap(),
+            appearance,
+            Rc::new(RefCell::new(
+                SteamAccountService::load(directory.join("steam.json")).unwrap(),
+            )),
+            directory.join("controller.json"),
+            directory.join("cores.json"),
+        );
+        let weak = Rc::downgrade(&controller);
+        let weak_ui = ui.as_weak();
+        ui.on_raw_key_input(move |text, repeated| {
+            let (Some(controller), Some(ui)) = (weak.upgrade(), weak_ui.upgrade()) else {
+                return false;
+            };
+            crate::input::action_for_key(&text, repeated).is_some_and(|action| {
+                controller.handle_action(&ui, UiActionEvent { action, repeated })
+            })
+        });
+        ui.on_raw_key_released(|_| true);
+        ui.show().unwrap();
+        ui.invoke_settings_activate(3); // Pointer activation opens the requested category.
+        assert_eq!(ui.get_settings_view(), 6);
+        controller.handle_action(&ui, UiActionEvent::fresh(UiAction::Accept));
+        assert_eq!(ui.get_settings_view(), 7);
+        let stage = Rc::new(Cell::new(0));
+        let ticks = Rc::new(Cell::new(0));
+        let timer = slint::Timer::default();
+        let (progress, count) = (Rc::clone(&stage), Rc::clone(&ticks));
+        let weak_ui = ui.as_weak();
+        let live = Rc::clone(&controller);
+        let output = directory.clone();
+        timer.start(
+            slint::TimerMode::Repeated,
+            std::time::Duration::from_millis(150),
+            move || {
+                let ui = weak_ui.upgrade().unwrap();
+                count.set(count.get() + 1);
+                assert!(
+                    count.get() < 100,
+                    "core settings timed out: {}",
+                    ui.get_settings_core_feedback()
+                );
+                if !ui.get_settings_core_ready() {
+                    return;
+                }
+                let tap = |key: slint::platform::Key| {
+                    ui.window()
+                        .dispatch_event_with_result(slint::platform::WindowEvent::KeyPressed {
+                            text: key.into(),
+                        })
+                        .unwrap();
+                    ui.window()
+                        .dispatch_event_with_result(slint::platform::WindowEvent::KeyReleased {
+                            text: key.into(),
+                        })
+                        .unwrap();
+                };
+                match progress.get() {
+                    0 => {
+                        tap(slint::platform::Key::RightArrow);
+                        progress.set(1);
+                    }
+                    1 => {
+                        assert!(ui.get_settings_core_smoothing());
+                        tap(slint::platform::Key::DownArrow);
+                        assert_eq!(ui.get_settings_selection(), 1);
+                        tap(slint::platform::Key::RightArrow);
+                        progress.set(2);
+                    }
+                    2 => {
+                        assert_eq!(ui.get_settings_core_sunlight(), 1);
+                        ui.invoke_settings_core_decrease();
+                        progress.set(3);
+                    }
+                    3 => {
+                        tap(slint::platform::Key::DownArrow);
+                        assert_eq!(ui.get_settings_selection(), 2);
+                        tap(slint::platform::Key::RightArrow);
+                        progress.set(6);
+                    }
+                    6 => {
+                        assert_eq!(ui.get_settings_core_filter(), "LCD");
+                        tap(slint::platform::Key::Return);
+                        progress.set(7);
+                    }
+                    7 => {
+                        assert_eq!(ui.get_settings_core_filter(), "Smooth");
+                        tap(slint::platform::Key::RightArrow);
+                        progress.set(8);
+                    }
+                    8 => {
+                        assert_eq!(ui.get_settings_core_filter(), "Smooth pixel art");
+                        tap(slint::platform::Key::RightArrow);
+                        progress.set(10);
+                    }
+                    10 => {
+                        assert_eq!(ui.get_settings_core_filter(), "None");
+                        tap(slint::platform::Key::LeftArrow);
+                        progress.set(9);
+                    }
+                    9 => {
+                        assert_eq!(ui.get_settings_core_filter(), "Smooth pixel art");
+                        tap(slint::platform::Key::DownArrow);
+                        assert_eq!(ui.get_settings_selection(), 3);
+                        tap(slint::platform::Key::RightArrow);
+                        progress.set(11);
+                    }
+                    11 => {
+                        assert!(ui.get_settings_core_color());
+                        assert!(ui.get_settings_core_freeze());
+                        tap(slint::platform::Key::DownArrow);
+                        assert_eq!(ui.get_settings_selection(), 4);
+                        tap(slint::platform::Key::LeftArrow);
+                        progress.set(12);
+                    }
+                    12 => {
+                        assert!(!ui.get_settings_core_freeze());
+                        assert_eq!(ui.get_settings_core_sunlight(), 0);
+                        let pixels = ui.window().take_snapshot().unwrap();
+                        image::save_buffer(
+                            output.join("mgba-settings.png"),
+                            pixels.as_bytes(),
+                            pixels.width(),
+                            pixels.height(),
+                            image::ColorType::Rgba8,
+                        )
+                        .unwrap();
+                        tap(slint::platform::Key::Escape);
+                        assert_eq!(
+                            (ui.get_settings_view(), ui.get_settings_selection()),
+                            (6, 0)
+                        );
+                        tap(slint::platform::Key::Escape);
+                        assert_eq!(
+                            (ui.get_settings_view(), ui.get_settings_selection()),
+                            (0, 3)
+                        );
+                        // A failed write must retain the already saved in-memory value.
+                        std::fs::rename(output.join("cores.json"), output.join("saved-cores.json"))
+                            .unwrap();
+                        std::fs::create_dir(output.join("cores.json")).unwrap();
+                        live.activate(&ui, 3);
+                        live.activate(&ui, 0);
+                        live.activate(&ui, 0);
+                        progress.set(4);
+                    }
+                    4 => {
+                        assert!(ui.get_settings_core_feedback().starts_with("Couldn't save"));
+                        assert!(ui.get_settings_core_smoothing());
+                        progress.set(5);
+                        slint::quit_event_loop().unwrap();
+                    }
+                    _ => {}
+                }
+            },
+        );
+        slint::run_event_loop().unwrap();
+        assert_eq!(stage.get(), 5);
+        let saved: crate::domain::core_settings::CorePreferences =
+            SettingsStore::new(directory.join("saved-cores.json"))
+                .load_value()
+                .unwrap();
+        assert!(saved.mgba.audio_smoothing);
+        assert_eq!(saved.mgba.sunlight.level(), 0);
+        assert_eq!(
+            saved.mgba.video_filter,
+            crate::domain::core_settings::VideoFilter::Xbrz
+        );
+        assert!(saved.mgba.color_correction);
+        assert!(!saved.mgba.freeze_when_unfocused);
     }
 }

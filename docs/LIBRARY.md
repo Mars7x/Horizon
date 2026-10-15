@@ -1,9 +1,10 @@
 # Library
 
-Library is a full-shell route, reached by Home's final tile or Menu/Start/F10.
+Library is a full-shell route, reached by Home's final tile.
 Its established responsive square-cover grid, Source/Sort controls and scrolling
-are retained. Library → Add games opens the [GBA importer](ROM_IMPORT.md). Imported games
-appear immediately and persist across restarts. Playback requires a future core.
+are retained. Add games and its X/Delete shortcut are absent. The
+[GBA importer](ROM_IMPORT.md) remains part of first-run setup. Imported games
+persist across restarts and launch through the embedded mGBA player.
 Empty-state labels reserve a full-height line box so glyph descenders remain
 visible at different UI scales, including the empty-filter message.
 

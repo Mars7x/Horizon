@@ -56,6 +56,11 @@ mod tests {
     }
 
     #[test]
+    fn plus_is_not_a_library_shortcut() {
+        assert_eq!(action_for_key("+", false), None);
+    }
+
+    #[test]
     fn arrows_map_to_navigation() {
         assert_eq!(
             action_for_key(encoded(Key::LeftArrow).as_str(), false),

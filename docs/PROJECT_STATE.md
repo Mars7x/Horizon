@@ -17,11 +17,11 @@ import and Ready. Completed setup is skipped; unfinished confirmed steps resume.
 | Surface | Current behavior |
 | --- | --- |
 | Home | Established carousel, Library tile, four utilities/profile avatar; Accept plays imported GBA games |
-| Library | Full-shell grid/sort/filter; Add games imports raw GBA ROMs; Accept opens the embedded player |
+| Library | Full-shell grid/sort/filter; Accept opens imported GBA games in the embedded player |
 | Activity | Retained session totals, recent history and distinct lifetime counters |
 | Album | Horizon-owned pictures/clips, viewer, video playback and confirmed deletion |
 | Achievements | Retained page and Milestones layout; no provider, “Achievements unavailable” |
-| Settings | Appearance, Controller, Third-Party → SteamGridDB and Steam Account |
+| Settings | Appearance, Controller, Cores → mGBA, Third-Party → SteamGridDB and Steam Account |
 | Profile | Local name/picture, Steam profile picture and read-only Steam friends |
 
 Utilities are **Album, Activity, Achievements, Settings**, in that order.
@@ -34,7 +34,7 @@ RetroAchievements is intended future work, not an available backend.
 GBA launches only its imported content through the embedded player; no capture
 sources are registered. External URI/foreground-handoff execution remains dormant.
 Optional SteamGridDB lookup can supply covers for imported games. The reusable importer
-opens from first-run setup and Library.
+opens from first-run setup.
 The shared append-only catalog and historical SQLite identities remain intact.
 
 There is no Shop, external launcher integration, Steam screenshot/achievement

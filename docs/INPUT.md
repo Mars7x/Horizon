@@ -12,7 +12,7 @@ on its required thread. Controller arrival/removal must not require a restart.
 | Navigate | Arrows | D-pad or stick |
 | Accept / Back | Enter / Escape | Platform confirm/back buttons |
 | Bumpers | Q / E | LB / RB |
-| Library | F10 | Menu/Start |
+| Library | Activate Home’s Library tile | Activate Home’s Library tile |
 | Home | Home | Guide/Home when delivered |
 
 Text fields retain normal editing behavior. Directional repeat is bounded across
@@ -31,15 +31,23 @@ recognition is separate from Steam account services.
 During [GBA playback](GBA_PLAYBACK.md), held buttons and key releases drive the
 core independently of menu repeats. Keyboard: arrows move, Z/X are A/B, A/S are
 L/R, Enter is Start and Backspace is Select. Escape/F10, Guide or a stick click
-opens Pause. Controller face-button conventions follow the device family;
-Start/Back are game Start/Select. Menu confirm/back swapping does not swap game
-buttons. Pause, window deactivation and player entry/exit release held state.
+opens Pause. Its vertical menu skips disabled state placeholders; Left/Right
+adjusts the focused speed choice. Back continues, or cancels restart confirmation. Focus loss clears and blocks
+gameplay input without opening this menu; optional background freezing resumes
+automatically, while an explicit pause remains paused.
+Controller face-button conventions follow the device family;
+Start/Back are game Start/Select. Swap Select and Back also exchanges controller gameplay A/B after device-family
+mapping. It leaves keyboard controls and all other game buttons unchanged. Pause, window deactivation and player entry/exit release held state.
 
 ## Mouse and touch
 
 Pointer activation must match controller activation and feedback. Hover is not
 selection. Wheel/touchpad input pans list cameras without moving selection.
-Window scaling, fullscreen and ultrawide do not change semantic navigation.
+Mouse side Back/Forward use the same multi-page history across routes, Settings
+subpages, Activity details and Album viewers. Temporary dialogs/editors keep
+input priority. New navigation clears Forward. Home game clicks activate the
+clicked game; a recognized drag pans without launching. Window scaling,
+fullscreen and ultrawide do not change semantic navigation.
 Touch can be reported as mouse input; provide the existing explicit keyboard
 button rather than relying only on device detection.
 

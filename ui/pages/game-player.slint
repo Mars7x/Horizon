@@ -1,30 +1,91 @@
-import { Theme, Metrics, Typography } from "../theme/theme.slint";
+import { PausePanel } from "../components/pause-panel.slint";
+import { CardRect } from "../models/game-card.slint";
+import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { ActionButton } from "../components/action-button.slint";
 import { ModalDialog } from "../components/modal-dialog.slint";
 
 export component GamePlayer inherits Rectangle {
     in property <bool> open;
+    in property <int> phase;
+    in property <CardRect> origin;
+    out property <float> progress: root.phase == 1 || root.phase == 2 ? 1.0 : 0.0;
+    animate progress {
+        duration: root.phase == 1 || root.phase == 3 ? Motion.player-zoom-duration : 0ms;
+        easing: root.phase == 3 ? ease-in-out : ease-out-back;
+    }
     in property <bool> paused;
+    in property <bool> frozen;
+    out property <float> picture-opacity: root.phase == 3
+        ? max(0.0, min(1.0, root.progress / Motion.player-card-blend-window)) : 1.0;
+    in property <bool> fast-forward;
+    in property <bool> restart-confirm;
+    in property <int> restart-focus;
+    callback restart-answer(int);
+    private property <float> pause-reveal: root.paused && !root.failed && root.phase == 2 ? 1.0 : 0.0;
+    animate pause-reveal { duration: Motion.dialog-duration; easing: ease-out; }
     in property <bool> busy;
     in property <bool> failed;
     in property <bool> has-frame;
+    in property <bool> smooth;
     in property <image> frame;
     in property <string> title;
     in property <string> message;
     in property <int> focused;
     callback choose(int);
     visible: root.open;
-    background: #000;
+    background: transparent;
     TouchArea {width:parent.width;height:parent.height;}
-    Image {
+    Rectangle {
         width: parent.width; height: parent.height;
-        source: root.frame;
-        visible: root.has-frame;
-        image-fit: contain;
-        image-rendering: pixelated;
+        background: #000;
+        opacity: max(0.0, min(1.0, root.progress));
     }
-    ModalDialog {
-        open: root.paused || root.busy || root.failed;
+    Rectangle {
+        x: root.origin.x * root.width * (1.0 - root.progress);
+        y: root.origin.y * root.height * (1.0 - root.progress);
+        width: root.width * (root.origin.width + (1.0 - root.origin.width) * root.progress);
+        height: root.height * (root.origin.height + (1.0 - root.origin.height) * root.progress);
+        // Upload the first frame during the card press, before the zoom clock.
+        opacity: root.phase == 0 ? (root.has-frame ? 0.01 : 0.0) : root.picture-opacity;
+        background: #000;
+        border-radius: Metrics.game-shell-radius * (1.0 - max(0.0, min(1.0, root.progress)));
+        clip: true;
+        Image {
+            width: parent.width; height: parent.height;
+            source: root.frame;
+            visible: root.has-frame;
+            image-fit: contain;
+            image-rendering: root.smooth ? ImageRendering.smooth : ImageRendering.pixelated;
+        }
+    }
+    if root.phase == 2 && !root.paused && !root.frozen && root.fast-forward && !root.failed : Rectangle {
+        x: parent.width - Metrics.page-margin - 48px; y: Metrics.spacing-lg;
+        width: 48px; height: 28px; border-radius: Metrics.radius-sm; background: #00000099;
+        Text { width: parent.width; height: parent.height; text: "2×"; color: white; font-size: Typography.body-size; horizontal-alignment: center; vertical-alignment: center; }
+    }
+    Rectangle {
+        width: parent.width; height: parent.height;
+        visible: root.phase == 2 && !root.failed && root.pause-reveal > 0.001;
+        background: #00000070; opacity: root.pause-reveal;
+        TouchArea { width: parent.width; height: parent.height; enabled: root.paused && !root.busy;
+            clicked => { if root.restart-confirm { root.restart-answer(0); } else { root.choose(0); } }
+        }
+    }
+    PausePanel {
+        x: Metrics.page-margin - Metrics.spacing-lg * (1.0 - root.pause-reveal);
+        y: Metrics.spacing-lg;
+        width: min(Metrics.pause-panel-width, root.width - Metrics.page-margin * 2);
+        height: root.height - Metrics.spacing-lg * 2;
+        visible: root.phase == 2 && !root.failed && (root.paused || root.pause-reveal > 0.001);
+        opacity: root.pause-reveal;
+        open: root.paused; busy: root.busy; fast-forward: root.fast-forward;
+        title: root.title; message: root.message; focused: root.focused;
+        restart-confirm: root.restart-confirm; restart-focus: root.restart-focus;
+        choose(index) => { root.choose(index); }
+        restart-answer(choice) => { root.restart-answer(choice); }
+    }
+    if root.phase == 2 : ModalDialog {
+        open: root.failed || (root.busy && !root.paused);
         area-width: parent.width; area-height: parent.height;
         card-width: 520px; card-height: root.message == "" ? 196px : 272px;
         VerticalLayout {
@@ -34,8 +95,8 @@ export component GamePlayer inherits Rectangle {
             if !root.busy : HorizontalLayout {
                 height: 48px;
                 spacing: Metrics.spacing-md;
-                ActionButton {label:root.failed ? "Back" : "Resume";focused:root.focused==0;activated=>{root.choose(0);}}
-                if !root.failed : ActionButton {label:"Save and quit";focused:root.focused==1;activated=>{root.choose(1);}}
+                ActionButton {label:root.failed ? "Back" : "Continue";focused:root.focused==0;activated=>{root.choose(0);}}
+                if !root.failed : ActionButton {label:"Save and quit";focused:root.focused==1;activated=>{root.choose(6);}}
             }
         }
     }

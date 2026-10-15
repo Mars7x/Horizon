@@ -8,8 +8,8 @@
 //! ```
 //!
 //! Folder names are `encode_path_segment` of the ids; the stamp is
-//! `YYYYMMDD-HHMMSS-mmm` in UTC. A writer saves to `<name>.part` and renames
-//! when complete, so a scan never lists a half-written file (`.part` is not a
+//! `YYYYMMDD-HHMMSS-mmm` in UTC. A writer saves to `<name>.part` and publishes
+//! only when complete, so a scan never lists a half-written file (`.part` is not a
 //! media extension).
 use std::{
     fs,
@@ -46,8 +46,8 @@ impl HorizonAlbum {
     }
 
     /// Where a new capture goes, with its folder created. The screenshot and
-    /// recording features call this, write `<path>.part`, then rename it to
-    /// `path`. Never returns an existing file.
+    /// recording features call this, write `<path>.part`, then atomically publish
+    /// it as `path`. Never returns an existing file.
     pub fn new_capture_path(
         &self,
         game: Option<&SourceGameRef>,

@@ -9,3 +9,6 @@ pub mod slint_backend;
 pub mod system_status;
 pub mod video;
 pub mod wayland_clipboard;
+
+mod gba_audio;
+mod gba_video;

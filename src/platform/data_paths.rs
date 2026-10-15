@@ -7,7 +7,7 @@
 //!
 //! ```text
 //! data/    library.sqlite3  album/  profile.png  profile-animated  profile-steam.png  profile-steam-animated
-//! config/  appearance.json  controller.json  profile.json  steamgriddb.json  steam-account.json   (0700 dir)
+//! config/  appearance.json  controller.json  cores.json  profile.json  steamgriddb.json  steam-account.json   (0700 dir)
 //! cache/   artwork/local/  artwork/steamgriddb/  album/  (disposable)
 //! ```
 //!
@@ -131,7 +131,12 @@ pub fn appearance_settings_path() -> Result<PathBuf, DataPathError> {
     config_file_path(APPEARANCE_FILE)
 }
 
-/// Controller preferences (swapping confirm and back).
+/// Curated preferences for the bundled core.
+pub fn core_settings_path() -> Result<PathBuf, DataPathError> {
+    config_file_path("cores.json")
+}
+
+/// Controller preferences (swapping confirm/back and gameplay A/B).
 pub fn controller_settings_path() -> Result<PathBuf, DataPathError> {
     config_file_path(CONTROLLER_FILE)
 }

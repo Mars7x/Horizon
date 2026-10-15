@@ -1,5 +1,5 @@
 import { Theme, Metrics, Motion } from "../theme/theme.slint";
-import { GameCardData } from "../models/game-card.slint";
+import { GameCardData, CardRect } from "../models/game-card.slint";
 import { GameTile } from "game-tile.slint";
 import { LibraryTile } from "library-tile.slint";
 import { SelectedGameLabel } from "selected-game-label.slint";
@@ -66,6 +66,18 @@ export component GameCarousel inherits Rectangle {
             + Metrics.carousel-content-padding
             + Metrics.game-stride / 2
             - root.camera-offset) / 1px;
+
+    public pure function selected-card-rect() -> CardRect {
+        let size = Metrics.game-tile-size * (root.launching-game-index == root.selected-index
+            ? Metrics.game-launch-pressed-scale : Metrics.game-selected-scale);
+        let from = root.selected-index < root.from-indices.length ? root.from-indices[root.selected-index] : root.selected-index;
+        let shift = root.reordering && from >= 0
+            ? (from + (root.selected-index - from) * root.moved - root.selected-index) * Metrics.game-stride : 0px;
+        let rise = root.reordering && from < 0 ? (1.0 - root.arrival) * root.arrival-rise : 0px;
+        return { x: (scene.x + root.selected-center-world-x + shift - size / 2) / 1px,
+            y: (root.local-shelf-y + Metrics.carousel-shelf-height / 2 + rise - size / 2) / 1px,
+            width: size / 1px, height: size / 1px };
+    }
 
     background: transparent;
 

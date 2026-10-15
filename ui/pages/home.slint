@@ -1,5 +1,5 @@
 import { Theme, Metrics } from "../theme/theme.slint";
-import { GameCardData } from "../models/game-card.slint";
+import { GameCardData, CardRect } from "../models/game-card.slint";
 import { GameCarousel } from "../components/game-carousel.slint";
 import { DragScroll } from "../components/scroll.slint";
 
@@ -21,6 +21,11 @@ export component HomePage inherits Rectangle {
     callback select-game(int);
     callback open-library();
     callback carousel-geometry-changed(float);
+
+    public pure function selected-card-rect() -> CardRect {
+        let rect = carousel.selected-card-rect();
+        return { x: rect.x, y: rect.y + swipe.y / 1px, width: rect.width, height: rect.height };
+    }
 
     background: Theme.background;
 

@@ -19,6 +19,8 @@ export component ListRow inherits Rectangle {
     in property <string> title;
     in property <string> subtitle;
     in property <bool> focused: false;
+    // Compact action rows share the same focus, hover and marquee behavior.
+    in property <bool> compact: false;
     in property <bool> enabled: true;
     // Width kept free on the right for the trailing children.
     in property <length> trailing-width: 48px;
@@ -27,7 +29,7 @@ export component ListRow inherits Rectangle {
     // never moves selection).
     callback wheel(length);
 
-    height: Metrics.list-row-height;
+    height: root.compact ? Metrics.compact-row-height : Metrics.list-row-height;
     private property <color> surface-color: root.enabled && (touch.pressed || touch.has-hover)
         ? Theme.surface-raised : Theme.surface;
     background: root.surface-color;
@@ -46,17 +48,18 @@ export component ListRow inherits Rectangle {
     accessible-enabled: root.enabled;
 
     MarqueeText {
-        x: 24px; y: 12px;
+        x: Metrics.spacing-lg; y: root.compact ? (parent.height - Metrics.compact-title-height) / 2 : 12px;
         width: max(40px, parent.width - 24px - root.trailing-width);
-        height: 30px;
+        height: root.compact ? Metrics.compact-title-height : 30px;
         text: root.title;
         active: root.focused;
         text-color: root.enabled ? Theme.foreground : Theme.secondary-foreground;
         edge-color: root.surface-color;
-        font-size: Typography.heading-size;
-        font-weight: Typography.heading-weight;
+        font-size: root.compact ? Typography.body-size : Typography.heading-size;
+        font-weight: root.compact ? Typography.emphasis-weight : Typography.heading-weight;
     }
     MarqueeText {
+        visible: !root.compact;
         x: 24px; y: 44px;
         width: max(40px, parent.width - 24px - root.trailing-width);
         height: 24px;

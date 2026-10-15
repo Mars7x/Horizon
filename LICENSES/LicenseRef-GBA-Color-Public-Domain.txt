@@ -1,0 +1,11 @@
+Upstream license statement from handheld/shaders/color/gba-color.slang
+https://github.com/libretro/slang-shaders/blob/master/handheld/shaders/color/gba-color.slang
+
+Shader Modified: Pokefan531
+Color Mangler
+Author: hunterk
+Optimized by: crashGG
+License: Public domain
+
+This retained upstream statement documents the public-domain dedication for the
+GBA colour profile used by Horizon. Horizon's CPU adaptation is GPL-3.0-or-later.

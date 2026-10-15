@@ -36,6 +36,10 @@ export global Metrics {
     out property <length> spacing-xl: 32px;
     out property <length> spacing-xxl: 48px;
 
+    out property <length> compact-row-height: 48px;
+    out property <length> compact-title-height: 28px;
+    out property <length> pause-row-height: compact-row-height;
+    out property <length> pause-panel-width: 456px;
     out property <length> radius-sm: 8px;
     out property <length> radius-md: 12px;
     out property <length> radius-lg: 18px;
@@ -175,6 +179,9 @@ export global Motion {
             1.0 - focus-idle-highlight-strength
                 * (0.5 - 0.5 * cos(animation-tick() / focus-idle-cycle * 360deg)));
     out property <length> game-focus-idle-expansion: 2.2px;
+    out property <duration> player-press-hold: reduced-motion ? 0ms : 125ms;
+    out property <float> player-card-blend-window: 0.65;
+    out property <duration> player-zoom-duration: reduced-motion ? 0ms : 230ms;
     out property <duration> launch-press-duration: reduced-motion ? 0ms : 90ms;
     out property <duration> launch-release-duration: reduced-motion ? 0ms : 230ms;
     // Playing badges are persistent card overlays. Fade/slide both directions;
