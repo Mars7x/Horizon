@@ -1,5 +1,7 @@
 pub mod actions;
 mod keyboard;
+#[cfg(test)]
+pub(crate) use keyboard::action_for_key;
 mod manager;
 pub mod mouse;
 pub mod sdl;

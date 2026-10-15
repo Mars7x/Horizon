@@ -1,6 +1,8 @@
 # ADR 0193 — Reviewed local GBA imports
 
-Status: Accepted. First-run integration is covered by [ADR 0194](0194-first-run-onboarding.md).
+Status: Accepted for identity/retention. Manual catalog/review interaction is
+superseded by [ADR 0195](0195-automatic-folder-import.md). First-run integration
+is covered by [ADR 0194](0194-first-run-onboarding.md).
 
 Start with raw Game Boy Advance cartridges before integrating an emulator. Users
 choose a folder, inspect matches, then confirm registration. Exact title/region

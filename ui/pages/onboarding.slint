@@ -1,5 +1,4 @@
 import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
-import { PageHeader } from "../components/page-header.slint";
 import { HintBar } from "../components/hint-bar.slint";
 import { HintData } from "../models/hints.slint";
 import { ActionButton } from "../components/action-button.slint";
@@ -212,7 +211,7 @@ component SetupStep inherits Rectangle {
         }
         Text {
             y: 68px; width: parent.width; height: 56px;
-            text: root.step == 0 ? "Make yourself at home." : root.step == 2 ? "Choose a folder, then review your games." : "Your profile is ready. Add games whenever you like.";
+            text: root.step == 0 ? "Make yourself at home." : root.step == 2 ? "Choose your game folder. We’ll take care of the rest." : "Your profile is ready. Add games whenever you like.";
             font-size: Typography.body-size;
             color: Theme.secondary-foreground;
             horizontal-alignment: center;
@@ -226,14 +225,6 @@ component SetupStep inherits Rectangle {
             focused: root.active;
             enabled: root.active && !root.busy;
             activated => { root.choose(0); }
-        }
-        if root.step == 2 : Text {
-            y: 136px; width: parent.width; height: 40px;
-            text: "Your files stay where they are.";
-            font-size: Typography.caption-size;
-            color: Theme.secondary-foreground;
-            horizontal-alignment: center;
-            vertical-alignment: center;
         }
         if root.step == 3 : Text {
             y: 136px; width: parent.width; height: 40px;
@@ -257,15 +248,15 @@ component SetupStep inherits Rectangle {
             activated => { root.choose(root.step == 1 ? 5 : root.step == 2 ? 2 : 1); }
         }
         if root.step == 2 : ActionButton {
-            x: parent.width - 348px; width: 168px; height: parent.height;
+            x: parent.width - 392px; width: 168px; height: parent.height;
             label: "Do this later";
             focused: root.active && root.focused == 1;
             enabled: root.active && !root.busy;
             activated => { root.choose(1); }
         }
         ActionButton {
-            x: parent.width - self.width; width: 164px; height: parent.height;
-            label: root.step == 1 ? "Continue" : root.step == 2 ? "Add games" : "Enter Horizon";
+            x: parent.width - self.width; width: root.step == 2 ? 208px : 164px; height: parent.height;
+            label: root.step == 1 ? "Continue" : root.step == 2 ? "Choose game folder" : "Enter Horizon";
             primary: true;
             focused: root.active && root.focused == (root.step == 1 ? 6 : 0);
             enabled: root.active && !root.busy;
@@ -304,13 +295,6 @@ export component OnboardingPage inherits Rectangle {
     visible: root.open;
     // A setup page consumes pointer input before Home underneath it.
     TouchArea { width: parent.width; height: parent.height; }
-    header := PageHeader {
-        x: 0px; y: 0px;
-        width: parent.width; height: Metrics.page-header-height;
-        z: 3;
-        title: "Horizon";
-        opacity: root.step != 0 && !root.keyboard-open ? 1.0 : 0.0;
-    }
     transition := TransitionDriver { prewarm: true; key: root.step; }
     for shown in [0, 1, 2, 3] : TransitionLayer {
         width: parent.width; height: parent.height;

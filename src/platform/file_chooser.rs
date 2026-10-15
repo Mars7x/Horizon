@@ -56,21 +56,17 @@ pub fn choose_image(title: &str) -> Result<Option<PathBuf>, FileChooserError> {
         .ok_or(FileChooserError::NotLocal)
 }
 
-/// Folder/catalog requests block; use a worker, just as for images.
-pub fn choose_rom_input(directory: bool) -> Result<Option<PathBuf>, FileChooserError> {
+/// Ask for a game folder. Blocks on a worker; cancellation changes nothing.
+pub fn choose_game_folder() -> Result<Option<PathBuf>, FileChooserError> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
     let response = runtime.block_on(async {
         let request = SelectedFiles::open_file()
-            .title(if directory {
-                "Choose GBA ROM folder"
-            } else {
-                "Choose GBA XML DAT catalog"
-            })
+            .title("Choose game folder")
             .modal(true)
             .multiple(false)
-            .directory(directory);
+            .directory(true);
         request.send().await?.response()
     });
     let files = match response {

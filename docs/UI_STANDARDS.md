@@ -1,7 +1,7 @@
 # UI standards
 
-Home keeps its own shell. The approved [first-run Welcome](ONBOARDING.md) is a
-minimal introduction without a header, hint bar or preference controls. Every other full-screen page uses the shared frame;
+Home keeps its own shell. The approved [first-run flow](ONBOARDING.md) omits the
+app header; Welcome also omits the hint bar and preference controls. Other full-screen pages use the shared frame;
 feature work must not replace Home's focus geometry, selected scale or marquee.
 See [Home](HOME_UI.md) and [navigation](NAVIGATION.md).
 

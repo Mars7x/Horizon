@@ -7,6 +7,8 @@
 | [0192](0192-repository-maintenance.md) | Current contracts, isolated history and repository checks |
 | [0193](0193-reviewed-gba-import.md) | Local GBA recognition and reviewed content identity before core integration |
 | [0194](0194-first-run-onboarding.md) | Minimal welcome, local profile setup and shared controller input |
+| [0195](0195-automatic-folder-import.md) | Direct folder selection with automatic scanning and import |
+| [0196](0196-rom-artwork-title-matching.md) | Source-aware release tags and normalized unique artwork title matching |
 
 Earlier decisions and their supporting phase notes are in
 [history](../history/INDEX.md). Their numbered identifiers remain reserved.

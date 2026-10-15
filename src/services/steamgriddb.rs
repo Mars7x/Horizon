@@ -8,6 +8,7 @@ use image::{ImageFormat, RgbaImage};
 use reqwest::{Url, blocking::Client, redirect::Policy};
 use serde::Deserialize;
 use thiserror::Error;
+use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
 
 use crate::{
     domain::LibraryGame,
@@ -364,8 +365,18 @@ impl SteamGridDbLookup {
                     .and_then(|source| source.external_artwork_id(source_ref.external_id()))
             })
             .collect::<Vec<_>>();
+        let display_title = game.game().title().as_str();
+        let mut titles = game.sources().iter().filter_map(|reference| {
+            sources
+                .get(reference.source_id())?
+                .artwork_search_title(display_title)
+        });
+        // Conflicting adapter suggestions retain the original title.
+        let title = titles
+            .next()
+            .filter(|first| titles.all(|next| next == *first));
         Self {
-            title: game.game().title().as_str().to_owned(),
+            title: title.unwrap_or_else(|| display_title.to_owned()),
             external_ids,
         }
     }
@@ -420,7 +431,9 @@ impl SteamGridDbMatchService {
         // SteamGridDB may not index some valid Steam AppIDs. A unique,
         // normalized *exact* title match is safe to use when every source ID
         // lookup returned NotFound; near matches and ambiguous titles are not.
-        let candidates = self.client.search_by_name(&lookup.title)?;
+        let candidates = self
+            .client
+            .search_by_name(&normalized_title(&lookup.title))?;
         Ok(match unique_exact_title(&lookup.title, candidates) {
             TitleMatch::Unique(found) => MatchOutcome::Matched(SteamGridDbMatch {
                 game: found,
@@ -461,6 +474,9 @@ enum TitleMatch {
 
 fn unique_exact_title(title: &str, candidates: Vec<SteamGridDbGame>) -> TitleMatch {
     let expected = normalized_title(title);
+    if expected.is_empty() {
+        return TitleMatch::None;
+    }
     let mut matches = candidates
         .into_iter()
         .filter(|candidate| normalized_title(&candidate.name) == expected);
@@ -476,6 +492,13 @@ fn unique_exact_title(title: &str, candidates: Vec<SteamGridDbGame>) -> TitleMat
 
 fn normalized_title(input: &str) -> String {
     input
+        .nfd()
+        .filter(|c| !is_combining_mark(*c))
+        .map(|c| match c {
+            ':' | '-' | '–' | '—' => ' ',
+            _ => c,
+        })
+        .collect::<String>()
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
@@ -544,7 +567,7 @@ mod tests {
         };
         let b = SteamGridDbGame {
             id: 4,
-            name: "GAME DELUXE".into(),
+            name: "GAME DELUXE II".into(),
             verified: true,
         };
         assert!(matches!(
@@ -552,7 +575,7 @@ mod tests {
             TitleMatch::Unique(_)
         ));
         assert!(matches!(
-            unique_exact_title("Game Deluxe", vec![a.clone()]),
+            unique_exact_title("Game Deluxe II", vec![a.clone()]),
             TitleMatch::None
         ));
         assert!(matches!(
@@ -624,6 +647,77 @@ mod tests {
         let lookup = SteamGridDbLookup::for_game(&reference, &registry);
         assert!(lookup.external_ids.is_empty());
         assert_eq!(lookup.title, "Demo");
+    }
+
+    #[test]
+    fn imported_pokemon_names_resolve_without_renaming_library_games() {
+        let mut registry = SourceRegistry::new();
+        registry
+            .register(crate::sources::gba::GbaSource::new().unwrap())
+            .unwrap();
+        for (title, response, expected_query, expected_id) in [
+            (
+                "Pokemon - LeafGreen Version (USA)",
+                r#"{"success":true,"data":[{"id":34216,"name":"Pokémon LeafGreen Version"},{"id":22,"name":"Pokémon FireRed and LeafGreen+"}]}"#,
+                "pokemon%20leafgreen%20version",
+                34216,
+            ),
+            (
+                "Pokemon - Emerald Version (USA, Europe)",
+                r#"{"success":true,"data":[{"id":34971,"name":"Pokémon Emerald Version"},{"id":23,"name":"Pokémon Emerald Enhanced"}]}"#,
+                "pokemon%20emerald%20version",
+                34971,
+            ),
+        ] {
+            let reference = game(title, "gba", "sha1:example");
+            let lookup = SteamGridDbLookup::for_game(&reference, &registry);
+            let (url, handle) = serve_once(200, response);
+            let matcher = SteamGridDbMatchService::new(test_client(url));
+            let MatchOutcome::Matched(found) = matcher.resolve(&lookup).unwrap() else {
+                panic!("expected a unique normalized match");
+            };
+            assert_eq!(found.game.id, expected_id);
+            assert_eq!(found.method, MatchMethod::UniqueExactTitle);
+            assert_eq!(reference.game().title().as_str(), title);
+            assert!(handle.join().unwrap().starts_with(&format!(
+                "GET /api/v2/search/autocomplete/{expected_query} "
+            )));
+        }
+    }
+
+    #[test]
+    fn normalized_title_matching_keeps_editions_sequels_and_collisions_distinct() {
+        let candidate = SteamGridDbGame {
+            id: 1,
+            name: "Pokémon Emerald Version".into(),
+            verified: true,
+        };
+        assert!(matches!(
+            unique_exact_title("Pokemon - Emerald Version", vec![candidate.clone()]),
+            TitleMatch::Unique(_)
+        ));
+        assert!(matches!(
+            unique_exact_title("Pokemon Emerald Version II", vec![candidate.clone()]),
+            TitleMatch::None
+        ));
+        assert!(matches!(
+            unique_exact_title("Pokemon Emerald Version (Beta)", vec![candidate.clone()]),
+            TitleMatch::None
+        ));
+        assert!(matches!(
+            unique_exact_title(
+                "Pokemon Emerald Version",
+                vec![
+                    candidate.clone(),
+                    SteamGridDbGame {
+                        id: 2,
+                        name: "Pokemon - Emerald Version".into(),
+                        ..candidate
+                    }
+                ]
+            ),
+            TitleMatch::Ambiguous
+        ));
     }
 
     /// Exercise request path, credential header, status classification and

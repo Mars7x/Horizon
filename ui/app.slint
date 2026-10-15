@@ -410,11 +410,19 @@ export component AppWindow inherits Window {
     callback onboarding-name-done();
     callback onboarding-name-edited();
     callback onboarding-name-focused();
+
+    // Release the Profile TextInput/FocusScope when its step becomes hidden.
+    // Rust still owns the selected control; this restores native key delivery.
+    changed onboarding-step => {
+        if (root.onboarding-step != 1) { input-scope.focus(); }
+    }
+    changed onboarding-open => {
+        if (!root.onboarding-open || root.onboarding-step != 1) { input-scope.focus(); }
+    }
     in property <bool> rom-setup-open: false;
     in property <bool> rom-setup-busy: false;
     in property <string> rom-setup-title;
     in property <string> rom-setup-detail;
-    in property <string> rom-setup-message;
     in property <[string]> rom-setup-labels;
     in property <int> rom-setup-focus: 0;
     out property <bool> rom-setup-blocking: rom-dialog.visible;
@@ -1049,7 +1057,6 @@ export component AppWindow inherits Window {
                 area-height: parent.height;
                 title: root.rom-setup-title;
                 detail: root.rom-setup-detail;
-                message: root.rom-setup-message;
                 labels: root.rom-setup-labels;
                 focused: root.rom-setup-focus;
                 busy: root.rom-setup-busy;

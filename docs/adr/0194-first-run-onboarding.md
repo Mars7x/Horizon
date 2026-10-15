@@ -1,6 +1,7 @@
 # ADR 0194 — Minimal first-run setup with shared input
 
-Status: Accepted.
+Status: Accepted. The import interaction is simplified by
+[ADR 0195](0195-automatic-folder-import.md).
 
 Add a first-run Welcome → Profile → Add your games → Ready flow before Home.
 Keep the introduction to a welcome and one primary action. Do not add preference

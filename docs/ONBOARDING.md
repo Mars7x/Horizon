@@ -11,6 +11,11 @@ route navigation. [Pure focus policy](../src/navigation/onboarding.rs) defines
 step movement and the name/avatar/Back/Continue controls. Home/Menu/Forward
 cannot bypass setup. Keyboard, mouse and controller share the same actions and
 existing UI sounds; no additional sound assets are bundled.
+The Library and Ready action rows follow their visible left-to-right order:
+Left moves toward Back and Right returns toward the primary action. Up/Down
+leave these single rows unchanged; directional movement stops at either edge.
+Leaving Profile returns native keyboard focus to the app's input scope so the
+hidden name editor cannot retain keyboard events on subsequent steps.
 
 The profile name uses the existing normalization and 32-character limit. Empty
 confirmation uses Player. Four text placeholders stand in for future profile
@@ -25,9 +30,10 @@ keyboard, leaving Profile open. Done returns focus to Continue. Physical editing
 and the on-screen keyboard share one draft and Unicode-aware caret handling.
 The form moves above the keyboard and suppresses nonessential content while typing.
 
-Add games opens the shared importer. Cancelling stays on the library setup step;
-confirming an import or choosing Do this later reaches Ready. The desktop portal's
-folder/catalog picker requires mouse/keyboard input; this explicit exception
+Choose game folder opens the system picker directly. Selection automatically
+scans and imports games, then reaches Ready; cancelling stays on the library setup
+step. Do this later also reaches Ready. There is no catalog setup or review menu.
+The desktop portal's folder picker requires mouse/keyboard input; this explicit exception
 preserves narrow sandbox access. All Horizon setup screens accept controller input.
 
 Profile writes and setup progress run on workers. Profile storage is committed
@@ -38,14 +44,15 @@ flow reveals the existing Home. Restarting resumes an unfinished confirmed step;
 completed setup is skipped. Existing installations get setup once without losing
 profile pictures, library entries or historical sessions.
 
-The UI uses shared page/header/hint/button/focus and transition components; the
-minimal Welcome intentionally omits the page header and hint bar. Shared motion
+The UI uses shared hint/button/focus and transition components. All setup steps
+omit the repeated app header; the minimal Welcome also omits the hint bar. Shared motion
 preferences apply, including Reduced Motion. No Home layout is replaced.
 
 Normal tests cover focus policy, persistence constraints, profile serialization
 and existing keyboard geometry/editing. The ignored Wayland test
-`controller_setup_keyboard_and_restart_smoke` exercises normalized controller
-actions, shared keyboard typing/Back/Done, placeholder selection, import cancel,
+`controller_setup_keyboard_and_restart_smoke` exercises Slint keyboard-event routing
+and switching to normalized controller actions, shared keyboard typing/Back/Done,
+placeholder selection, import cancel,
 skipping games, completion and saved state. It requires isolated XDG directories
 and `HORIZON_SETUP_TEST_DIR`; it must never run against the user's real data.
 A semantic input test does not establish physical gamepad reconnection or ARM
