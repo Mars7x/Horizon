@@ -64,6 +64,7 @@ impl SourceArtworkCandidate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceLaunchTarget {
     Uri(String),
+    EmbeddedGba { sha256: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -434,7 +435,7 @@ pub enum SourceRegistryBuildError {
     Registry(#[from] SourceRegistryError),
 }
 
-/// GBA is import-only until an embedded emulator is implemented.
+/// GBA is the first embedded core; external launcher adapters remain retired.
 pub fn production_source_registry() -> Result<SourceRegistry, SourceRegistryBuildError> {
     let mut registry = SourceRegistry::new();
     registry.register(gba::GbaSource::new()?)?;

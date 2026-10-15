@@ -1,7 +1,8 @@
 # Architecture
 
-Horizon keeps behavior in Rust and rendering in Slint. A future core host must
-fit this separation; no hosting API or in-process/child-process choice is made here.
+Horizon keeps behavior in Rust and rendering in Slint. The first approved host is
+an in-process mGBA libretro worker, scoped to GBA rather than a permanent multi-core
+framework. [ADR 0198](adr/0198-first-gba-playback.md) records the decision.
 
 | Layer | Responsibility | Source |
 | --- | --- | --- |
@@ -22,7 +23,7 @@ not string checks spread through presentation.
 ## Composition and workers
 
 [Startup](../src/app.rs) resolves paths, opens/migrates SQLite, constructs the
-GBA import-only registry and reads the active library. Runtime services share the
+GBA registry and reads the active library. Runtime services share the
 repository. Home, Library and Activity share an append-only catalog whose indices
 never move during a run; reloads append and mark removals.
 
@@ -43,8 +44,15 @@ remain on the appropriate main thread; SDL event-pump ownership stays explicit.
 - Normal desktop file choice and browser links use XDG portals. There is no
   shell execution, host launcher adapter or session helper.
 
-Generic lifecycle/import interfaces are retained, not a promise that their
-external-URI assumptions will suit emulator hosting. Evaluate them alongside
-crash containment, input ownership, video/audio, saves and architecture support
-in a separately approved core-hosting decision. See [Database](DATABASE.md),
+Generic lifecycle/import interfaces remain, while embedded launches bypass their
+external-URI/foreground-handoff assumptions. Further core or process architecture
+changes require a separate decision. See [Database](DATABASE.md),
 [Storage](STORAGE.md) and [current decisions](adr/).
+
+The [player service](../src/services/gba_player.rs) revalidates a complete ROM
+snapshot against its imported SHA-256, owns save writes and observed sessions,
+and calls the [mGBA host](../src/platform/gba_core.rs) on one worker. Slint receives
+only the latest software RGBA frame; PipeWire consumes a bounded audio queue.
+SDL remains on its existing main-thread event pump. Gameplay held state is
+separate from menu repeats; the Rust player consumes shell actions while open.
+No external emulator executable, host command or broader Flatpak grant is used.

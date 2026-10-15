@@ -63,6 +63,21 @@ modules:
         url: https://github.com/libsdl-org/SDL/releases/download/release-3.4.18/SDL3-3.4.18.tar.gz
         sha256: 9c75cf16330322c217dedd2e0609f1124f1b54b8633e763467b4684d0f4334a3
 
+  - name: mgba-core
+    buildsystem: simple
+    build-commands:
+      - cmake -S . -B build -G Ninja -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -DBUILD_LIBRETRO=ON -DBUILD_QT=OFF -DBUILD_SDL=OFF -DSKIP_LIBRARY=ON -DDISABLE_DEPS=ON -DM_CORE_GB=OFF -DM_CORE_GBA=ON -DUSE_DEBUGGERS=OFF -DENABLE_SCRIPTING=OFF -DBUILD_GL=OFF -DBUILD_GLES2=OFF -DBUILD_GLES3=OFF
+      - cmake --build build
+      - install -Dm0755 build/mgba_libretro.so /app/lib/horizon/mgba_libretro.so
+      - install -Dm0644 LICENSE /app/share/licenses/mgba/MPL-2.0.txt
+      - install -Dm0644 src/third-party/inih/LICENSE.txt /app/share/licenses/mgba/inih.txt
+      - install -Dm0644 src/third-party/blip_buf/license.txt /app/share/licenses/mgba/blip_buf.txt
+      - install -Dm0644 src/platform/libretro/libretro.h /app/share/licenses/mgba/libretro-header.h
+    sources:
+      - type: archive
+        url: https://github.com/mgba-emu/mgba/archive/refs/tags/0.10.5.tar.gz
+        sha256: 91d6fbd32abcbdf030d58d3f562de25ebbc9d56040d513ff8e5c19bee9dacf14
+
   - name: horizon
     buildsystem: simple
     build-options:
@@ -84,6 +99,13 @@ modules:
       - install -Dm0644 LICENSES/OFL-1.1.txt /app/share/licenses/horizon/OFL-1.1.txt
       - install -Dm0644 LICENSES/Apache-2.0.txt /app/share/licenses/horizon/Apache-2.0.txt
       - install -Dm0644 LICENSES/MIT.txt /app/share/licenses/horizon/MIT.txt
+      - install -Dm0644 LICENSES/CC-BY-SA-4.0.txt /app/share/licenses/horizon/CC-BY-SA-4.0.txt
+      - install -Dm0644 LICENSES/libloading-ISC.txt /app/share/licenses/horizon/libloading-ISC.txt
     sources:
       - type: dir
         path: ..
+        skip:
+          - .git
+          - target
+          - build-dir
+          - .flatpak-builder

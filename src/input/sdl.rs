@@ -232,6 +232,62 @@ impl SdlGamepadInput {
             .find(|pad| !pad.ignored)
             .map(|pad| pad.family)
     }
+
+    /// Raw held state for the embedded game, independent of menu repeat/swap.
+    pub fn gameplay_buttons(&self) -> u16 {
+        let state = self.state.borrow();
+        if !state.enabled {
+            return 0;
+        }
+        let selected = state
+            .last_used
+            .filter(|id| state.pads.iter().any(|pad| pad.id == *id && !pad.ignored))
+            .or_else(|| state.pads.iter().find(|pad| !pad.ignored).map(|pad| pad.id));
+        let Some(pad) = state
+            .open_gamepads
+            .iter()
+            .find(|pad| pad.id().ok() == selected)
+        else {
+            return 0;
+        };
+        let family = state
+            .pads
+            .iter()
+            .find(|pad| Some(pad.id) == selected)
+            .map(|pad| pad.family)
+            .unwrap_or_default();
+        let nintendo = matches!(family, ControllerFamily::Nintendo | ControllerFamily::Odin);
+        let mut buttons = 0;
+        for (button, bit) in [
+            (Button::South, if nintendo { 0 } else { 8 }),
+            (Button::East, if nintendo { 8 } else { 0 }),
+            (Button::Back, 2),
+            (Button::Start, 3),
+            (Button::DPadUp, 4),
+            (Button::DPadDown, 5),
+            (Button::DPadLeft, 6),
+            (Button::DPadRight, 7),
+            (Button::LeftShoulder, 10),
+            (Button::RightShoulder, 11),
+        ] {
+            if pad.button(button) {
+                buttons |= 1 << bit;
+            }
+        }
+        let x = pad.axis(Axis::LeftX);
+        let y = pad.axis(Axis::LeftY);
+        if x < -18000 {
+            buttons |= 1 << 6;
+        } else if x > 18000 {
+            buttons |= 1 << 7;
+        }
+        if y < -18000 {
+            buttons |= 1 << 4;
+        } else if y > 18000 {
+            buttons |= 1 << 5;
+        }
+        buttons
+    }
 }
 
 fn pace(timer: &Timer, state: &SdlState) {

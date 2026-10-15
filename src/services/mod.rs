@@ -19,4 +19,5 @@ pub mod steamgriddb;
 
 pub mod steamgriddb_artwork;
 
+pub mod gba_player;
 pub mod rom_import;

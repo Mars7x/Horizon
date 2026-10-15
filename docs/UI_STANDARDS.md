@@ -5,6 +5,10 @@ app header; Welcome also omits the hint bar and preference controls. Other full-
 feature work must not replace Home's focus geometry, selected scale or marquee.
 See [Home](HOME_UI.md) and [navigation](NAVIGATION.md).
 
+The embedded game surface is content: aspect-preserving software frames on a
+black background, without shell chrome. Its loading/error/pause controls use the
+shared ModalDialog and ActionButton components. Rust owns player mode and focus.
+
 ## Shared components
 
 | Element | Contract | Implementation |

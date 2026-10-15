@@ -21,4 +21,5 @@ pub(crate) type CallbackSlot<F> = std::cell::RefCell<Option<std::rc::Rc<F>>>;
 
 pub mod rom_setup;
 
+pub mod gba_player;
 pub mod onboarding;

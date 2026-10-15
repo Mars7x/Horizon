@@ -23,9 +23,7 @@ use crate::{
     },
     persistence::{SqliteLibraryRepository, settings::SettingsStore},
     platform::{
-        data_paths,
-        launcher::PortalLaunchExecutor,
-        slint_backend,
+        data_paths, slint_backend,
         system_status::{StatusMonitor, SystemStatus},
         video::FfmpegVideo,
     },
@@ -223,8 +221,18 @@ pub fn run() -> Result<(), AppError> {
         data_paths::local_artwork_cache_dir(artwork::LOCAL_ARTWORK_CACHE_VERSION),
         data_paths::steamgriddb_cache_dir(artwork::STEAMGRIDDB_CACHE_VERSION),
     ));
-    let mut launch_service =
-        GameLaunchService::new(Rc::clone(&registry), Rc::new(PortalLaunchExecutor));
+    let player = crate::presentation::gba_player::GbaPlayer::new(
+        &ui,
+        crate::services::gba_player::PlayerPaths {
+            database: database_path.clone(),
+            core: data_paths::gba_core_path(),
+            saves: data_paths::gba_save_directory()?,
+        },
+    );
+    let close_player = Rc::clone(&player);
+    ui.window()
+        .on_close_requested(move || close_player.request_close());
+    let mut launch_service = GameLaunchService::new(Rc::clone(&registry), player.clone());
     // Source-runtime observation must work in the ordinary Flatpak. Provider
     // adapters expose only provider-owned state that is already readable
     // through Horizon's narrow filesystem grants.
@@ -457,6 +465,7 @@ pub fn run() -> Result<(), AppError> {
     );
     let action_onboarding = Rc::clone(&onboarding);
     let action_setup = Rc::clone(&rom_setup);
+    let action_player = Rc::clone(&player);
 
     let ui_weak = ui.as_weak();
     let action_navigation = Rc::clone(&navigation);
@@ -465,7 +474,10 @@ pub fn run() -> Result<(), AppError> {
         let Some(ui) = ui_weak.upgrade() else {
             return;
         };
-        if action_setup.handle_action(&ui, event) || action_onboarding.handle_action(&ui, event) {
+        if action_player.handle_action(event)
+            || action_setup.handle_action(&ui, event)
+            || action_onboarding.handle_action(&ui, event)
+        {
             return;
         }
         // Snapshot semantic focus, not raw key presses: blocked directions and
@@ -625,6 +637,30 @@ pub fn run() -> Result<(), AppError> {
         Rc::clone(&last_device),
         glyph_sink,
     );
+    let gameplay_input = Rc::clone(&input);
+    player.set_gamepads(Rc::new(move || gameplay_input.gameplay_buttons()));
+    let window_active = Rc::new(Cell::new(true));
+    let player_sound = Rc::clone(&navigation_sound);
+    let player_active = Rc::clone(&window_active);
+    let player_mode_input = Rc::clone(&input);
+    let player_ui = ui.as_weak();
+    ui.on_player_open_changed(move |open| {
+        // This can originate inside SDL's event callback; reset its borrowed
+        // held state only after that callback has returned.
+        let input = Rc::clone(&player_mode_input);
+        let active = Rc::clone(&player_active);
+        Timer::single_shot(Duration::ZERO, move || {
+            input.set_ui_input_enabled(false);
+            input.set_ui_input_enabled(active.get());
+        });
+        player_sound
+            .borrow_mut()
+            .set_foreground(!open && player_active.get());
+        if let Some(ui) = player_ui.upgrade() {
+            ui.global::<crate::Motion>()
+                .set_loops_paused(open || !player_active.get());
+        }
+    });
 
     // Settings → Controller can swap select and back on controllers; the
     // hints swap their A and B to match, unless the user keeps them as they
@@ -670,11 +706,19 @@ pub fn run() -> Result<(), AppError> {
     let activation_album = Rc::clone(&album);
     let activation_ui = ui.as_weak();
     let activation_sound = Rc::clone(&navigation_sound);
+    let activation_player = Rc::clone(&player);
     ui.on_application_active_changed(move |active| {
+        window_active.set(active);
+        if !active {
+            activation_player.pause();
+        }
         activation_input.set_ui_input_enabled(active);
-        activation_sound.borrow_mut().set_foreground(active);
+        activation_sound
+            .borrow_mut()
+            .set_foreground(active && !activation_player.is_open());
         if let Some(ui) = activation_ui.upgrade() {
-            ui.global::<crate::Motion>().set_loops_paused(!active);
+            ui.global::<crate::Motion>()
+                .set_loops_paused(!active || activation_player.is_open());
         }
 
         // Activity observes the same OS activation boundary that owns
@@ -787,11 +831,21 @@ pub fn run() -> Result<(), AppError> {
     });
 
     let keyboard_input = Rc::clone(&input);
+    let keyboard_player = Rc::clone(&player);
     ui.on_raw_key_input(move |text, repeated| {
-        keyboard_input.handle_keyboard(text.as_str(), repeated)
+        if keyboard_player.keyboard(text.as_str(), repeated, true) {
+            keyboard_input.mark_keyboard_used();
+            true
+        } else {
+            keyboard_input.handle_keyboard(text.as_str(), repeated)
+        }
     });
     let keyboard_release = Rc::clone(&input);
-    ui.on_raw_key_released(move |text| keyboard_release.handle_keyboard_released(text.as_str()));
+    let release_player = Rc::clone(&player);
+    ui.on_raw_key_released(move |text| {
+        release_player.keyboard(text.as_str(), false, false)
+            || keyboard_release.handle_keyboard_released(text.as_str())
+    });
 
     // Keep services/timers/input managers alive for the full UI event loop.
     let _runtime_repository = runtime_repository;
@@ -811,7 +865,9 @@ pub fn run() -> Result<(), AppError> {
     let _live_activity_timer = live_activity_timer;
     let _activity_checkpoint_timer = activity_checkpoint_timer;
 
-    ui.run()?;
+    let ui_result = ui.run();
+    player.shutdown().map_err(AppError::GbaPlayer)?;
+    ui_result?;
 
     Ok(())
 }

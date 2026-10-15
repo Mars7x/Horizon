@@ -1,11 +1,12 @@
-//! Reviewed GBA imports are persisted explicitly; startup never auto-imports.
+//! Imported GBA content is played by Horizon's bundled mGBA core.
 
 pub mod recognition;
 use super::{
     GameSource, SourceDescriptor, SourceDiscovery, SourceError, SourceInitializationError,
     SourceSnapshot,
 };
-use crate::domain::SourceId;
+use super::{SourceCapability, SourceLaunchTarget};
+use crate::domain::{ExternalGameId, SourceId};
 
 pub struct GbaSource {
     descriptor: SourceDescriptor,
@@ -13,11 +14,27 @@ pub struct GbaSource {
 impl GbaSource {
     pub fn new() -> Result<Self, SourceInitializationError> {
         Ok(Self {
-            descriptor: SourceDescriptor::new(SourceId::new("gba")?, "Game Boy Advance", vec![])?,
+            descriptor: SourceDescriptor::new(
+                SourceId::new("gba")?,
+                "Game Boy Advance",
+                vec![SourceCapability::Launch],
+            )?,
         })
     }
 }
 impl GameSource for GbaSource {
+    fn launch_target(
+        &self,
+        id: &ExternalGameId,
+    ) -> Result<Option<SourceLaunchTarget>, SourceError> {
+        Ok(id
+            .as_str()
+            .strip_prefix("sha256:")
+            .filter(|hash| hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
+            .map(|hash| SourceLaunchTarget::EmbeddedGba {
+                sha256: hash.to_owned(),
+            }))
+    }
     fn descriptor(&self) -> &SourceDescriptor {
         &self.descriptor
     }

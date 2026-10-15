@@ -55,6 +55,36 @@ impl SqliteLibraryRepository {
         migrations::current_schema_version(&self.connection)
     }
 
+    /// Retain every location for a content identity; launch revalidates bytes.
+    pub fn gba_rom_locations(
+        &self,
+        sha256: &str,
+    ) -> Result<Vec<crate::services::gba_player::RomLocation>, PersistenceError> {
+        use std::os::unix::ffi::OsStringExt;
+        let mut statement = self.connection.prepare(
+            "SELECT DISTINCT g.id, g.title, r.path FROM games g \
+             JOIN game_sources s ON s.game_id = g.id AND s.source_id = 'gba' \
+             JOIN rom_files r ON r.game_id = g.id \
+             WHERE r.sha256 = ?1 AND s.external_id = 'sha256:' || r.sha256 ORDER BY r.path",
+        )?;
+        let rows = statement.query_map([sha256], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Vec<u8>>(2)?,
+            ))
+        })?;
+        rows.map(|row| {
+            let (id, title, path) = row?;
+            Ok(crate::services::gba_player::RomLocation {
+                game_id: Self::domain_value("ROM game ID", GameId::new(id))?,
+                title,
+                path: std::ffi::OsString::from_vec(path).into(),
+            })
+        })
+        .collect()
+    }
+
     /// Retired metadata remains available for Horizon-owned capture titles.
     pub fn retired_games(&self) -> Result<Vec<LibraryGame>, PersistenceError> {
         let mut statement = self.connection.prepare(

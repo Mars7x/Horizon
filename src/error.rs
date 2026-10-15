@@ -10,6 +10,8 @@ use crate::{
 
 #[derive(Debug, Error)]
 pub enum AppError {
+    #[error("GBA playback: {0}")]
+    GbaPlayer(String),
     #[error("Could not prepare the game library: {0}")]
     LibraryPreparation(String),
     #[error("UI platform error: {0}")]

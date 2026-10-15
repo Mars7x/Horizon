@@ -34,6 +34,26 @@ const PROFILE_FILE: &str = "profile.json";
 const CONTROLLER_FILE: &str = "controller.json";
 const CACHE_VERSION_FILE: &str = ".version";
 const ALBUM_DIR: &str = "album";
+
+/// Only the packaged core is loaded in Flatpak. Native development can opt in
+/// to a built core; this override is never exposed through application settings.
+pub fn gba_core_path() -> PathBuf {
+    if std::env::var("FLATPAK_ID").is_ok_and(|id| id == "io.github.Mars7x.Horizon") {
+        PathBuf::from("/app/lib/horizon/mgba_libretro.so")
+    } else {
+        std::env::var_os("HORIZON_GBA_CORE")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/usr/lib/horizon/mgba_libretro.so"))
+    }
+}
+
+pub fn gba_save_directory() -> Result<PathBuf, DataPathError> {
+    Ok(app_dir(BaseDir::Data)?.join("saves/gba"))
+}
+
+pub fn gba_save_file(directory: &Path, sha256: &str) -> PathBuf {
+    directory.join(format!("{sha256}.sav"))
+}
 const PROFILE_PICTURE_FILE: &str = "profile.png";
 const PROFILE_ANIMATED_FILE: &str = "profile-animated";
 const STEAM_PICTURE_FILE: &str = "profile-steam.png";

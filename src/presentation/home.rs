@@ -665,6 +665,12 @@ impl HomeController {
         match self.launch_service.launch_game(game) {
             Ok(receipt) => {
                 match receipt.mode() {
+                    GameLaunchMode::Embedded => {
+                        // The player shares this window, so no foreground
+                        // handoff will arrive to release the legacy launch latch.
+                        self.set_launch_feedback(ui, LaunchFeedbackState::Idle);
+                        return;
+                    }
                     GameLaunchMode::External => {
                         self.launch_activity
                             .launch_dispatched(game.game().id(), receipt.source_id().clone());
