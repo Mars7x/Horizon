@@ -1,5 +1,8 @@
 # Artwork policy
 
+> **Architecture transition (ADR 0190):** SteamGridDB and all saved artwork/provenance remain. With no active game adapters there are no production artwork jobs. Registered-adapter external-ID lookup is retained as a generic boundary; archived Steam references use title lookup if explicitly passed to it. Local Steam icon-cache extraction is retired. The Steam source section below is historical.
+
+
 Horizon primary game artwork is **native 1:1 only**.
 
 The 1:1 requirement applies to the provider source asset itself, not merely to

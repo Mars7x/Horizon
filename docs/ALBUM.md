@@ -1,5 +1,8 @@
 # Album
 
+> **Architecture transition (ADR 0190):** Steam game-source retirement does not remove its capture source. Archived game identities supply known titles; unknown games keep the existing honest fallback. Local Steam screenshot access and user-confirmed deletion permissions remain unchanged.
+
+
 The Album shows every screenshot and video clip Horizon can find, newest
 first: Horizon's own captures and the captures sources keep (Steam's
 screenshots). See [ADR 0166](adr/0166-album-captures-and-media-pipeline.md).

@@ -2,6 +2,8 @@
 
 **For a new coding agent:** read [../AGENTS.md](../AGENTS.md), then [PROJECT_STATE.md](PROJECT_STATE.md), then [DEVELOPMENT.md](DEVELOPMENT.md). Use feature documentation for local invariants and inspect the code before patching. The blank repository-root `README.md` is deliberate.
 
+Horizon is a desktop Flatpak transitioning toward embedded emulator cores; no cores or production game sources are implemented in this recovery. See [ADR 0190](adr/0190-flatpak-embedded-emulator-direction.md).
+
 ## Current entry points
 
 | Question | Start here | Primary code |
@@ -20,7 +22,7 @@
 | Browsing and installing from Flathub? | [Shop, retired](SHOP.md) | removed 2026-10-12 |
 | Typing with a controller or touch screen? | [On-screen keyboard](KEYBOARD.md) | `src/navigation/keyboard.rs`, `src/presentation/keyboard.rs`, `ui/components/on-screen-keyboard.slint` |
 | Profile name, picture and Steam friends? | [Profile](PROFILE.md) | `src/services/profile.rs`, `src/services/friends.rs`, `src/presentation/profile.rs`, `src/presentation/friends.rs`, `ui/pages/profile.slint` |
-| Imports and provider capabilities? | [Sources](SOURCES.md), [Steam](STEAM.md), [Heroic](HEROIC.md), [Flatpak games, retired](FLATPAK_GAMES.md) | `src/sources/`, `src/services/import.rs`, `src/presentation/library_reload.rs` |
+| Retired imports and retained provider boundaries? | [Sources](SOURCES.md), [Steam](STEAM.md), [Heroic](HEROIC.md), [Flatpak games, retired](FLATPAK_GAMES.md) | `src/sources/`, `src/services/import.rs`, `src/presentation/library_reload.rs` |
 | Database or migrations? | [Database](DATABASE.md), [Domain](DOMAIN.md) | `src/persistence/`, `src/domain/` |
 | Where are files kept on disk? | [Files on disk](STORAGE.md) | `src/platform/data_paths.rs` |
 | Art, attribution, permission review? | [Artwork](ARTWORK.md), [Licensing](LICENSING.md) | `ui/assets/`, `REUSE.toml`, `THIRD_PARTY_NOTICES.md` |

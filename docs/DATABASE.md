@@ -2,6 +2,10 @@
 
 Horizon uses SQLite through `rusqlite`. SQL is confined to `src/persistence/`; presentation, UI, domain, and source adapters must not issue SQL directly.
 
+## Current retirement policy — schema 0010
+
+Migrations 0009/0010 move Steam/Heroic membership into `retired_game_sources`, retaining original IDs, game IDs, external IDs and timestamps. All game metadata, observed sessions and lifetime counters survive, including unplayed titles. The archive references games with `ON DELETE RESTRICT`; authoritative reconciliation also explicitly protects archived identities. Active library/count/most-played queries continue to use `game_sources`. `SqliteLibraryRepository::retired_games` supplies metadata to Album and Achievements only. No account files or artwork caches are changed. Old migrations are immutable; their previous deletions cannot be undone by this transition. See ADR 0190.
+
 ## Location
 
 `library.sqlite3` lives directly in Horizon's data directory: `~/.var/app/io.github.Mars7x.Horizon/data/library.sqlite3` under Flatpak, or `$XDG_DATA_HOME/io.github.Mars7x.Horizon/library.sqlite3` (default `~/.local/share/…`) otherwise. See [Files on disk](STORAGE.md). No broad host filesystem permission is required.
@@ -21,6 +25,8 @@ The current migration sequence is:
 0006_activity_session_checkpoints.sql
 0007_remove_bottles_source.sql
 0008_remove_flatpak_source.sql
+0009_retire_steam_games.sql
+0010_retire_heroic_games.sql
 ```
 
 `0008` retires Flatpak games like `0005` and `0007`: their `game_sources` rows go,

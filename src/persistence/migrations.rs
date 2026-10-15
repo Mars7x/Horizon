@@ -49,9 +49,19 @@ const MIGRATIONS: &[Migration] = &[
         name: "remove_flatpak_source",
         sql: include_str!("migrations/0008_remove_flatpak_source.sql"),
     },
+    Migration {
+        version: 9,
+        name: "retire_steam_games",
+        sql: include_str!("migrations/0009_retire_steam_games.sql"),
+    },
+    Migration {
+        version: 10,
+        name: "retire_heroic_games",
+        sql: include_str!("migrations/0010_retire_heroic_games.sql"),
+    },
 ];
 
-pub(crate) const LATEST_SCHEMA_VERSION: i64 = 8;
+pub(crate) const LATEST_SCHEMA_VERSION: i64 = 10;
 
 const MIGRATION_LEDGER_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -184,6 +194,72 @@ mod tests {
         assert_eq!(
             count("SELECT COUNT(*) FROM play_sessions WHERE game_id = 2"),
             1
+        );
+    }
+
+    #[test]
+    fn retiring_launchers_preserves_all_metadata_and_history() {
+        let mut connection = Connection::open_in_memory().expect("database");
+        connection
+            .execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("foreign keys");
+        connection
+            .execute_batch(MIGRATION_LEDGER_SQL)
+            .expect("ledger");
+        for migration in MIGRATIONS.iter().filter(|migration| migration.version <= 8) {
+            connection
+                .execute_batch(migration.sql)
+                .expect("old migration");
+            connection
+                .execute(
+                    "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?1, ?2, 0)",
+                    params![migration.version, migration.name],
+                )
+                .expect("ledger entry");
+        }
+        connection
+            .execute_batch(
+                "INSERT INTO games(id, title, created_at, updated_at) VALUES
+                    (1, 'Unplayed', 10, 20), (2, 'Played', 10, 20),
+                    (3, 'Lifetime', 10, 20), (4, 'Other', 10, 20),
+                    (5, 'Unplayed Heroic', 10, 20);
+                 INSERT INTO game_sources(game_id, source_id, external_id, first_seen_at, last_seen_at) VALUES
+                    (1, 'steam', '10', 11, 22), (2, 'steam', '20', 11, 22),
+                    (3, 'heroic', 'gog:30', 11, 22), (4, 'example', '40', 11, 22),
+                    (5, 'heroic', 'epic:50', 11, 22);
+                 INSERT INTO play_sessions(id, game_id, source_id, started_at, ended_at, tracking_method, state, checkpoint_at)
+                    VALUES (1, 2, 'steam', 100, 200, 'source_runtime', 'completed', 200);
+                 INSERT INTO source_lifetime_playtime(game_id, source_id, lifetime_seconds, observed_at)
+                    VALUES (3, 'heroic', 900, 100);",
+            )
+            .expect("seed version 8");
+        migrate(&mut connection).expect("upgrade");
+        migrate(&mut connection).expect("reopen");
+        let count = |sql: &str| {
+            connection
+                .query_row(sql, [], |row| row.get::<_, i64>(0))
+                .expect("query")
+        };
+        assert_eq!(count("SELECT COUNT(*) FROM games"), 5);
+        assert_eq!(
+            count("SELECT COUNT(*) FROM retired_game_sources WHERE first_seen_at = 11 AND last_seen_at = 22"),
+            4
+        );
+        assert_eq!(
+            count("SELECT COUNT(*) FROM game_sources WHERE source_id IN ('steam', 'heroic')"),
+            0
+        );
+        assert_eq!(
+            count("SELECT COUNT(*) FROM game_sources WHERE source_id = 'example'"),
+            1
+        );
+        assert_eq!(
+            count("SELECT COUNT(*) FROM play_sessions WHERE ended_at - started_at = 100"),
+            1
+        );
+        assert_eq!(
+            count("SELECT lifetime_seconds FROM source_lifetime_playtime"),
+            900
         );
     }
 
@@ -334,7 +410,15 @@ mod tests {
                 |row| row.get::<_, i64>(0),
             )
             .expect("count Steam refs");
-        assert_eq!(steam_refs, 1);
+        assert_eq!(steam_refs, 0);
+        let archived = connection
+            .query_row(
+                "SELECT COUNT(*) FROM retired_game_sources WHERE source_id = 'steam'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("archived Steam identity");
+        assert_eq!(archived, 1);
     }
 
     #[test]

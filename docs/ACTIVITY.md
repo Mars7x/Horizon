@@ -1,5 +1,8 @@
 # Activity and playtime
 
+> **Architecture transition (ADR 0190):** Steam/Heroic external monitoring and lifetime ingestion are retired. Stored sessions, checkpoints and lifetime values remain; startup still recovers interrupted sessions. Retired games leave installed-most-played slots but totals/recent history remain. Source-neutral tracking is preserved for later evaluation; no emulator sessions are implemented.
+
+
 > **Current-state guide:** The sections below include chronological implementation notes beginning in Phase 8. The present Activity overview shows Horizon-observed totals, most-played imported games, a weekly chart, and an unfocusable read-only per-game session history. Its **Milestones** area now previews up to three recent **real provider-attributed achievement unlocks**, currently from Steam, with Steam badge artwork when available and a neutral fallback, not artificial Horizon playtime challenges; see [ACHIEVEMENTS.md](ACHIEVEMENTS.md). Steam lifetime and Horizon-observed session time must never be added.
 
 

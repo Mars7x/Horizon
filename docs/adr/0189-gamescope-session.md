@@ -6,7 +6,7 @@ Date: 2026-10-12
 
 Superseded (2026-10-12). The session was cancelled during Phase 1 in favour
 of embedding emulator cores in the desktop Flatpak; its code was removed.
-Kept as history; see [GAMESCOPE_SESSION.md](../GAMESCOPE_SESSION.md).
+Superseded by [ADR 0190](0190-flatpak-embedded-emulator-direction.md). Kept as history; see [GAMESCOPE_SESSION.md](../GAMESCOPE_SESSION.md).
 
 ## Context
 

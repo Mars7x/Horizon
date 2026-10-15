@@ -1,58 +1,27 @@
-# Current project state — source snapshot through 10.4.2
+# Current project state — architecture recovery
 
-This page describes the **prepared source** assembled from the cleaned repository and the Phase 10.3.3 → 10.4.0 (Steam Achievements) → 10.4.1 → 10.4.1.1 → 10.4.2 patches. It is an onboarding snapshot, **not** a release claim or a substitute for inspecting the checked-out branch. The crate's `Cargo.toml` version remains `0.1.0`.
+This describes the prepared working-tree source for the transition in [ADR 0190](adr/0190-flatpak-embedded-emulator-direction.md). Cargo remains at `0.1.0`; this is not a release claim.
 
-**Verification boundary:** source and documentation can be audited here; a successful full GNOME Builder Rust/Slint build of the new 10.4.2 changes has **not** been established in this snapshot. Test on the user's actual `x86_64`/`aarch64` environments before claiming compatibility.
+## Implemented now
 
-## Implemented surfaces
+- Rust 2024 and Slint desktop Flatpak, application ID `io.github.Mars7x.Horizon`, runtime/SDK 26.08. Linux x86_64 and aarch64 remain targets; neither architecture is newly build-verified by this recovery.
+- Home retains its carousel, selected cover, focus frame, motion, marquee, theme, input behavior and Library tile. Four utilities: **Album, Activity, Achievements, Settings**. Profile opens from the avatar. Library remains full-shell.
+- No production game sources are registered. Steam and Heroic game discovery, URI launches, runtime monitoring, local lifetime ingestion and source artwork scanning are retired. No emulator core, game importer or playable replacement is implemented yet; Home/Library have no active games after retirement.
+- Album retains Horizon-owned captures, active-account Steam screenshots and their thumbnails, existing user-confirmed deletion rules, video playback and PipeWire audio. Archived identities retain known screenshot titles.
+- Steam Account settings, Web API credentials, profile/avatar and read-only friends remain. This is manual SteamID64/API-key configuration, **not OAuth or interactive Steam login**; no such login was implemented to preserve.
+- Achievements and Activity Milestones retain the existing read-only Steam API/cache implementation. Previously imported Steam identities remain eligible through archived metadata. Fresh installations have no imported identities; adding an independent account game catalog is deferred. Unavailable/private data is never fabricated as zero.
+- SteamGridDB keys, preferences, title lookup, downloading, caching and refresh remain, along with existing artwork files and provenance. With no active games there are no cover jobs. Source-owned Steam icon-cache scanning is retired.
+- Historic observed sessions and source lifetime counters remain separate. Activity retains totals, recent sessions and durable records; installed-most-played slots exclude retired games. Generic lifecycle/recovery services remain but have no production launcher to observe.
+- SDL3 input, controller glyphs/naming, select/back settings, keyboard/mouse input, reduced motion, scaling, fullscreen and normal desktop lifecycle handling remain.
 
-- **Home:** game covers, controller/pointer navigation, game launching, utility row, original focus geometry, title marquee and shell status. The row leads with the latest played or newly added games and glides when it changes (ADR 0184).
-- **Library:** browse imported titles with source/sort controls, responsive artwork grid and Home-matched selected scaling/focus geometry. Library is a full-shell route; Home's original presentation is not replaced.
-- **Activity:** Horizon-observed totals, most-played imported games, recent playtime chart, and a per-game read-only session history; per-game screen Up/Down scrolls without focusing rows. The **Milestones** preview shows up to three recent *real Steam achievements*, not synthetic playtime goals.
-- **Achievements:** fourth Home utility, after Activity; read-only Steam Web API achievement unlock states for eligible imported Steam games; list browsing and recent-unlocks preview. Now has source-aware game/achievement models, optional bounded Steam badge thumbnails, and a source selector; no other achievement provider, full offline cache, or comprehensive account sign-in flow yet.
-- **Settings:** appearance and third-party service configuration, including SteamGridDB and **Steam Account** under Third-Party. SteamID64 + personal Web API key can be stored in an app-private file with owner-only permissions; not encrypted or OAuth.
-- **Album:** Horizon's own captures (`data/album/`, written by the future screenshot/recording features) and the active Steam account's screenshots, newest first, in a grid with Game and Type filters. A full-screen viewer slides between captures and plays videos with FFmpeg, sound through PipeWire. See [Album](ALBUM.md).
-- There is no Shop (removed 2026-10-12; ADR 0181 superseded), no Web utility (ADR 0174) and no Friends utility: a read-only Steam friends list is on the Profile page (ADR 0178).
+## Persistence and sandbox
 
-## Production source and data boundaries
+Schema is **0010**. Immutable migrations 0001–0008 remain. Migration 0009 creates `retired_game_sources` and archives Steam membership; 0010 archives Heroic. Neither deletes games, identities, sessions or lifetime counters. Active-library queries continue to use `game_sources`; Album and Achievements read the archive separately. Reconciliation protects archived game rows. Older retirement migrations retain their original behavior; this cannot recover data already deleted by those earlier versions.
 
-- Production game sources: **Steam** and **Heroic**. Lutris, Bottles and Flatpak games (2026-10-12, migration 0008) were retired; keep their existing removal migrations.
-- The library is read at startup (`LibraryReloader` can read it again but nothing triggers it since the Shop was removed); Home, Library and Activity share one append-only `Catalog` whose indices never move during a run.
-- Steam local game discovery and source-reported lifetime playtime are separate from opt-in **Steam Web API** achievement retrieval.
-- Existing SQLite schema through migration **0008**. Observed sessions and source lifetime are distinct; never add them together. Historic activity can remain after a game is no longer imported.
-- Artwork may come from source adapters or the optional SteamGridDB integration. Preserve local user choices and provenance.
-- Routing, focus decisions and semantic controller input are Rust-owned. Slint is presentation only.
-- Button glyphs follow the keyboard or controller used last (Xbox, PlayStation, Nintendo, Steam Deck); Nintendo pads confirm with A on the right, and Q/E are the keyboard's bumpers (ADR 0185, [Input](INPUT.md)).
-- Settings → Controller can swap select and back on controllers, with the hints swapped or not (ADR 0188).
+Heroic/Legendary filesystem grants are removed. Steam roots remain read-only except the existing Album userdata grants. Networking, portals, graphics, controller input, PipeWire and read-only status permissions remain. There is no host command execution, session helper or compositor integration. Gamescope implementation was already removed in `bf87675` and `06756c5`; its plans/ADR remain historical.
 
-## Current limitations and planned work (not implemented)
+## Validation boundary
 
-- Phase 10.4.1.1 fixes a reported 14-element Rust tuple comparison (`E0369`) and replaces the achievement utility SVG; confirmation requires a real rebuild.
-- Steam Web API key configuration is **manual** and should be treated as sensitive; saved credentials are protected by file permissions, not encryption. Environment variables can provide a fallback for developer runs.
-- Achievement data can be inaccessible due to privacy/API/network conditions; missing is **not** zero. The achievement browser uses an account-scoped disk cache. Phase 10.4.3.3 adds on-demand badge hydration for opened games; images unavailable from Steam/CDN still use a neutral fallback. Rich Steam sign-in is not implemented.
-- Steam friends (Profile page) use the shared Steam account and HTTP client services, read-only.
-- Existing historical guides/ADRs may refer to retired providers or superseded UI experiments. Read the code for the present behavior.
+Recovery environment: Cargo, rustc and rustfmt are unavailable; `/usr/bin/flatpak` resolves to an unavailable host-execution wrapper, and flatpak-builder is absent. Rust/Slint compilation, Clippy, Rust tests, Flatpak builds and interactive UI checks cannot be claimed. Run the repository quality gate and actual x86_64/aarch64 Flatpak builds before release. In particular, Phase 10.4.1.1 remains unverified without the user's successful build report.
 
-## Quick links
-
-Start with [INDEX.md](INDEX.md) for navigation, [DEVELOPMENT.md](DEVELOPMENT.md) for validation, [ACHIEVEMENTS.md](ACHIEVEMENTS.md) for credential/data behavior, [ACTIVITY.md](ACTIVITY.md) for session semantics, and [NAVIGATION.md](NAVIGATION.md) for route policy.
-
-## Phase 10.4.3 (pending GNOME Builder build verification)
-
-Achievements now presents a full-width vertical game list with A/Enter to open full-width per-game read-only achievements, Back to preserve selection, smooth camera movement, genuine square badge artwork, and an optional per-account achievement snapshot/badge cache (30-minute freshness, 7-day stale display while refreshing). Steam remains the only achievement provider; Steam Friends is deferred.
-
-## Phase 10.4.3.1 (prepared, pending GNOME Builder build verification)
-
-Achievements' header and scroll boundary now match Library's full-width edge treatment; games and details crossfade in the Settings style; list content reaches the physical bottom edge. Rapid navigation no longer culls intermediary cards before the animated camera reaches them, and navigating upward brings selection back into view. Source is an unboxed, non-focusable text grouping, and all game titles have stable bold weight. Desktop directional repeat is globally capped at the controller D-pad's 300ms/115ms timing with release and deactivation reset. See [ADR 0160](adr/0160-achievement-list-transition-and-input-parity.md).
-
-## Phase 10.4.3.2 (prepared, pending GNOME Builder build verification)
-
-Achievements games now have a single exclusive focused-row border, avoiding teal focus trails during rapid navigation. The top full-width scroll-edge shadow is absent at scroll offset zero and fades in/out with the already-animated camera in both the game and per-game achievements lists. Library uses the same rule for its header elevation, without changing Home, Library's bottom shadow, or source/focus behavior. See [ADR 0161](adr/0161-scroll-driven-header-elevation-and-exclusive-game-focus.md).
-
-## Prepared Phase 10.4.3.3 (awaiting GNOME Builder verification)
-
-Corrects held Achievements detail scrolling, adds camera-only mouse-wheel navigation in Achievements/Library and read-only Activity session details, resets Achievements selection/viewport on every fresh utility visit, and lazily fills authentic per-game Steam achievement badges from the existing account-scoped cache/API. Home, Friends, other source adapters, and the database schema are unchanged. See [ADR 0162](adr/0162-achievement-input-and-lazy-badge-parity.md).
-
-Settings intra-page Back now restores the parent row (Appearance, Third-Party,
-or Steam Account), while completely leaving and revisiting Settings resets to
-Appearance. This change is prepared pending GNOME Builder verification.
+SQL migration checks use temporary in-memory SQLite databases, not user data. See [Development](DEVELOPMENT.md) for reproducible validation and [ADR 0190](adr/0190-flatpak-embedded-emulator-direction.md) for intentionally deferred core decisions.

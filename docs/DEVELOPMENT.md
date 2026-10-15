@@ -2,6 +2,14 @@
 
 This document gives reproducible commands for the source snapshot described in [PROJECT_STATE.md](PROJECT_STATE.md). It does not replace GNOME Builder's build output or claim that all targets have been verified.
 
+## Recovery SQL validation
+
+`python3 scripts/check-retirement-migrations.py` runs five temporary in-memory
+SQLite checks: fresh schema, v8/v9 upgrades, exact metadata/history retention,
+archive protection during reconciliation, and failure rollback without ledger
+advancement. It never opens the application database. This supplements the Rust
+migration/repository tests; it does not compile Rust or Slint.
+
 ## Toolchain and location
 
 - `Cargo.toml` specifies Rust edition **2024** and `rust-version = "1.92"`; the project uses Slint **~1.18** with Winit/Skia, SDL3 (`pkg-config`), SQLite and XDG portals.

@@ -1,6 +1,10 @@
-# Source framework
+# Source boundaries
 
-Phase 6 defined the provider boundary that launcher adapters plug into. Phase 7 exercised it with Steam; Phase 9 expanded the same unchanged generic contracts to additional providers. The current production set is Steam and Heroic; Flatpak games ([Flatpak games](FLATPAK_GAMES.md)) were retired on 2026-10-12 (migration 0008). Historical Bottles support was retired in Phase 9.5.44.43.
+No production game sources are registered. Steam, Heroic, Flatpak games, Lutris and Bottles are retired. Generic library/import/artwork/lifecycle boundaries remain for later evaluation; emulator hosting is not implemented. Steam `CaptureSource` and controller naming remain independent of `GameSource`. See [ADR 0190](adr/0190-flatpak-embedded-emulator-direction.md).
+
+## Historical implementation (retired)
+
+Phase 6 defined the provider boundary that launcher adapters plug into. Phase 7 exercised it with Steam; Phase 9 expanded the same unchanged generic contracts to additional providers. At that stage the production set was Steam and Heroic; Flatpak games ([Flatpak games](FLATPAK_GAMES.md)) were retired on 2026-10-12 (migration 0008). Historical Bottles support was retired in Phase 9.5.44.43.
 
 ## Boundary
 
