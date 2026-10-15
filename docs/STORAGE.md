@@ -41,6 +41,8 @@ flushed before rename; the previous valid save is retained as a backup. A failed
 save pauses the game and exposes retry through Save and quit. Save states and
 external-emulator save import are not implemented.
 
-`cores.json` stores the curated mGBA preferences. The settings worker serializes
+`cores.json` stores shared playback freezing and curated mGBA preferences.
+Legacy nested freeze values are read without rewriting the file at load; the
+shared field takes precedence and is used for subsequent atomic saves. The settings worker serializes
 atomic writes; invalid files and failed writes preserve prior data. The player
 reads and validates this file on its worker before loading the core.

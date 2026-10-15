@@ -54,7 +54,7 @@ use crate::{
 // leaves the gliding camera up to a row behind its destination
 // (`ScrollCamera`), which is what these rows are mounted around.
 const OVERSCAN_ROWS: usize = 3;
-/// Decoded thumbnails kept in memory (about 0.5 MiB each).
+/// Decoded thumbnails kept in memory (at most about 2 MiB each).
 const THUMBNAIL_MEMORY: usize = 96;
 /// Decoded full-screen photos kept: the open one and its neighbours.
 const DISPLAY_MEMORY: usize = 4;
@@ -1851,5 +1851,104 @@ mod tests {
         assert_eq!(clock_text(Duration::from_secs(42)), "0:42");
         assert_eq!(clock_text(Duration::from_secs(605)), "10:05");
         assert_eq!(clock_text(Duration::from_secs(3725)), "1:02:05");
+    }
+}
+
+#[cfg(test)]
+mod runtime_tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "requires Wayland and a fresh HORIZON_ALBUM_THUMBNAIL_TEST_DIR"]
+    fn album_thumbnail_detail_and_native_pixels() {
+        let output = PathBuf::from(
+            std::env::var_os("HORIZON_ALBUM_THUMBNAIL_TEST_DIR").expect("test output"),
+        );
+        let root = output.join("album");
+        std::fs::create_dir_all(root.join("horizon")).unwrap();
+        std::fs::create_dir_all(output.join("cache")).unwrap();
+        for (name, width, height) in [
+            ("portrait", 1080, 1920),
+            ("square", 1920, 1920),
+            ("wide", 3840, 1080),
+            ("native", 240, 160),
+        ] {
+            image::RgbaImage::from_fn(width, height, |x, y| {
+                image::Rgba(if (x / 4 + y / 4) % 2 == 0 {
+                    [255, 0, 255, 255]
+                } else {
+                    [0, 255, 0, 255]
+                })
+            })
+            .save(root.join(format!("horizon/{name}.png")))
+            .unwrap();
+        }
+        let ui = AppWindow::new().unwrap();
+        ui.global::<crate::Motion>().set_reduced_motion(true);
+        ui.set_current_route(AppRouteView::Album);
+        let album = AlbumController::new(
+            &ui,
+            &[],
+            Some(root),
+            Vec::new(),
+            Some(output.join("cache")),
+            Arc::new(crate::services::album::media::NoVideo("Photos only".into())),
+        );
+        let weak_album = Rc::downgrade(&album);
+        let weak_ui = ui.as_weak();
+        ui.on_album_layout_changed(move || {
+            if let (Some(album), Some(ui)) = (weak_album.upgrade(), weak_ui.upgrade()) {
+                album.on_layout_changed(&ui);
+            }
+        });
+        ui.window().set_size(slint::PhysicalSize::new(1920, 1080));
+        ui.show().unwrap();
+        album.start_new_visit(&ui);
+        let ticks = Cell::new(0);
+        let stage = Cell::new(0);
+        let weak_ui = ui.as_weak();
+        let timer = Timer::default();
+        timer.start(
+            slint::TimerMode::Repeated,
+            Duration::from_millis(300),
+            move || {
+                let ui = weak_ui.upgrade().unwrap();
+                ticks.set(ticks.get() + 1);
+                assert!(ticks.get() < 80, "thumbnail runtime timed out");
+                if album.tiles.row_count() != 4
+                    || album.tiles.iter().any(|tile| !tile.has_thumbnail)
+                {
+                    return;
+                }
+                for capture in &album.state.borrow().captures {
+                    let image = album
+                        .thumbnails
+                        .borrow_mut()
+                        .get(&capture.path().to_owned())
+                        .unwrap();
+                    let native = capture.path().file_stem().unwrap() == "native";
+                    let expected = if native { (240, 160) } else { (960, 540) };
+                    assert_eq!((image.size().width, image.size().height), expected);
+                }
+                let snapshot = ui.window().take_snapshot().unwrap();
+                let width = if stage.get() == 0 { 1920 } else { 3840 };
+                assert_eq!(snapshot.width(), width);
+                assert_eq!(snapshot.height(), width * 9 / 16);
+                image::save_buffer(
+                    output.join(format!("album-{width}.png")),
+                    snapshot.as_bytes(),
+                    snapshot.width(),
+                    snapshot.height(),
+                    image::ColorType::Rgba8,
+                )
+                .unwrap();
+                if stage.replace(1) == 0 {
+                    ui.window().set_size(slint::PhysicalSize::new(3840, 2160));
+                } else {
+                    slint::quit_event_loop().unwrap();
+                }
+            },
+        );
+        slint::run_event_loop().unwrap();
     }
 }

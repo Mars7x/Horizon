@@ -188,7 +188,7 @@ fn play(
     let Some((location, rom)) = selected else {
         return Err(failure);
     };
-    let audio: AudioBuffer = Arc::new(Mutex::new(std::collections::VecDeque::with_capacity(32768)));
+    let audio: AudioBuffer = Arc::new(crate::platform::gba_audio::GameAudio::default());
     let preferences = crate::persistence::settings::SettingsStore::new(paths.settings)
         .load_value::<crate::domain::core_settings::CorePreferences>()
         .map_err(|_| "Could not read core settings. Check cores.json before playing.".to_owned())?;
@@ -205,25 +205,17 @@ fn play(
     if !last_save.is_empty() {
         core.restore_save(&last_save)?;
     }
-    let playback_audio = Arc::clone(&audio);
+    let mut audio_reader = crate::platform::gba_audio::AudioReader::new(
+        Arc::clone(&audio),
+        core.av.sample_rate.round() as u32,
+    );
     let stream = AudioStream::open(
         "Horizon GBA",
         Role::Game,
         core.av.sample_rate.round() as u32,
         2,
         256,
-        Box::new(move |output, _| {
-            output.fill(0.0);
-            if let Ok(mut audio) = playback_audio.try_lock() {
-                for sample in output {
-                    if let Some(next) = audio.pop_front() {
-                        *sample = next;
-                    } else {
-                        break;
-                    }
-                }
-            }
-        }),
+        Box::new(move |output, _| audio_reader.render(output)),
     )
     .map_err(|_| "Could not open game audio. Check the audio output and try again.".to_owned())?;
     let source = SourceId::new("gba").map_err(|e| e.to_string())?;
@@ -237,7 +229,7 @@ fn play(
     let mut frame_attempts = 0u32;
     let _ = events.send(Event::Ready {
         title: location.title.clone(),
-        freeze_when_unfocused: preferences.mgba.freeze_when_unfocused,
+        freeze_when_unfocused: preferences.freeze_when_unfocused,
     });
     let result = (|| -> Result<(), String> {
         loop {
@@ -247,19 +239,17 @@ fn play(
                         paused = value;
                         core.set_fast_forward(fast_forward);
                         buttons.store(0, Ordering::Release);
+                        stream.set_active(false);
+                        audio.clear();
                         stream.set_active(!value);
-                        if let Ok(mut audio) = audio.lock() {
-                            audio.clear();
-                        }
                         deadline = Instant::now();
                     }
                     Command::FastForward(enabled) => {
                         fast_forward = enabled;
                         core.set_fast_forward(enabled);
+                        stream.set_active(false);
+                        audio.clear();
                         stream.set_active(!paused);
-                        if let Ok(mut audio) = audio.lock() {
-                            audio.clear();
-                        }
                         deadline = Instant::now();
                         let _ = events.send(Event::SpeedChanged(enabled));
                     }
@@ -290,9 +280,7 @@ fn play(
                             continue;
                         }
                         buttons.store(0, Ordering::Release);
-                        if let Ok(mut audio) = audio.lock() {
-                            audio.clear();
-                        }
+                        audio.clear();
                         paused = false;
                         stream.set_active(true);
                         deadline = Instant::now();

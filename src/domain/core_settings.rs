@@ -1,32 +1,54 @@
 //! Curated preferences for the bundled core, independent of its C ABI.
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "SavedCorePreferences")]
 pub struct CorePreferences {
+    pub freeze_when_unfocused: bool,
     pub mgba: MgbaPreferences,
 }
+impl Default for CorePreferences {
+    fn default() -> Self {
+        Self {
+            freeze_when_unfocused: true,
+            mgba: MgbaPreferences::default(),
+        }
+    }
+}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+// Read the former core-specific setting without rewriting a user's file on
+// load. A shared value, when present, takes precedence over the legacy field.
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct SavedCorePreferences {
+    freeze_when_unfocused: Option<bool>,
+    mgba: SavedMgbaPreferences,
+}
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct SavedMgbaPreferences {
+    #[serde(flatten)]
+    values: MgbaPreferences,
+    freeze_when_unfocused: Option<bool>,
+}
+impl From<SavedCorePreferences> for CorePreferences {
+    fn from(saved: SavedCorePreferences) -> Self {
+        Self {
+            freeze_when_unfocused: saved
+                .freeze_when_unfocused
+                .or(saved.mgba.freeze_when_unfocused)
+                .unwrap_or(true),
+            mgba: saved.mgba.values,
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MgbaPreferences {
-    pub audio_smoothing: bool,
     pub sunlight: Sunlight,
     pub video_filter: VideoFilter,
     pub color_correction: bool,
-    pub freeze_when_unfocused: bool,
-}
-
-impl Default for MgbaPreferences {
-    fn default() -> Self {
-        Self {
-            audio_smoothing: false,
-            sunlight: Sunlight::default(),
-            video_filter: VideoFilter::default(),
-            color_correction: false,
-            freeze_when_unfocused: true,
-        }
-    }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -90,9 +112,8 @@ mod tests {
         let values: CorePreferences =
             serde_json::from_str(r#"{"mgba":{"audio_smoothing":true,"sunlight":7}}"#).unwrap();
         assert_eq!(values.mgba.video_filter, VideoFilter::None);
-        assert!(values.mgba.audio_smoothing);
         assert!(!values.mgba.color_correction);
-        assert!(values.mgba.freeze_when_unfocused);
+        assert!(values.freeze_when_unfocused);
         assert_eq!(values.mgba.sunlight.level(), 7);
         assert!(
             serde_json::from_str::<CorePreferences>(r#"{"mgba":{"video_filter":"missing"}}"#)
@@ -106,6 +127,40 @@ mod tests {
         ] {
             assert_eq!(filter.step(true).step(false), filter);
             assert_eq!(filter.step(true).step(true).step(true).step(true), filter);
+        }
+    }
+}
+
+#[cfg(test)]
+mod compatibility_tests {
+    use super::*;
+    #[test]
+    fn shared_freeze_preserves_legacy_false_and_wins_over_legacy_values() {
+        for (json, expected) in [
+            (
+                r#"{"mgba":{"freeze_when_unfocused":false,"audio_smoothing":true}}"#,
+                false,
+            ),
+            (
+                r#"{"freeze_when_unfocused":true,"mgba":{"freeze_when_unfocused":false}}"#,
+                true,
+            ),
+            (
+                r#"{"freeze_when_unfocused":false,"mgba":{"freeze_when_unfocused":true}}"#,
+                false,
+            ),
+            (r#"{}"#, true),
+        ] {
+            let values: CorePreferences = serde_json::from_str(json).unwrap();
+            assert_eq!(values.freeze_when_unfocused, expected);
+            let json = serde_json::to_value(values).unwrap();
+            assert_eq!(json["freeze_when_unfocused"], expected);
+            assert!(json["mgba"].get("freeze_when_unfocused").is_none());
+            assert!(json["mgba"].get("audio_smoothing").is_none());
+            assert_eq!(
+                serde_json::from_value::<CorePreferences>(json).unwrap(),
+                values
+            );
         }
     }
 }

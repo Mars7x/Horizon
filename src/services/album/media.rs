@@ -21,11 +21,11 @@ use crate::{
 };
 
 /// Bump when the thumbnail format or size changes; the folder is cleared.
-// 3: lossless PNG thumbnails retain screenshot pixel colours and alpha.
-pub const ALBUM_CACHE_VERSION: &str = "3";
-/// Thumbnails fit inside this box. Large enough for a grid tile on a 4K
-/// screen. PNG preserves the pixels and alpha of native screenshots.
-pub const THUMBNAIL_SIZE: (u32, u32) = (480, 270);
+// 4: crop large photos before shrinking, retaining detail for 4K grid tiles.
+pub const ALBUM_CACHE_VERSION: &str = "4";
+/// Enough pixels for a selected grid tile at 4K, including its lift. Photos
+/// use the grid's centre crop; small originals retain their native pixels.
+pub const THUMBNAIL_SIZE: (u32, u32) = (960, 540);
 
 #[derive(Debug, Error)]
 pub enum MediaError {
@@ -293,14 +293,20 @@ fn make_thumbnail(capture: &Capture, video: &dyn VideoBackend) -> Result<Thumbna
             if let Some(preview) = capture.preview()
                 && let Ok(image) = decoding::decode_file(preview)
                 && image.width() >= THUMBNAIL_SIZE.0
+                && image.height() >= THUMBNAIL_SIZE.1
             {
                 return Ok(Thumbnail {
-                    image: fit(image, THUMBNAIL_SIZE),
+                    image: photo_thumbnail(image),
                     duration: None,
                 });
             }
             Ok(Thumbnail {
-                image: decode_photo(capture.path(), THUMBNAIL_SIZE)?,
+                image: photo_thumbnail(decoding::decode_file(capture.path()).map_err(|error| {
+                    MediaError::Decode {
+                        path: capture.path().to_owned(),
+                        message: error.to_string(),
+                    }
+                })?),
                 duration: None,
             })
         }
@@ -312,6 +318,36 @@ fn make_thumbnail(capture: &Capture, video: &dyn VideoBackend) -> Result<Thumbna
             })
         }
     }
+}
+
+fn photo_thumbnail(image: DynamicImage) -> RgbaImage {
+    let (width, height) = (image.width(), image.height());
+    let (target_width, target_height) = THUMBNAIL_SIZE;
+    if width <= target_width && height <= target_height {
+        // In particular, never resample native emulator screenshots. Slint
+        // crops them to the tile and enlarges their authored pixels directly.
+        return image.into_rgba8();
+    }
+
+    // The grid uses image-fit: cover. Fitting the *whole* portrait/square into
+    // a wide box first discards most of its useful resolution, only to enlarge
+    // and crop it again in Slint. Apply that same centre crop before reducing.
+    let (crop_width, crop_height) = if u64::from(width) * u64::from(target_height)
+        > u64::from(height) * u64::from(target_width)
+    {
+        ((height * target_width / target_height).max(1), height)
+    } else {
+        (width, (width * target_height / target_width).max(1))
+    };
+    fit(
+        image.crop_imm(
+            (width - crop_width) / 2,
+            (height - crop_height) / 2,
+            crop_width,
+            crop_height,
+        ),
+        THUMBNAIL_SIZE,
+    )
 }
 
 fn read_cached(dir: &Path, key: &str, kind: MediaKind) -> Option<Thumbnail> {
@@ -529,11 +565,68 @@ mod tests {
             })
         });
         image.save(&path).unwrap();
-        let cache = ThumbnailCache::new(Some(dir.join("cache")));
+        let cache_dir = dir.join("cache");
+        fs::create_dir_all(&cache_dir).unwrap();
+        let cache = ThumbnailCache::new(Some(cache_dir.clone()));
         let capture = photo(path);
         assert_eq!(cache.thumbnail(&capture, &FixedVideo).unwrap().image, image);
+        let cached = read_cached(
+            &cache_dir,
+            &cache_key(capture.path()).unwrap(),
+            MediaKind::Photo,
+        )
+        .expect("lossless on-disk thumbnail");
+        assert_eq!(cached.image, image);
         assert_eq!(cache.thumbnail(&capture, &FixedVideo).unwrap().image, image);
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn large_photo_thumbnails_keep_detail_in_the_grids_centre_crop() {
+        let dir = temp_dir("crop-detail");
+        let cache_dir = dir.join("cache");
+        fs::create_dir_all(&cache_dir).unwrap();
+        let cache = ThumbnailCache::new(Some(cache_dir));
+        for (width, height) in [(1920, 1920), (1080, 1920), (3840, 1080)] {
+            let path = dir.join(format!("{width}x{height}.png"));
+            let original = RgbaImage::from_fn(width, height, |x, y| {
+                // Edges that must be cropped out, and fine central detail.
+                image::Rgba(if x < width / 4 || x >= width * 3 / 4 {
+                    [255, 0, 0, 255]
+                } else if y < height / 4 || y >= height * 3 / 4 {
+                    [0, 0, 255, 255]
+                } else if (x / 8) % 2 == 0 {
+                    [0, 255, 0, 255]
+                } else {
+                    [0, 0, 0, 255]
+                })
+            });
+            original.save(&path).unwrap();
+            let capture = photo(path.clone());
+            let thumbnail = cache.thumbnail(&capture, &FixedVideo).unwrap();
+            assert_eq!(thumbnail.image.dimensions(), THUMBNAIL_SIZE);
+            let centre = thumbnail.image.get_pixel(480, 270).0;
+            assert_eq!(centre[0], 0);
+            assert_eq!(centre[2], 0);
+            assert_eq!(
+                cache.thumbnail(&capture, &FixedVideo).unwrap().image,
+                thumbnail.image
+            );
+            // A full-screen photo still has its original composition; the
+            // thumbnail's crop must never overwrite or affect the original.
+            assert_eq!(decode_photo(&path, (4096, 4096)).unwrap(), original);
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn narrow_sources_and_native_gba_thumbnails_are_never_enlarged() {
+        let gba = RgbaImage::from_fn(240, 160, |x, y| {
+            image::Rgba([x as u8, y as u8, 0, (x % 255) as u8])
+        });
+        assert_eq!(photo_thumbnail(DynamicImage::ImageRgba8(gba.clone())), gba);
+        let portrait = DynamicImage::ImageRgba8(RgbaImage::new(320, 1920));
+        assert_eq!(photo_thumbnail(portrait).dimensions(), (320, 180));
     }
 
     #[test]
@@ -555,7 +648,7 @@ mod tests {
         // A different file at the same path gets a new key.
         RgbaImage::new(800, 800).save(&shot).unwrap();
         let changed = cache.thumbnail(&capture, &FixedVideo).unwrap();
-        assert_eq!(changed.image.dimensions(), (270, 270));
+        assert_eq!(changed.image.dimensions(), (800, 450));
 
         cache.prune(&[capture]);
         assert_eq!(
@@ -599,10 +692,16 @@ mod tests {
         RgbaImage::from_pixel(200, 112, image::Rgba([0, 255, 0, 255]))
             .save(&tiny)
             .unwrap();
+        let short = dir.join("short.png");
+        RgbaImage::from_pixel(1200, 100, image::Rgba([0, 255, 0, 255]))
+            .save(&short)
+            .unwrap();
         let cache = ThumbnailCache::new(None);
-        let capture = photo(shot).with_preview(Some(tiny));
-        let thumbnail = cache.thumbnail(&capture, &FixedVideo).unwrap();
-        assert_eq!(thumbnail.image.get_pixel(5, 5).0, [255, 0, 0, 255]);
+        for preview in [tiny, short] {
+            let capture = photo(shot.clone()).with_preview(Some(preview));
+            let thumbnail = cache.thumbnail(&capture, &FixedVideo).unwrap();
+            assert_eq!(thumbnail.image.get_pixel(5, 5).0, [255, 0, 0, 255]);
+        }
         fs::remove_dir_all(dir).unwrap();
     }
 }

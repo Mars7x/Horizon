@@ -16,6 +16,7 @@
 | [0201](0201-gba-colour-and-pixel-art.md) | GBA colour correction and pixel-art smoothing |
 | [0202](0202-background-freeze-and-return-blend.md) | Independent background freezing and continuous return to the game card |
 | [0203](0203-shared-page-history-and-pointer-actions.md) | Shared page history, working pointer activation and crisp Album images |
+| [0204](0204-shared-playback-preferences-and-stable-audio.md) | Shared playback freezing, stable quick-menu feedback and bounded game audio |
 
 Earlier decisions and their supporting phase notes are in
 [history](../history/INDEX.md). Their numbered identifiers remain reserved.

@@ -55,11 +55,11 @@ mod tests {
             CorePreferences::default()
         );
         let mut next = CorePreferences::default();
-        next.mgba.audio_smoothing = true;
+
         next.mgba.sunlight = 7.try_into().unwrap();
         next.mgba.video_filter = crate::domain::core_settings::VideoFilter::Xbrz;
         next.mgba.color_correction = true;
-        next.mgba.freeze_when_unfocused = false;
+        next.freeze_when_unfocused = false;
         worker.requests.send(next).unwrap();
         assert_eq!(worker.results.recv().unwrap().unwrap(), next);
         drop(worker);

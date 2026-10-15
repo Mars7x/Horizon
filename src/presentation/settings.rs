@@ -151,19 +151,21 @@ impl SettingsController {
             return;
         }
         let mut next = self.core_values.get();
-        match row {
-            0 => next.mgba.audio_smoothing = direction.unwrap_or(!next.mgba.audio_smoothing),
-            1 => {
+        match (self.page.borrow().view, row) {
+            (SettingsView::Cores, 1) => {
+                next.freeze_when_unfocused = direction.unwrap_or(!next.freeze_when_unfocused)
+            }
+            (SettingsView::Mgba, 0) => {
                 next.mgba.sunlight =
                     next.mgba
                         .sunlight
                         .step(if direction == Some(false) { -1 } else { 1 })
             }
-            2 => next.mgba.video_filter = next.mgba.video_filter.step(direction != Some(false)),
-            3 => next.mgba.color_correction = direction.unwrap_or(!next.mgba.color_correction),
-            4 => {
-                next.mgba.freeze_when_unfocused =
-                    direction.unwrap_or(!next.mgba.freeze_when_unfocused)
+            (SettingsView::Mgba, 1) => {
+                next.mgba.video_filter = next.mgba.video_filter.step(direction != Some(false))
+            }
+            (SettingsView::Mgba, 2) => {
+                next.mgba.color_correction = direction.unwrap_or(!next.mgba.color_correction)
             }
             _ => return,
         }
@@ -173,7 +175,7 @@ impl SettingsController {
         match self.cores.requests.send(next) {
             Ok(()) => {
                 self.core_busy.set(true);
-                *self.core_feedback.borrow_mut() = "Saving…".into();
+                self.core_feedback.borrow_mut().clear();
             }
             Err(_) => *self.core_feedback.borrow_mut() = "Couldn't save core settings".into(),
         }
@@ -438,7 +440,9 @@ impl SettingsController {
                 } else if page.view == SettingsView::Appearance && page.selected == 14 {
                     drop(page);
                     self.set_ui_sounds_enabled(ui, action == UiAction::Right);
-                } else if page.view == SettingsView::Mgba {
+                } else if page.view == SettingsView::Mgba
+                    || (page.view == SettingsView::Cores && page.selected == 1)
+                {
                     let row = page.selected;
                     drop(page);
                     self.change_core(ui, row, Some(action == UiAction::Right));
@@ -479,7 +483,7 @@ impl SettingsController {
             if let (Some(core), Some(ui)) = (core.upgrade(), weak.upgrade())
                 && core.page.borrow().view == SettingsView::Mgba
             {
-                core.change_core(&ui, 1, Some(false));
+                core.change_core(&ui, 0, Some(false));
             }
         });
         let weak = ui.as_weak();
@@ -613,6 +617,11 @@ impl SettingsController {
                 return;
             }
             SettingsView::Cores => {
+                if selected == 1 {
+                    self.page.borrow_mut().selected = 1;
+                    self.change_core(ui, 1, None);
+                    return;
+                }
                 if selected != 0 {
                     return;
                 }
@@ -1004,11 +1013,10 @@ impl SettingsController {
             SettingsView::Cores => 6,
             SettingsView::Mgba => 7,
         });
-        ui.set_settings_core_ready(self.core_ready.get() && !self.core_busy.get());
+        ui.set_settings_core_ready(self.core_ready.get());
         ui.set_settings_core_filter(self.core_values.get().mgba.video_filter.label().into());
         ui.set_settings_core_color(self.core_values.get().mgba.color_correction);
-        ui.set_settings_core_freeze(self.core_values.get().mgba.freeze_when_unfocused);
-        ui.set_settings_core_smoothing(self.core_values.get().mgba.audio_smoothing);
+        ui.set_settings_core_freeze(self.core_values.get().freeze_when_unfocused);
         ui.set_settings_core_sunlight(i32::from(self.core_values.get().mgba.sunlight.level()));
         ui.set_settings_core_feedback(self.core_feedback.borrow().as_str().into());
         let prefs = self.appearance.preferences();
@@ -1087,8 +1095,8 @@ fn settings_parent(view: SettingsView) -> Option<(SettingsView, i32)> {
 fn selection_count(view: SettingsView) -> i32 {
     match view {
         SettingsView::Root => 4,
-        SettingsView::Cores => 1,
-        SettingsView::Mgba => 5,
+        SettingsView::Cores => 2,
+        SettingsView::Mgba => 3,
         SettingsView::Appearance => 15,
         SettingsView::Controller => 2,
         SettingsView::ThirdParty => 2,
@@ -1430,7 +1438,7 @@ mod core_runtime_tests {
                     "core settings timed out: {}",
                     ui.get_settings_core_feedback()
                 );
-                if !ui.get_settings_core_ready() {
+                if !ui.get_settings_core_ready() || live.core_busy.get() {
                     return;
                 }
                 let tap = |key: slint::platform::Key| {
@@ -1451,39 +1459,33 @@ mod core_runtime_tests {
                         progress.set(1);
                     }
                     1 => {
-                        assert!(ui.get_settings_core_smoothing());
-                        tap(slint::platform::Key::DownArrow);
-                        assert_eq!(ui.get_settings_selection(), 1);
-                        tap(slint::platform::Key::RightArrow);
+                        assert_eq!(ui.get_settings_core_sunlight(), 1);
+                        ui.invoke_settings_core_decrease();
                         progress.set(2);
                     }
                     2 => {
-                        assert_eq!(ui.get_settings_core_sunlight(), 1);
-                        ui.invoke_settings_core_decrease();
+                        assert_eq!(ui.get_settings_core_sunlight(), 0);
+                        tap(slint::platform::Key::DownArrow);
+                        assert_eq!(ui.get_settings_selection(), 1);
+                        tap(slint::platform::Key::RightArrow);
                         progress.set(3);
                     }
                     3 => {
-                        tap(slint::platform::Key::DownArrow);
-                        assert_eq!(ui.get_settings_selection(), 2);
-                        tap(slint::platform::Key::RightArrow);
+                        assert_eq!(ui.get_settings_core_filter(), "LCD");
+                        tap(slint::platform::Key::Return);
                         progress.set(6);
                     }
                     6 => {
-                        assert_eq!(ui.get_settings_core_filter(), "LCD");
-                        tap(slint::platform::Key::Return);
+                        assert_eq!(ui.get_settings_core_filter(), "Smooth");
+                        tap(slint::platform::Key::RightArrow);
                         progress.set(7);
                     }
                     7 => {
-                        assert_eq!(ui.get_settings_core_filter(), "Smooth");
+                        assert_eq!(ui.get_settings_core_filter(), "Smooth pixel art");
                         tap(slint::platform::Key::RightArrow);
                         progress.set(8);
                     }
                     8 => {
-                        assert_eq!(ui.get_settings_core_filter(), "Smooth pixel art");
-                        tap(slint::platform::Key::RightArrow);
-                        progress.set(10);
-                    }
-                    10 => {
                         assert_eq!(ui.get_settings_core_filter(), "None");
                         tap(slint::platform::Key::LeftArrow);
                         progress.set(9);
@@ -1491,21 +1493,12 @@ mod core_runtime_tests {
                     9 => {
                         assert_eq!(ui.get_settings_core_filter(), "Smooth pixel art");
                         tap(slint::platform::Key::DownArrow);
-                        assert_eq!(ui.get_settings_selection(), 3);
+                        assert_eq!(ui.get_settings_selection(), 2);
                         tap(slint::platform::Key::RightArrow);
-                        progress.set(11);
+                        progress.set(10);
                     }
-                    11 => {
+                    10 => {
                         assert!(ui.get_settings_core_color());
-                        assert!(ui.get_settings_core_freeze());
-                        tap(slint::platform::Key::DownArrow);
-                        assert_eq!(ui.get_settings_selection(), 4);
-                        tap(slint::platform::Key::LeftArrow);
-                        progress.set(12);
-                    }
-                    12 => {
-                        assert!(!ui.get_settings_core_freeze());
-                        assert_eq!(ui.get_settings_core_sunlight(), 0);
                         let pixels = ui.window().take_snapshot().unwrap();
                         image::save_buffer(
                             output.join("mgba-settings.png"),
@@ -1520,23 +1513,39 @@ mod core_runtime_tests {
                             (ui.get_settings_view(), ui.get_settings_selection()),
                             (6, 0)
                         );
+                        tap(slint::platform::Key::DownArrow);
+                        assert_eq!(ui.get_settings_selection(), 1);
+                        assert!(ui.get_settings_core_freeze());
+                        tap(slint::platform::Key::LeftArrow);
+                        progress.set(11);
+                    }
+                    11 => {
+                        assert!(!ui.get_settings_core_freeze());
+                        let pixels = ui.window().take_snapshot().unwrap();
+                        image::save_buffer(
+                            output.join("shared-settings.png"),
+                            pixels.as_bytes(),
+                            pixels.width(),
+                            pixels.height(),
+                            image::ColorType::Rgba8,
+                        )
+                        .unwrap();
                         tap(slint::platform::Key::Escape);
                         assert_eq!(
                             (ui.get_settings_view(), ui.get_settings_selection()),
                             (0, 3)
                         );
-                        // A failed write must retain the already saved in-memory value.
+                        // Failed writes retain the last committed shared value.
                         std::fs::rename(output.join("cores.json"), output.join("saved-cores.json"))
                             .unwrap();
                         std::fs::create_dir(output.join("cores.json")).unwrap();
                         live.activate(&ui, 3);
-                        live.activate(&ui, 0);
-                        live.activate(&ui, 0);
-                        progress.set(4);
+                        live.activate(&ui, 1);
+                        progress.set(12);
                     }
-                    4 => {
+                    12 => {
                         assert!(ui.get_settings_core_feedback().starts_with("Couldn't save"));
-                        assert!(ui.get_settings_core_smoothing());
+                        assert!(!ui.get_settings_core_freeze());
                         progress.set(5);
                         slint::quit_event_loop().unwrap();
                     }
@@ -1550,13 +1559,12 @@ mod core_runtime_tests {
             SettingsStore::new(directory.join("saved-cores.json"))
                 .load_value()
                 .unwrap();
-        assert!(saved.mgba.audio_smoothing);
         assert_eq!(saved.mgba.sunlight.level(), 0);
         assert_eq!(
             saved.mgba.video_filter,
             crate::domain::core_settings::VideoFilter::Xbrz
         );
         assert!(saved.mgba.color_correction);
-        assert!(!saved.mgba.freeze_when_unfocused);
+        assert!(!saved.freeze_when_unfocused);
     }
 }

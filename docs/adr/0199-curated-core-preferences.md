@@ -5,8 +5,9 @@ important settings, and for Swap Select and Back to affect cores.
 
 Keep the existing bundled mGBA host. Add no new cores, plugin/process APIs,
 downloads or BIOS management. Settings lists only installed mGBA and exposes
-Audio smoothing (the native low-pass filter, default off) and a manual Sunlight
-level (0–10, default zero), useful for games requiring a solar sensor. No hardware
+a manual Sunlight level (0–10, default zero), useful for solar-sensor games.
+[ADR 0204](0204-shared-playback-preferences-and-stable-audio.md) removes the former
+audio smoothing control and makes background freezing a shared preference. No hardware
 sensor interface is granted. The user's subsequent filter approval adds a Video
 filter choice: None, LCD and Smooth; [ADR 0201](0201-gba-colour-and-pixel-art.md)
 adds colour correction and Smooth pixel art. None remains the default; LCD is an original

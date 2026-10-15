@@ -20,7 +20,7 @@ pub struct Frame {
     pub smooth: bool,
 }
 pub type LatestFrame = Arc<Mutex<Option<Frame>>>;
-pub type AudioBuffer = Arc<Mutex<std::collections::VecDeque<f32>>>;
+pub type AudioBuffer = Arc<super::gba_audio::GameAudio>;
 
 struct Callbacks {
     frame: LatestFrame,
@@ -30,7 +30,6 @@ struct Callbacks {
     preferences: MgbaPreferences,
     raw_frame: Option<Frame>,
     audio_speed: super::gba_audio::SpeedAudio,
-    max_audio_samples: usize,
     frames: Arc<AtomicU64>,
 }
 thread_local! { static CALLBACKS: RefCell<Option<Callbacks>> = const { RefCell::new(None) }; }
@@ -129,7 +128,6 @@ impl Core {
                     preferences,
                     raw_frame: None,
                     audio_speed: super::gba_audio::SpeedAudio::default(),
-                    max_audio_samples: 32768 * 2 / 20,
                     frames: Arc::clone(&core.frames),
                 })
             });
@@ -159,7 +157,7 @@ impl Core {
             }
             CALLBACKS.with(|state| {
                 if let Some(state) = state.borrow_mut().as_mut() {
-                    state.max_audio_samples = (core.av.sample_rate as usize / 20) * 2;
+                    state.audio.configure(core.av.sample_rate.round() as u32);
                 }
             });
             Ok(core)
@@ -271,11 +269,7 @@ extern "C" fn environment(command: u32, data: *mut c_void) -> bool {
                     let state = state.borrow();
                     let preferences = state.as_ref()?.preferences;
                     match CStr::from_ptr(variable.key).to_bytes() {
-                        b"mgba_audio_low_pass_filter" => Some(if preferences.audio_smoothing {
-                            c"enabled"
-                        } else {
-                            c"disabled"
-                        }),
+                        b"mgba_audio_low_pass_filter" => Some(c"disabled"),
                         b"mgba_solar_sensor_level" => Some(
                             [
                                 c"0", c"1", c"2", c"3", c"4", c"5", c"6", c"7", c"8", c"9", c"10",
@@ -412,19 +406,14 @@ extern "C" fn audio_batch(data: *const i16, frames: usize) -> usize {
         let Some(state) = state.as_mut() else {
             return;
         };
-        if let Ok(mut audio) = state.audio.lock() {
-            let samples = unsafe { std::slice::from_raw_parts(data, frames * 2) };
-            for stereo in samples.as_chunks::<2>().0 {
-                if let Some(output) = state.audio_speed.process([
-                    f32::from(stereo[0]) / 32768.0,
-                    f32::from(stereo[1]) / 32768.0,
-                ]) {
-                    audio.extend(output);
-                }
+        let samples = unsafe { std::slice::from_raw_parts(data, frames * 2) };
+        for stereo in samples.as_chunks::<2>().0 {
+            if let Some(output) = state.audio_speed.process([
+                f32::from(stereo[0]) / 32768.0,
+                f32::from(stereo[1]) / 32768.0,
+            ]) {
+                state.audio.push(output);
             }
-            // Prefer recent complete stereo frames over delayed audio after a stall.
-            let excess = audio.len().saturating_sub(state.max_audio_samples);
-            audio.drain(..excess);
         }
     });
     frames
@@ -495,10 +484,10 @@ mod tests {
     use super::*;
     #[test]
     #[ignore = "requires the built pinned mGBA core"]
-    fn real_core_applies_curated_audio_and_sunlight_options() {
+    fn real_core_applies_sunlight_and_keeps_unfiltered_audio() {
         let path = std::env::var_os("HORIZON_GBA_CORE").unwrap();
         let capture = |preferences: MgbaPreferences| {
-            let audio = Arc::new(Mutex::new(std::collections::VecDeque::new()));
+            let audio = Arc::new(super::super::gba_audio::GameAudio::default());
             let mut core = Core::load(
                 Path::new(&path),
                 &test_rom(),
@@ -525,23 +514,17 @@ mod tests {
             for _ in 0..10 {
                 core.run_frame();
             }
-            let samples: Vec<f32> = audio.lock().unwrap().drain(..).collect();
+            let samples: Vec<f32> = audio.drain();
             samples
         };
         let unfiltered = capture(MgbaPreferences::default());
         let filtered = capture(MgbaPreferences {
-            audio_smoothing: true,
             sunlight: 7.try_into().unwrap(),
             ..MgbaPreferences::default()
         });
         assert_eq!(unfiltered.len(), filtered.len());
         assert!(unfiltered.iter().any(|sample| sample.abs() > 0.001));
-        assert!(
-            unfiltered
-                .iter()
-                .zip(filtered)
-                .any(|(a, b)| (*a - b).abs() > 0.001)
-        );
+        assert_eq!(unfiltered, filtered);
     }
 
     #[test]
@@ -558,7 +541,7 @@ mod tests {
                 ..MgbaPreferences::default()
             },
             Arc::clone(&frame),
-            Arc::new(Mutex::new(std::collections::VecDeque::new())),
+            Arc::new(super::super::gba_audio::GameAudio::default()),
             Arc::new(AtomicU16::new(0)),
         )
         .unwrap();
@@ -581,7 +564,7 @@ mod tests {
         let path = std::env::var_os("HORIZON_GBA_CORE").expect("set HORIZON_GBA_CORE");
         let rom = test_rom();
         let frame = Arc::new(Mutex::new(None));
-        let audio = Arc::new(Mutex::new(std::collections::VecDeque::with_capacity(32768)));
+        let audio = Arc::new(super::super::gba_audio::GameAudio::default());
         let buttons = Arc::new(AtomicU16::new(0));
         let mut core = Core::load(
             Path::new(&path),
@@ -613,26 +596,14 @@ mod tests {
             core.run_frame();
         }
         assert!(frame.lock().unwrap().as_ref().unwrap().rgba[1] > 200);
-        assert!(!audio.lock().unwrap().is_empty());
-        assert!(
-            audio
-                .lock()
-                .unwrap()
-                .iter()
-                .any(|sample| sample.abs() > 0.01)
-        );
-        audio.lock().unwrap().clear();
+        assert!(!audio.is_empty());
+        assert!(audio.drain().iter().any(|sample| sample.abs() > 0.01));
+        audio.clear();
         core.set_fast_forward(true);
         for _ in 0..3 {
             core.run_frame();
         }
-        assert!(
-            audio
-                .lock()
-                .unwrap()
-                .iter()
-                .any(|sample| sample.abs() > 0.01)
-        );
+        assert!(audio.drain().iter().any(|sample| sample.abs() > 0.01));
         let capture = core.capture_frame().unwrap();
         assert_eq!((capture.width, capture.height), (240, 160));
         assert!(capture.rgba[1] > 200);
@@ -643,7 +614,7 @@ mod tests {
         for _ in 0..3 {
             core.run_frame();
         }
-        assert!(!audio.lock().unwrap().is_empty());
+        assert!(!audio.is_empty());
         drop(core);
         let mut reopened = Core::load(
             Path::new(&path),
