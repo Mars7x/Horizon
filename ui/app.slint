@@ -323,7 +323,6 @@ export component AppWindow inherits Window {
     in property <bool> settings-core-freeze;
     in property <bool> settings-core-color;
     in property <string> settings-core-filter: "None";
-    in property <bool> settings-core-smoothing: false;
     in property <int> settings-core-sunlight: 0;
     in property <string> settings-core-feedback: "";
     callback settings-core-decrease();
@@ -924,7 +923,6 @@ export component AppWindow inherits Window {
                     core-filter: root.settings-core-filter;
                     core-color: root.settings-core-color;
                     core-freeze: root.settings-core-freeze;
-                    core-smoothing: root.settings-core-smoothing;
                     core-sunlight: root.settings-core-sunlight;
                     core-feedback: root.settings-core-feedback;
                     core-decrease => { root.settings-core-decrease(); }

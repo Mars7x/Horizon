@@ -749,9 +749,9 @@ mod runtime_tests {
         preferences.mgba.video_filter = filter;
         preferences.mgba.color_correction =
             std::env::var_os("HORIZON_TEST_COLOR_CORRECTION").is_some();
-        preferences.mgba.freeze_when_unfocused =
+        preferences.freeze_when_unfocused =
             std::env::var_os("HORIZON_TEST_BACKGROUND_CONTINUES").is_none();
-        let freeze = preferences.mgba.freeze_when_unfocused;
+        let freeze = preferences.freeze_when_unfocused;
         let corrected = preferences.mgba.color_correction;
         crate::persistence::settings::SettingsStore::new(directory.join("cores.json"))
             .save_value(&preferences)
@@ -960,7 +960,20 @@ mod runtime_tests {
                     snapshot("gba-paused");
                     tap(slint::platform::Key::DownArrow);
                     assert_eq!(ui.get_player_focus(), 1);
+                    let before = ui
+                        .global::<crate::Motion>()
+                        .get_reduced_motion()
+                        .then(|| ui.window().take_snapshot().unwrap());
                     tap(slint::platform::Key::RightArrow);
+                    assert!(ui.get_player_busy());
+                    if let Some(before) = before {
+                        let during = ui.window().take_snapshot().unwrap();
+                        assert_eq!(
+                            before.as_bytes(),
+                            during.as_bytes(),
+                            "pause panel restyled while changing speed"
+                        );
+                    }
                     progress.set(10);
                 }
                 10 if !ui.get_player_busy() => {

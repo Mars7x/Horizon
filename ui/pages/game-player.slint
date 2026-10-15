@@ -58,11 +58,6 @@ export component GamePlayer inherits Rectangle {
             image-rendering: root.smooth ? ImageRendering.smooth : ImageRendering.pixelated;
         }
     }
-    if root.phase == 2 && !root.paused && !root.frozen && root.fast-forward && !root.failed : Rectangle {
-        x: parent.width - Metrics.page-margin - 48px; y: Metrics.spacing-lg;
-        width: 48px; height: 28px; border-radius: Metrics.radius-sm; background: #00000099;
-        Text { width: parent.width; height: parent.height; text: "2×"; color: white; font-size: Typography.body-size; horizontal-alignment: center; vertical-alignment: center; }
-    }
     Rectangle {
         width: parent.width; height: parent.height;
         visible: root.phase == 2 && !root.failed && root.pause-reveal > 0.001;

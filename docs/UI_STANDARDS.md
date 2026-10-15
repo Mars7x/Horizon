@@ -11,8 +11,8 @@ ActionButton components. Pause uses a compact side panel over a dimmed frame,
 using the shared compact ListRow variant, button glyphs and action buttons.
 The panel uses Theme.background (true black in Black), shared typography/marquee,
 spacing and focus animation; hints share Home's footer baseline. Pointer and
-keyboard/controller actions use the same UI sound boundary. Speed changes update
-the value without progress/success text; only failures need feedback. Disabled save-state
+keyboard/controller actions use the same UI sound boundary. Pending actions preserve row styling, focus and footer hints. Speed changes update
+only the pause-panel value, with no gameplay badge or progress/success text; only failures need feedback. Disabled save-state
 placeholders never take focus; restart confirmation defaults to Cancel. Rust owns player mode, handoff
 phases and focus. Launch/return use card-origin zooms with shared Motion tokens;
 keep the card press/rebound, preserve video aspect ratio, and hold the last frame

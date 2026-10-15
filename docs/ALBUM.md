@@ -15,9 +15,13 @@ Captures are filed by escaped source/game identity or the Horizon folder; old
 identity references can still supply titles without becoming active games.
 Writes use a temporary `.part` path, published atomically only when complete. The file is the record; no media
 table is needed. External changes appear on the next visit. Thumbnails/durations
-are disposable caches, not the original media. Version 3 thumbnails are lossless
-PNG, preserving native screenshot colours/alpha. Small still images use nearest
-pixel sampling when enlarged in the grid, viewer, slide and landing layers;
+are disposable caches, not the original media. Version 4 thumbnails are lossless
+PNG. Large photos are centre-cropped to the grid's 16:9 shape before shrinking
+to at most 960×540, so portrait/square pictures retain enough detail for 4K tiles.
+Small originals keep their native pixels and alpha. Only the disposable thumbnail
+cache is regenerated after an update; originals and full-screen decoding are unchanged.
+Small still images use nearest pixel sampling when enlarged in the grid, viewer,
+slide and landing layers;
 downscaled images and videos keep smooth sampling.
 
 Supported extensions include PNG, JPEG, GIF, JPEG XL, MP4, M4V, MKV, WebM and

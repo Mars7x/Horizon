@@ -103,7 +103,6 @@ export component SettingsPage inherits Rectangle {
     in property <bool> core-freeze;
     in property <bool> core-color;
     in property <string> core-filter: "None";
-    in property <bool> core-smoothing;
     in property <int> core-sunlight;
     in property <string> core-feedback;
     callback core-decrease();
@@ -472,6 +471,23 @@ export component SettingsPage inherits Rectangle {
             focused: root.view == 6 && root.selection == 0;
             activated => { if (root.view == 6) { root.activate(0); } }
         }
+        SettingsRow {
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 1;
+            width: parent.width;
+            title: "Freeze when unfocused";
+            subtitle: "Resume automatically when you return";
+            toggle: true;
+            checked: root.core-freeze;
+            enabled: root.view == 6 && root.core-ready;
+            focused: root.view == 6 && root.selection == 1;
+            activated => { if (root.view == 6) { root.activate(1); } }
+        }
+        Text {
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 2;
+            width: parent.width; height: 60px;
+            text: root.core-feedback != "" ? root.core-feedback : "Applies to all cores on the next game launch";
+            color: Theme.secondary-foreground; font-size: Typography.caption-size; wrap: word-wrap;
+        }
     }
 
     mgba := TransitionLayer {
@@ -492,60 +508,38 @@ export component SettingsPage inherits Rectangle {
         SettingsRow {
             y: Metrics.breadcrumb-height + Metrics.spacing-sm;
             width: parent.width;
-            title: "Audio smoothing";
-            subtitle: "Soften sharp game audio";
-            toggle: true;
-            checked: root.core-smoothing;
-            enabled: root.view == 7 && root.core-ready;
-            focused: root.view == 7 && root.selection == 0;
-            activated => { if (root.view == 7) { root.activate(0); } }
-        }
-        SettingsRow {
-            y: Metrics.breadcrumb-height + Metrics.spacing-sm + Metrics.list-row-height + Metrics.list-row-gap;
-            width: parent.width;
             title: "Sunlight level";
             subtitle: "For games that use a solar sensor";
             trailing: "+   " + root.core-sunlight + " / 10";
             secondary: "−";
             enabled: root.view == 7 && root.core-ready;
-            focused: root.view == 7 && root.selection == 1;
-            activated => { if (root.view == 7) { root.activate(1); } }
+            focused: root.view == 7 && root.selection == 0;
+            activated => { if (root.view == 7) { root.activate(0); } }
             secondary-activated => { if (root.view == 7) { root.core-decrease(); } }
         }
         SettingsRow {
-            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 2;
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 1;
             width: parent.width;
             title: "Video filter";
             subtitle: "Sharp, LCD, smooth scaling or smooth pixel art";
             trailing: root.core-filter + "  ›";
             enabled: root.view == 7 && root.core-ready;
-            focused: root.view == 7 && root.selection == 2;
-            activated => { if (root.view == 7) { root.activate(2); } }
+            focused: root.view == 7 && root.selection == 1;
+            activated => { if (root.view == 7) { root.activate(1); } }
         }
         SettingsRow {
-            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 3;
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 2;
             width: parent.width;
             title: "Colour correction";
             subtitle: "Approximate the original GBA display colours";
             toggle: true;
             checked: root.core-color;
             enabled: root.view == 7 && root.core-ready;
-            focused: root.view == 7 && root.selection == 3;
-            activated => { if (root.view == 7) { root.activate(3); } }
-        }
-        SettingsRow {
-            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 4;
-            width: parent.width;
-            title: "Freeze when unfocused";
-            subtitle: "Resume automatically when you return";
-            toggle: true;
-            checked: root.core-freeze;
-            enabled: root.view == 7 && root.core-ready;
-            focused: root.view == 7 && root.selection == 4;
-            activated => { if (root.view == 7) { root.activate(4); } }
+            focused: root.view == 7 && root.selection == 2;
+            activated => { if (root.view == 7) { root.activate(2); } }
         }
         Text {
-            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 5;
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 3;
             width: parent.width; height: 60px;
             text: root.core-feedback != "" ? root.core-feedback : "Applies next time you launch a game";
             color: Theme.secondary-foreground;

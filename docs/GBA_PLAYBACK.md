@@ -43,8 +43,15 @@ Playback speed toggles 1×/2× for this loaded game (Left/Right also selects spe
 At 2× the worker doubles its frame pace and plays audio twice as fast, one octave
 higher. A stereo low-pass filter prevents aliasing when reducing the doubled
 sample flow to the output rate. Buffered audio is cleared on speed changes and
-kept to at most 50 ms in the application queue; a small 2× badge
-appears during play. Returning to 1× clears queued audio before playback resumes.
+kept to at most 50 ms in the application queue. Speed is shown only in the pause
+panel. Returning to 1× clears queued audio before playback resumes.
+
+The game worker publishes atomic stereo frames to a bounded queue; PipeWire does
+not lock against core filtering or allocate. Playback builds about 40 ms of
+headroom on startup/resume and after a real underrun, with short ramps at audio
+boundaries. Brief frame jitter no longer repeatedly drains an empty queue or
+produces silence because the worker holds a mutex. Long core/storage/device stalls
+can still exhaust a bounded buffer.
 Restart retains the current speed; launching another game starts at 1×.
 
 Take screenshot writes the native unfiltered frame to Horizon's Album, without
@@ -55,6 +62,8 @@ stays paused without resetting. Restart remains within the same observed session
 Return to Horizon saves and closes the game through the card return animation.
 The last game picture fades into the existing card as it shrinks, before the
 card rebounds; there is no opaque picture swap at the end.
+Pending actions retain the panel’s rows, focus styling and footer hints; only
+the relevant value or message changes. Repeated actions are guarded in Rust.
 The panel and hints support keyboard, controller and pointer, and respect Reduced
 Motion and appearance preferences. Errors remain visible in the panel.
 
@@ -68,12 +77,13 @@ gameplay A/B; keyboard bindings stay unchanged. Home/Library focus and route are
 
 ## Core preferences
 
-Settings → Cores → mGBA offers Audio smoothing, Sunlight level (0–10) for
-solar-sensor games, Video filter (None, LCD, Smooth or Smooth pixel art), and
-Colour correction and Freeze when unfocused. Defaults keep filter/correction off,
-sunlight zero and background freezing on. Saved choices are read on the game worker at launch; restart the game to
-apply changes. Invalid/unreadable settings are reported without overwriting the
-file. No hardware sensors or BIOS configuration are added.
+Settings → Cores contains the shared Freeze when unfocused switch, default on.
+Cores → mGBA contains Sunlight level (0–10) for solar-sensor games, Video filter
+(None, LCD, Smooth or Smooth pixel art), and Colour correction. Defaults keep
+filter/correction off and sunlight zero. Saved choices are read on the game worker
+at launch; restart the game to apply changes. Invalid/unreadable settings are
+reported without overwriting the file. No hardware sensors or BIOS configuration
+are added. Audio smoothing is no longer a user preference.
 
 LCD applies an original subtle RGB subpixel/grid treatment at 3× on the core
 worker, then uses smooth scaling. Smooth uses native bilinear scaling without
