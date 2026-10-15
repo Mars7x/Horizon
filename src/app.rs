@@ -73,7 +73,26 @@ pub fn run() -> Result<(), AppError> {
         .init();
 
     let database_path = data_paths::library_database_path()?;
-    let repository = SqliteLibraryRepository::open(&database_path)?;
+    // Hash recognition uses embedded metadata and saved fingerprints. Keep DB
+    // work on a startup worker and finish before constructing any UI/catalog.
+    let recognition_database = database_path.clone();
+    let repository = std::thread::Builder::new()
+        .name("horizon-rom-titles".into())
+        .spawn(move || -> Result<SqliteLibraryRepository, String> {
+            let mut repository = SqliteLibraryRepository::open(recognition_database)
+                .map_err(|error| error.to_string())?;
+            let catalog = crate::services::rom_import::GbaCatalog::bundled()
+                .map_err(|error| error.to_string())?;
+            let recognized = repository
+                .recognize_saved_rom_titles(&catalog)
+                .map_err(|error| error.to_string())?;
+            debug!(recognized, "saved ROM titles checked against hash catalog");
+            Ok(repository)
+        })
+        .map_err(|error| AppError::LibraryPreparation(error.to_string()))?
+        .join()
+        .map_err(|_| AppError::LibraryPreparation("ROM title worker stopped unexpectedly".into()))?
+        .map_err(AppError::LibraryPreparation)?;
     let schema_version = repository.schema_version()?;
     let retired_games = repository.retired_games()?;
     let mut library = LibraryService::new(repository);

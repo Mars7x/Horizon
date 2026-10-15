@@ -21,6 +21,7 @@ required_assets=(
 required_licenses=(
   "CC0-1.0.txt"
   "CC-BY-SA-3.0-US.txt"
+  "CC-BY-SA-4.0.txt"
   "GPL-3.0-or-later.txt"
   "OFL-1.1.txt"
   "Apache-2.0.txt"
@@ -31,6 +32,9 @@ for asset in "${required_assets[@]}"; do
   test -f "$root/ui/assets/$asset" || { echo "missing third-party asset: $asset" >&2; exit 1; }
   grep -Fq "$asset" "$notice" || { echo "asset missing from THIRD_PARTY_NOTICES.md: $asset" >&2; exit 1; }
 done
+
+test -s "$root/data/catalogs/gba.xml" || { echo "missing GBA hash catalog" >&2; exit 1; }
+grep -Fq 'data/catalogs/gba.xml' "$notice" || { echo "GBA catalog attribution missing" >&2; exit 1; }
 
 grep -Fq "LINE Seed JP" "$notice" || { echo "LINE Seed JP missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
 grep -Fq "© LY Corporation" "$notice" || { echo "LINE Seed JP copyright missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }

@@ -9,6 +9,7 @@
 | [0194](0194-first-run-onboarding.md) | Minimal welcome, local profile setup and shared controller input |
 | [0195](0195-automatic-folder-import.md) | Direct folder selection with automatic scanning and import |
 | [0196](0196-rom-artwork-title-matching.md) | Source-aware release tags and normalized unique artwork title matching |
+| [0197](0197-offline-hash-title-recognition.md) | Offline ROM-hash catalog naming for new and existing imports |
 
 Earlier decisions and their supporting phase notes are in
 [history](../history/INDEX.md). Their numbered identifiers remain reserved.

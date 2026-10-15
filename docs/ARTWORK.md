@@ -22,6 +22,8 @@ changing library titles or ROM recognition. Search and comparison fold Unicode
 diacritics, case, whitespace and colon/dash separators. A single matching catalog
 ID is required; editions, hacks, sequels and unknown tags remain distinct. See
 [ADR 0196](adr/0196-rom-artwork-title-matching.md).
+Library titles come from exact ROM hash catalogs where recognized; SteamGridDB
+matching never replaces them with its search-result names.
 Eligible square grids rank by score with deterministic ties, not upload recency.
 
 Requests and public-image URLs use explicit HTTPS host validation, bounded

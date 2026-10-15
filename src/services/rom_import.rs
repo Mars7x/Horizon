@@ -18,7 +18,15 @@ pub fn scan_folder(
     folder: &std::path::Path,
     catalog: Option<&GbaCatalog>,
 ) -> Result<RomScan, RomImportError> {
-    let mut result = scan(folder, catalog)?;
+    let bundled;
+    let catalog = match catalog {
+        Some(catalog) => catalog,
+        None => {
+            bundled = GbaCatalog::bundled()?;
+            &bundled
+        }
+    };
+    let mut result = scan(folder, Some(catalog))?;
     for candidate in &mut result.candidates {
         candidate.selected = candidate.fingerprint.is_some();
     }
