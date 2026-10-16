@@ -1,3 +1,5 @@
+import { InputGlyphs, GlyphFamily } from "../components/hint-bar.slint";
+import { ControllerBindingRow } from "../models/controller.slint";
 import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { SelectionFocusSurface } from "../components/selection-focus-surface.slint";
 import { ListRow } from "../components/list-row.slint";
@@ -97,6 +99,11 @@ export component SettingsPage inherits Rectangle {
     in property <int> theme-index: 0; // System, Light, Dark, Black
     in property <int> accent-index: 0; // System, nine spectrum colours
     in property <bool> ui-sounds-enabled: true;
+    in property <[ControllerBindingRow]> binding-rows;
+    in property <bool> binding-open;
+    in property <string> binding-title;
+    in property <bool> controller-ready;
+    callback cancel-binding();
     in property <bool> swap-confirm: false;
     in property <bool> swap-hints: true;
     in property <bool> core-ready;
@@ -595,8 +602,14 @@ export component SettingsPage inherits Rectangle {
             focused: root.view == 5 && root.selection == 1;
             activated => { if (root.view == 5 && !root.editing-key && !root.refresh-open) { root.activate(1); } }
         }
-        Text {
+        SettingsRow {
             x: 0px; y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 2;
+            width: parent.width; title: "Button mapping"; subtitle: "GBA gameplay controls"; trailing: "Open";
+            focused: root.view == 5 && root.selection == 2;
+            activated => { if (root.view == 5 && !root.binding-open) {root.activate(2);} }
+        }
+        Text {
+            x: 0px; y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 3;
             width: parent.width; height: 30px;
             text: root.feedback;
             visible: root.view == 5 && root.feedback != "";
@@ -606,6 +619,69 @@ export component SettingsPage inherits Rectangle {
         }
     }
 
+    bindings := TransitionLayer {
+        x: Metrics.page-margin; rest-y: Metrics.page-header-height;
+        width: root.content-width; height: root.height - Metrics.page-header-height - Metrics.page-bottom-bar-height;
+        opaque: true; active: root.view == 8; outgoing: view-transition.from-key == 8;
+        returning: root.view-back; phase: view-transition.phase;
+        Breadcrumb { x: 0px; y: 0px; width: parent.width; section: "Controller"; page: "GBA button mapping"; back => {if (root.view == 8 && !root.binding-open) {root.go-back();}} }
+        // The action and assigned physical input have distinct visual roles.
+        // Keep each pair one shared focus/click target, including its keycap.
+        Text {
+            x: Metrics.spacing-lg; y: Metrics.breadcrumb-height + Metrics.spacing-md;
+            width: parent.width / 2; height: Metrics.spacing-lg;
+            text: "GBA control"; color: Theme.secondary-foreground; font-size: Typography.caption-size;
+            vertical-alignment: center;
+        }
+        Text {
+            x: parent.width - Metrics.spacing-xxl * 5 - Metrics.spacing-lg;
+            y: Metrics.breadcrumb-height + Metrics.spacing-md;
+            width: Metrics.spacing-xxl * 4; height: Metrics.spacing-lg;
+            text: "Controller input"; color: Theme.secondary-foreground; font-size: Typography.caption-size;
+            horizontal-alignment: center; vertical-alignment: center;
+        }
+        for row[index] in root.binding-rows: ListRow {
+            x: 0px;
+            y: Metrics.breadcrumb-height + Metrics.spacing-xxl + index * (Metrics.compact-row-height + Metrics.list-row-gap);
+            width: parent.width; compact: true;
+            title: row.title == "Start" || row.title == "Select" ? row.title : row.title + " button";
+            subtitle: "Assigned to controller input " + row.value + ". Select to change.";
+            trailing-width: Metrics.spacing-xxl * 6;
+            focused: root.view == 8 && root.selection == index && !root.binding-open;
+            enabled: root.view == 8 && root.controller-ready && !root.binding-open;
+            activated => {if (root.view == 8 && !root.binding-open) {root.activate(index);}}
+            Rectangle {
+                x: parent.width - Metrics.spacing-xxl * 5 - Metrics.spacing-lg;
+                y: Metrics.spacing-sm; width: Metrics.spacing-xxl * 4;
+                height: parent.height - Metrics.spacing-sm * 2;
+                background: Theme.surface-raised; border-radius: Metrics.radius-sm;
+                Text {
+                    width: parent.width; height: parent.height;
+                    text: row.value; color: Theme.foreground;
+                    font-size: Typography.body-size; font-weight: Typography.emphasis-weight;
+                    horizontal-alignment: center; vertical-alignment: center;
+                }
+            }
+            Text {
+                x: parent.width - Metrics.spacing-xxl; y: 0px;
+                width: Metrics.spacing-lg; height: parent.height;
+                text: "›"; color: Theme.secondary-foreground; font-size: Typography.heading-size;
+                horizontal-alignment: center; vertical-alignment: center;
+            }
+        }
+        SettingsRow {
+            y: Metrics.breadcrumb-height + Metrics.spacing-xxl + 6 * (Metrics.compact-row-height + Metrics.list-row-gap) + Metrics.spacing-md;
+            width: parent.width; compact: true; title: "Restore defaults";
+            focused: root.view == 8 && root.selection == 6 && !root.binding-open;
+            enabled: root.view == 8 && root.controller-ready && !root.binding-open;
+            activated => {if (root.view == 8 && !root.binding-open) {root.activate(6);}}
+        }
+        Text {
+            y: Metrics.breadcrumb-height + Metrics.spacing-xxl + 7 * (Metrics.compact-row-height + Metrics.list-row-gap) + Metrics.spacing-md;
+            width: parent.width; height: Metrics.compact-row-height;
+            text: root.feedback; color: Theme.secondary-foreground; font-size: Typography.caption-size; wrap: word-wrap;
+        }
+    }
     // Third-Party lists one row per service; each opens its own page, so
     // SteamGridDB and Steam are reached and laid out the same way.
     third-party := TransitionLayer {
@@ -1163,4 +1239,18 @@ export component SettingsPage inherits Rectangle {
         selected: root.confirm-focus;
         choose(choice) => { root.confirm(choice); }
     }
+    ModalDialog {
+        z: 30;
+        open: root.binding-open; area-width: root.width; area-height: root.height;
+        Text {x: Metrics.spacing-lg; y: Metrics.spacing-lg; width: parent.width - Metrics.spacing-lg * 2; height: Metrics.spacing-xl;
+            text: root.binding-title; color: Theme.foreground; font-size: Typography.heading-size; font-weight: Typography.emphasis-weight;}
+        Text {x: Metrics.spacing-lg; y: Metrics.spacing-lg + Metrics.spacing-xxl; width: parent.width - Metrics.spacing-lg * 2; height: Metrics.spacing-xxl;
+            text: "Release, then press a controller button.\nStick click or Escape cancels."; color: Theme.secondary-foreground; font-size: Typography.caption-size; wrap: word-wrap;}
+        SettingsButton {
+            width: Metrics.spacing-xxl * 2; height: Metrics.compact-row-height - Metrics.spacing-sm;
+            x: parent.width - self.width - Metrics.spacing-lg; y: parent.height - self.height - Metrics.spacing-lg;
+            label: "Cancel"; focused: InputGlyphs.family == GlyphFamily.keyboard; activated => {root.cancel-binding();}
+        }
+    }
+
 }

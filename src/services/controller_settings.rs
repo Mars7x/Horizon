@@ -1,89 +1,71 @@
-//! Controller preferences, kept in `controller.json`.
-
-use std::{
-    fs, io,
-    path::{Path, PathBuf},
+//! Serial controller preference I/O; failed loads never overwrite user data.
+pub use crate::domain::controller::ControllerPreferences;
+use crate::{
+    persistence::settings::SettingsStore,
+    services::worker::{self, Notify},
 };
-
-use serde::{Deserialize, Serialize};
-
-/// What `controller.json` keeps.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ControllerPreferences {
-    /// Controllers select with the button that normally goes back, and go
-    /// back with the one that normally selects. The keyboard is unchanged.
-    pub swap_confirm: bool,
-    /// With the swap on, hints show the swapped buttons (the ones to press);
-    /// off, they keep the controller's usual buttons.
-    pub swap_hints: bool,
+use std::{
+    path::PathBuf,
+    sync::mpsc::{self, Receiver, Sender},
+};
+pub struct ControllerSettings {
+    pub requests: Sender<ControllerPreferences>,
+    pub results: Receiver<Result<ControllerPreferences, String>>,
 }
-
-impl Default for ControllerPreferences {
-    fn default() -> Self {
-        Self {
-            swap_confirm: false,
-            swap_hints: true,
+impl ControllerSettings {
+    pub fn new(path: PathBuf, notify: Notify) -> Self {
+        let (requests, commands) = mpsc::channel();
+        let (sender, results) = worker::worker_channel(notify);
+        let failed = sender.clone();
+        if !worker::spawn("controller-settings", move || {
+            let store = SettingsStore::new(path);
+            let loaded = store
+                .load_value::<ControllerPreferences>()
+                .map_err(|e| e.to_string());
+            let usable = loaded.is_ok();
+            let _ = sender.send(loaded);
+            if !usable {
+                return;
+            }
+            while let Ok(next) = commands.recv() {
+                if sender
+                    .send(
+                        store
+                            .save_value(&next)
+                            .map(|()| next)
+                            .map_err(|e| e.to_string()),
+                    )
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        }) {
+            let _ = failed.send(Err("Could not start controller settings".into()));
         }
+        Self { requests, results }
     }
 }
-
-impl ControllerPreferences {
-    /// Whether hints draw select and back swapped.
-    pub const fn hints_swapped(self) -> bool {
-        self.swap_confirm && self.swap_hints
-    }
-}
-
-/// The saved preferences; anything unreadable is the default.
-pub fn load_preferences(path: &Path) -> ControllerPreferences {
-    fs::read(path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
-}
-
-pub fn save_preferences(path: &Path, preferences: &ControllerPreferences) -> io::Result<()> {
-    let json = serde_json::to_vec_pretty(preferences).map_err(io::Error::other)?;
-    let partial = partial_path(path);
-    fs::write(&partial, json)?;
-    fs::rename(&partial, path)
-}
-
-fn partial_path(path: &Path) -> PathBuf {
-    let mut name = path.file_name().unwrap_or_default().to_owned();
-    name.push(".part");
-    path.with_file_name(name)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
-    fn preferences_round_trip_and_default_when_missing() {
-        let dir = std::env::temp_dir().join(format!("horizon-controller-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).expect("temp dir");
-        let path = dir.join("controller.json");
-        assert_eq!(load_preferences(&path), ControllerPreferences::default());
-
-        let swapped = ControllerPreferences {
-            swap_confirm: true,
-            swap_hints: false,
-        };
-        save_preferences(&path, &swapped).expect("save");
-        assert_eq!(load_preferences(&path), swapped);
-        assert!(!swapped.hints_swapped());
-
-        // A file saved before the hints switch keeps hints swapped.
-        fs::write(&path, br#"{"swap_confirm": true}"#).expect("write");
-        assert!(load_preferences(&path).hints_swapped());
-
-        fs::write(&path, b"not json").expect("write");
-        assert_eq!(load_preferences(&path), ControllerPreferences::default());
-        fs::write(&path, b"{}").expect("write");
-        assert_eq!(load_preferences(&path), ControllerPreferences::default());
-        let _ = fs::remove_dir_all(&dir);
+    fn old_settings_default_bindings_and_invalid_files_are_preserved() {
+        let path =
+            std::env::temp_dir().join(format!("horizon-mapping-{}.json", std::process::id()));
+        std::fs::write(&path, br#"{"swap_confirm":true}"#).unwrap();
+        let worker = ControllerSettings::new(path.clone(), worker::no_notify());
+        let mut values = worker.results.recv().unwrap().unwrap();
+        assert!(values.hints_swapped());
+        values.gba_bindings = values.gba_bindings.assign(0, 9, false);
+        worker.requests.send(values).unwrap();
+        assert_eq!(worker.results.recv().unwrap().unwrap(), values);
+        drop(worker);
+        std::fs::write(&path, b"broken").unwrap();
+        let worker = ControllerSettings::new(path.clone(), worker::no_notify());
+        assert!(worker.results.recv().unwrap().is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"broken");
+        drop(worker);
+        std::fs::remove_file(path).unwrap();
     }
 }

@@ -1,5 +1,6 @@
 //! Narrow mGBA libretro host. All core calls and callbacks stay on one worker.
 use crate::domain::core_settings::MgbaPreferences;
+use crate::domain::core_settings::PlaybackSpeed;
 use libloading::Library;
 use std::{
     cell::RefCell,
@@ -248,10 +249,10 @@ impl Core {
         // SAFETY: same worker and retained library as every other core call.
         unsafe { (self.reset)() }
     }
-    pub fn set_fast_forward(&mut self, enabled: bool) {
+    pub fn set_speed(&mut self, speed: PlaybackSpeed) {
         CALLBACKS.with(|state| {
             if let Some(state) = state.borrow_mut().as_mut() {
-                state.audio_speed.set_fast_forward(enabled);
+                state.audio_speed.set_speed(speed);
             }
         });
     }
@@ -732,7 +733,7 @@ mod tests {
         assert!(!audio.is_empty());
         assert!(audio.drain().iter().any(|sample| sample.abs() > 0.01));
         audio.clear();
-        core.set_fast_forward(true);
+        core.set_speed(PlaybackSpeed::Double);
         for _ in 0..3 {
             core.run_frame();
         }
@@ -743,7 +744,7 @@ mod tests {
         core.restart();
         core.restore_save(&saved).unwrap();
         assert_eq!(core.save_ram().unwrap()[0], 31);
-        core.set_fast_forward(false);
+        core.set_speed(PlaybackSpeed::Normal);
         for _ in 0..3 {
             core.run_frame();
         }

@@ -1,9 +1,10 @@
-//! Streaming 2:1 audio decimation for accelerated GBA playback.
+//! Streaming integer audio decimation for accelerated GBA playback.
 //! Filtering before dropping samples avoids folding high frequencies into the
 //! audible range. Stereo channels and history persist across libretro batches.
+use crate::domain::core_settings::PlaybackSpeed;
 use std::sync::{
     Arc,
-    atomic::{AtomicU64, AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
 };
 
 // Packed stereo slots remain atomic even when an overrun discards old frames
@@ -15,6 +16,7 @@ pub struct GameAudio {
     write: AtomicUsize,
     limit: AtomicUsize,
     epoch: AtomicU64,
+    paused: AtomicBool,
 }
 impl Default for GameAudio {
     fn default() -> Self {
@@ -24,10 +26,16 @@ impl Default for GameAudio {
             write: AtomicUsize::new(0),
             limit: AtomicUsize::new(32768 / 20),
             epoch: AtomicU64::new(0),
+            paused: AtomicBool::new(false),
         }
     }
 }
 impl GameAudio {
+    /// Silence the live output without consuming the frozen game's timeline.
+    /// Keeping its bounded headroom avoids re-priming on an ordinary resume.
+    pub fn set_paused(&self, paused: bool) {
+        self.paused.store(paused, Ordering::Release);
+    }
     pub fn configure(&self, rate: u32) {
         self.limit
             .store((rate as usize / 20).clamp(1, CAPACITY), Ordering::Release);
@@ -125,6 +133,11 @@ impl AudioReader {
     }
     pub fn render(&mut self, output: &mut [f32]) {
         output.fill(0.0);
+        if self.audio.paused.load(Ordering::Acquire) {
+            self.fade = 0;
+            self.last = [0.0; 2];
+            return;
+        }
         let epoch = self.audio.epoch.load(Ordering::Acquire);
         if self.epoch != epoch {
             self.epoch = epoch;
@@ -169,8 +182,8 @@ impl AudioReader {
 const TAPS: usize = 63;
 
 pub(super) struct SpeedAudio {
-    fast: bool,
-    phase: bool,
+    factor: usize,
+    phase: usize,
     position: usize,
     history: [[f32; 2]; TAPS],
     coefficients: [f32; TAPS],
@@ -178,10 +191,23 @@ pub(super) struct SpeedAudio {
 
 impl Default for SpeedAudio {
     fn default() -> Self {
-        let mut coefficients = [0.0; TAPS];
-        // Leave a transition band below the decimated Nyquist frequency (0.25).
-        let cutoff = 0.22;
-        for (index, coefficient) in coefficients.iter_mut().enumerate() {
+        Self {
+            factor: 1,
+            phase: 0,
+            position: 0,
+            history: [[0.0; 2]; TAPS],
+            coefficients: [0.0; TAPS],
+        }
+    }
+}
+impl SpeedAudio {
+    pub fn set_speed(&mut self, speed: PlaybackSpeed) {
+        self.factor = usize::from(speed.factor());
+        self.phase = 0;
+        self.position = 0;
+        self.history.fill([0.0; 2]);
+        let cutoff = 0.44 / self.factor as f64;
+        for (index, coefficient) in self.coefficients.iter_mut().enumerate() {
             let offset = index as f64 - (TAPS / 2) as f64;
             let sinc = if offset == 0.0 {
                 2.0 * cutoff
@@ -193,36 +219,20 @@ impl Default for SpeedAudio {
                 0.54 - 0.46 * (2.0 * std::f64::consts::PI * index as f64 / (TAPS - 1) as f64).cos();
             *coefficient = (sinc * window) as f32;
         }
-        let gain: f32 = coefficients.iter().sum();
-        for coefficient in &mut coefficients {
+        let gain: f32 = self.coefficients.iter().sum();
+        for coefficient in &mut self.coefficients {
             *coefficient /= gain;
         }
-        Self {
-            fast: false,
-            phase: false,
-            position: 0,
-            history: [[0.0; 2]; TAPS],
-            coefficients,
-        }
-    }
-}
-
-impl SpeedAudio {
-    pub fn set_fast_forward(&mut self, enabled: bool) {
-        self.fast = enabled;
-        self.phase = false;
-        self.position = 0;
-        self.history.fill([0.0; 2]);
     }
 
     pub fn process(&mut self, stereo: [f32; 2]) -> Option<[f32; 2]> {
-        if !self.fast {
+        if self.factor == 1 {
             return Some(stereo);
         }
         self.history[self.position] = stereo;
         self.position = (self.position + 1) % TAPS;
-        self.phase = !self.phase;
-        if self.phase {
+        self.phase = (self.phase + 1) % self.factor;
+        if self.phase != 0 {
             return None;
         }
         let mut output = [0.0; 2];
@@ -245,53 +255,308 @@ mod tests {
     fn normal_speed_is_exact_and_speed_changes_discard_filter_history() {
         let mut audio = SpeedAudio::default();
         assert_eq!(audio.process([0.25, -0.5]), Some([0.25, -0.5]));
-        audio.set_fast_forward(true);
+        audio.set_speed(PlaybackSpeed::Double);
         for _ in 0..128 {
             audio.process([1.0, -1.0]);
         }
-        audio.set_fast_forward(false);
+        audio.set_speed(PlaybackSpeed::Normal);
         assert_eq!(audio.process([0.0, 0.0]), Some([0.0, 0.0]));
-        audio.set_fast_forward(true);
+        audio.set_speed(PlaybackSpeed::Double);
         assert_eq!(audio.process([0.0, 0.0]), None);
         assert_eq!(audio.process([0.0, 0.0]), Some([0.0, 0.0]));
     }
 
     #[test]
-    fn accelerated_audio_halves_sample_count_preserves_stereo_and_rejects_aliasing() {
-        let mut audio = SpeedAudio::default();
-        audio.set_fast_forward(true);
-        let mut output = Vec::new();
-        // Independent low and high tones in the two channels.
-        for index in 0..4096 {
-            let time = index as f32 * 2.0 * std::f32::consts::PI;
-            if let Some(sample) = audio.process([(time * 0.04).sin(), (time * 0.35).sin()]) {
-                output.push(sample);
+    fn all_accelerated_speeds_preserve_stereo_pitch_and_reject_aliasing() {
+        for speed in PlaybackSpeed::ALL.into_iter().skip(1) {
+            let mut audio = SpeedAudio::default();
+            audio.set_speed(speed);
+            let mut output = Vec::new();
+            for i in 0..12288 {
+                let t = i as f32 * 2.0 * std::f32::consts::PI;
+                if let Some(frame) = audio.process([(t * 0.02).sin(), (t * 0.35).sin()]) {
+                    output.push(frame);
+                }
             }
+            assert_eq!(output.len(), 12288 / usize::from(speed.factor()));
+            let stable = &output[128..];
+            let rms = |channel: usize| {
+                (stable.iter().map(|f| f[channel].powi(2)).sum::<f32>() / stable.len() as f32)
+                    .sqrt()
+            };
+            assert!((0.69..0.72).contains(&rms(0)), "{speed:?}: {}", rms(0));
+            assert!(rms(1) < 0.003, "{speed:?}: alias {}", rms(1));
+            let crossings = stable
+                .windows(2)
+                .filter(|pair| pair[0][0] < 0.0 && pair[1][0] >= 0.0)
+                .count();
+            assert!(
+                (crossings as f32 - stable.len() as f32 * 0.02 * f32::from(speed.factor())).abs()
+                    < 2.0
+            );
+            audio.set_speed(PlaybackSpeed::Normal);
+            assert_eq!(audio.process([0.25, -0.5]), Some([0.25, -0.5]));
         }
-        assert_eq!(output.len(), 2048);
-        let stable = &output[128..];
-        let rms = |channel: usize| {
-            (stable
-                .iter()
-                .map(|sample| sample[channel].powi(2))
-                .sum::<f32>()
-                / stable.len() as f32)
-                .sqrt()
-        };
-        assert!((0.69..0.72).contains(&rms(0)));
-        assert!(rms(1) < 0.002);
-        // Low input tone advances twice as far per output sample: higher pitch.
-        let crossings = stable
-            .windows(2)
-            .filter(|pair| pair[0][0] < 0.0 && pair[1][0] >= 0.0)
-            .count();
-        assert!((crossings as f32 - stable.len() as f32 * 0.08).abs() < 2.0);
     }
 }
 
 #[cfg(test)]
 mod queue_tests {
     use super::*;
+    #[test]
+    #[ignore = "10-minute real mGBA/PipeWire audio soak; requires HORIZON_GBA_CORE"]
+    fn real_core_pipewire_audio_soak() {
+        use crate::platform::{
+            gba_core,
+            pipewire::{AudioStream, Role},
+        };
+        use std::{
+            sync::Mutex,
+            time::{Duration, Instant},
+        };
+        #[derive(Default)]
+        struct Metrics {
+            callbacks: AtomicU64,
+            starved: AtomicU64,
+            silent: AtomicU64,
+            invalid: AtomicU64,
+            paused_leaks: AtomicU64,
+            resumes: AtomicU64,
+            bad_resumes: AtomicU64,
+            max_gap_us: AtomicU64,
+            max_queue: AtomicUsize,
+        }
+        let path = std::env::var_os("HORIZON_GBA_CORE").expect("set HORIZON_GBA_CORE");
+        let seconds = std::env::var("HORIZON_AUDIO_SOAK_SECONDS")
+            .map(|value| value.parse::<u64>().unwrap())
+            .unwrap_or(600)
+            .clamp(10, 3600);
+        let audio = Arc::new(GameAudio::default());
+        let mut core = gba_core::Core::load(
+            std::path::Path::new(&path),
+            &gba_core::test_rom(),
+            Default::default(),
+            Arc::new(Mutex::new(None)),
+            audio.clone(),
+            Default::default(),
+        )
+        .unwrap();
+        let rate = core.av.sample_rate.round() as u32;
+        let interval = Duration::from_secs_f64(1.0 / core.av.fps);
+        let metrics = Arc::new(Metrics::default());
+        let start = Instant::now();
+        let settling = Arc::new(AtomicU64::new(500_000));
+        let resume_pending = Arc::new(AtomicBool::new(false));
+        let mut reader = AudioReader::new(audio.clone(), rate);
+        let mut last_callback = Instant::now();
+        let output_audio = audio.clone();
+        let measured = metrics.clone();
+        let settle = settling.clone();
+        let resuming = resume_pending.clone();
+        let stream = AudioStream::open(
+            "Horizon audio soak",
+            Role::Game,
+            rate,
+            2,
+            256,
+            Box::new(move |output, _| {
+                let now = Instant::now();
+                measured.max_gap_us.fetch_max(
+                    now.duration_since(last_callback).as_micros() as u64,
+                    Ordering::Relaxed,
+                );
+                last_callback = now;
+                measured.callbacks.fetch_add(1, Ordering::Relaxed);
+                let paused = output_audio.paused.load(Ordering::Acquire);
+                reader.render(output);
+                let silent = output.iter().all(|sample| sample.abs() < 1e-8);
+                if output
+                    .iter()
+                    .any(|sample| !sample.is_finite() || sample.abs() > 1.0)
+                {
+                    measured.invalid.fetch_add(1, Ordering::Relaxed);
+                }
+                // Check only callbacks entirely within a pause, avoiding a
+                // control-thread transition racing this callback's snapshot.
+                if paused && output_audio.paused.load(Ordering::Acquire) && !silent {
+                    measured.paused_leaks.fetch_add(1, Ordering::Relaxed);
+                }
+                if !paused
+                    && now.duration_since(start).as_micros() as u64
+                        >= settle.load(Ordering::Acquire)
+                {
+                    if reader.priming {
+                        measured.starved.fetch_add(1, Ordering::Relaxed);
+                    }
+                    if silent {
+                        measured.silent.fetch_add(1, Ordering::Relaxed);
+                    }
+                    if resuming.swap(false, Ordering::AcqRel) {
+                        measured.resumes.fetch_add(1, Ordering::Relaxed);
+                        if reader.priming || silent {
+                            measured.bad_resumes.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+                }
+                // Quiet synthetic tone; metrics above inspect unattenuated audio.
+                for sample in output {
+                    *sample *= 0.05;
+                }
+            }),
+        )
+        .unwrap();
+        let mut deadline = Instant::now();
+        let mut phase = 0;
+        // Offset freezes from minute-boundary speed changes so resume checks
+        // never hide inside the speed-change settling interval.
+        let mut next_pause = Duration::from_secs(17);
+        let mut report_at = Duration::from_secs(60);
+        let mut frames = 0u64;
+        while start.elapsed() < Duration::from_secs(seconds) {
+            let elapsed = start.elapsed();
+            let next_phase = elapsed.as_secs() / 60;
+            if next_phase != phase {
+                phase = next_phase;
+                audio.set_paused(true);
+                core.set_speed(PlaybackSpeed::ALL[phase as usize % 4]);
+                audio.clear();
+                settling.store(
+                    (elapsed + Duration::from_millis(500)).as_micros() as u64,
+                    Ordering::Release,
+                );
+                audio.set_paused(false);
+                deadline = Instant::now();
+            }
+            if elapsed >= next_pause {
+                audio.set_paused(true);
+                std::thread::sleep(Duration::from_millis(300));
+                resume_pending.store(true, Ordering::Release);
+                audio.set_paused(false);
+                deadline = Instant::now();
+                next_pause += Duration::from_secs(15);
+            }
+            core.run_frame();
+            metrics.max_queue.fetch_max(audio.len(), Ordering::Relaxed);
+            frames += 1;
+            deadline += interval / u32::from(PlaybackSpeed::ALL[phase as usize % 4].factor());
+            if Instant::now().saturating_duration_since(deadline) > Duration::from_millis(100) {
+                deadline = Instant::now();
+            }
+            std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
+            if elapsed >= report_at {
+                println!(
+                    "soak {}s: frames={frames}, callbacks={}, starved={}, silent={}, max_gap_us={}, max_queue={}",
+                    elapsed.as_secs(),
+                    metrics.callbacks.load(Ordering::Relaxed),
+                    metrics.starved.load(Ordering::Relaxed),
+                    metrics.silent.load(Ordering::Relaxed),
+                    metrics.max_gap_us.load(Ordering::Relaxed),
+                    metrics.max_queue.load(Ordering::Relaxed)
+                );
+                report_at += Duration::from_secs(60);
+            }
+        }
+        drop(stream);
+        println!(
+            "soak complete: wall={:.2}s, rate={rate}, frames={frames}, callbacks={}, starved={}, silent={}, invalid={}, pause_leaks={}, resumes={}, bad_resumes={}, max_gap_us={}, max_queue={}",
+            start.elapsed().as_secs_f64(),
+            metrics.callbacks.load(Ordering::Relaxed),
+            metrics.starved.load(Ordering::Relaxed),
+            metrics.silent.load(Ordering::Relaxed),
+            metrics.invalid.load(Ordering::Relaxed),
+            metrics.paused_leaks.load(Ordering::Relaxed),
+            metrics.resumes.load(Ordering::Relaxed),
+            metrics.bad_resumes.load(Ordering::Relaxed),
+            metrics.max_gap_us.load(Ordering::Relaxed),
+            metrics.max_queue.load(Ordering::Relaxed)
+        );
+        assert!(
+            metrics.callbacks.load(Ordering::Relaxed) > seconds * 20,
+            "PipeWire did not keep consuming audio"
+        );
+        assert_eq!(metrics.invalid.load(Ordering::Relaxed), 0);
+        assert_eq!(metrics.paused_leaks.load(Ordering::Relaxed), 0);
+        assert_eq!(metrics.bad_resumes.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            metrics.starved.load(Ordering::Relaxed),
+            0,
+            "unexpected steady-playback underrun"
+        );
+        assert_eq!(
+            metrics.silent.load(Ordering::Relaxed),
+            0,
+            "unexpected steady-playback silence"
+        );
+        assert!(metrics.max_queue.load(Ordering::Relaxed) <= rate as usize / 20);
+    }
+    #[test]
+    fn paused_output_preserves_headroom_and_resumes_in_the_next_callback() {
+        for selected in PlaybackSpeed::ALL {
+            let audio = Arc::new(GameAudio::default());
+            audio.configure(32768);
+            let mut reader = AudioReader::new(audio.clone(), 32768);
+            let mut speed = SpeedAudio::default();
+            speed.set_speed(selected);
+            for _ in 0..1400 * usize::from(selected.factor()) {
+                if let Some(frame) = speed.process([0.5, -0.25]) {
+                    audio.push(frame);
+                }
+            }
+            let mut output = [0.0; 512];
+            reader.render(&mut output);
+            let queued = audio.len();
+            assert!(queued > 256 && queued < reader.target);
+            audio.set_paused(true);
+            for _ in 0..100 {
+                reader.render(&mut output);
+                assert!(output.iter().all(|sample| *sample == 0.0));
+                assert_eq!(audio.len(), queued);
+            }
+            audio.set_paused(false);
+            reader.render(&mut output);
+            assert!(
+                output
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .all(|f| f[0] > 0.0 && f[1] < 0.0)
+            );
+            assert_eq!(audio.len(), queued - 256);
+            assert_eq!(reader.fade, 64);
+        }
+    }
+    #[test]
+    fn clearing_while_paused_discards_old_audio_and_still_requires_headroom() {
+        let audio = Arc::new(GameAudio::default());
+        audio.configure(8000);
+        let mut reader = AudioReader::new(audio.clone(), 8000);
+        for _ in 0..400 {
+            audio.push([0.5, -0.25]);
+        }
+        let mut output = [0.0; 128];
+        reader.render(&mut output);
+        audio.set_paused(true);
+        audio.clear();
+        for _ in 0..100 {
+            audio.push([-0.5, 0.25]);
+        }
+        reader.render(&mut output);
+        assert!(output.iter().all(|sample| *sample == 0.0));
+        audio.set_paused(false);
+        reader.render(&mut output);
+        assert!(output.iter().all(|sample| *sample == 0.0));
+        for _ in 0..220 {
+            audio.push([-0.5, 0.25]);
+        }
+        reader.render(&mut output);
+        assert!(
+            output
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .all(|f| f[0] < 0.0 && f[1] > 0.0)
+        );
+    }
     #[test]
     fn queue_is_bounded_stereo_aligned_and_reset_discards_old_sound() {
         let audio = Arc::new(GameAudio::default());
@@ -372,7 +637,7 @@ mod queue_tests {
     }
     #[test]
     fn bounded_headroom_absorbs_brief_frame_jitter_at_both_speeds() {
-        for speed in [1, 2] {
+        for speed in [1, 2, 3, 4] {
             let rate = 32768;
             let audio = Arc::new(GameAudio::default());
             audio.configure(rate);

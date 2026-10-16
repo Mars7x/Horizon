@@ -37,6 +37,7 @@ pub struct InputManager {
     /// Controllers confirm with their back button and back with their
     /// confirm button (Settings → Controller). The keyboard is unchanged.
     swap_confirm: Rc<Cell<bool>>,
+    bindings: Cell<crate::domain::controller::GameplayBindings>,
 }
 
 /// Follows the keyboard or controller used last and tells the UI when its
@@ -113,6 +114,7 @@ impl InputManager {
             last_device,
             glyphs,
             swap_confirm,
+            bindings: Cell::default(),
         })
     }
 
@@ -121,12 +123,19 @@ impl InputManager {
         self.swap_confirm.set(swap);
     }
 
+    pub fn set_gameplay_bindings(&self, bindings: crate::domain::controller::GameplayBindings) {
+        self.bindings.set(bindings);
+    }
+    pub fn mapping_snapshot(&self) -> Option<(u16, u64)> {
+        self.gamepad_input.as_ref()?.gameplay_snapshot()
+    }
+
     pub fn gameplay_buttons(&self) -> u16 {
         let buttons = self
             .gamepad_input
             .as_ref()
             .map_or(0, SdlGamepadInput::gameplay_buttons);
-        gameplay_mapping(buttons, self.swap_confirm.get())
+        gameplay_mapping(self.bindings.get().apply(buttons), self.swap_confirm.get())
     }
 
     pub fn mark_keyboard_used(&self) {
@@ -254,6 +263,7 @@ mod tests {
             last_device: Rc::default(),
             glyphs: Rc::new(GlyphTracker::new(Rc::new(|_| {}))),
             swap_confirm: Rc::default(),
+            bindings: Cell::default(),
         };
         let right: SharedString = Key::RightArrow.into();
         let t = Instant::now();
@@ -292,6 +302,7 @@ mod tests {
             last_device: Rc::default(),
             glyphs: Rc::new(GlyphTracker::new(Rc::new(|_| {}))),
             swap_confirm: Rc::default(),
+            bindings: Cell::default(),
         };
         let right: SharedString = Key::RightArrow.into();
 
@@ -321,6 +332,7 @@ mod tests {
                 observed.borrow_mut().push(style)
             }))),
             swap_confirm: Rc::default(),
+            bindings: Cell::default(),
         };
         let pad = GlyphStyle::Controller(ControllerFamily::PlayStation);
         manager.glyphs.set(pad);
@@ -356,6 +368,7 @@ mod tests {
             last_device: Rc::default(),
             glyphs: Rc::new(GlyphTracker::new(Rc::new(|_| {}))),
             swap_confirm: Rc::default(),
+            bindings: Cell::default(),
         };
         manager.set_swap_confirm(true);
         let enter: SharedString = Key::Return.into();
@@ -380,5 +393,186 @@ mod gameplay_tests {
         assert_eq!(gameplay_mapping(256, true), 1);
         assert_eq!(gameplay_mapping(1, true), 256);
         assert_eq!(gameplay_mapping(257, true), 257);
+    }
+}
+
+#[cfg(test)]
+mod virtual_mapping_tests {
+    use super::*;
+    use sdl3::{
+        gamepad::{Axis, Button},
+        joystick::{JoystickType, VirtualJoystickDescription},
+    };
+    use slint::ComponentHandle;
+    use std::cell::RefCell;
+    #[test]
+    #[ignore = "requires Wayland/SDL virtual gamepad"]
+    fn virtual_gamepad_remapping_triggers_and_reconnection() {
+        let ui = crate::AppWindow::new().unwrap();
+        ui.show().unwrap();
+        let sdl = sdl3::init().unwrap();
+        let joysticks = sdl.joystick().unwrap();
+        let virtual_system = joysticks.clone();
+        let attach = move || {
+            virtual_system
+                .attach_virtual_joystick(
+                    VirtualJoystickDescription::new()
+                        .name("Horizon mapping test")
+                        .joystick_type(JoystickType::Gamepad)
+                        .with_buttons([
+                            Button::South,
+                            Button::East,
+                            Button::West,
+                            Button::North,
+                            Button::Back,
+                            Button::Guide,
+                            Button::LeftStick,
+                            Button::RightStick,
+                            Button::Start,
+                            Button::LeftShoulder,
+                            Button::RightShoulder,
+                            Button::DPadUp,
+                            Button::DPadDown,
+                            Button::DPadLeft,
+                            Button::DPadRight,
+                        ])
+                        .with_axes([
+                            Axis::LeftX,
+                            Axis::LeftY,
+                            Axis::RightX,
+                            Axis::RightY,
+                            Axis::TriggerLeft,
+                            Axis::TriggerRight,
+                        ]),
+                )
+                .unwrap()
+        };
+        let connection = RefCell::new(Some(attach()));
+        let first_id = connection.borrow().as_ref().unwrap().id();
+        let mut joystick = joysticks.open(first_id).unwrap();
+        let actions = Rc::new(RefCell::new(Vec::new()));
+        let seen = actions.clone();
+        let input = InputManager::new(
+            Rc::new(move |event| seen.borrow_mut().push(event.action)),
+            Rc::new(|_| {}),
+            Rc::new(Cell::new(InputDevice::Keyboard)),
+            Rc::new(|_| {}),
+        );
+        joystick
+            .set_virtual_button(Button::South as u32, true)
+            .unwrap();
+        let timer = slint::Timer::default();
+        let stage = Rc::new(Cell::new(0));
+        let progress = stage.clone();
+        let ticks = Cell::new(0);
+        timer.start(
+            slint::TimerMode::Repeated,
+            std::time::Duration::from_millis(150),
+            move || {
+                ticks.set(ticks.get() + 1);
+                assert!(
+                    ticks.get() < 40,
+                    "virtual pad timed out at {}",
+                    progress.get()
+                );
+                match progress.get() {
+                    0 => {
+                        if input
+                            .mapping_snapshot()
+                            .is_none_or(|(_, id)| id != u64::from(first_id.raw()))
+                        {
+                            return;
+                        }
+                        assert_ne!(input.gameplay_buttons() & (1 << 8), 0);
+                        joystick
+                            .set_virtual_button(Button::South as u32, false)
+                            .unwrap();
+                        input.set_gameplay_bindings(
+                            crate::domain::controller::GameplayBindings::default()
+                                .assign(0, 9, false),
+                        );
+                        joystick
+                            .set_virtual_button(Button::West as u32, true)
+                            .unwrap();
+                        progress.set(1);
+                    }
+                    1 => {
+                        assert_eq!(input.gameplay_buttons(), 1 << 8);
+                        assert!(actions.borrow().contains(&UiAction::Secondary));
+                        input.set_swap_confirm(true);
+                        progress.set(2);
+                    }
+                    2 => {
+                        assert_eq!(input.gameplay_buttons(), 1);
+                        joystick
+                            .set_virtual_button(Button::West as u32, false)
+                            .unwrap();
+                        input.set_gameplay_bindings(
+                            crate::domain::controller::GameplayBindings::default()
+                                .assign(0, 9, false)
+                                .assign(2, 12, false),
+                        );
+                        joystick
+                            .set_virtual_axis(Axis::TriggerLeft as u32, 32767)
+                            .unwrap();
+                        joystick
+                            .set_virtual_button(Button::Start as u32, true)
+                            .unwrap();
+                        progress.set(3);
+                    }
+                    3 => {
+                        assert_eq!(
+                            input.gameplay_buttons(),
+                            (1 << 10) | (1 << 3),
+                            "snapshot={:?}, axis={:?}, button={:?}, actions={:?}",
+                            input.mapping_snapshot(),
+                            joystick.axis(Axis::TriggerLeft as u32),
+                            joystick.button(Button::Start as u32),
+                            actions.borrow()
+                        );
+                        input.set_ui_input_enabled(false);
+                        assert_eq!(input.gameplay_buttons(), 0);
+                        assert!(input.mapping_snapshot().is_none());
+                        input.set_ui_input_enabled(true);
+                        joystick
+                            .set_virtual_axis(Axis::TriggerLeft as u32, 0)
+                            .unwrap();
+                        joystick
+                            .set_virtual_button(Button::Start as u32, false)
+                            .unwrap();
+                        connection.borrow_mut().take();
+                        progress.set(4);
+                    }
+                    4 => {
+                        if input.mapping_snapshot().is_some() {
+                            return;
+                        }
+                        assert_eq!(input.gameplay_buttons(), 0);
+                        let next = attach();
+                        assert_ne!(next.id(), first_id);
+                        joystick = joysticks.open(next.id()).unwrap();
+                        *connection.borrow_mut() = Some(next);
+                        joystick
+                            .set_virtual_button(Button::West as u32, true)
+                            .unwrap();
+                        progress.set(5);
+                    }
+                    5 => {
+                        if input
+                            .mapping_snapshot()
+                            .is_none_or(|(_, id)| id == u64::from(first_id.raw()))
+                        {
+                            return;
+                        }
+                        assert_eq!(input.gameplay_buttons(), 1);
+                        progress.set(6);
+                        slint::quit_event_loop().unwrap();
+                    }
+                    _ => {}
+                }
+            },
+        );
+        slint::run_event_loop().unwrap();
+        assert_eq!(stage.get(), 6);
     }
 }

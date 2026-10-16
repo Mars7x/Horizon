@@ -1,3 +1,5 @@
+import { ControllerBindingRow } from "models/controller.slint";
+export { ControllerBindingRow }
 import { SaveStateRow } from "models/save-state.slint";
 export { SaveStateRow }
 import { OnboardingPage } from "pages/onboarding.slint";
@@ -109,7 +111,7 @@ export component AppWindow inherits Window {
         // Bumper pickers are shown beside their header values, not here.
         // Order: X, then B, with A always rightmost.
         // The on-screen keyboard needs no hints.
-        root.keyboard-open ? []
+        root.keyboard-open || (root.current-route == AppRouteView.settings && root.settings-binding-open) ? []
         : root.rom-setup-open ? [{ button: "B", label: "Close" }, { button: "A", label: "Select" }]
         : root.current-route == AppRouteView.library ? [{ button: "B", label: "Back" }]
         : root.current-route == AppRouteView.activity ? (root.activity-details-visible
@@ -319,6 +321,11 @@ export component AppWindow inherits Window {
     in property <int> settings-theme-index: 0; // System, Light, Dark, Black
     in property <int> settings-accent-index: 0; // System, spectrum presets
     in property <bool> settings-ui-sounds-enabled: true;
+    in property <[ControllerBindingRow]> settings-binding-rows;
+    in property <bool> settings-binding-open;
+    in property <string> settings-binding-title;
+    in property <bool> settings-controller-ready;
+    callback settings-cancel-binding();
     in property <bool> settings-swap-confirm: false;
     in property <bool> settings-swap-hints: true;
     in property <bool> settings-core-ready: false;
@@ -414,7 +421,8 @@ export component AppWindow inherits Window {
     in property <image> player-screenshot-preview;
     in property <bool> player-screenshot-visible: false;
     in property <int> player-screenshot-sequence: 0;
-    in property <bool> player-fast-forward: false;
+    in property <int> player-speed: 1;
+    in property <bool> player-speed-forward: true;
     in property <int> player-state-mode: 0;
     in property <int> player-state-focus: -1;
     in property <[SaveStateRow]> player-state-rows;
@@ -927,6 +935,11 @@ export component AppWindow inherits Window {
                     theme-index: root.settings-theme-index;
                     accent-index: root.settings-accent-index;
                     ui-sounds-enabled: root.settings-ui-sounds-enabled;
+                    binding-rows: root.settings-binding-rows;
+                    binding-open: root.settings-binding-open;
+                    binding-title: root.settings-binding-title;
+                    controller-ready: root.settings-controller-ready;
+                    cancel-binding => {root.settings-cancel-binding();}
                     swap-confirm: root.settings-swap-confirm;
                     swap-hints: root.settings-swap-hints;
                     core-ready: root.settings-core-ready;
@@ -1115,7 +1128,7 @@ export component AppWindow inherits Window {
             player-surface := GamePlayer {
                 z: 30; width: parent.width; height: parent.height;
                 phase: root.player-phase; origin: root.player-origin;
-                fast-forward: root.player-fast-forward;
+                speed: root.player-speed; speed-forward: root.player-speed-forward;
                 screenshot-preview: root.player-screenshot-preview;
                 screenshot-visible: root.player-screenshot-visible;
                 screenshot-sequence: root.player-screenshot-sequence;

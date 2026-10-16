@@ -235,21 +235,21 @@ impl SdlGamepadInput {
 
     /// Device-family held state for the embedded game; InputManager applies the saved A/B swap.
     pub fn gameplay_buttons(&self) -> u16 {
+        self.gameplay_snapshot().map_or(0, |(buttons, _)| buttons)
+    }
+    pub fn gameplay_snapshot(&self) -> Option<(u16, u64)> {
         let state = self.state.borrow();
         if !state.enabled {
-            return 0;
+            return None;
         }
         let selected = state
             .last_used
             .filter(|id| state.pads.iter().any(|pad| pad.id == *id && !pad.ignored))
             .or_else(|| state.pads.iter().find(|pad| !pad.ignored).map(|pad| pad.id));
-        let Some(pad) = state
+        let pad = state
             .open_gamepads
             .iter()
-            .find(|pad| pad.id().ok() == selected)
-        else {
-            return 0;
-        };
+            .find(|pad| pad.id().ok() == selected)?;
         let family = state
             .pads
             .iter()
@@ -261,6 +261,8 @@ impl SdlGamepadInput {
         for (button, bit) in [
             (Button::South, if nintendo { 0 } else { 8 }),
             (Button::East, if nintendo { 8 } else { 0 }),
+            (Button::West, if nintendo { 1 } else { 9 }),
+            (Button::North, if nintendo { 9 } else { 1 }),
             (Button::Back, 2),
             (Button::Start, 3),
             (Button::DPadUp, 4),
@@ -274,6 +276,12 @@ impl SdlGamepadInput {
                 buttons |= 1 << bit;
             }
         }
+        if pad.axis(Axis::TriggerLeft) > 18000 {
+            buttons |= 1 << 12;
+        }
+        if pad.axis(Axis::TriggerRight) > 18000 {
+            buttons |= 1 << 13;
+        }
         let x = pad.axis(Axis::LeftX);
         let y = pad.axis(Axis::LeftY);
         if x < -18000 {
@@ -286,7 +294,7 @@ impl SdlGamepadInput {
         } else if y > 18000 {
             buttons |= 1 << 5;
         }
-        buttons
+        Some((buttons, u64::from(selected?.raw())))
     }
 }
 
@@ -729,6 +737,9 @@ fn poll_gamepad_events(
             Event::GamepadAxisMotion {
                 which, axis, value, ..
             } => {
+                if matches!(axis, Axis::TriggerLeft | Axis::TriggerRight) && value > 18000 {
+                    state.family_of(which);
+                }
                 if let Some(action) =
                     state
                         .analog_navigation

@@ -486,6 +486,7 @@ pub enum SettingsPage {
     Root,
     Appearance,
     Controller,
+    GameBindings,
     Cores,
     Mgba,
     // Third-Party lists one "Open" row per service; each service has its

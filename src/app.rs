@@ -685,12 +685,15 @@ pub fn run() -> Result<(), AppError> {
         let (input, glyph_ui) = (Rc::clone(&input), ui.as_weak());
         move |preferences: ControllerPreferences| {
             input.set_swap_confirm(preferences.swap_confirm);
+            input.set_gameplay_bindings(preferences.gba_bindings);
             if let Some(ui) = glyph_ui.upgrade() {
                 ui.global::<InputGlyphs>()
                     .set_swap_confirm(preferences.hints_swapped());
             }
         }
     };
+    let mapping_input = Rc::clone(&input);
+    settings_for_controller.set_mapping_source(Rc::new(move || mapping_input.mapping_snapshot()));
     apply_controller(settings_for_controller.controller_preferences());
     settings_for_controller.set_controller_changed(Rc::new(apply_controller));
 
@@ -723,11 +726,15 @@ pub fn run() -> Result<(), AppError> {
     let activation_ui = ui.as_weak();
     let activation_sound = Rc::clone(&navigation_sound);
     let activation_player = Rc::clone(&player);
+    let activation_settings = Rc::clone(&settings_for_controller);
     ui.on_application_active_changed(move |active| {
         window_active.set(active);
         activation_player.set_active(active);
         activation_input.set_ui_input_enabled(active);
         if let Some(ui) = activation_ui.upgrade() {
+            if !active {
+                activation_settings.cancel_binding(&ui);
+            }
             let menu_active = active && (!activation_player.is_open() || ui.get_player_paused());
             activation_sound.borrow_mut().set_foreground(active);
             ui.global::<crate::Motion>().set_loops_paused(!menu_active);

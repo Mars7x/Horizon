@@ -19,3 +19,5 @@ pub use library::{
 pub mod settings;
 
 pub mod core_settings;
+
+pub mod controller;

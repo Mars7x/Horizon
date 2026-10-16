@@ -56,7 +56,8 @@ export component PausePanel inherits Rectangle {
     in property <float> shadow-strength: 1.0;
     in property <length> footer-center: Metrics.hint-row-center-from-bottom;
     in property <bool> busy;
-    in property <bool> fast-forward;
+    in property <int> speed: 1;
+    in property <bool> speed-forward: true;
     in property <image> screenshot-preview;
     in property <bool> screenshot-visible;
     in property <int> screenshot-sequence;
@@ -123,7 +124,7 @@ export component PausePanel inherits Rectangle {
                 height: Metrics.pause-row-height * 7 + Metrics.spacing-xs * 8 + Metrics.spacing-sm * 2;
                 spacing: Metrics.spacing-xs;
                 PauseAction { title: "Continue"; focused: root.view == 0 && root.focused == 0; enabled: root.open && root.view == 0; activated => { root.activate(0); } }
-                PauseAction { title: "Playback speed"; value: root.fast-forward ? "2×" : "1×"; forward: root.fast-forward; focused: root.view == 0 && root.focused == 1; enabled: root.open && root.view == 0; activated => { root.activate(1); } }
+                PauseAction { title: "Playback speed"; value: root.speed + "×"; forward: root.speed-forward; focused: root.view == 0 && root.focused == 1; enabled: root.open && root.view == 0; activated => { root.activate(1); } }
                 Rectangle { height: Metrics.spacing-sm; background: transparent; }
                 PauseAction { title: "Save state"; focused: root.view == 0 && root.focused == 2; enabled: root.open && root.view == 0; activated => { root.activate(2); } }
                 PauseAction { title: "Load state"; focused: root.view == 0 && root.focused == 3; enabled: root.open && root.view == 0; activated => { root.activate(3); } }

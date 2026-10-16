@@ -99,3 +99,60 @@ mod tests {
         }
     }
 }
+
+/// Session-only playback speed; deliberately bounded to supported factors.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum PlaybackSpeed {
+    #[default]
+    Normal = 1,
+    Double = 2,
+    Triple = 3,
+    Quadruple = 4,
+}
+impl PlaybackSpeed {
+    pub const ALL: [Self; 4] = [Self::Normal, Self::Double, Self::Triple, Self::Quadruple];
+    pub fn factor(self) -> u8 {
+        self as u8
+    }
+    pub fn step(self, forward: bool) -> Self {
+        Self::ALL[(self.factor() as usize - 1)
+            .saturating_add_signed(if forward { 1 } else { -1 })
+            .min(3)]
+    }
+    pub fn cycle(self) -> Self {
+        Self::ALL[self.factor() as usize % 4]
+    }
+}
+impl TryFrom<u8> for PlaybackSpeed {
+    type Error = &'static str;
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::Normal),
+            2 => Ok(Self::Double),
+            3 => Ok(Self::Triple),
+            4 => Ok(Self::Quadruple),
+            _ => Err("Unsupported playback speed"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod speed_tests {
+    use super::*;
+    #[test]
+    fn speed_boundaries_and_cycle() {
+        assert_eq!(PlaybackSpeed::Normal.step(false), PlaybackSpeed::Normal);
+        assert_eq!(
+            PlaybackSpeed::Quadruple.step(true),
+            PlaybackSpeed::Quadruple
+        );
+        let mut speed = PlaybackSpeed::Normal;
+        for expected in [2, 3, 4, 1] {
+            speed = speed.cycle();
+            assert_eq!(speed.factor(), expected);
+        }
+        assert!(PlaybackSpeed::try_from(0).is_err());
+        assert!(PlaybackSpeed::try_from(5).is_err());
+    }
+}

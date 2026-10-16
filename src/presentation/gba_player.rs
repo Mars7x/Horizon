@@ -1,4 +1,5 @@
 //! Rust owns player mode/focus. Slint only presents the latest software frame.
+use crate::domain::core_settings::PlaybackSpeed;
 use crate::{
     AppWindow,
     audio::UiSoundCue,
@@ -380,7 +381,10 @@ impl GbaPlayer {
                 UiAction::Left | UiAction::Right
                     if ui.get_player_focus() == 1 && !event.repeated =>
                 {
-                    self.set_speed(&ui, event.action == UiAction::Right)
+                    self.set_speed(
+                        &ui,
+                        current_speed(&ui).step(event.action == UiAction::Right),
+                    )
                 }
                 UiAction::Accept if !event.repeated => self.choose(ui.get_player_focus()),
                 UiAction::Back | UiAction::Home if !event.repeated => self.choose(0),
@@ -540,7 +544,7 @@ impl GbaPlayer {
                 ui.set_player_message("".into());
                 self.sync_pause(&ui);
             }
-            1 => self.set_speed(&ui, !ui.get_player_fast_forward()),
+            1 => self.set_speed(&ui, current_speed(&ui).cycle()),
             2 | 3 => {
                 self.set_state_mode(
                     &ui,
@@ -577,10 +581,10 @@ impl GbaPlayer {
             _ => {}
         }
     }
-    fn set_speed(&self, ui: &AppWindow, fast: bool) {
-        if fast != ui.get_player_fast_forward() && !ui.get_player_busy() {
+    fn set_speed(&self, ui: &AppWindow, speed: PlaybackSpeed) {
+        if speed != current_speed(ui) && !ui.get_player_busy() {
             self.cue(UiSoundCue::Ok);
-            self.send_action(ui, Command::FastForward(fast), "");
+            self.send_action(ui, Command::Speed(speed), "");
         }
     }
     fn send_action(&self, ui: &AppWindow, command: Command, message: &str) {
@@ -742,8 +746,11 @@ impl GbaPlayer {
                         ui.set_player_busy(false);
                         ui.set_player_message(error.into());
                     }
-                    Event::SpeedChanged(fast) => {
-                        ui.set_player_fast_forward(fast);
+                    Event::SpeedChanged(speed) => {
+                        ui.set_player_speed_forward(
+                            i32::from(speed.factor()) > ui.get_player_speed(),
+                        );
+                        ui.set_player_speed(i32::from(speed.factor()));
                         ui.set_player_busy(false);
                         ui.set_player_message("".into());
                     }
@@ -959,7 +966,7 @@ impl LaunchExecutor for GbaPlayer {
             ui.set_player_focus(0);
             ui.set_player_restart_confirm(false);
             ui.set_player_restart_focus(0);
-            ui.set_player_fast_forward(false);
+            ui.set_player_speed(1);
             self.clear_screenshot(&ui);
             ui.set_player_screenshot_preview(Image::default());
             self.set_state_mode(&ui, StateMode::Menu);
@@ -972,6 +979,13 @@ impl LaunchExecutor for GbaPlayer {
         result.map_err(|error| LaunchExecutionError::new(std::io::Error::other(error)))
     }
 }
+fn current_speed(ui: &AppWindow) -> PlaybackSpeed {
+    u8::try_from(ui.get_player_speed())
+        .ok()
+        .and_then(|value| PlaybackSpeed::try_from(value).ok())
+        .unwrap_or_default()
+}
+
 fn keyboard_button(text: &str) -> Option<u32> {
     use slint::{SharedString, platform::Key};
     for (key, bit) in [
@@ -1192,7 +1206,7 @@ mod runtime_tests {
         let motion_player = Rc::clone(&player);
         // Capture value and nested-view motion before it settles. Encode after
         // the event loop so PNG writes cannot interrupt the animation clock.
-        let menu_key = Cell::new((-1, false, false));
+        let menu_key = Cell::new((-1, 1, false));
         let menu_since = Cell::new(Instant::now());
         let menu_frames = Cell::new(0u8);
         let menu_sequence = Cell::new(0u32);
@@ -1203,7 +1217,7 @@ mod runtime_tests {
             if !reduced && phase == 2 && ui.get_player_paused() {
                 let key = (
                     ui.get_player_state_mode(),
-                    ui.get_player_fast_forward(),
+                    ui.get_player_speed(),
                     ui.get_player_restart_confirm(),
                 );
                 if menu_key.replace(key) != key {
@@ -1383,7 +1397,31 @@ mod runtime_tests {
                     progress.set(10);
                 }
                 10 if !ui.get_player_busy() => {
-                    assert!(ui.get_player_fast_forward());
+                    assert_eq!(ui.get_player_speed(), 2);
+                    tap(slint::platform::Key::RightArrow);
+                    progress.set(40);
+                }
+                40 if !ui.get_player_busy() => {
+                    assert_eq!(ui.get_player_speed(), 3);
+                    snapshot("gba-speed-3");
+                    tap(slint::platform::Key::RightArrow);
+                    progress.set(41);
+                }
+                41 if !ui.get_player_busy() => {
+                    assert_eq!(ui.get_player_speed(), 4);
+                    snapshot("gba-speed-4");
+                    tap(slint::platform::Key::RightArrow);
+                    assert!(!ui.get_player_busy());
+                    tap(slint::platform::Key::Return);
+                    progress.set(42);
+                }
+                42 if !ui.get_player_busy() => {
+                    assert_eq!(ui.get_player_speed(), 1);
+                    tap(slint::platform::Key::RightArrow);
+                    progress.set(43);
+                }
+                43 if !ui.get_player_busy() => {
+                    assert_eq!(ui.get_player_speed(), 2);
                     assert!(ui.get_player_message().is_empty());
                     snapshot("gba-speed");
                     tap(slint::platform::Key::DownArrow);
@@ -1549,7 +1587,7 @@ mod runtime_tests {
                         assert!(!ui.get_player_frozen());
                     }
                     assert!(!ui.get_player_paused());
-                    assert!(ui.get_player_fast_forward());
+                    assert_eq!(ui.get_player_speed(), 2);
                     snapshot("gba-restarted");
                     live.handle_action(UiActionEvent::fresh(UiAction::Home));
                     tap(slint::platform::Key::DownArrow);
@@ -1557,7 +1595,7 @@ mod runtime_tests {
                     progress.set(14);
                 }
                 14 if !ui.get_player_busy() => {
-                    assert!(!ui.get_player_fast_forward());
+                    assert_eq!(ui.get_player_speed(), 1);
                     tap(slint::platform::Key::UpArrow);
                     assert_eq!(ui.get_player_focus(), 0);
                     tap(slint::platform::Key::Return);
@@ -1848,7 +1886,7 @@ mod pause_preview_tests {
         ui.set_player_open(true);
         ui.set_player_phase(2);
         ui.set_player_has_frame(true);
-        ui.set_player_fast_forward(true);
+        ui.set_player_speed(2);
         ui.set_player_paused(true);
         ui.set_player_focus(1);
         ui.set_player_restart_confirm(std::env::var_os("HORIZON_PAUSE_PREVIEW_RESTART").is_some());
