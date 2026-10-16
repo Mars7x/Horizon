@@ -32,7 +32,9 @@ RetroAchievements is intended future work, not an available backend.
 Storage uses the fresh [purpose-first layout](STORAGE.md), with readable game
 folders, game-named saves and independent playback/core preference files. Old
 layout files remain untouched and are not migrated. Four manual save slots and a separate automatic exit state support seamless
-resume, enabled by default. States include previews and compatibility checks.
+resume, enabled by default. States include previews and compatibility checks. Stored screenshots, previews,
+profiles and artwork caches use lossless JXL; profile/Album JXL animations are
+supported, with import decoders retained for external PNG/JPEG/GIF/APNG images.
 
 ## Inactive boundaries
 

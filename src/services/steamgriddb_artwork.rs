@@ -13,7 +13,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use image::{ImageFormat, RgbaImage};
+use image::RgbaImage;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
@@ -34,7 +34,7 @@ const NEGATIVE_CACHE_AGE: Duration = Duration::from_secs(5 * 60);
 // Highest scores are ranked first; try a bounded number of candidates if a
 // top-voted image fails validation or is unavailable.
 const MAX_CANDIDATES: usize = 8;
-const CACHE_SCHEMA: u8 = 2;
+const CACHE_SCHEMA: u8 = 3;
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
 /// Contains only owned data; safe to transfer from the presentation thread.
@@ -407,7 +407,7 @@ fn read_cache(root: &Path) -> Option<(SquareArtwork, bool)> {
     {
         return None;
     }
-    let file = root.with_extension("png");
+    let file = root.with_extension("jxl");
     if fs::metadata(&file).ok()?.len() > 8 * 1024 * 1024 {
         return None;
     }
@@ -454,28 +454,31 @@ fn write_cache(
         .ok_or(io::Error::from(io::ErrorKind::InvalidInput))?;
     fs::create_dir_all(parent)?;
     let id = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-    let png = root.with_extension("png");
+    let jxl = root.with_extension("jxl");
     let json = root.with_extension("json");
-    let tmp_png = root.with_extension(format!("{}.{}.png.tmp", std::process::id(), id));
+    let tmp_jxl = root.with_extension(format!("{}.{}.jxl.tmp", std::process::id(), id));
     let tmp_json = root.with_extension(format!("{}.{}.json.tmp", std::process::id(), id));
     let result = (|| {
-        let rgba = RgbaImage::from_raw(artwork.size(), artwork.size(), artwork.rgba().to_vec())
-            .ok_or(io::Error::from(io::ErrorKind::InvalidData))?;
-        rgba.save_with_format(&tmp_png, ImageFormat::Png)
-            .map_err(io::Error::other)?;
+        let file = fs::File::create(&tmp_jxl)?;
+        crate::platform::jpeg_xl::write_rgba(
+            &file,
+            artwork.rgba(),
+            artwork.size(),
+            artwork.size(),
+        )?;
         fs::write(
             &tmp_json,
             serde_json::to_vec_pretty(provenance).map_err(io::Error::other)?,
         )?;
-        fs::rename(&tmp_png, &png)?;
+        fs::rename(&tmp_jxl, &jxl)?;
         // Metadata is the final commit marker; a mismatch checksum rejects any
-        // interrupted write that left mixed PNG/JSON versions.
+        // interrupted write that left mixed JXL/JSON versions.
         fs::rename(&tmp_json, &json)?;
         let _ = fs::remove_file(root.with_extension("miss-v7"));
         Ok(())
     })();
     if result.is_err() {
-        let _ = fs::remove_file(tmp_png);
+        let _ = fs::remove_file(tmp_jxl);
         let _ = fs::remove_file(tmp_json);
     }
     result
@@ -601,7 +604,7 @@ mod tests {
             read_cache(&root).is_none(),
             "pre-score cache must be ranked again"
         );
-        fs::write(root.with_extension("png"), b"bad").unwrap();
+        fs::write(root.with_extension("jxl"), b"bad").unwrap();
         assert!(read_cache(&root).is_none());
         fs::remove_dir_all(root.parent().unwrap()).unwrap();
     }

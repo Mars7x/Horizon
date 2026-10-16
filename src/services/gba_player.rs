@@ -445,25 +445,18 @@ fn write_screenshot(
     frame: &crate::platform::gba_core::Frame,
 ) -> Result<(), String> {
     use crate::services::album::catalog::{HorizonAlbum, part_path};
-    use image::ImageEncoder;
     let path = HorizonAlbum::new(album.to_owned())
-        .new_capture_path(Some(game), title, "png", chrono::Utc::now())
+        .new_capture_path(Some(game), title, "jxl", chrono::Utc::now())
         .map_err(|_| "Could not prepare the screenshot in Album".to_owned())?;
     let partial = part_path(&path);
-    let mut file = OpenOptions::new()
+    let file = OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o600)
         .open(&partial)
         .map_err(|_| "Could not create the screenshot".to_owned())?;
     let result = (|| -> Result<(), String> {
-        image::codecs::png::PngEncoder::new(&mut file)
-            .write_image(
-                &frame.rgba,
-                frame.width,
-                frame.height,
-                image::ExtendedColorType::Rgba8,
-            )
+        crate::platform::jpeg_xl::write_rgba(&file, &frame.rgba, frame.width, frame.height)
             .map_err(|_| "Could not encode the screenshot".to_owned())?;
         file.sync_all()
             .map_err(|_| "Could not save the screenshot".to_owned())?;
@@ -626,9 +619,13 @@ mod tests {
         let shots = crate::services::album::catalog::HorizonAlbum::new(dir.clone()).scan();
         assert_eq!(shots.len(), 1);
         assert_eq!(
-            image::open(shots[0].path()).unwrap().to_rgba8().as_raw(),
+            crate::services::image::decode_file(shots[0].path())
+                .unwrap()
+                .to_rgba8()
+                .as_raw(),
             &frame.rgba
         );
+        assert_eq!(shots[0].path().extension().unwrap(), "jxl");
         let blocked = dir.join("unavailable");
         fs::write(&blocked, b"preserved").unwrap();
         assert!(

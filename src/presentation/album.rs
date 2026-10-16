@@ -271,9 +271,8 @@ pub struct AlbumController {
     failed: RefCell<HashSet<PathBuf>>,
     display: RefCell<ImageMemory<(PathBuf, (u32, u32))>>,
     active_video: RefCell<Option<ActiveVideo>>,
-    /// The open GIF animating, if any. Stopped with the video.
     animation: RefCell<Option<AnimationPlayback>>,
-    /// Which playback (video or animation) may deliver frames; older ones
+    /// Which video playback may deliver frames; older ones
     /// are ignored.
     video_generation: Arc<AtomicU64>,
     /// Bumped by every seek: frames decoded before it never move the
@@ -418,6 +417,9 @@ impl AlbumController {
 
     /// Horizon lost the foreground (a game started): pause, never play on.
     pub fn handle_application_active_changed(&self, ui: &AppWindow, active: bool) {
+        if let Some(animation) = self.animation.borrow().as_ref() {
+            animation.set_playing(active);
+        }
         if !active {
             self.set_playing(ui, false);
         }
@@ -480,7 +482,14 @@ impl AlbumController {
                             && max == display_size(&ui)
                         {
                             drop(s);
-                            self.show(&ui, Some(image));
+                            if !self
+                                .animation
+                                .borrow()
+                                .as_ref()
+                                .is_some_and(|playback| playback.is_animated())
+                            {
+                                self.show(&ui, Some(image));
+                            }
                         }
                     }
                     Err(error) => {
@@ -1094,44 +1103,64 @@ impl AlbumController {
         }
         if capture.kind() == MediaKind::Video {
             self.start_video(ui, &capture);
-        } else if is_gif(&path) {
+        } else if !ui.global::<crate::Motion>().get_reduced_motion() {
             self.start_animation(ui, &path);
         }
     }
 
-    /// An animated GIF plays in place of its first frame, looping silently,
-    /// until the viewer moves on (`stop_video`).
     fn start_animation(&self, ui: &AppWindow, path: &std::path::Path) {
         let generation = self.video_generation.load(Ordering::SeqCst);
         let current = Arc::clone(&self.video_generation);
         let pending = Arc::new(AtomicBool::new(false));
         let weak = self.ui.clone();
-        let playback = play_animation(
+        match play_animation(
             path,
             display_size(ui),
             Box::new(move |frame| {
-                // A frame still waiting for the UI is replaced, never queued.
+                let is_frame = frame.is_ok();
                 if current.load(Ordering::SeqCst) != generation
-                    || pending.swap(true, Ordering::SeqCst)
+                    || (is_frame && pending.swap(true, Ordering::SeqCst))
                 {
                     return;
                 }
-                let buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
-                    frame.as_raw(),
-                    frame.width(),
-                    frame.height(),
-                );
+                let frame = frame.map(|frame| {
+                    SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                        frame.as_raw(),
+                        frame.width(),
+                        frame.height(),
+                    )
+                });
                 let (pending, current) = (Arc::clone(&pending), Arc::clone(&current));
                 let _ = weak.upgrade_in_event_loop(move |ui| {
-                    pending.store(false, Ordering::SeqCst);
-                    if current.load(Ordering::SeqCst) == generation {
-                        ui.set_album_viewer_image(Image::from_rgba8(buffer));
-                        ui.set_album_viewer_has_image(true);
+                    if is_frame {
+                        pending.store(false, Ordering::SeqCst);
+                    }
+                    if current.load(Ordering::SeqCst) != generation {
+                        return;
+                    }
+                    match frame {
+                        Ok(buffer)
+                            if !ui.global::<crate::Motion>().get_reduced_motion()
+                                && !ui.global::<crate::Motion>().get_loops_paused() =>
+                        {
+                            ui.set_album_viewer_image(Image::from_rgba8(buffer));
+                            ui.set_album_viewer_has_image(true);
+                        }
+                        Ok(_) => {}
+                        Err(error) => {
+                            warn!(%error, "Album JXL animation failed");
+                            ui.set_album_viewer_problem("Can't play this animated image".into());
+                        }
                     }
                 });
             }),
-        );
-        *self.animation.borrow_mut() = Some(playback);
+        ) {
+            Ok(playback) => *self.animation.borrow_mut() = Some(playback),
+            Err(error) => {
+                warn!(%error, "Album JXL worker could not start");
+                ui.set_album_viewer_problem("Can't play this animated image".into());
+            }
+        }
     }
 
     fn show(&self, ui: &AppWindow, image: Option<Image>) {
@@ -1672,14 +1701,6 @@ fn clock_text(duration: Duration) -> String {
 /// One copy out of the decoder's buffer into Slint's: a single memcpy when
 /// rows are tightly packed (the usual case), never a zero-filled buffer
 /// first.
-/// Only GIFs animate. The name only decides whether to try: the player reads
-/// the content and sends nothing for anything else.
-fn is_gif(path: &std::path::Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("gif"))
-}
-
 fn copy_frame(frame: &VideoFrame<'_>) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
     let row = frame.width as usize * 4;
     let height = frame.height as usize;
@@ -1859,13 +1880,134 @@ mod runtime_tests {
     use super::*;
 
     #[test]
+    #[ignore = "requires Wayland and a fresh HORIZON_JXL_ANIMATION_TEST_DIR"]
+    fn animated_jxl_viewer_stops_and_respects_reduced_motion() {
+        let output = PathBuf::from(std::env::var_os("HORIZON_JXL_ANIMATION_TEST_DIR").unwrap());
+        let root = output.join("album");
+        let folder = root.join("horizon/screenshots");
+        std::fs::create_dir_all(&folder).unwrap();
+        let frames = vec![
+            (
+                RgbaImage::from_pixel(240, 160, image::Rgba([240, 16, 32, 255])),
+                Duration::from_millis(120),
+            ),
+            (
+                RgbaImage::from_pixel(240, 160, image::Rgba([16, 240, 32, 128])),
+                Duration::from_millis(180),
+            ),
+        ];
+        let animation = crate::services::profile::Animation {
+            still: frames[0].0.clone(),
+            frames,
+        };
+        crate::services::profile::save_animation(&folder.join("moving.jxl"), &animation).unwrap();
+        let ui = AppWindow::new().unwrap();
+        let reduced = std::env::var_os("HORIZON_JXL_TEST_REDUCED").is_some();
+        ui.global::<crate::Motion>().set_reduced_motion(reduced);
+        ui.set_current_route(AppRouteView::Album);
+        let album = AlbumController::new(
+            &ui,
+            &[],
+            Some(root),
+            Vec::new(),
+            None,
+            Arc::new(crate::services::album::media::NoVideo("test".into())),
+        );
+        ui.window().set_size(slint::PhysicalSize::new(1280, 720));
+        ui.show().unwrap();
+        album.start_new_visit(&ui);
+        let ticks = Cell::new(0);
+        let stage = Cell::new(0);
+        let paused_at = Cell::new(0);
+        let frozen = RefCell::new(Vec::new());
+        let weak = ui.as_weak();
+        let timer = Timer::default();
+        timer.start(
+            slint::TimerMode::Repeated,
+            Duration::from_millis(80),
+            move || {
+                if stage.get() == 4 {
+                    return;
+                }
+                let ui = weak.upgrade().unwrap();
+                ticks.set(ticks.get() + 1);
+                assert!(ticks.get() < 100, "JXL viewer timed out");
+                assert!(ui.get_album_viewer_problem().is_empty());
+                if stage.get() == 0 {
+                    if album.tiles.row_count() != 1
+                        || album.tiles.iter().any(|tile| !tile.has_thumbnail)
+                    {
+                        return;
+                    }
+                    assert!(album.open_viewer(&ui));
+                    stage.set(1);
+                    paused_at.set(ticks.get());
+                    return;
+                }
+                let Some(frame) = ui.get_album_viewer_image().to_rgba8() else {
+                    return;
+                };
+                assert_eq!((frame.width(), frame.height()), (240, 160));
+                let green = frame.as_slice()[0].g > 200;
+                if reduced {
+                    assert!(!green);
+                    assert!(album.animation.borrow().is_none());
+                    if ticks.get() - paused_at.get() < 6 {
+                        return;
+                    }
+                } else {
+                    match stage.get() {
+                        1 if green => {
+                            *frozen.borrow_mut() = frame.as_bytes().to_vec();
+                            album.handle_application_active_changed(&ui, false);
+                            ui.global::<crate::Motion>().set_loops_paused(true);
+                            stage.set(2);
+                            paused_at.set(ticks.get());
+                            return;
+                        }
+                        1 => return,
+                        2 => {
+                            assert_eq!(frame.as_bytes(), frozen.borrow().as_slice());
+                            if ticks.get() - paused_at.get() < 6 {
+                                return;
+                            }
+                            ui.global::<crate::Motion>().set_loops_paused(false);
+                            album.handle_application_active_changed(&ui, true);
+                            stage.set(3);
+                            return;
+                        }
+                        3 if green => return,
+                        _ => {}
+                    }
+                }
+                // PNG diagnostic output can queue another timer tick before
+                // event-loop shutdown; never close the viewer twice.
+                stage.set(4);
+                let snapshot = ui.window().take_snapshot().unwrap();
+                image::save_buffer(
+                    output.join("viewer.png"),
+                    snapshot.as_bytes(),
+                    snapshot.width(),
+                    snapshot.height(),
+                    image::ColorType::Rgba8,
+                )
+                .unwrap();
+                assert!(album.close_viewer(&ui));
+                assert!(album.animation.borrow().is_none());
+                slint::quit_event_loop().unwrap();
+            },
+        );
+        slint::run_event_loop().unwrap();
+    }
+
+    #[test]
     #[ignore = "requires Wayland and a fresh HORIZON_ALBUM_THUMBNAIL_TEST_DIR"]
     fn album_thumbnail_detail_and_native_pixels() {
         let output = PathBuf::from(
             std::env::var_os("HORIZON_ALBUM_THUMBNAIL_TEST_DIR").expect("test output"),
         );
         let root = output.join("album");
-        std::fs::create_dir_all(root.join("horizon")).unwrap();
+        std::fs::create_dir_all(root.join("horizon/screenshots")).unwrap();
         std::fs::create_dir_all(output.join("cache")).unwrap();
         for (name, width, height) in [
             ("portrait", 1080, 1920),
@@ -1873,15 +2015,16 @@ mod runtime_tests {
             ("wide", 3840, 1080),
             ("native", 240, 160),
         ] {
-            image::RgbaImage::from_fn(width, height, |x, y| {
+            let original = image::RgbaImage::from_fn(width, height, |x, y| {
                 image::Rgba(if (x / 4 + y / 4) % 2 == 0 {
                     [255, 0, 255, 255]
                 } else {
                     [0, 255, 0, 255]
                 })
-            })
-            .save(root.join(format!("horizon/{name}.png")))
-            .unwrap();
+            });
+            let file = std::fs::File::create(root.join(format!("horizon/screenshots/{name}.jxl")))
+                .unwrap();
+            crate::platform::jpeg_xl::write_rgba(&file, original.as_raw(), width, height).unwrap();
         }
         let ui = AppWindow::new().unwrap();
         ui.global::<crate::Motion>().set_reduced_motion(true);
@@ -1906,6 +2049,10 @@ mod runtime_tests {
         album.start_new_visit(&ui);
         let ticks = Cell::new(0);
         let stage = Cell::new(0);
+        let final_width: u32 = std::env::var("HORIZON_ALBUM_THUMBNAIL_TEST_WIDTH")
+            .unwrap_or_else(|_| "3840".into())
+            .parse()
+            .unwrap();
         let weak_ui = ui.as_weak();
         let timer = Timer::default();
         timer.start(
@@ -1931,7 +2078,7 @@ mod runtime_tests {
                     assert_eq!((image.size().width, image.size().height), expected);
                 }
                 let snapshot = ui.window().take_snapshot().unwrap();
-                let width = if stage.get() == 0 { 1920 } else { 3840 };
+                let width = if stage.get() == 0 { 1920 } else { final_width };
                 assert_eq!(snapshot.width(), width);
                 assert_eq!(snapshot.height(), width * 9 / 16);
                 image::save_buffer(
@@ -1942,8 +2089,9 @@ mod runtime_tests {
                     image::ColorType::Rgba8,
                 )
                 .unwrap();
-                if stage.replace(1) == 0 {
-                    ui.window().set_size(slint::PhysicalSize::new(3840, 2160));
+                if stage.replace(1) == 0 && final_width != 1920 {
+                    ui.window()
+                        .set_size(slint::PhysicalSize::new(final_width, final_width * 9 / 16));
                 } else {
                     slint::quit_event_loop().unwrap();
                 }

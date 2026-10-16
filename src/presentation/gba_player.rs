@@ -1482,7 +1482,10 @@ mod runtime_tests {
                         captures[0].game().unwrap().external_id().as_str(),
                         format!("sha256:{hash}")
                     );
-                    let shot = image::open(captures[0].path()).unwrap().to_rgba8();
+                    assert_eq!(captures[0].path().extension().unwrap(), "jxl");
+                    let shot = crate::services::image::decode_file(captures[0].path())
+                        .unwrap()
+                        .to_rgba8();
                     assert_eq!(shot.dimensions(), (240, 160));
                     assert_eq!(shot.as_raw(), preview.as_bytes());
                     let first = shot.get_pixel(0, 0);

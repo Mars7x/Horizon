@@ -14,7 +14,13 @@ avatar artwork.
 The avatar is the page's one focus. A/click opens Edit profile; Up/Down scrolls
 friends. The editor offers Name, Choose a picture, Use Steam picture and Done.
 A chosen image comes through the FileChooser portal and is copied/normalized
-into `data/profile/pictures/`; animated originals are retained for playback.
+into `data/profile/pictures/` as lossless JXL; animations are decoded, cropped/fitted
+and re-encoded as animated JXL with their frame timing and transparency. Original
+GIF/APNG source files are imported, not saved as profile originals. Native JXL
+animations are accepted too. Images are bounded to 600 frames and 128 MiB of
+prepared pixels; invalid/oversized imports report an error. Reduced Motion and
+background freezing keep pictures still. Retained PNG/extensionless profile copies
+remain readable until explicitly removed.
 Local profile preferences live in `data/profile/profile.json`. Removal deletes
 Horizon's copy after confirmation, not the user's original file.
 

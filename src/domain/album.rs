@@ -16,11 +16,11 @@ pub enum MediaKind {
 }
 
 impl MediaKind {
-    /// Formats Horizon can decode: photos (GIFs animate in the viewer)
+    /// Formats Horizon can decode: JXL photos
     /// through `services::image`, videos through the platform's video backend.
     pub fn from_extension(extension: &str) -> Option<Self> {
         match extension.to_ascii_lowercase().as_str() {
-            "png" | "jpg" | "jpeg" | "gif" | "jxl" => Some(Self::Photo),
+            "jxl" => Some(Self::Photo),
             "mp4" | "m4v" | "mkv" | "webm" | "mov" => Some(Self::Video),
             _ => None,
         }
@@ -181,11 +181,14 @@ mod tests {
 
     #[test]
     fn media_kind_follows_the_extension_case_insensitively() {
-        assert_eq!(MediaKind::from_extension("PNG"), Some(MediaKind::Photo));
-        assert_eq!(MediaKind::from_extension("jpeg"), Some(MediaKind::Photo));
-        assert_eq!(MediaKind::from_extension("GIF"), Some(MediaKind::Photo));
+        for retired in ["png", "jpg", "jpeg", "gif", "webp", "avif"] {
+            assert_eq!(MediaKind::from_extension(retired), None);
+        }
+        assert_eq!(MediaKind::from_extension("JXL"), Some(MediaKind::Photo));
         assert_eq!(MediaKind::from_extension("jxl"), Some(MediaKind::Photo));
-        assert_eq!(MediaKind::from_extension("webm"), Some(MediaKind::Video));
+        for video in ["mp4", "m4v", "mkv", "webm", "mov"] {
+            assert_eq!(MediaKind::from_extension(video), Some(MediaKind::Video));
+        }
         assert_eq!(MediaKind::from_extension("part"), None);
         assert_eq!(MediaKind::from_extension("vdf"), None);
     }

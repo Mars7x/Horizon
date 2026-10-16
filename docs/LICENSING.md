@@ -22,7 +22,7 @@ permission to guess. New dependencies need a demonstrated consumer and review.
 - UI WAVs and native media test fixtures retain their documented attribution.
 - The offline GBA hash/title catalog is derived from pinned No-Intro/Libretro
   metadata under CC-BY-SA-4.0, with its license and derivation in the notices.
-- FFmpeg, PipeWire, SDL3, SQLite and all resolved Rust dependencies need their
+- FFmpeg, PipeWire, libjxl, SDL3, SQLite and all resolved Rust dependencies need their
   upstream license obligations respected. Hand-written notices are not a full
   lockfile-derived release inventory.
 - The separately bundled mGBA 0.10.5 core is built from unchanged source under

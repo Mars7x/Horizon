@@ -1,6 +1,6 @@
 //! The profile picture and where it comes from.
 //!
-//! - **Chosen**: any image the user picks becomes Horizon's own square PNG,
+//! - **Chosen**: any image the user picks becomes Horizon's own square JXL,
 //!   so the original can move or vanish and nothing of it but the pixels (no
 //!   metadata) is kept.
 //! - **Steam**: the account's avatar, fetched through the Steam Web API and
@@ -17,7 +17,9 @@ use std::{
     time::Duration,
 };
 
-use image::{DynamicImage, ImageFormat, RgbaImage, imageops::FilterType};
+#[cfg(test)]
+use image::ImageFormat;
+use image::{DynamicImage, RgbaImage, imageops::FilterType};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -162,34 +164,103 @@ pub fn decode_animation(bytes: &[u8], side: u32) -> Result<Animation, ProfileErr
     Ok(Animation { still, frames })
 }
 
-/// A chosen animated picture (a GIF, an animated PNG) from its file's bytes:
+/// A chosen animated picture (GIF, APNG or JXL) from its file's bytes:
 /// every frame cropped to its centre square like the still, at `side`.
 /// `None` when it doesn't move.
-pub fn decode_chosen_animation(bytes: &[u8], side: u32) -> Option<Animation> {
-    let frames = decoding::small_animation(bytes, (side, side), MAX_FRAMES, true)
-        .ok()
-        .flatten()?;
-    let still = frames.first()?.0.clone();
-    Some(Animation { still, frames })
+pub fn decode_chosen_animation(bytes: &[u8], side: u32) -> Result<Option<Animation>, ProfileError> {
+    let Some(frames) = decoding::small_animation(bytes, (side, side), MAX_FRAMES, true)? else {
+        return Ok(None);
+    };
+    let Some((still, _)) = frames.first() else {
+        return Ok(None);
+    };
+    Ok(Some(Animation {
+        still: still.clone(),
+        frames,
+    }))
 }
 
-/// Keep a file's bytes as they are (an animated original), replacing any
-/// earlier copy only once the new one is complete.
-pub fn save_bytes(path: &Path, bytes: &[u8]) -> Result<(), ProfileError> {
+/// Import bytes once, then persist normalized still/animation copies. Decode
+/// and encoding failures are reported, never treated as a request to clear an
+/// existing animation.
+pub fn import_chosen(
+    source: &Path,
+    path: &Path,
+    animated: &Path,
+) -> Result<(RgbaImage, Option<Animation>), ProfileError> {
+    let bytes = decoding::read_bytes(source)?;
+    let picture = prepare_bytes(&bytes)?;
+    let animation = decode_chosen_animation(&bytes, ANIMATED_SIDE)?;
+    if let Some(animation) = &animation {
+        save_animation(animated, animation)?;
+    }
+    save(path, &picture)?;
+    if animation.is_none() {
+        remove(animated)?;
+    }
+    Ok((picture, animation))
+}
+
+/// Keep only normalized image pixels and timing as lossless JXL. Replacing
+/// an earlier copy happens only after the complete animation is encoded.
+pub fn save_animation(path: &Path, animation: &Animation) -> Result<(), ProfileError> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
     let partial = partial_path(path);
-    let written = fs::write(&partial, bytes).and_then(|()| fs::rename(&partial, path));
-    if written.is_err() {
+    let result = (|| -> io::Result<()> {
+        let file = fs::File::create(&partial)?;
+        if animation.frames.is_empty() {
+            crate::platform::jpeg_xl::write_rgba(
+                &file,
+                animation.still.as_raw(),
+                animation.still.width(),
+                animation.still.height(),
+            )?;
+        } else {
+            let frames: Vec<_> = animation
+                .frames
+                .iter()
+                .map(|(frame, delay)| (frame.as_raw().as_slice(), *delay))
+                .collect();
+            if animation
+                .frames
+                .iter()
+                .any(|(frame, _)| frame.dimensions() != animation.still.dimensions())
+            {
+                return Err(io::Error::other("animation frame dimensions differ"));
+            }
+            crate::platform::jpeg_xl::write_frames(
+                &file,
+                &frames,
+                animation.still.width(),
+                animation.still.height(),
+            )?;
+        }
+        file.sync_all()?;
+        fs::rename(&partial, path)
+    })();
+    if result.is_err() {
         let _ = fs::remove_file(&partial);
     }
-    Ok(written?)
+    Ok(result?)
 }
 
-/// A kept original, decoded; `None` when absent or unreadable.
+fn stored_path(path: &Path) -> PathBuf {
+    if path.exists() {
+        return path.to_owned();
+    }
+    crate::platform::data_paths::legacy_profile_image_path(path).unwrap_or_else(|| path.to_owned())
+}
+
 pub fn load_animation(path: &Path, side: u32) -> Option<Animation> {
-    decode_animation(&fs::read(path).ok()?, side).ok()
+    decode_animation(&decoding::read_bytes(&stored_path(path)).ok()?, side).ok()
+}
+
+pub fn load_chosen_animation(path: &Path, side: u32) -> Option<Animation> {
+    decode_chosen_animation(&decoding::read_bytes(&stored_path(path)).ok()?, side)
+        .ok()
+        .flatten()
 }
 
 /// Decode `source` (by content, under the usual limits), crop its centre to a
@@ -221,10 +292,9 @@ pub fn save(path: &Path, picture: &RgbaImage) -> Result<(), ProfileError> {
         fs::create_dir_all(dir)?;
     }
     let partial = partial_path(path);
-    let written = picture
-        .save_with_format(&partial, ImageFormat::Png)
-        .map_err(|error| ProfileError::Save(io::Error::other(error)))
-        .and_then(|()| fs::rename(&partial, path).map_err(ProfileError::from));
+    let written = decoding::write_jxl(&partial, picture)
+        .and_then(|()| fs::rename(&partial, path))
+        .map_err(ProfileError::from);
     if written.is_err() {
         let _ = fs::remove_file(&partial);
     }
@@ -233,14 +303,21 @@ pub fn save(path: &Path, picture: &RgbaImage) -> Result<(), ProfileError> {
 
 /// The stored picture, if there is one and it still reads.
 pub fn load(path: &Path) -> Option<RgbaImage> {
+    let path = stored_path(path);
     path.exists()
-        .then(|| decoding::decode_file(path).ok())
+        .then(|| decoding::decode_file(&path).ok())
         .flatten()
         .map(DynamicImage::into_rgba8)
 }
 
 /// Forget the picture. Already gone is fine.
 pub fn remove(path: &Path) -> io::Result<()> {
+    if let Some(legacy) = crate::platform::data_paths::legacy_profile_image_path(path) {
+        match fs::remove_file(legacy) {
+            Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
+            _ => {}
+        }
+    }
     match fs::remove_file(path) {
         Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
         _ => Ok(()),
@@ -299,7 +376,7 @@ mod tests {
         RgbaImage::from_pixel(40, 30, image::Rgba([10, 20, 30, 255]))
             .save_with_format(&source, ImageFormat::Png)
             .unwrap();
-        let stored = dir.join("data/profile.png");
+        let stored = dir.join("data/profile.jxl");
         assert!(load(&stored).is_none());
         let picture = prepare(&source).unwrap();
         save(&stored, &picture).unwrap();
@@ -308,6 +385,56 @@ mod tests {
         remove(&stored).unwrap();
         remove(&stored).unwrap();
         assert!(load(&stored).is_none());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn retained_profile_files_load_until_explicitly_removed() {
+        let dir = temp_dir("legacy");
+        let legacy = dir.join("custom.png");
+        let modern = dir.join("custom.jxl");
+        let image = RgbaImage::from_pixel(8, 8, image::Rgba([1, 2, 3, 64]));
+        image.save(&legacy).unwrap();
+        assert_eq!(load(&modern).unwrap(), image);
+        save(&modern, &image).unwrap();
+        assert!(legacy.exists());
+        assert!(decoding::is_jxl(&fs::read(&modern).unwrap()));
+        assert!(
+            decode_animation(&fs::read(&modern).unwrap(), 184)
+                .unwrap()
+                .frames
+                .is_empty()
+        );
+        remove(&modern).unwrap();
+        assert!(!legacy.exists());
+        assert!(load(&modern).is_none());
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn apng_import_becomes_jxl_with_timing_alpha_and_cropping() {
+        let dir = temp_dir("apng-import");
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/animation-8x4.png");
+        let path = dir.join("custom.jxl");
+        let moving = dir.join("custom-animation.jxl");
+        let (_, animation) = import_chosen(&source, &path, &moving).unwrap();
+        let animation = animation.unwrap();
+        let loaded = load_chosen_animation(&moving, ANIMATED_SIDE).unwrap();
+        assert_eq!(loaded.frames.len(), 3);
+        for (actual, expected) in loaded.frames.iter().zip(animation.frames.iter()) {
+            assert_eq!(actual, expected);
+            assert_eq!(actual.0.dimensions(), (4, 4));
+        }
+        assert_eq!(loaded.frames[1].0.get_pixel(0, 0).0, [0, 255, 0, 128]);
+        assert_eq!(
+            loaded
+                .frames
+                .iter()
+                .map(|(_, delay)| delay.as_millis())
+                .collect::<Vec<_>>(),
+            [30, 70, 110]
+        );
+        assert!(decoding::is_jxl(&fs::read(path).unwrap()));
+        assert!(decoding::is_jxl(&fs::read(moving).unwrap()));
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -413,7 +540,8 @@ mod tests {
 
         let dir = temp_dir("animation");
         let path = dir.join("item");
-        save_bytes(&path, &gif).unwrap();
+        save_animation(&path, &animation).unwrap();
+        assert!(decoding::is_jxl(&fs::read(&path).unwrap()));
         assert_eq!(
             load_animation(&path, ANIMATED_SIDE).unwrap().frames.len(),
             3
@@ -439,7 +567,9 @@ mod tests {
                     .unwrap();
             }
         }
-        let animation = decode_chosen_animation(&gif, ANIMATED_SIDE).unwrap();
+        let animation = decode_chosen_animation(&gif, ANIMATED_SIDE)
+            .unwrap()
+            .unwrap();
         assert_eq!(animation.frames.len(), 2);
         assert_eq!(
             animation.frames[0].0.dimensions(),
@@ -449,7 +579,11 @@ mod tests {
         RgbaImage::new(40, 40)
             .write_to(&mut io::Cursor::new(&mut png), ImageFormat::Png)
             .unwrap();
-        assert!(decode_chosen_animation(&png, ANIMATED_SIDE).is_none());
+        assert!(
+            decode_chosen_animation(&png, ANIMATED_SIDE)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

@@ -66,3 +66,10 @@ bundles on the same player worker. The narrow mGBA host owns serialization and
 rollback on rejected loads. Rust owns slot selection, overwrite confirmation and
 automatic resume policy; Slint receives only row projections and decoded frames.
 See [Storage](STORAGE.md) for the fresh layout and state bundles.
+
+JPEG XL is the stored raster format for screenshots, state previews, profiles and
+normalized artwork/Album caches. The original libjxl shim encodes lossless sRGB
+RGBA frames on workers; shared image services import source formats and decode
+bounded JXL animations through jxl-oxide's frame API. Videos and authored SVGs
+keep their existing boundaries. Versioned state/profile readers preserve older
+durable files; only disposable cache versions are invalidated.
