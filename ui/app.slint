@@ -1,3 +1,5 @@
+import { SaveStateRow } from "models/save-state.slint";
+export { SaveStateRow }
 import { OnboardingPage } from "pages/onboarding.slint";
 import { GamePlayer } from "pages/game-player.slint";
 import { RomSetupDialog } from "components/rom-setup.slint";
@@ -321,6 +323,7 @@ export component AppWindow inherits Window {
     in property <bool> settings-swap-hints: true;
     in property <bool> settings-core-ready: false;
     in property <bool> settings-core-freeze;
+    in property <bool> settings-core-resume: true;
     in property <bool> settings-core-color;
     in property <string> settings-core-filter: "None";
     in property <int> settings-core-sunlight: 0;
@@ -409,6 +412,10 @@ export component AppWindow inherits Window {
     in property <bool> player-paused: false;
     in property <bool> player-frozen: false;
     in property <bool> player-fast-forward: false;
+    in property <int> player-state-mode: 0;
+    in property <int> player-state-focus: -1;
+    in property <[SaveStateRow]> player-state-rows;
+    callback player-state-choose(int);
     in property <bool> player-restart-confirm: false;
     in property <int> player-restart-focus: 0;
     callback player-restart-answer(int);
@@ -923,6 +930,7 @@ export component AppWindow inherits Window {
                     core-filter: root.settings-core-filter;
                     core-color: root.settings-core-color;
                     core-freeze: root.settings-core-freeze;
+                    core-resume: root.settings-core-resume;
                     core-sunlight: root.settings-core-sunlight;
                     core-feedback: root.settings-core-feedback;
                     core-decrease => { root.settings-core-decrease(); }
@@ -1105,6 +1113,9 @@ export component AppWindow inherits Window {
                 z: 30; width: parent.width; height: parent.height;
                 phase: root.player-phase; origin: root.player-origin;
                 fast-forward: root.player-fast-forward;
+                state-mode: root.player-state-mode; state-focus: root.player-state-focus;
+                state-rows: root.player-state-rows;
+                state-choose(slot) => { root.player-state-choose(slot); }
                 restart-confirm: root.player-restart-confirm; restart-focus: root.player-restart-focus;
                 restart-answer(choice) => { root.player-restart-answer(choice); }
                 open: root.player-open; paused: root.player-paused; frozen: root.player-frozen; busy: root.player-busy;

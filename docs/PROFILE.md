@@ -14,7 +14,8 @@ avatar artwork.
 The avatar is the page's one focus. A/click opens Edit profile; Up/Down scrolls
 friends. The editor offers Name, Choose a picture, Use Steam picture and Done.
 A chosen image comes through the FileChooser portal and is copied/normalized
-into Horizon data; animated originals are retained for playback. Removal deletes
+into `data/profile/pictures/`; animated originals are retained for playback.
+Local profile preferences live in `data/profile/profile.json`. Removal deletes
 Horizon's copy after confirmation, not the user's original file.
 
 The name is whitespace-normalized, at most 32 characters, and empty means no

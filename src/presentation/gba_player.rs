@@ -27,7 +27,15 @@ enum PlayerStage {
 }
 
 const RETURN_TO_HORIZON: i32 = 6;
-const PAUSE_ACTIONS: [i32; 5] = [0, 1, 4, 5, RETURN_TO_HORIZON];
+const PAUSE_ACTIONS: [i32; 7] = [0, 1, 2, 3, 4, 5, RETURN_TO_HORIZON];
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
+enum StateMode {
+    Menu = 0,
+    Save = 1,
+    Load = 2,
+    Overwrite = 3,
+}
 fn pause_step(current: i32, down: bool, repeated: bool) -> i32 {
     let index = PAUSE_ACTIONS
         .iter()
@@ -47,6 +55,9 @@ pub struct GbaPlayer {
     ui: slint::Weak<AppWindow>,
     paths: PlayerPaths,
     running: RefCell<Option<RunningGame>>,
+    state_mode: Cell<StateMode>,
+    state_focus: Cell<i32>,
+    state_entries: RefCell<Vec<crate::services::save_states::Entry>>,
     keyboard: Cell<u16>,
     pad_ready: Cell<bool>,
     gamepads: CallbackSlot<dyn Fn() -> u16>,
@@ -66,6 +77,9 @@ impl GbaPlayer {
             ui: ui.as_weak(),
             paths,
             running: RefCell::new(None),
+            state_mode: Cell::new(StateMode::Menu),
+            state_focus: Cell::new(-1),
+            state_entries: RefCell::new(Vec::new()),
             keyboard: Cell::new(0),
             pad_ready: Cell::new(false),
             gamepads: RefCell::new(None),
@@ -83,6 +97,12 @@ impl GbaPlayer {
         ui.on_player_choose(move |index| {
             if let Some(player) = weak.upgrade() {
                 player.choose(index);
+            }
+        });
+        let weak = Rc::downgrade(&player);
+        ui.on_player_state_choose(move |slot| {
+            if let Some(player) = weak.upgrade() {
+                player.choose_state(slot);
             }
         });
         let weak = Rc::downgrade(&player);
@@ -145,10 +165,17 @@ impl GbaPlayer {
         let Some(ui) = self.ui.upgrade() else {
             return;
         };
-        if !ui.get_player_open() || ui.get_player_failed() {
+        if !ui.get_player_open()
+            || ui.get_player_failed()
+            || ui.get_player_paused()
+            || !self.foreground.get()
+            || self.stage.get() != PlayerStage::Playing
+            || ui.get_player_busy()
+        {
             return;
         }
         ui.set_player_paused(true);
+        self.set_state_mode(&ui, StateMode::Menu);
         ui.set_player_restart_confirm(false);
         ui.set_player_focus(0);
         self.keyboard.set(0);
@@ -157,6 +184,15 @@ impl GbaPlayer {
             game.buttons.store(0, Ordering::Release);
         }
         self.sync_pause(&ui);
+        self.cue(UiSoundCue::QuickMenuOpen);
+    }
+
+    fn close_pause(&self, ui: &AppWindow) {
+        let was_paused = ui.get_player_paused();
+        ui.set_player_paused(false);
+        if was_paused && !self.closing.get() && self.foreground.get() && !ui.get_player_failed() {
+            self.cue(UiSoundCue::QuickMenuClose);
+        }
     }
 
     pub fn keyboard(&self, text: &str, repeated: bool, pressed: bool) -> bool {
@@ -178,7 +214,9 @@ impl GbaPlayer {
                 if !ui.get_player_paused() {
                     self.choose(RETURN_TO_HORIZON);
                 }
-            } else if ui.get_player_restart_confirm() {
+            } else if ui.get_player_restart_confirm()
+                || self.state_mode.get() == StateMode::Overwrite
+            {
                 self.restart_answer(0);
             } else if ui.get_player_paused() || ui.get_player_failed() {
                 self.choose(0);
@@ -207,10 +245,13 @@ impl GbaPlayer {
         true
     }
     pub fn handle_action(&self, event: UiActionEvent) -> bool {
-        let before = self
-            .ui
-            .upgrade()
-            .map(|ui| (ui.get_player_focus(), ui.get_player_restart_focus()));
+        let before = self.ui.upgrade().map(|ui| {
+            (
+                ui.get_player_focus(),
+                ui.get_player_restart_focus(),
+                ui.get_player_state_focus(),
+            )
+        });
         let handled = self.handle_action_inner(event);
         if handled
             && matches!(
@@ -218,7 +259,11 @@ impl GbaPlayer {
                 UiAction::Up | UiAction::Down | UiAction::Left | UiAction::Right
             )
             && self.ui.upgrade().is_some_and(|ui| {
-                Some((ui.get_player_focus(), ui.get_player_restart_focus())) != before
+                Some((
+                    ui.get_player_focus(),
+                    ui.get_player_restart_focus(),
+                    ui.get_player_state_focus(),
+                )) != before
             })
         {
             self.cue(UiSoundCue::Navigation);
@@ -249,6 +294,64 @@ impl GbaPlayer {
             return true;
         }
         if ui.get_player_paused() {
+            if self.state_mode.get() != StateMode::Menu {
+                match event.action {
+                    UiAction::Back | UiAction::Home if !event.repeated => self.choose(0),
+                    UiAction::Accept if !event.repeated => {
+                        if self.state_mode.get() == StateMode::Overwrite {
+                            self.restart_answer(ui.get_player_restart_focus());
+                        } else {
+                            self.choose_state(self.state_focus.get());
+                        }
+                    }
+                    UiAction::Up | UiAction::Down | UiAction::Left | UiAction::Right
+                        if self.state_mode.get() == StateMode::Overwrite =>
+                    {
+                        ui.set_player_restart_focus(
+                            if matches!(event.action, UiAction::Down | UiAction::Right) {
+                                1
+                            } else {
+                                0
+                            },
+                        )
+                    }
+                    UiAction::Up | UiAction::Down => {
+                        let slots: Vec<_> = self
+                            .state_entries
+                            .borrow()
+                            .iter()
+                            .filter(|entry| {
+                                if self.state_mode.get() == StateMode::Save {
+                                    entry.slot > 0
+                                } else {
+                                    entry.metadata.is_some()
+                                }
+                            })
+                            .map(|entry| i32::from(entry.slot))
+                            .collect();
+                        if let Some(index) = slots
+                            .iter()
+                            .position(|slot| *slot == self.state_focus.get())
+                        {
+                            let index = crate::navigation::step_with_edge_wrap(
+                                index as i32,
+                                0,
+                                slots.len() as i32 - 1,
+                                if event.action == UiAction::Down {
+                                    1
+                                } else {
+                                    -1
+                                },
+                                event.repeated,
+                            );
+                            self.state_focus.set(slots[index as usize]);
+                            ui.set_player_state_focus(self.state_focus.get());
+                        }
+                    }
+                    _ => {}
+                }
+                return true;
+            }
             if ui.get_player_restart_confirm() {
                 match event.action {
                     UiAction::Left | UiAction::Up => ui.set_player_restart_focus(0),
@@ -282,6 +385,112 @@ impl GbaPlayer {
         // Game B/Start and menu repeats never navigate the shell underneath.
         true
     }
+    fn set_state_mode(&self, ui: &AppWindow, mode: StateMode) {
+        self.state_mode.set(mode);
+        ui.set_player_state_mode(mode as i32);
+    }
+    fn publish_states(&self, ui: &AppWindow) {
+        let saving = self.state_mode.get() != StateMode::Load;
+        let entries = self.state_entries.borrow();
+        let allowed: Vec<_> = entries
+            .iter()
+            .filter(|entry| {
+                if saving {
+                    entry.slot > 0
+                } else {
+                    entry.metadata.is_some()
+                }
+            })
+            .collect();
+        if !allowed
+            .iter()
+            .any(|entry| i32::from(entry.slot) == self.state_focus.get())
+        {
+            self.state_focus.set(
+                allowed
+                    .iter()
+                    .max_by_key(|entry| {
+                        if saving {
+                            -i64::from(entry.slot)
+                        } else {
+                            entry.metadata.as_ref().map(|m| m.saved_at).unwrap_or(0)
+                        }
+                    })
+                    .map_or(-1, |entry| i32::from(entry.slot)),
+            );
+        }
+        let rows = entries
+            .iter()
+            .filter(|entry| !saving || entry.slot > 0)
+            .map(|entry| {
+                let preview = entry.preview.as_ref().map_or_else(Image::default, |frame| {
+                    Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                        &frame.rgba,
+                        frame.width,
+                        frame.height,
+                    ))
+                });
+                let detail = entry
+                    .metadata
+                    .as_ref()
+                    .and_then(|meta| chrono::DateTime::from_timestamp_millis(meta.saved_at))
+                    .map(|date| {
+                        date.with_timezone(&chrono::Local)
+                            .format("%b %-d, %Y · %H:%M")
+                            .to_string()
+                    })
+                    .unwrap_or_else(|| {
+                        if entry.issue.is_some() {
+                            "Unavailable".into()
+                        } else {
+                            "Empty slot".into()
+                        }
+                    });
+                crate::SaveStateRow {
+                    slot: i32::from(entry.slot),
+                    title: if entry.slot == 0 {
+                        "Automatic resume".into()
+                    } else {
+                        format!("Slot {}", entry.slot).into()
+                    },
+                    detail: detail.into(),
+                    preview,
+                    available: saving || entry.metadata.is_some(),
+                    occupied: entry.metadata.is_some(),
+                }
+            })
+            .collect::<Vec<_>>();
+        ui.set_player_state_rows(slint::ModelRc::new(slint::VecModel::from(rows)));
+        ui.set_player_state_focus(self.state_focus.get());
+    }
+    fn choose_state(&self, slot: i32) {
+        let Some(ui) = self.ui.upgrade() else { return };
+        if !ui.get_player_paused() || ui.get_player_busy() || !self.foreground.get() {
+            return;
+        }
+        let Some(entry) = self
+            .state_entries
+            .borrow()
+            .iter()
+            .find(|entry| i32::from(entry.slot) == slot)
+            .cloned()
+        else {
+            return;
+        };
+        self.state_focus.set(slot);
+        ui.set_player_state_focus(slot);
+        if self.state_mode.get() == StateMode::Save && slot > 0 {
+            if entry.metadata.is_some() || entry.issue.is_some() {
+                self.set_state_mode(&ui, StateMode::Overwrite);
+                ui.set_player_restart_focus(0);
+                self.cue(UiSoundCue::Ok);
+            } else {
+                self.send_action(&ui, Command::SaveState(entry.slot), "");
+            }
+        } else if self.state_mode.get() == StateMode::Load && entry.metadata.is_some() {
+            self.send_action(&ui, Command::LoadState(entry.slot), "");
+        }
+    }
     fn choose(&self, index: i32) {
         let Some(ui) = self.ui.upgrade() else {
             return;
@@ -293,16 +502,24 @@ impl GbaPlayer {
             self.begin_exit(&ui);
             return;
         }
+        if self.state_mode.get() != StateMode::Menu && index == 0 {
+            if self.state_mode.get() == StateMode::Overwrite {
+                self.restart_answer(0);
+            } else {
+                let old = self.state_mode.get();
+                self.set_state_mode(&ui, StateMode::Menu);
+                ui.set_player_focus(if old == StateMode::Save { 2 } else { 3 });
+                ui.set_player_message("".into());
+                self.cue(UiSoundCue::Back);
+            }
+            return;
+        }
         if !PAUSE_ACTIONS.contains(&index) || (ui.get_player_busy() && index != RETURN_TO_HORIZON) {
             return;
         }
         ui.set_player_focus(index);
-        if index != 1 {
-            self.cue(if index == 0 {
-                UiSoundCue::Back
-            } else {
-                UiSoundCue::Ok
-            });
+        if ![0, 1, RETURN_TO_HORIZON].contains(&index) {
+            self.cue(UiSoundCue::Ok);
         }
         match index {
             0 if ui.get_player_paused() && self.foreground.get() => {
@@ -310,11 +527,24 @@ impl GbaPlayer {
                 self.keyboard.set(0);
                 self.pad_ready.set(false);
                 ui.set_player_restart_confirm(false);
-                ui.set_player_paused(false);
+                self.close_pause(&ui);
                 ui.set_player_message("".into());
                 self.sync_pause(&ui);
             }
             1 => self.set_speed(&ui, !ui.get_player_fast_forward()),
+            2 | 3 => {
+                self.set_state_mode(
+                    &ui,
+                    if index == 2 {
+                        StateMode::Save
+                    } else {
+                        StateMode::Load
+                    },
+                );
+                self.state_focus.set(if index == 2 { 1 } else { -1 });
+                self.publish_states(&ui);
+                self.send_action(&ui, Command::ListStates, "");
+            }
             4 => self.send_action(&ui, Command::Screenshot, "Taking screenshot"),
             5 => {
                 ui.set_player_restart_confirm(true);
@@ -322,6 +552,7 @@ impl GbaPlayer {
                 ui.set_player_message("".into());
             }
             RETURN_TO_HORIZON => {
+                self.set_state_mode(&ui, StateMode::Menu);
                 ui.set_player_busy(true);
                 ui.set_player_message("Saving game".into());
                 if let Some(game) = self.running.borrow().as_ref() {
@@ -362,6 +593,18 @@ impl GbaPlayer {
         let Some(ui) = self.ui.upgrade() else {
             return;
         };
+        if self.state_mode.get() == StateMode::Overwrite {
+            if ui.get_player_busy() {
+                return;
+            }
+            if choice == 1 {
+                self.send_action(&ui, Command::SaveState(self.state_focus.get() as u8), "");
+            } else {
+                self.set_state_mode(&ui, StateMode::Save);
+                self.cue(UiSoundCue::Back);
+            }
+            return;
+        }
         if !ui.get_player_restart_confirm() || ui.get_player_busy() {
             return;
         }
@@ -414,7 +657,7 @@ impl GbaPlayer {
             ui.set_launching_game_index(ui.get_selected_index());
         }
         ui.set_player_origin(ui.invoke_player_capture_origin());
-        ui.set_player_paused(false);
+        self.close_pause(ui);
         self.set_stage(ui, PlayerStage::Exiting);
         self.timer.restart();
         if Self::zoom_duration(ui).is_zero() {
@@ -484,6 +727,33 @@ impl GbaPlayer {
                         ui.set_player_busy(false);
                         ui.set_player_message("".into());
                     }
+                    Event::States(entries) => {
+                        *self.state_entries.borrow_mut() = entries;
+                        if self.state_mode.get() != StateMode::Menu && !self.closing.get() {
+                            self.publish_states(&ui);
+                            ui.set_player_busy(false);
+                        }
+                    }
+                    Event::StateSaved => {
+                        if !self.closing.get() {
+                            self.set_state_mode(&ui, StateMode::Save);
+                            ui.set_player_busy(false);
+                            self.publish_states(&ui);
+                            self.cue(UiSoundCue::Ok);
+                        }
+                    }
+                    Event::StateLoaded => {
+                        if self.closing.get() {
+                            continue;
+                        }
+                        self.set_state_mode(&ui, StateMode::Menu);
+                        ui.set_player_busy(false);
+                        self.close_pause(&ui);
+                        self.sync_pause(&ui);
+                        ui.set_player_message("".into());
+                        self.keyboard.set(0);
+                        self.pad_ready.set(false);
+                    }
                     Event::ScreenshotSaved => {
                         ui.set_player_busy(false);
                         ui.set_player_message("Screenshot saved to Album".into());
@@ -491,7 +761,7 @@ impl GbaPlayer {
                     Event::Restarted => {
                         ui.set_player_busy(false);
                         ui.set_player_restart_confirm(false);
-                        ui.set_player_paused(false);
+                        self.close_pause(&ui);
                         self.worker_paused.set(false); // Restart resumes the core worker.
                         self.sync_pause(&ui);
                         ui.set_player_message("".into());
@@ -499,6 +769,9 @@ impl GbaPlayer {
                         self.pad_ready.set(false);
                     }
                     Event::ActionFailed(error) => {
+                        if self.state_mode.get() == StateMode::Overwrite {
+                            self.set_state_mode(&ui, StateMode::Save);
+                        }
                         ui.set_player_busy(false);
                         ui.set_player_restart_confirm(false);
                         ui.set_player_message(error.into());
@@ -641,6 +914,10 @@ impl LaunchExecutor for GbaPlayer {
             ui.set_player_restart_confirm(false);
             ui.set_player_restart_focus(0);
             ui.set_player_fast_forward(false);
+            self.set_state_mode(&ui, StateMode::Menu);
+            self.state_entries.borrow_mut().clear();
+            self.state_focus.set(-1);
+            ui.set_player_state_rows(slint::ModelRc::default());
             ui.set_player_open(true);
             Ok(())
         })();
@@ -674,9 +951,9 @@ fn keyboard_button(text: &str) -> Option<u32> {
 mod tests {
     use super::*;
     #[test]
-    fn pause_navigation_skips_placeholders_and_does_not_wrap_on_repeat() {
-        assert_eq!(pause_step(1, true, false), 4);
-        assert_eq!(pause_step(4, false, false), 1);
+    fn pause_navigation_includes_states_and_does_not_wrap_on_repeat() {
+        assert_eq!(pause_step(1, true, false), 2);
+        assert_eq!(pause_step(4, false, false), 3);
         assert_eq!(pause_step(0, false, true), 0);
         assert_eq!(pause_step(6, true, true), 6);
         assert_eq!(pause_step(6, true, false), 0);
@@ -753,10 +1030,35 @@ mod runtime_tests {
             std::env::var_os("HORIZON_TEST_BACKGROUND_CONTINUES").is_none();
         let freeze = preferences.freeze_when_unfocused;
         let corrected = preferences.mgba.color_correction;
-        crate::persistence::settings::SettingsStore::new(directory.join("cores.json"))
-            .save_value(&preferences)
-            .unwrap();
+        let core_paths = crate::platform::data_paths::CoreSettingsPaths {
+            playback: directory.join("playback.json"),
+            mgba: directory.join("cores/mgba.json"),
+        };
+        crate::persistence::core_settings::CoreSettingsStore::new(core_paths.clone())
+            .write_fixture(preferences);
+        let storage_game = crate::domain::SourceGameRef::new(
+            crate::domain::SourceId::new("gba").unwrap(),
+            crate::domain::ExternalGameId::new(format!("sha256:{hash}")).unwrap(),
+        );
+        let save_file = crate::services::game_storage::GameFolder::prepare(
+            &saves,
+            &storage_game,
+            "Horizon homebrew",
+        )
+        .unwrap()
+        .save_path();
         let ui = AppWindow::new().unwrap();
+        let _appearance = std::env::var_os("HORIZON_TEST_BLACK").map(|_| {
+            let appearance = crate::presentation::appearance::AppearanceController::new(
+                &ui,
+                crate::appearance::store::AppearanceStore::new(directory.join("appearance.json")),
+            )
+            .unwrap();
+            appearance
+                .set_theme_preference(&ui, crate::appearance::ThemePreference::Black)
+                .unwrap();
+            appearance
+        });
         let reduced = std::env::var_os("HORIZON_TEST_REDUCED_MOTION").is_some();
         ui.global::<crate::Motion>().set_reduced_motion(reduced);
         if let Ok(width) = std::env::var("HORIZON_PLAYER_TEST_WIDTH") {
@@ -769,10 +1071,24 @@ mod runtime_tests {
                 database: database.clone(),
                 core: std::env::var_os("HORIZON_GBA_CORE").unwrap().into(),
                 saves: saves.clone(),
-                settings: directory.join("cores.json"),
+                settings: core_paths,
                 album: directory.join("album"),
             },
         );
+        let sounds = Rc::new(RefCell::new(Vec::new()));
+        let recorded_sounds = Rc::clone(&sounds);
+        let mut audio_feedback =
+            std::env::var_os("HORIZON_TEST_MENU_AUDIO").map(|_| crate::audio::UiSounds::new(true));
+        if let Some(sound) = audio_feedback.as_mut() {
+            sound.prepare();
+        }
+        let audio_feedback = RefCell::new(audio_feedback);
+        player.set_sound(Rc::new(move |cue| {
+            recorded_sounds.borrow_mut().push(cue);
+            if let Some(sound) = audio_feedback.borrow_mut().as_mut() {
+                sound.play(cue);
+            }
+        }));
         let games = repository.list_games().unwrap();
         let catalog = crate::presentation::catalog::Catalog::shared(games);
         let registry = Rc::new(crate::sources::production_source_registry().unwrap());
@@ -811,6 +1127,7 @@ mod runtime_tests {
         if std::env::var_os("HORIZON_TEST_DEACTIVATE_LAUNCH").is_some() {
             player.set_active(false);
         }
+        let final_sounds = Rc::clone(&sounds);
         let stage = Rc::new(Cell::new(0));
         let ticks = Rc::new(Cell::new(0));
         let done = Rc::new(Cell::new(false));
@@ -949,14 +1266,20 @@ mod runtime_tests {
                     key("z".into(), false);
                     tap(slint::platform::Key::Escape);
                     assert!(ui.get_player_paused());
+                    assert_eq!(sounds.borrow().last(), Some(&UiSoundCue::QuickMenuOpen));
+                    let sound_count = sounds.borrow().len();
+                    live.pause(); // Repeated open requests cannot replay the cue.
+                    assert_eq!(sounds.borrow().len(), sound_count);
                     progress.set(2);
                 }
                 2 => {
-                    // An explicit pause survives deactivation/reactivation.
+                    // An explicit pause survives deactivation/reactivation silently.
+                    let sound_count = sounds.borrow().len();
                     live.set_active(false);
                     assert!(ui.get_player_paused());
                     live.set_active(true);
                     assert!(ui.get_player_paused());
+                    assert_eq!(sounds.borrow().len(), sound_count);
                     snapshot("gba-paused");
                     tap(slint::platform::Key::DownArrow);
                     assert_eq!(ui.get_player_focus(), 1);
@@ -981,12 +1304,71 @@ mod runtime_tests {
                     assert!(ui.get_player_message().is_empty());
                     snapshot("gba-speed");
                     tap(slint::platform::Key::DownArrow);
-                    assert_eq!(ui.get_player_focus(), 4); // skips save/load placeholders
-                    ui.invoke_player_choose(2);
-                    ui.invoke_player_choose(3);
-                    assert_eq!(ui.get_player_focus(), 4);
-                    assert!(!ui.get_player_busy());
+                    assert_eq!(ui.get_player_focus(), 2);
                     tap(slint::platform::Key::Return);
+                    progress.set(20);
+                }
+                20 if !ui.get_player_busy() => {
+                    assert_eq!(ui.get_player_state_mode(), StateMode::Save as i32);
+                    assert_eq!(ui.get_player_state_focus(), 1);
+                    assert_eq!(
+                        live.state_entries
+                            .borrow()
+                            .iter()
+                            .filter(|e| e.metadata.is_some())
+                            .count(),
+                        0
+                    );
+                    snapshot("states-empty");
+                    tap(slint::platform::Key::Return);
+                    progress.set(21);
+                }
+                21 if !ui.get_player_busy() => {
+                    assert!(live.state_entries.borrow()[1].metadata.is_some());
+                    snapshot("states-saved");
+                    tap(slint::platform::Key::Return);
+                    assert_eq!(ui.get_player_state_mode(), StateMode::Overwrite as i32);
+                    assert_eq!(ui.get_player_restart_focus(), 0);
+                    progress.set(22);
+                }
+                22 => {
+                    snapshot("states-replace-confirm");
+                    tap(slint::platform::Key::Escape);
+                    assert_eq!(ui.get_player_state_mode(), StateMode::Save as i32);
+                    tap(slint::platform::Key::Return);
+                    assert_eq!(ui.get_player_state_mode(), StateMode::Overwrite as i32);
+                    tap(slint::platform::Key::RightArrow);
+                    tap(slint::platform::Key::Return);
+                    progress.set(29);
+                }
+                29 if !ui.get_player_busy() => {
+                    assert_eq!(ui.get_player_state_mode(), StateMode::Save as i32);
+                    tap(slint::platform::Key::DownArrow);
+                    assert_eq!(ui.get_player_state_focus(), 2);
+                    tap(slint::platform::Key::Return);
+                    progress.set(23);
+                }
+                23 if !ui.get_player_busy() => {
+                    assert!(live.state_entries.borrow()[2].metadata.is_some());
+                    tap(slint::platform::Key::Escape);
+                    assert_eq!(ui.get_player_focus(), 2);
+                    tap(slint::platform::Key::DownArrow);
+                    tap(slint::platform::Key::Return);
+                    progress.set(24);
+                }
+                24 if !ui.get_player_busy() => {
+                    assert_eq!(ui.get_player_state_mode(), StateMode::Load as i32);
+                    assert_eq!(ui.get_player_state_focus(), 2);
+                    snapshot("states-load");
+                    tap(slint::platform::Key::UpArrow);
+                    assert_eq!(ui.get_player_state_focus(), 1);
+                    tap(slint::platform::Key::Return);
+                    progress.set(25);
+                }
+                25 if !ui.get_player_busy() => {
+                    assert!(!ui.get_player_paused());
+                    live.pause();
+                    ui.invoke_player_choose(4);
                     progress.set(11);
                 }
                 11 if !ui.get_player_busy() => {
@@ -1125,8 +1507,11 @@ mod runtime_tests {
                     assert!(live.handle_action(UiActionEvent::fresh(UiAction::Home)));
                     assert!(ui.get_player_paused());
                     // A save failure must stay paused, without beginning collapse.
-                    std::fs::create_dir(saves.join(format!("{hash}.tmp"))).unwrap();
-                    for _ in 0..4 {
+                    std::fs::create_dir(crate::platform::data_paths::save_temporary_path(
+                        &save_file,
+                    ))
+                    .unwrap();
+                    for _ in 0..6 {
                         live.handle_action(UiActionEvent::fresh(UiAction::Down));
                     }
                     assert_eq!(ui.get_player_focus(), RETURN_TO_HORIZON);
@@ -1137,16 +1522,15 @@ mod runtime_tests {
                     assert!(ui.get_player_paused());
                     assert_eq!(ui.get_player_phase(), 2);
                     assert!(!ui.get_player_message().is_empty());
-                    std::fs::remove_dir(saves.join(format!("{hash}.tmp"))).unwrap();
+                    std::fs::remove_dir(crate::platform::data_paths::save_temporary_path(
+                        &save_file,
+                    ))
+                    .unwrap();
                     live.handle_action(UiActionEvent::fresh(UiAction::Accept));
                     progress.set(4);
                 }
                 4 if !ui.get_player_open() => {
-                    assert!(
-                        !std::fs::read(saves.join(format!("{hash}.sav")))
-                            .unwrap()
-                            .is_empty()
-                    );
+                    assert!(!std::fs::read(&save_file).unwrap().is_empty());
                     let repository = SqliteLibraryRepository::open(&database).unwrap();
                     assert_eq!(repository.list_games().unwrap()[0].game().id(), game_id);
                     let activity = crate::services::activity::ActivityService::new(Rc::new(
@@ -1173,11 +1557,44 @@ mod runtime_tests {
                     && !ui.get_player_busy()
                     && ui.get_player_phase() == 2 =>
                 {
-                    live.handle_action(UiActionEvent::fresh(UiAction::Home));
-                    for _ in 0..4 {
-                        live.handle_action(UiActionEvent::fresh(UiAction::Down));
-                    }
-                    live.handle_action(UiActionEvent::fresh(UiAction::Accept));
+                    live.pause();
+                    ui.invoke_player_choose(2);
+                    progress.set(26);
+                }
+                26 if !ui.get_player_busy() => {
+                    assert!(live.state_entries.borrow()[0].metadata.is_some());
+                    ui.invoke_player_state_choose(3);
+                    progress.set(27);
+                }
+                27 if !ui.get_player_busy() => {
+                    let folder = crate::services::game_storage::GameFolder::prepare(
+                        &saves,
+                        &storage_game,
+                        "Horizon homebrew",
+                    )
+                    .unwrap();
+                    let core = crate::platform::data_paths::state_core_directory(&folder.directory);
+                    let read_counter = |slot| {
+                        let files = crate::platform::data_paths::state_bundle_paths(
+                            &crate::platform::data_paths::state_slot_directory(&core, slot),
+                            &folder.manifest.file_stem,
+                            slot,
+                        );
+                        let bytes = std::fs::read(files.state).unwrap();
+                        u32::from_le_bytes(bytes[0x1fc..0x200].try_into().unwrap())
+                    };
+                    assert!(
+                        read_counter(3) > read_counter(0),
+                        "Launch did not resume the automatic machine state"
+                    );
+                    tap(slint::platform::Key::Escape);
+                    ui.invoke_player_choose(3);
+                    progress.set(28);
+                }
+                28 if !ui.get_player_busy() => {
+                    snapshot("states-with-automatic");
+                    tap(slint::platform::Key::Escape);
+                    ui.invoke_player_choose(6);
                     progress.set(6);
                 }
                 6 if !ui.get_player_open() => {
@@ -1198,6 +1615,30 @@ mod runtime_tests {
             player.worker_paused.get(),
             player.keyboard.get()
         );
+        let transitions: Vec<_> = final_sounds
+            .borrow()
+            .iter()
+            .copied()
+            .filter(|cue| matches!(cue, UiSoundCue::QuickMenuOpen | UiSoundCue::QuickMenuClose))
+            .collect();
+        let mut expected = vec![
+            UiSoundCue::QuickMenuOpen,
+            UiSoundCue::QuickMenuClose,
+            UiSoundCue::QuickMenuOpen,
+        ];
+        // Restart completion while inactive must stay silent.
+        if std::env::var_os("HORIZON_TEST_DEACTIVATE_LAUNCH").is_none() {
+            expected.push(UiSoundCue::QuickMenuClose);
+        }
+        expected.extend([
+            UiSoundCue::QuickMenuOpen,
+            UiSoundCue::QuickMenuClose, // Continue
+            UiSoundCue::QuickMenuOpen,
+            UiSoundCue::QuickMenuClose, // Saved Home return
+            UiSoundCue::QuickMenuOpen,
+            UiSoundCue::QuickMenuClose, // Library return
+        ]);
+        assert_eq!(transitions, expected);
         assert_eq!(motion.get(), if reduced { 0 } else { 15 });
         assert_eq!(blends.get(), if reduced { 0 } else { 3 });
         // Encode after the event loop so snapshot I/O cannot skip animation phases.
@@ -1229,6 +1670,14 @@ mod pause_preview_tests {
             crate::appearance::store::AppearanceStore::new(directory.join("appearance.json")),
         )
         .unwrap();
+        if let Ok(width) = std::env::var("HORIZON_PLAYER_TEST_WIDTH") {
+            let height =
+                std::env::var("HORIZON_PLAYER_TEST_HEIGHT").unwrap_or_else(|_| "720".into());
+            ui.window().set_size(slint::PhysicalSize::new(
+                width.parse().unwrap(),
+                height.parse().unwrap(),
+            ));
+        }
         appearance
             .set_theme_preference(
                 &ui,
@@ -1268,6 +1717,22 @@ mod pause_preview_tests {
             move || {
                 let ui = weak.upgrade().unwrap();
                 let pixels = ui.window().take_snapshot().unwrap();
+                let background = ui.global::<crate::Theme>().get_background();
+                let expected = [background.red(), background.green(), background.blue()];
+                let scale = (pixels.width() as f32 / 1280.0).min(pixels.height() as f32 / 720.0);
+                let inside_right =
+                    ((ui.global::<crate::Metrics>().get_pause_panel_width() - 2.0) * scale) as u32;
+                // The drawer reaches both screen edges with square corners,
+                // at normal, scaled and ultrawide viewport sizes.
+                for (x, y) in [
+                    (0, 0),
+                    (inside_right, 0),
+                    (0, pixels.height() - 1),
+                    (inside_right, pixels.height() - 1),
+                ] {
+                    let corner = pixels.as_slice()[(y * pixels.width() + x) as usize];
+                    assert_eq!([corner.r, corner.g, corner.b], expected);
+                }
                 if std::env::var_os("HORIZON_PAUSE_PREVIEW_BLACK").is_some() {
                     let interior = pixels.as_slice()[(100 * pixels.width() + 52) as usize];
                     assert_eq!([interior.r, interior.g, interior.b], [0, 0, 0]);

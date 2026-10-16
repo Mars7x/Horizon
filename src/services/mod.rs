@@ -23,3 +23,7 @@ pub mod gba_player;
 pub mod rom_import;
 
 pub mod core_settings;
+
+pub mod game_storage;
+
+pub mod save_states;

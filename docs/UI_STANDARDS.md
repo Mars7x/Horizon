@@ -7,13 +7,19 @@ See [Home](HOME_UI.md) and [navigation](NAVIGATION.md).
 
 The embedded game surface is content: aspect-preserving software frames on a
 black background, without shell chrome. Loading/errors use shared ModalDialog and
-ActionButton components. Pause uses a compact side panel over a dimmed frame,
-using the shared compact ListRow variant, button glyphs and action buttons.
+ActionButton components. Pause uses a full-height side panel over a dimmed frame,
+flush with the left edge and square at the outer corners. It slides fully from
+and back behind that edge using the shared dialog duration, with no panel fade
+or floating margins; Reduced Motion makes this immediate. It uses the shared
+compact ListRow variant, button glyphs and action buttons.
+The right edge uses the shared header-bar shadow turned sideways, with strength
+following the slide; the panel has no edge outline.
 The panel uses Theme.background (true black in Black), shared typography/marquee,
 spacing and focus animation; hints share Home's footer baseline. Pointer and
 keyboard/controller actions use the same UI sound boundary. Pending actions preserve row styling, focus and footer hints. Speed changes update
-only the pause-panel value, with no gameplay badge or progress/success text; only failures need feedback. Disabled save-state
-placeholders never take focus; restart confirmation defaults to Cancel. Rust owns player mode, handoff
+only the pause-panel value, with no gameplay badge or progress/success text; only failures need feedback. Save/load state browsers use shared ListRows with native-pixel previews and
+timestamps. Empty/unavailable load slots never take focus. Save replacement and
+restart confirmations default to Cancel. Rust owns player mode, handoff
 phases and focus. Launch/return use card-origin zooms with shared Motion tokens;
 keep the card press/rebound, preserve video aspect ratio, and hold the last frame
 until saving succeeds. The returning game picture crossfades into the existing
@@ -71,8 +77,15 @@ The stored choice and current focus have distinct visual states.
 LINE Seed JP is the shared family: Regular 400 for interface text, Bold 700 for
 emphasis/game titles, ExtraBold 800 for clock digits. Flatpak bundles four
 unmodified static faces including Thin 100. Font packaging/provenance is in
-[Licensing](LICENSING.md) and the manifest. UI sounds are existing WAV assets
-played through PipeWire and controlled by the appearance preference.
+[Licensing](LICENSING.md) and the manifest. UI sounds play through PipeWire and follow the appearance preference.
+Quick-menu opening and closing use distinct short, smooth shuffle cues with a
+soft noise texture and gentle fades. Continue/Back, successful restart and successful Return to Horizon share
+the closing cue; nested confirmation cancellation keeps the normal Back cue.
+Repeat/ignored input and background freezing stay silent. The UI sound stream
+stays warm during embedded gameplay in the active Horizon window, allowing the
+close sound to finish instead of replaying when the panel next opens. Existing
+owner-supplied navigation/OK/Back WAVs remain unmodified. The original pair is
+reproducible with [the generator](../scripts/generate-quick-menu-sounds.py).
 
 ## Text and dialogs
 

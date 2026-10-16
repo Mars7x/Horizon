@@ -32,7 +32,7 @@ pub struct PlayerPaths {
     pub database: PathBuf,
     pub core: PathBuf,
     pub saves: PathBuf,
-    pub settings: PathBuf,
+    pub settings: crate::platform::data_paths::CoreSettingsPaths,
     pub album: PathBuf,
 }
 pub enum Command {
@@ -42,6 +42,9 @@ pub enum Command {
     FastForward(bool),
     Screenshot,
     Restart,
+    ListStates,
+    SaveState(u8),
+    LoadState(u8),
 }
 pub enum Event {
     Ready {
@@ -55,6 +58,9 @@ pub enum Event {
     SpeedChanged(bool),
     ScreenshotSaved,
     Restarted,
+    States(Vec<crate::services::save_states::Entry>),
+    StateSaved,
+    StateLoaded,
     ActionFailed(String),
 }
 pub struct RunningGame {
@@ -189,9 +195,20 @@ fn play(
         return Err(failure);
     };
     let audio: AudioBuffer = Arc::new(crate::platform::gba_audio::GameAudio::default());
-    let preferences = crate::persistence::settings::SettingsStore::new(paths.settings)
-        .load_value::<crate::domain::core_settings::CorePreferences>()
-        .map_err(|_| "Could not read core settings. Check cores.json before playing.".to_owned())?;
+    let preferences = crate::persistence::core_settings::CoreSettingsStore::new(paths.settings)
+        .load()
+        .map_err(|_| "Could not read playback or core settings".to_owned())?;
+    let game = crate::domain::SourceGameRef::new(
+        SourceId::new("gba").map_err(|e| e.to_string())?,
+        crate::domain::ExternalGameId::new(format!("sha256:{sha256}"))
+            .map_err(|e| e.to_string())?,
+    );
+    let game_folder =
+        crate::services::game_storage::GameFolder::prepare(&paths.saves, &game, &location.title)
+            .map_err(|_| {
+                "Could not prepare the game's save folder. Existing files have been preserved."
+                    .to_owned()
+            })?;
     let mut core = Core::load(
         &paths.core,
         &rom,
@@ -200,10 +217,16 @@ fn play(
         Arc::clone(&audio),
         Arc::clone(&buttons),
     )?;
-    let save_path = crate::platform::data_paths::gba_save_file(&paths.saves, sha256);
+    let save_path = game_folder.save_path();
     let mut last_save = read_save(&save_path)?.unwrap_or_default();
     if !last_save.is_empty() {
         core.restore_save(&last_save)?;
+    }
+    let states =
+        crate::services::save_states::Store::new(game_folder.clone(), core.state_identity.clone());
+    if preferences.resume_last_state
+        && let Some(snapshot) = states.latest().map_err(|_| "Saved states are unavailable or incompatible. Disable Resume last state in Settings to start normally. Existing states have been preserved.".to_owned())? {
+            core.restore_state(&snapshot.bytes)?;
     }
     let mut audio_reader = crate::platform::gba_audio::AudioReader::new(
         Arc::clone(&audio),
@@ -254,14 +277,53 @@ fn play(
                         let _ = events.send(Event::SpeedChanged(enabled));
                     }
                     Command::Screenshot => {
-                        let result = core
-                            .capture_frame()
-                            .and_then(|frame| write_screenshot(&paths.album, sha256, &frame));
+                        let result = core.capture_frame().and_then(|frame| {
+                            write_screenshot(
+                                &paths.album,
+                                &game,
+                                &game_folder.manifest.title,
+                                &frame,
+                            )
+                        });
                         let _ = events.send(match result {
                             Ok(()) => Event::ScreenshotSaved,
                             Err(error) => Event::ActionFailed(error),
                         });
                     }
+                    Command::ListStates => {
+                        let _ = events.send(Event::States(states.list()));
+                    }
+                    Command::SaveState(slot) => {
+                        let result = core.serialize_state().and_then(|bytes| core.capture_frame().and_then(|frame|
+                            states.save(slot, &bytes, &frame).map_err(|_| "Could not save the state. Existing checkpoints have been preserved.".to_owned())));
+                        if let Err(error) = result {
+                            let _ = events.send(Event::ActionFailed(error));
+                        } else {
+                            let _ = events.send(Event::States(states.list()));
+                            let _ = events.send(Event::StateSaved);
+                        }
+                    }
+                    Command::LoadState(slot) => match states.load(slot) {
+                        Ok(Some(snapshot)) => {
+                            save_current(&core, &save_path, &mut last_save)?;
+                            stream.set_active(false);
+                            buttons.store(0, Ordering::Release);
+                            audio.clear();
+                            core.restore_state(&snapshot.bytes)?;
+                            core.set_fast_forward(fast_forward);
+                            core.run_frame();
+                            audio.clear();
+                            deadline = Instant::now();
+                            let _ = events.send(Event::StateLoaded);
+                        }
+                        Ok(None) => {
+                            let _ =
+                                events.send(Event::ActionFailed("This state slot is empty".into()));
+                        }
+                        Err(error) => {
+                            let _ = events.send(Event::ActionFailed(error.to_string()));
+                        }
+                    },
                     Command::Restart => {
                         if let Err(error) = save_current(&core, &save_path, &mut last_save) {
                             paused = true;
@@ -289,7 +351,11 @@ fn play(
                     Command::Stop | Command::Shutdown => {
                         let stopping = matches!(command, Command::Stop);
                         if let Err(error) = if session.is_some() {
-                            save_current(&core, &save_path, &mut last_save)
+                            save_current(&core, &save_path, &mut last_save).and_then(|()| {
+                                let bytes=core.serialize_state()?;
+                                let frame=core.capture_frame()?;
+                                states.save(0,&bytes,&frame).map_err(|_| "Could not save the automatic resume point. Free storage or restore folder access, then retry.".to_owned())
+                            })
                         } else {
                             Ok(())
                         } {
@@ -373,20 +439,14 @@ fn play(
 
 fn write_screenshot(
     album: &Path,
-    sha256: &str,
+    game: &crate::domain::SourceGameRef,
+    title: &str,
     frame: &crate::platform::gba_core::Frame,
 ) -> Result<(), String> {
-    use crate::{
-        domain::{ExternalGameId, SourceGameRef},
-        services::album::catalog::{HorizonAlbum, part_path},
-    };
+    use crate::services::album::catalog::{HorizonAlbum, part_path};
     use image::ImageEncoder;
-    let game = SourceGameRef::new(
-        SourceId::new("gba").map_err(|e| e.to_string())?,
-        ExternalGameId::new(format!("sha256:{sha256}")).map_err(|e| e.to_string())?,
-    );
     let path = HorizonAlbum::new(album.to_owned())
-        .new_capture_path(Some(&game), "png", chrono::Utc::now())
+        .new_capture_path(Some(game), title, "png", chrono::Utc::now())
         .map_err(|_| "Could not prepare the screenshot in Album".to_owned())?;
     let partial = part_path(&path);
     let mut file = OpenOptions::new()
@@ -417,6 +477,14 @@ fn write_screenshot(
 }
 
 fn read_save(path: &Path) -> Result<Option<Vec<u8>>, String> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if !metadata.is_file() => {
+            return Err("The existing save is not a regular file. It has been preserved.".into());
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err("Could not inspect the existing save. It has been preserved.".into()),
+        _ => {}
+    }
     match File::open(path) {
         Ok(file) => {
             let size = file
@@ -453,23 +521,34 @@ pub fn write_save(path: &Path, bytes: &[u8]) -> Result<(), String> {
         return Err("Invalid game save size".into());
     }
     fn replace(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-        let temporary = path.with_extension("tmp");
+        let temporary = crate::platform::data_paths::save_temporary_path(path);
         let mut file = OpenOptions::new()
             .write(true)
-            .create(true)
-            .truncate(true)
+            .create_new(true)
             .mode(0o600)
             .open(&temporary)?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        fs::rename(&temporary, path)?;
-        if let Some(parent) = path.parent() {
-            File::open(parent)?.sync_all()?;
+        let result = (|| {
+            file.write_all(bytes)?;
+            file.sync_all()?;
+            fs::rename(&temporary, path)?;
+            if let Some(parent) = path.parent() {
+                File::open(parent)?.sync_all()?;
+            }
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
         }
-        Ok(())
+        result
     }
     if let Some(previous) = read_save(path)? {
-        replace(&path.with_extension("sav.bak"), &previous)
+        let backup =
+            crate::platform::data_paths::save_backup_path(path).map_err(|e| e.to_string())?;
+        let parent = path.parent().ok_or("The save has no directory")?;
+        let backup_parent = backup.parent().ok_or("The backup has no directory")?;
+        crate::services::game_storage::ensure_directory(parent, backup_parent)
+            .map_err(|_| "Could not prepare the save backup directory".to_owned())?;
+        replace(&backup, &previous)
             .map_err(|_| "Could not preserve the previous save".to_owned())?;
     }
     replace(path,bytes).map_err(|_| "Could not write the game save. Free storage or restore folder access, then try returning to Horizon again.".to_owned())
@@ -512,14 +591,14 @@ mod tests {
         write_save(&path, &[2; 512]).unwrap();
         assert_eq!(read_save(&path).unwrap().unwrap(), vec![2; 512]);
         assert_eq!(
-            fs::read(path.with_extension("sav.bak")).unwrap(),
+            fs::read(crate::platform::data_paths::save_backup_path(&path).unwrap()).unwrap(),
             vec![1; 512]
         );
         fs::write(&path, vec![0u8; 128 * 1024 + 1]).unwrap();
         assert!(write_save(&path, &[3; 512]).is_err());
         assert_eq!(fs::metadata(&path).unwrap().len(), 128 * 1024 + 1);
         assert_eq!(
-            fs::read(path.with_extension("sav.bak")).unwrap(),
+            fs::read(crate::platform::data_paths::save_backup_path(&path).unwrap()).unwrap(),
             vec![1; 512]
         );
         fs::remove_dir_all(dir).unwrap();
@@ -533,7 +612,16 @@ mod tests {
             rgba: vec![255, 0, 0, 255, 0, 255, 0, 255],
             smooth: false,
         };
-        write_screenshot(&dir, &"a".repeat(64), &frame).unwrap();
+        write_screenshot(
+            &dir,
+            &crate::domain::SourceGameRef::new(
+                SourceId::new("gba").unwrap(),
+                crate::domain::ExternalGameId::new(format!("sha256:{}", "a".repeat(64))).unwrap(),
+            ),
+            "Test game",
+            &frame,
+        )
+        .unwrap();
         let shots = crate::services::album::catalog::HorizonAlbum::new(dir.clone()).scan();
         assert_eq!(shots.len(), 1);
         assert_eq!(
@@ -542,8 +630,58 @@ mod tests {
         );
         let blocked = dir.join("unavailable");
         fs::write(&blocked, b"preserved").unwrap();
-        assert!(write_screenshot(&blocked, &"a".repeat(64), &frame).is_err());
+        assert!(
+            write_screenshot(
+                &blocked,
+                &crate::domain::SourceGameRef::new(
+                    SourceId::new("gba").unwrap(),
+                    crate::domain::ExternalGameId::new(format!("sha256:{}", "a".repeat(64)))
+                        .unwrap()
+                ),
+                "Test game",
+                &frame
+            )
+            .is_err()
+        );
         assert_eq!(fs::read(blocked).unwrap(), b"preserved");
         fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod storage_failure_tests {
+    use super::*;
+    #[test]
+    fn failed_backup_and_occupied_partial_preserve_save_and_unrelated_files() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-save-failure-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let save = root.join("Game.sav");
+        write_save(&save, &[1; 512]).unwrap();
+        let backup = crate::platform::data_paths::save_backup_path(&save).unwrap();
+        fs::write(backup.parent().unwrap(), b"keep directory obstruction").unwrap();
+        assert!(write_save(&save, &[2; 512]).is_err());
+        assert_eq!(read_save(&save).unwrap().unwrap(), vec![1; 512]);
+        fs::remove_file(backup.parent().unwrap()).unwrap();
+        let partial = crate::platform::data_paths::save_temporary_path(&save);
+        fs::write(&partial, b"keep unfinished file").unwrap();
+        assert!(write_save(&save, &[2; 512]).is_err());
+        assert_eq!(fs::read(&partial).unwrap(), b"keep unfinished file");
+        assert_eq!(read_save(&save).unwrap().unwrap(), vec![1; 512]);
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn save_symlinks_are_rejected_without_reading_or_replacing_the_target() {
+        let root = std::env::temp_dir().join(format!("horizon-save-link-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let original = root.join("outside.sav");
+        fs::write(&original, [1; 512]).unwrap();
+        let save = root.join("Game.sav");
+        std::os::unix::fs::symlink(&original, &save).unwrap();
+        assert!(read_save(&save).is_err());
+        assert!(write_save(&save, &[2; 512]).is_err());
+        assert_eq!(fs::read(original).unwrap(), vec![1; 512]);
+        assert!(fs::symlink_metadata(save).unwrap().file_type().is_symlink());
+        fs::remove_dir_all(root).unwrap();
     }
 }

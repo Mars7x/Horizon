@@ -101,6 +101,7 @@ export component SettingsPage inherits Rectangle {
     in property <bool> swap-hints: true;
     in property <bool> core-ready;
     in property <bool> core-freeze;
+    in property <bool> core-resume: true;
     in property <bool> core-color;
     in property <string> core-filter: "None";
     in property <int> core-sunlight;
@@ -482,8 +483,18 @@ export component SettingsPage inherits Rectangle {
             focused: root.view == 6 && root.selection == 1;
             activated => { if (root.view == 6) { root.activate(1); } }
         }
-        Text {
+        SettingsRow {
             y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 2;
+            width: parent.width;
+            title: "Resume last state";
+            subtitle: "Load the newest state when starting a game";
+            toggle: true; checked: root.core-resume;
+            enabled: root.view == 6 && root.core-ready;
+            focused: root.view == 6 && root.selection == 2;
+            activated => { if root.view == 6 { root.activate(2); } }
+        }
+        Text {
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 3;
             width: parent.width; height: 60px;
             text: root.core-feedback != "" ? root.core-feedback : "Applies to all cores on the next game launch";
             color: Theme.secondary-foreground; font-size: Typography.caption-size; wrap: word-wrap;

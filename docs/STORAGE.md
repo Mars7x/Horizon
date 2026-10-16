@@ -1,48 +1,132 @@
 # Storage
 
-[Data paths](../src/platform/data_paths.rs) is the only code that selects file
-locations. Startup resolves paths and passes them to services. No ad-hoc HOME/XDG
-lookups in services, and no assumed host paths inside the Flatpak sandbox.
+[Data paths](../src/platform/data_paths.rs) selects every storage location.
+Startup passes paths to workers; services do not resolve HOME/XDG roots.
+Under Flatpak, its private data/config/cache roots are used directly. Native
+builds use an `io.github.Mars7x.Horizon` subdirectory beneath each XDG root.
 
-Under Flatpak, XDG data/config/cache roots are already private to Horizon; put
-files directly there. Do not nest another application-ID directory. Native
-development uses an `io.github.Mars7x.Horizon` subdirectory beneath the XDG roots.
+## Layout
 
-| Root | Contents | Lifetime |
-| --- | --- | --- |
-| data | library.sqlite3, album/, chosen/Steam profile images and animated originals | Durable user data |
-| data | saves/gba/ followed by the ROM SHA-256 and `.sav`; previous save in `.sav.bak` | Durable battery-save data |
-| config | appearance.json, controller.json, cores.json, profile.json, steamgriddb.json, steam-account.json | Persistent preferences/credentials |
-| cache | artwork/local/, artwork/steamgriddb/, album/ | Disposable derived media/provenance |
+```text
+data/
+  library/library.sqlite3
+  saves/gba/<game>/
+    game.json
+    <game name>.sav
+    backups/<game name>.previous.sav
+  album/gba/<game>/
+    game.json
+    screenshots/<UTC timestamp>.png
+    recordings/<UTC timestamp>.<extension>
+  album/horizon/screenshots/                 # captures without a game
+  profile/
+    profile.json
+    pictures/custom.png
+    pictures/custom-original
+    pictures/steam.png
+    pictures/steam-original
+  artwork/custom/                            # reserved for custom originals
+config/
+  appearance.json
+  controller.json
+  playback.json
+  cores/mgba.json
+  integrations/steam.json
+  integrations/steamgriddb.json
+cache/
+  artwork/local/
+  artwork/steamgriddb/
+  album/
+```
 
-Config directories use owner-only permissions; sensitive files use mode 0600.
-This is not encryption. Atomic replacement must preserve prior valid settings
-when saving fails. No secrets in UI state, logs, screenshots, cache metadata or
-commits. Account and SteamGridDB credentials remain separate.
+Only implemented writers create files. There is no recording implementation or
+custom-cover picker. Profile animation originals are extensionless because their
+content can be GIF or APNG. The existing local/SteamGridDB artwork and Album cache
+locations already follow the new grouping; they are not moved or reclassified.
 
-Versioned caches hold a `.version` marker and are invalidated only through their
-owner's format constant. Originals, explicit artwork choices and database history
-are not cache. Old Steam achievement caches may remain on disk but are no longer
-read or written; cleanup does not delete them.
+## Game identity and readable names
 
-Album's file is its record; `.part` files are unfinished and invisible to scans.
-Chosen profile pictures are Horizon-owned copies; deleting them does not delete
-the source file. Steam pictures are downloaded through the API, not read from
-local Steam directories. No other application's files are scanned or deleted.
+A game folder looks like `Pokemon - Emerald Version [abcd1234]`. The suffix is a
+short ROM-hash prefix; a collision extends the prefix rather than merging games.
+`game.json` stores format version, system, full source identity (`sha256:` and
+all 64 hex digits for GBA), original title and a filesystem-safe file stem.
+This metadata is shared by [save and Album storage](../src/services/game_storage.rs).
 
-Any new durable file needs a data_paths function, a row here, defined ownership
-and error behavior. Schema changes follow [Database](DATABASE.md); assets follow
-[Licensing](LICENSING.md).
+Full identity chooses an existing folder. Display-title changes do not rename a
+folder or point at a new empty save. Multiple folders claiming the same identity,
+corrupt metadata and unsupported versions fail rather than choosing arbitrarily.
+Sanitization removes path separators, control/unsafe characters and reserved
+names, preserves Unicode and bounds UTF-8 filename length. Titles alone never
+identify saves or authorize sharing between ROM versions.
 
-GBA save locations are selected by data_paths. The player reads bounded existing
-save files, preserves invalid/unreadable saves and writes changed RAM on its
-worker every five seconds and at normal quit. Temporary replacement files are
-flushed before rename; the previous valid save is retained as a backup. A failed
-save pauses the game and exposes retry through Save and quit. Save states and
-external-emulator save import are not implemented.
+Metadata is published without replacing an existing identity document. Game
+folders reject symlink components. Album scans restore references from metadata,
+ignore incomplete files and do not follow media/directory symlinks. Deleting a
+capture removes empty capture-type folders; the game's identity document stays
+so subsequent captures retain their folder name.
 
-`cores.json` stores shared playback freezing and curated mGBA preferences.
-Legacy nested freeze values are read without rewriting the file at load; the
-shared field takes precedence and is used for subsequent atomic saves. The settings worker serializes
-atomic writes; invalid files and failed writes preserve prior data. The player
-reads and validates this file on its worker before loading the core.
+## Durability and ownership
+
+| Contents | Ownership and lifetime |
+| --- | --- |
+| Library database, saves, Album originals, profile files | Durable user data |
+| Custom artwork originals, when supported | Durable user data, never cache |
+| Preferences and integration credentials | Private persistent configuration |
+| Downloaded/normalized artwork, thumbnails and durations | Disposable, reproducible cache |
+
+Private root/config directories use owner-only permissions. Credential files are
+mode 0600; permissions are not encryption. Credentials never belong in game
+metadata, caches, UI state, logs or commits. Cache version changes invalidate only
+their owner's cache, using its `.version` marker; originals are never cache.
+
+Save writes run on the player worker every five seconds and at normal quit when
+RAM changed. A flushed replacement is published atomically, preserving the prior
+valid save under `backups/`. Invalid/unreadable saves, occupied partial paths and
+failed writes preserve existing files and surface an error. A failed game save
+pauses playback and allows retry. `.part` captures are invisible until complete.
+No other application's files are scanned or deleted.
+
+`playback.json` owns shared focus freezing and automatic resume; `cores/mgba.json` owns only mGBA
+preferences. Settings load/save on the existing worker. Each action commits one
+owner's file atomically; a failed save does not update the published preferences.
+
+## Save states
+
+Four manual slots and one automatic resume point use complete bundles:
+
+```text
+saves/gba/<game>/states/mgba/
+  resume/<game name>.resume.{state,json,png}
+  slot-01/<game name>.slot-01.{state,json,png}
+  slot-02/…
+  slot-03/…
+  slot-04/…
+  backups/slot-<number>-<unique write id>/…
+```
+
+Metadata records format version, full ROM identity, slot, UTC timestamp, exact
+core name/version/binary hash, byte count and SHA-256 hashes of state and preview.
+Previews are native 240×160 PNGs and stay with durable states. Regular saves remain
+core-independent. State reads are bounded, reject symlink components, validate
+metadata/checksums/dimensions and run on the player worker. No state directory
+is created before the first write.
+
+A private staging directory receives all three flushed files. Replacement moves
+the previous bundle to backups, then publishes the complete staged bundle.
+Interrupted publication or damaged current data can recover the newest valid
+previous bundle. Successful writes retain one complete compatible prior bundle
+per slot; unknown, damaged, incompatible or extra-file backups are preserved.
+Incomplete staging directories never appear as slots. Failed writes preserve
+existing states and show an error; normal exit waits for the automatic state.
+Neither state loads nor state backup cleanup deletes battery saves or Album data.
+See [GBA playback](GBA_PLAYBACK.md) for resume behavior.
+
+## Fresh layout
+
+The user approved a fresh structure without migration. Retired database, save,
+profile, core/integration preference and Album paths are not read, moved or
+deleted. Appearance, controller and cache paths already match this layout and
+continue to be used. Existing files remain untouched; the new database starts
+an independent library/setup.
+SQL schema remains 12 and deployed migrations remain immutable. This is not
+permission to delete old data. See [ADR 0205](adr/0205-human-readable-storage.md).

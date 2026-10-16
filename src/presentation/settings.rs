@@ -84,7 +84,7 @@ impl SettingsController {
         appearance: AppearanceController,
         steam_account: Rc<RefCell<SteamAccountService>>,
         controller_path: PathBuf,
-        core_path: PathBuf,
+        core_path: crate::platform::data_paths::CoreSettingsPaths,
     ) -> Rc<Self> {
         let weak_ui = ui.as_weak();
         let (notify, drain) = super::wake::drain_notify(move |controller: &Self| {
@@ -138,7 +138,7 @@ impl SettingsController {
                     *self.core_feedback.borrow_mut() = if self.core_ready.get() {
                         "Couldn't save. Previous settings retained.".into()
                     } else {
-                        "Couldn't load core settings. Check cores.json and restart.".into()
+                        "Couldn't load playback settings. Check saved settings and restart.".into()
                     };
                 }
             }
@@ -154,6 +154,9 @@ impl SettingsController {
         match (self.page.borrow().view, row) {
             (SettingsView::Cores, 1) => {
                 next.freeze_when_unfocused = direction.unwrap_or(!next.freeze_when_unfocused)
+            }
+            (SettingsView::Cores, 2) => {
+                next.resume_last_state = direction.unwrap_or(!next.resume_last_state)
             }
             (SettingsView::Mgba, 0) => {
                 next.mgba.sunlight =
@@ -441,7 +444,7 @@ impl SettingsController {
                     drop(page);
                     self.set_ui_sounds_enabled(ui, action == UiAction::Right);
                 } else if page.view == SettingsView::Mgba
-                    || (page.view == SettingsView::Cores && page.selected == 1)
+                    || (page.view == SettingsView::Cores && matches!(page.selected, 1 | 2))
                 {
                     let row = page.selected;
                     drop(page);
@@ -617,9 +620,9 @@ impl SettingsController {
                 return;
             }
             SettingsView::Cores => {
-                if selected == 1 {
-                    self.page.borrow_mut().selected = 1;
-                    self.change_core(ui, 1, None);
+                if matches!(selected, 1 | 2) {
+                    self.page.borrow_mut().selected = selected;
+                    self.change_core(ui, selected, None);
                     return;
                 }
                 if selected != 0 {
@@ -1017,6 +1020,7 @@ impl SettingsController {
         ui.set_settings_core_filter(self.core_values.get().mgba.video_filter.label().into());
         ui.set_settings_core_color(self.core_values.get().mgba.color_correction);
         ui.set_settings_core_freeze(self.core_values.get().freeze_when_unfocused);
+        ui.set_settings_core_resume(self.core_values.get().resume_last_state);
         ui.set_settings_core_sunlight(i32::from(self.core_values.get().mgba.sunlight.level()));
         ui.set_settings_core_feedback(self.core_feedback.borrow().as_str().into());
         let prefs = self.appearance.preferences();
@@ -1095,7 +1099,7 @@ fn settings_parent(view: SettingsView) -> Option<(SettingsView, i32)> {
 fn selection_count(view: SettingsView) -> i32 {
     match view {
         SettingsView::Root => 4,
-        SettingsView::Cores => 2,
+        SettingsView::Cores => 3,
         SettingsView::Mgba => 3,
         SettingsView::Appearance => 15,
         SettingsView::Controller => 2,
@@ -1402,7 +1406,10 @@ mod core_runtime_tests {
                 SteamAccountService::load(directory.join("steam.json")).unwrap(),
             )),
             directory.join("controller.json"),
-            directory.join("cores.json"),
+            crate::platform::data_paths::CoreSettingsPaths {
+                playback: directory.join("playback.json"),
+                mgba: directory.join("cores/mgba.json"),
+            },
         );
         let weak = Rc::downgrade(&controller);
         let weak_ui = ui.as_weak();
@@ -1521,6 +1528,14 @@ mod core_runtime_tests {
                     }
                     11 => {
                         assert!(!ui.get_settings_core_freeze());
+                        tap(slint::platform::Key::DownArrow);
+                        assert_eq!(ui.get_settings_selection(), 2);
+                        assert!(ui.get_settings_core_resume());
+                        tap(slint::platform::Key::LeftArrow);
+                        progress.set(13);
+                    }
+                    13 => {
+                        assert!(!ui.get_settings_core_resume());
                         let pixels = ui.window().take_snapshot().unwrap();
                         image::save_buffer(
                             output.join("shared-settings.png"),
@@ -1536,9 +1551,12 @@ mod core_runtime_tests {
                             (0, 3)
                         );
                         // Failed writes retain the last committed shared value.
-                        std::fs::rename(output.join("cores.json"), output.join("saved-cores.json"))
-                            .unwrap();
-                        std::fs::create_dir(output.join("cores.json")).unwrap();
+                        std::fs::rename(
+                            output.join("playback.json"),
+                            output.join("saved-playback.json"),
+                        )
+                        .unwrap();
+                        std::fs::create_dir(output.join("playback.json")).unwrap();
                         live.activate(&ui, 3);
                         live.activate(&ui, 1);
                         progress.set(12);
@@ -1555,10 +1573,15 @@ mod core_runtime_tests {
         );
         slint::run_event_loop().unwrap();
         assert_eq!(stage.get(), 5);
-        let saved: crate::domain::core_settings::CorePreferences =
-            SettingsStore::new(directory.join("saved-cores.json"))
-                .load_value()
-                .unwrap();
+        let saved = crate::persistence::core_settings::CoreSettingsStore::new(
+            crate::platform::data_paths::CoreSettingsPaths {
+                playback: directory.join("saved-playback.json"),
+                mgba: directory.join("cores/mgba.json"),
+            },
+        )
+        .load()
+        .unwrap();
+        assert!(!saved.resume_last_state);
         assert_eq!(saved.mgba.sunlight.level(), 0);
         assert_eq!(
             saved.mgba.video_filter,

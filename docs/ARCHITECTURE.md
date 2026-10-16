@@ -56,3 +56,13 @@ only the latest software RGBA frame; PipeWire consumes a bounded audio queue.
 SDL remains on its existing main-thread event pump. Gameplay held state is
 separate from menu repeats; the Rust player consumes shell actions while open.
 No external emulator executable, host command or broader Flatpak grant is used.
+
+[Game storage](../src/services/game_storage.rs) resolves readable folders by full
+identity metadata on storage workers; data_paths owns their layout.
+[Core settings persistence](../src/persistence/core_settings.rs) aggregates shared
+playback and mGBA preference files without introducing cross-file UI commits.
+[Save-state storage](../src/services/save_states.rs) validates complete state/metadata/preview
+bundles on the same player worker. The narrow mGBA host owns serialization and
+rollback on rejected loads. Rust owns slot selection, overwrite confirmation and
+automatic resume policy; Slint receives only row projections and decoded frames.
+See [Storage](STORAGE.md) for the fresh layout and state bundles.

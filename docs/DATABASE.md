@@ -3,7 +3,7 @@
 Latest schema: `12`
 
 [SqliteLibraryRepository](../src/persistence/sqlite.rs) owns SQL and the shared
-connection. Data lives in `library.sqlite3` at the location chosen by
+connection. Data lives in `library/library.sqlite3` at the location chosen by
 [data paths](../src/platform/data_paths.rs). The domain and UI do not issue SQL.
 
 ## Migration contract

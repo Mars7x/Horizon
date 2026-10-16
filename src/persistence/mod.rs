@@ -54,3 +54,5 @@ pub enum PersistenceError {
 }
 
 pub mod settings;
+
+pub mod core_settings;

@@ -35,9 +35,18 @@ saving and skips the decorative return animation.
 | Start / Select | Enter / Backspace | Start / Back |
 | Pause | Escape or F10 | Guide or stick click |
 
-Pause opens a quiet side panel over the dimmed game. Continue is initially
-focused; Up/Down selects enabled actions, and Back continues. Save state and Load
-state are disabled placeholders, skipped by focus, with no state files created.
+Pause slides a square-edged, full-height panel in from the left edge over the
+dimmed game, with no floating margins. Reduced Motion makes it immediate. Continue is initially
+focused; Up/Down selects enabled actions, and Back continues. Opening and closing
+use distinct short, smooth shuffle sounds under UI Sounds. Only actual transitions play
+these cues; repeated opens, ignored inputs and focus freezing are silent. Closing
+is heard on Continue/Back, successful restart or successful Return to Horizon;
+cancelling a nested confirmation keeps the usual Back sound. Save state opens four
+manual slots with native-pixel previews and local timestamps. Occupied or damaged
+slots require confirmation, initially Cancel. Load state includes these slots and
+the separate Automatic resume point; empty/unavailable entries do not take focus.
+Back returns to the main panel. Saving stays paused; a successful load continues
+the game and clears queued audio/input, respecting background freeze.
 
 Playback speed toggles 1×/2× for this loaded game (Left/Right also selects speed).
 At 2× the worker doubles its frame pace and plays audio twice as fast, one octave
@@ -77,7 +86,8 @@ gameplay A/B; keyboard bindings stay unchanged. Home/Library focus and route are
 
 ## Core preferences
 
-Settings → Cores contains the shared Freeze when unfocused switch, default on.
+Settings → Cores contains shared Freeze when unfocused and Resume last state
+switches, both default on.
 Cores → mGBA contains Sunlight level (0–10) for solar-sensor games, Video filter
 (None, LCD, Smooth or Smooth pixel art), and Colour correction. Defaults keep
 filter/correction off and sunlight zero. Saved choices are read on the game worker
@@ -96,19 +106,32 @@ treatments. No RetroArch shader runtime or imported presets are supported.
 
 ## Saves and sessions
 
-Battery saves belong to Horizon under `saves/gba/<ROM-SHA-256>.sav`. Changing a
+Battery saves belong to Horizon under `saves/gba/<game>/<game name>.sav`,
+with full ROM identity in `game.json`. Changing a
 filename does not change the save identity. Changed RAM is saved every five
-seconds and on quit. The previous valid save is retained as `.sav.bak`; invalid
+seconds and on quit. The previous valid save is retained as `backups/<game name>.previous.sav`; invalid
 existing saves are preserved and reported. Save errors pause the game so the
 user can fix storage and retry Return to Horizon. Closing the window waits for normal
 saving. A forced process/core loss can lose progress since the last checkpoint.
 See [storage](STORAGE.md).
 
+Manual states and the automatic resume point are separate from battery saves.
+Every normal game exit or application close writes an automatic point before
+return/close completes. Resume last state loads the newest compatible automatic
+or manual point at launch, before the first displayed frame. Turning this option
+off starts normally but continues saving the automatic point on exit. A missing
+state starts normally; if states exist but none can be read compatibly, launch
+reports the problem and preserves them. Disable the option to start normally.
+States match the full ROM hash, metadata format and exact mGBA version/build
+hash. Core upgrades can make states unavailable; battery saves stay independent.
+There is no automatic state checkpoint during gameplay, so a forced exit can lose
+progress since the latest manual/automatic state. See [ADR 0206](adr/0206-save-states-and-resume.md).
+
 Observed Activity sessions begin after the core produces a frame, include time
 while the loaded game is paused, and finish after normal shutdown. Failed sessions
 are interrupted; no session is invented for a failed load. No source lifetime
-counter is added. Save states, rewind, custom cores and RetroAchievements remain
-future work.
+counter is added. Loading a state or restarting does not start another session.
+Rewind, custom cores and RetroAchievements remain future work.
 
 ## Development
 
@@ -120,6 +143,7 @@ the production Flatpak always uses its packaged path.
 The ignored `real_core_draws_responds_to_held_input_and_restores_battery_memory`
 test needs the built core. `real_player_window_input_pause_quit_and_relaunch`
 also needs Wayland/PipeWire and a fresh `HORIZON_GBA_TEST_DIR`. Set
-`HORIZON_TEST_VIDEO_FILTER` to `none`, `lcd` or `smooth` to review each preset. Both use generated
+`HORIZON_TEST_VIDEO_FILTER` to `none`, `lcd` or `smooth` to review each preset. `HORIZON_TEST_MENU_AUDIO=1` enables real UI cue playback
+alongside the runtime test's semantic sound trace. Both use generated
 original homebrew, never personal ROMs or the production database. See
 [ADR 0198](adr/0198-first-gba-playback.md) and [licensing](LICENSING.md).

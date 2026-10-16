@@ -56,6 +56,10 @@ pub struct AvInfo {
 pub struct Core {
     // Function pointers cannot outlive this library. Drop deinitializes first.
     _library: Library,
+    serialize_size: unsafe extern "C" fn() -> usize,
+    serialize: unsafe extern "C" fn(*mut c_void, usize) -> bool,
+    unserialize: unsafe extern "C" fn(*const c_void, usize) -> bool,
+    pub state_identity: String,
     run: unsafe extern "C" fn(),
     reset: unsafe extern "C" fn(),
     unload: unsafe extern "C" fn(),
@@ -108,7 +112,55 @@ impl Core {
                 symbol(&library, b"retro_set_input_poll\0")?;
             let set_input: unsafe extern "C" fn(extern "C" fn(u32, u32, u32, u32) -> i16) =
                 symbol(&library, b"retro_set_input_state\0")?;
+            #[repr(C)]
+            struct SystemInfo {
+                name: *const std::ffi::c_char,
+                version: *const std::ffi::c_char,
+                extensions: *const std::ffi::c_char,
+                need_fullpath: bool,
+                block_extract: bool,
+            }
+            let get_info: unsafe extern "C" fn(*mut SystemInfo) =
+                symbol(&library, b"retro_get_system_info\0")?;
+            let mut info = SystemInfo {
+                name: std::ptr::null(),
+                version: std::ptr::null(),
+                extensions: std::ptr::null(),
+                need_fullpath: false,
+                block_extract: false,
+            };
+            get_info(&mut info);
+            if info.name.is_null() || info.version.is_null() {
+                return Err("Core version is unavailable".into());
+            }
+            // SAFETY: libretro guarantees NUL-terminated strings valid for the library lifetime.
+            let core_version = format!(
+                "{}@{}",
+                CStr::from_ptr(info.name).to_string_lossy(),
+                CStr::from_ptr(info.version).to_string_lossy()
+            );
             let mut core = Self {
+                serialize_size: symbol(&library, b"retro_serialize_size\0")?,
+                serialize: symbol(&library, b"retro_serialize\0")?,
+                unserialize: symbol(&library, b"retro_unserialize\0")?,
+                state_identity: {
+                    use std::io::Read;
+                    let mut bytes = Vec::new();
+                    std::fs::File::open(path)
+                        .map_err(|_| "Could not inspect the core build")?
+                        .take(64 * 1024 * 1024 + 1)
+                        .read_to_end(&mut bytes)
+                        .map_err(|_| "Could not inspect the core build")?;
+                    if bytes.len() > 64 * 1024 * 1024 {
+                        return Err("Core build is too large".into());
+                    }
+                    let digest: String = ring::digest::digest(&ring::digest::SHA256, &bytes)
+                        .as_ref()
+                        .iter()
+                        .map(|b| format!("{b:02x}"))
+                        .collect();
+                    format!("{core_version}:{digest}")
+                },
                 run: symbol(&library, b"retro_run\0")?,
                 reset: symbol(&library, b"retro_reset\0")?,
                 unload: symbol(&library, b"retro_unload_game\0")?,
@@ -162,6 +214,35 @@ impl Core {
             });
             Ok(core)
         }
+    }
+    pub fn serialize_state(&self) -> Result<Vec<u8>, String> {
+        // SAFETY: libretro v1 symbols from the retained core, on its worker.
+        let size = unsafe { (self.serialize_size)() };
+        if size == 0 || size > 16 * 1024 * 1024 {
+            return Err("The core returned an invalid state size".into());
+        }
+        let mut bytes = vec![0; size];
+        if !unsafe { (self.serialize)(bytes.as_mut_ptr().cast(), bytes.len()) } {
+            return Err("The core could not save this state".into());
+        }
+        Ok(bytes)
+    }
+    pub fn restore_state(&mut self, bytes: &[u8]) -> Result<(), String> {
+        if bytes.is_empty() || bytes.len() > 16 * 1024 * 1024 {
+            return Err("Invalid saved state size".into());
+        }
+        let rollback = self.serialize_state()?;
+        // SAFETY: validated bounded buffers, retained core, same worker.
+        if !unsafe { (self.unserialize)(bytes.as_ptr().cast(), bytes.len()) } {
+            let restored = unsafe { (self.unserialize)(rollback.as_ptr().cast(), rollback.len()) };
+            return Err(if restored {
+                "The core rejected this state; the previous session was restored"
+            } else {
+                "The core rejected this state and could not restore its previous session"
+            }
+            .into());
+        }
+        Ok(())
     }
     pub fn restart(&mut self) {
         // SAFETY: same worker and retained library as every other core call.
@@ -482,6 +563,58 @@ pub(crate) fn test_rom() -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "requires the built pinned mGBA core"]
+    fn real_core_state_restores_machine_and_rejects_damage_without_changing_it() {
+        let path = std::env::var_os("HORIZON_GBA_CORE").unwrap();
+        let mut core = Core::load(
+            Path::new(&path),
+            &test_rom(),
+            MgbaPreferences::default(),
+            Arc::new(Mutex::new(None)),
+            Arc::new(super::super::gba_audio::GameAudio::default()),
+            Arc::new(AtomicU16::new(0)),
+        )
+        .unwrap();
+        for _ in 0..10 {
+            core.run_frame();
+        }
+        let first = core.serialize_state().unwrap();
+        for _ in 0..30 {
+            core.run_frame();
+        }
+        let later = core.serialize_state().unwrap();
+        // Pinned mGBA format: frame counter at 0x1fc, CPU registers at
+        // 0x20..0x60, palette/VRAM/working RAM at 0x800..0x61000.
+        // Audio bookkeeping is normalized during restore, so compare machine
+        // progress and memory rather than requiring byte-identical containers.
+        let counter = |bytes: &[u8]| u32::from_le_bytes(bytes[0x1fc..0x200].try_into().unwrap());
+        assert!(counter(&later) > counter(&first));
+        core.restore_state(&first).unwrap();
+        let restored = core.serialize_state().unwrap();
+        assert_eq!(counter(&restored), counter(&first));
+        assert!(
+            restored[0x20..0x60] == first[0x20..0x60],
+            "CPU registers differ"
+        );
+        assert!(
+            restored[0x800..0x61000] == first[0x800..0x61000],
+            "Game memory differs"
+        );
+        assert!(core.restore_state(b"damaged").is_err());
+        let recovered = core.serialize_state().unwrap();
+        assert_eq!(counter(&recovered), counter(&first));
+        assert!(
+            recovered[0x20..0x60] == first[0x20..0x60],
+            "Rollback CPU differs"
+        );
+        assert!(
+            recovered[0x800..0x61000] == first[0x800..0x61000],
+            "Rollback memory differs"
+        );
+        assert!(core.state_identity.starts_with("mGBA@"));
+    }
+
     #[test]
     #[ignore = "requires the built pinned mGBA core"]
     fn real_core_applies_sunlight_and_keeps_unfiltered_audio() {
