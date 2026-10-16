@@ -683,10 +683,10 @@ mod tests {
         }
         let display = frame.lock().unwrap().clone().unwrap();
         let raw = core.capture_frame().unwrap();
-        assert_eq!((display.width, display.height), (720, 480));
+        assert_eq!((display.width, display.height), (1440, 960));
         assert_eq!((raw.width, raw.height), (240, 160));
         assert!(raw.rgba[1] > 240 && raw.rgba[0] < 20);
-        let centre = ((240 * 720 + 360) * 4) as usize;
+        let centre = ((480 * 1440 + 720) * 4) as usize;
         assert!(display.rgba[centre] > 50);
         assert!(display.rgba[centre + 1] < raw.rgba[1]);
     }

@@ -4,13 +4,15 @@ Status: Accepted. The user selected xBRZ smoothing and colour correction while
 retaining a small, curated set of video options.
 
 Add Smooth pixel art to the existing Video filter choice. Use pinned xbrz-rs
-0.1.0 (GPL-3.0-only), unmodified, at a fixed 3× on validated, bounded native
+0.1.0 (GPL-3.0-only), unmodified, at a fixed 6× on validated, bounded native
 frames on the game worker. It is the demonstrated consumer of the new dependency;
 its transitive dependencies already exist. Retain its original license text and
 attribution and distribute the combined application under GPLv3 obligations.
 The final renderer preserves the native aspect ratio. Following user feedback
-about small steps on smoothed edges, it smoothly fits the 3× filtered output to
+about small steps on smoothed edges, it smoothly fits the 6× filtered output to
 the viewport instead of enlarging those steps with nearest-neighbour scaling.
+The higher reconstruction resolution avoids excessive enlargement of a low-resolution
+intermediate without adding a shader runtime or another user-facing option.
 
 Colour correction is an independent, off-by-default switch. The pinned mGBA
 0.10.5 core lacks the newer native option, so use a CPU adaptation of the

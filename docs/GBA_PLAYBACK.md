@@ -107,9 +107,11 @@ are added. Audio smoothing is no longer a user preference.
 LCD applies an original subtle RGB subpixel/grid treatment at 3× on the core
 worker, then uses smooth scaling. Smooth uses native bilinear scaling without
 changing source pixels. Smooth pixel art uses the pinned xbrz-rs implementation
-at 3× to round pixel-art diagonals, then smoothly fits the filtered output to the
-window. This avoids enlarging the filter's small steps with nearest-neighbour
-scaling at fractional sizes; it does not remove intentional pixel-art details.
+at 6× (1440×960 for GBA) to round pixel-art diagonals, then smoothly fits the
+filtered output to the window. The higher reconstruction resolution reduces the
+softness of enlarging a 3× intermediate. Smooth fitting avoids enlarging the
+filter's small steps with nearest-neighbour scaling at fractional sizes; it does
+not remove intentional pixel-art details.
 Colour correction
 independently applies the credited sRGB GBA display profile before any filter;
 it approximates the original screen rather than calibrating the user's display.
