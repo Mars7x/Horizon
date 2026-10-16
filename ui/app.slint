@@ -411,6 +411,9 @@ export component AppWindow inherits Window {
     in property <bool> player-open: false;
     in property <bool> player-paused: false;
     in property <bool> player-frozen: false;
+    in property <image> player-screenshot-preview;
+    in property <bool> player-screenshot-visible: false;
+    in property <int> player-screenshot-sequence: 0;
     in property <bool> player-fast-forward: false;
     in property <int> player-state-mode: 0;
     in property <int> player-state-focus: -1;
@@ -1113,6 +1116,9 @@ export component AppWindow inherits Window {
                 z: 30; width: parent.width; height: parent.height;
                 phase: root.player-phase; origin: root.player-origin;
                 fast-forward: root.player-fast-forward;
+                screenshot-preview: root.player-screenshot-preview;
+                screenshot-visible: root.player-screenshot-visible;
+                screenshot-sequence: root.player-screenshot-sequence;
                 state-mode: root.player-state-mode; state-focus: root.player-state-focus;
                 state-rows: root.player-state-rows;
                 state-choose(slot) => { root.player-state-choose(slot); }

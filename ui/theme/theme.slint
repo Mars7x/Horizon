@@ -199,6 +199,8 @@ export global Motion {
     // Changing values (picker labels, counts, the selected game's name) slide
     // and crossfade over this one duration on every page.
     out property <duration> value-swap-duration: reduced-motion ? 0ms : 180ms;
+    // Successful screenshot feedback holds after entry, including Reduced Motion.
+    out property <duration> screenshot-hold-duration: 1000ms;
     // Every list and grid camera (components/scroll.slint): linear, and a
     // little longer than the 115 ms input repeat. Each held step retargets
     // the glide before it ends, so a linear glide runs at one constant speed

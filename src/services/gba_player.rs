@@ -56,7 +56,7 @@ pub enum Event {
     Failed(String),
     SaveFailed(String),
     SpeedChanged(bool),
-    ScreenshotSaved,
+    ScreenshotSaved(crate::platform::gba_core::Frame),
     Restarted,
     States(Vec<crate::services::save_states::Entry>),
     StateSaved,
@@ -284,9 +284,10 @@ fn play(
                                 &game_folder.manifest.title,
                                 &frame,
                             )
+                            .map(|()| frame)
                         });
                         let _ = events.send(match result {
-                            Ok(()) => Event::ScreenshotSaved,
+                            Ok(frame) => Event::ScreenshotSaved(frame),
                             Err(error) => Event::ActionFailed(error),
                         });
                     }

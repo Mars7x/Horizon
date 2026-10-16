@@ -55,6 +55,7 @@ pub struct GbaPlayer {
     ui: slint::Weak<AppWindow>,
     paths: PlayerPaths,
     running: RefCell<Option<RunningGame>>,
+    screenshot_until: Cell<Option<Instant>>,
     state_mode: Cell<StateMode>,
     state_focus: Cell<i32>,
     state_entries: RefCell<Vec<crate::services::save_states::Entry>>,
@@ -77,6 +78,7 @@ impl GbaPlayer {
             ui: ui.as_weak(),
             paths,
             running: RefCell::new(None),
+            screenshot_until: Cell::new(None),
             state_mode: Cell::new(StateMode::Menu),
             state_focus: Cell::new(-1),
             state_entries: RefCell::new(Vec::new()),
@@ -187,7 +189,12 @@ impl GbaPlayer {
         self.cue(UiSoundCue::QuickMenuOpen);
     }
 
+    fn clear_screenshot(&self, ui: &AppWindow) {
+        self.screenshot_until.set(None);
+        ui.set_player_screenshot_visible(false);
+    }
     fn close_pause(&self, ui: &AppWindow) {
+        self.clear_screenshot(ui);
         let was_paused = ui.get_player_paused();
         ui.set_player_paused(false);
         if was_paused && !self.closing.get() && self.foreground.get() && !ui.get_player_failed() {
@@ -386,6 +393,9 @@ impl GbaPlayer {
         true
     }
     fn set_state_mode(&self, ui: &AppWindow, mode: StateMode) {
+        if mode != StateMode::Menu {
+            self.clear_screenshot(ui);
+        }
         self.state_mode.set(mode);
         ui.set_player_state_mode(mode as i32);
     }
@@ -421,7 +431,6 @@ impl GbaPlayer {
         }
         let rows = entries
             .iter()
-            .filter(|entry| !saving || entry.slot > 0)
             .map(|entry| {
                 let preview = entry.preview.as_ref().map_or_else(Image::default, |frame| {
                     Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
@@ -455,7 +464,7 @@ impl GbaPlayer {
                     },
                     detail: detail.into(),
                     preview,
-                    available: saving || entry.metadata.is_some(),
+                    available: entry.metadata.is_some(),
                     occupied: entry.metadata.is_some(),
                 }
             })
@@ -518,7 +527,7 @@ impl GbaPlayer {
             return;
         }
         ui.set_player_focus(index);
-        if ![0, 1, RETURN_TO_HORIZON].contains(&index) {
+        if ![0, 1, 4, RETURN_TO_HORIZON].contains(&index) {
             self.cue(UiSoundCue::Ok);
         }
         match index {
@@ -545,8 +554,12 @@ impl GbaPlayer {
                 self.publish_states(&ui);
                 self.send_action(&ui, Command::ListStates, "");
             }
-            4 => self.send_action(&ui, Command::Screenshot, "Taking screenshot"),
+            4 => {
+                self.clear_screenshot(&ui);
+                self.send_action(&ui, Command::Screenshot, "");
+            }
             5 => {
+                self.clear_screenshot(&ui);
                 ui.set_player_restart_confirm(true);
                 ui.set_player_restart_focus(0);
                 ui.set_player_message("".into());
@@ -686,6 +699,13 @@ impl GbaPlayer {
         let Some(ui) = self.ui.upgrade() else {
             return;
         };
+        if self
+            .screenshot_until
+            .get()
+            .is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            self.clear_screenshot(&ui);
+        }
         if self.stage.get() == PlayerStage::Exiting {
             if self.stage_since.get().elapsed()
                 >= Self::zoom_duration(&ui) + Duration::from_millis(16)
@@ -754,9 +774,35 @@ impl GbaPlayer {
                         self.keyboard.set(0);
                         self.pad_ready.set(false);
                     }
-                    Event::ScreenshotSaved => {
+                    Event::ScreenshotSaved(frame) => {
+                        if self.closing.get() {
+                            continue;
+                        }
                         ui.set_player_busy(false);
-                        ui.set_player_message("Screenshot saved to Album".into());
+                        ui.set_player_message("".into());
+                        if ui.get_player_paused() && self.state_mode.get() == StateMode::Menu {
+                            ui.set_player_screenshot_preview(Image::from_rgba8(
+                                SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                                    &frame.rgba,
+                                    frame.width,
+                                    frame.height,
+                                ),
+                            ));
+                            ui.set_player_screenshot_sequence(
+                                ui.get_player_screenshot_sequence().wrapping_add(1),
+                            );
+                            ui.set_player_screenshot_visible(true);
+                            let motion = ui.global::<crate::Motion>();
+                            self.screenshot_until.set(Some(
+                                Instant::now()
+                                    + Duration::from_millis(
+                                        (motion.get_value_swap_duration()
+                                            + motion.get_screenshot_hold_duration())
+                                        .max(0) as u64,
+                                    ),
+                            ));
+                            self.cue(UiSoundCue::Screenshot);
+                        }
                     }
                     Event::Restarted => {
                         ui.set_player_busy(false);
@@ -914,6 +960,8 @@ impl LaunchExecutor for GbaPlayer {
             ui.set_player_restart_confirm(false);
             ui.set_player_restart_focus(0);
             ui.set_player_fast_forward(false);
+            self.clear_screenshot(&ui);
+            ui.set_player_screenshot_preview(Image::default());
             self.set_state_mode(&ui, StateMode::Menu);
             self.state_entries.borrow_mut().clear();
             self.state_focus.set(-1);
@@ -1142,10 +1190,45 @@ mod runtime_tests {
         let recorded = Rc::clone(&motion);
         let weak_ui = ui.as_weak();
         let motion_player = Rc::clone(&player);
+        // Capture value and nested-view motion before it settles. Encode after
+        // the event loop so PNG writes cannot interrupt the animation clock.
+        let menu_key = Cell::new((-1, false, false));
+        let menu_since = Cell::new(Instant::now());
+        let menu_frames = Cell::new(0u8);
+        let menu_sequence = Cell::new(0u32);
         motion_timer.start(TimerMode::Repeated, Duration::from_millis(16), move || {
             let ui = weak_ui.upgrade().unwrap();
             let phase = ui.get_player_phase();
             let progress = ui.get_player_visual_progress();
+            if !reduced && phase == 2 && ui.get_player_paused() {
+                let key = (
+                    ui.get_player_state_mode(),
+                    ui.get_player_fast_forward(),
+                    ui.get_player_restart_confirm(),
+                );
+                if menu_key.replace(key) != key {
+                    menu_since.set(Instant::now());
+                    menu_frames.set(0);
+                    menu_sequence.set(menu_sequence.get() + 1);
+                }
+                for (bit, milliseconds) in [(1, 40), (2, 100)] {
+                    if menu_frames.get() & bit == 0
+                        && menu_since.get().elapsed() >= Duration::from_millis(milliseconds)
+                    {
+                        captures.borrow_mut().push((
+                            format!(
+                                "menu-view-{}-speed-{}-{}-{milliseconds}.png",
+                                key.0,
+                                key.1,
+                                menu_sequence.get()
+                            ),
+                            ui.window().take_snapshot().unwrap(),
+                        ));
+                        menu_frames.set(menu_frames.get() | bit);
+                    }
+                }
+            }
+
             if phase == 3 && progress > 0.04 && progress < 0.35 {
                 let library = ui.get_current_route() == crate::AppRouteView::Library;
                 let bit = if library { 2 } else { 1 };
@@ -1368,11 +1451,29 @@ mod runtime_tests {
                 25 if !ui.get_player_busy() => {
                     assert!(!ui.get_player_paused());
                     live.pause();
+                    std::fs::write(directory.join("album"), b"capture obstruction").unwrap();
+                    ui.invoke_player_choose(4);
+                    assert!(!ui.get_player_screenshot_visible());
+                    assert!(ui.get_player_message().is_empty());
+                    progress.set(31);
+                }
+                31 if !ui.get_player_busy() => {
+                    assert!(ui.get_player_paused());
+                    assert!(!ui.get_player_message().is_empty());
+                    assert!(!ui.get_player_screenshot_visible());
+                    assert!(!sounds.borrow().contains(&UiSoundCue::Screenshot));
+                    snapshot("gba-screenshot-failed");
+                    std::fs::remove_file(directory.join("album")).unwrap();
                     ui.invoke_player_choose(4);
                     progress.set(11);
                 }
                 11 if !ui.get_player_busy() => {
-                    assert!(ui.get_player_message().contains("saved to Album"));
+                    assert!(ui.get_player_message().is_empty());
+                    assert!(ui.get_player_screenshot_visible());
+                    assert_eq!(sounds.borrow().last(), Some(&UiSoundCue::Screenshot));
+                    let preview = ui.get_player_screenshot_preview().to_rgba8().unwrap();
+                    assert_eq!((preview.width(), preview.height()), (240, 160));
+                    snapshot("gba-screenshot-confirmation");
                     let captures =
                         crate::services::album::catalog::HorizonAlbum::new(directory.join("album"))
                             .scan();
@@ -1383,8 +1484,39 @@ mod runtime_tests {
                     );
                     let shot = image::open(captures[0].path()).unwrap().to_rgba8();
                     assert_eq!(shot.dimensions(), (240, 160));
+                    assert_eq!(shot.as_raw(), preview.as_bytes());
                     let first = shot.get_pixel(0, 0);
                     assert!(shot.pixels().all(|p| p == first)); // native pixels, no panel/filter/badge
+                    let first_sequence = ui.get_player_screenshot_sequence();
+                    ui.invoke_player_choose(4);
+                    assert!(!ui.get_player_screenshot_visible());
+                    assert_eq!(ui.get_player_screenshot_sequence(), first_sequence);
+                    progress.set(32);
+                }
+                32 if !ui.get_player_busy() => {
+                    assert!(ui.get_player_screenshot_visible());
+                    assert_eq!(ui.get_player_screenshot_sequence(), 2);
+                    assert_eq!(
+                        sounds
+                            .borrow()
+                            .iter()
+                            .filter(|cue| **cue == UiSoundCue::Screenshot)
+                            .count(),
+                        2
+                    );
+                    assert_eq!(
+                        crate::services::album::catalog::HorizonAlbum::new(directory.join("album"))
+                            .scan()
+                            .len(),
+                        2
+                    );
+                    progress.set(30);
+                }
+                30 if !ui.get_player_screenshot_visible() => {
+                    assert!(ui.get_player_paused());
+                    assert_eq!(ui.get_player_focus(), 4);
+                    assert!(ui.get_player_message().is_empty());
+                    snapshot("gba-screenshot-cleared");
                     tap(slint::platform::Key::DownArrow);
                     assert_eq!(ui.get_player_focus(), 5);
                     tap(slint::platform::Key::Return);
@@ -1507,9 +1639,15 @@ mod runtime_tests {
                     assert!(live.handle_action(UiActionEvent::fresh(UiAction::Home)));
                     assert!(ui.get_player_paused());
                     // A save failure must stay paused, without beginning collapse.
-                    std::fs::create_dir(crate::platform::data_paths::save_temporary_path(
-                        &save_file,
-                    ))
+                    std::fs::write(
+                        crate::platform::data_paths::state_slot_directory(
+                            &crate::platform::data_paths::state_core_directory(
+                                save_file.parent().unwrap(),
+                            ),
+                            0,
+                        ),
+                        b"exit-state obstruction",
+                    )
                     .unwrap();
                     for _ in 0..6 {
                         live.handle_action(UiActionEvent::fresh(UiAction::Down));
@@ -1522,8 +1660,11 @@ mod runtime_tests {
                     assert!(ui.get_player_paused());
                     assert_eq!(ui.get_player_phase(), 2);
                     assert!(!ui.get_player_message().is_empty());
-                    std::fs::remove_dir(crate::platform::data_paths::save_temporary_path(
-                        &save_file,
+                    std::fs::remove_file(crate::platform::data_paths::state_slot_directory(
+                        &crate::platform::data_paths::state_core_directory(
+                            save_file.parent().unwrap(),
+                        ),
+                        0,
                     ))
                     .unwrap();
                     live.handle_action(UiActionEvent::fresh(UiAction::Accept));
@@ -1639,8 +1780,6 @@ mod runtime_tests {
             UiSoundCue::QuickMenuClose, // Library return
         ]);
         assert_eq!(transitions, expected);
-        assert_eq!(motion.get(), if reduced { 0 } else { 15 });
-        assert_eq!(blends.get(), if reduced { 0 } else { 3 });
         // Encode after the event loop so snapshot I/O cannot skip animation phases.
         for (name, pixels) in motion_captures.borrow().iter() {
             image::save_buffer(
@@ -1652,6 +1791,8 @@ mod runtime_tests {
             )
             .unwrap();
         }
+        assert_eq!(motion.get(), if reduced { 0 } else { 15 });
+        assert_eq!(blends.get(), if reduced { 0 } else { 3 });
     }
 }
 

@@ -8,7 +8,9 @@ Add Smooth pixel art to the existing Video filter choice. Use pinned xbrz-rs
 frames on the game worker. It is the demonstrated consumer of the new dependency;
 its transitive dependencies already exist. Retain its original license text and
 attribution and distribute the combined application under GPLv3 obligations.
-The final renderer preserves sharp output pixels and the native aspect ratio.
+The final renderer preserves the native aspect ratio. Following user feedback
+about small steps on smoothed edges, it smoothly fits the 3× filtered output to
+the viewport instead of enlarging those steps with nearest-neighbour scaling.
 
 Colour correction is an independent, off-by-default switch. The pinned mGBA
 0.10.5 core lacks the newer native option, so use a CPU adaptation of the
