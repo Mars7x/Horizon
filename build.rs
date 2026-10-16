@@ -14,6 +14,7 @@ fn native_media() {
         "libswscale",
         "libswresample",
         "libpipewire-0.3",
+        "libjxl",
     ];
     let mut build = cc::Build::new();
     let mut found = Vec::new();
@@ -30,6 +31,7 @@ fn native_media() {
     build
         .file("csrc/horizon_media.c")
         .file("csrc/horizon_audio.c")
+        .file("csrc/horizon_jxl.c")
         .flag_if_supported("-std=gnu11")
         .warnings(true)
         .compile("horizon_native");

@@ -4,11 +4,10 @@ use crate::{
     platform::{data_paths, gba_core::Frame},
     services::game_storage::{GameFolder, ensure_directory},
 };
-use image::{ImageDecoder, ImageEncoder};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File, OpenOptions},
-    io::{self, Cursor, Read, Write},
+    io::{self, Read, Write},
     os::unix::fs::{DirBuilderExt, OpenOptionsExt},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
@@ -62,7 +61,7 @@ impl Store {
         let metadata: Metadata =
             serde_json::from_slice(&read(&files.metadata, 16384).map_err(incomplete)?)
                 .map_err(io::Error::other)?;
-        if metadata.format_version != 1
+        if !matches!(metadata.format_version, 1 | 2)
             || metadata.saved_at < 0
             || metadata.slot != slot
             || metadata.core != "mgba"
@@ -74,22 +73,28 @@ impl Store {
             ));
         }
         let bytes = read(&files.state, 16 * 1024 * 1024).map_err(incomplete)?;
-        let png = read(&files.screenshot, 512 * 1024).map_err(incomplete)?;
+        let files = if metadata.format_version == 1 {
+            data_paths::legacy_state_bundle_paths(directory, &self.folder.manifest.file_stem, slot)
+        } else {
+            files
+        };
+        let preview = read(&files.screenshot, 512 * 1024).map_err(incomplete)?;
         if bytes.is_empty()
             || bytes.len() != metadata.state_size
             || hash(&bytes) != metadata.state_sha256
-            || hash(&png) != metadata.preview_sha256
+            || hash(&preview) != metadata.preview_sha256
         {
             return Err(io::Error::other("Saved state is incomplete or damaged"));
         }
-        let decoder =
-            image::codecs::png::PngDecoder::new(Cursor::new(png)).map_err(io::Error::other)?;
-        if decoder.dimensions() != (240, 160) {
+        if crate::services::image::dimensions(&preview, None).map_err(io::Error::other)?
+            != (240, 160)
+            || (metadata.format_version == 2 && !crate::services::image::is_jxl(&preview))
+        {
             return Err(io::Error::other("Invalid saved state preview"));
         }
-        let rgba = image::DynamicImage::from_decoder(decoder)
+        let rgba = crate::services::image::decode(&preview, None)
             .map_err(io::Error::other)?
-            .to_rgba8();
+            .into_rgba8();
         Ok(Snapshot {
             bytes,
             metadata,
@@ -240,12 +245,16 @@ impl Store {
             directory: stage.clone(),
         };
         let files = self.files(&stage, slot);
-        let mut png = Vec::new();
-        image::codecs::png::PngEncoder::new(&mut png)
-            .write_image(&frame.rgba, 240, 160, image::ExtendedColorType::Rgba8)
-            .map_err(io::Error::other)?;
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&files.screenshot)?;
+        crate::platform::jpeg_xl::write_rgba(&file, &frame.rgba, 240, 160)?;
+        file.sync_all()?;
+        let preview = read(&files.screenshot, 512 * 1024)?;
         let metadata = Metadata {
-            format_version: 1,
+            format_version: 2,
             slot,
             rom_identity: self.folder.manifest.game_id.clone(),
             core: "mgba".into(),
@@ -253,10 +262,9 @@ impl Store {
             saved_at: chrono::Utc::now().timestamp_millis(),
             state_size: bytes.len(),
             state_sha256: hash(bytes),
-            preview_sha256: hash(&png),
+            preview_sha256: hash(&preview),
         };
         write(&files.state, bytes)?;
-        write(&files.screenshot, &png)?;
         write(
             &files.metadata,
             &serde_json::to_vec_pretty(&metadata).map_err(io::Error::other)?,
@@ -443,6 +451,36 @@ mod tests {
         assert_eq!(fs::read(f.store.folder.save_path()).unwrap(), b"battery");
         assert!(f.store.load(5).is_err());
         assert!(f.store.save(5, b"bad", &f.frame).is_err());
+    }
+    #[test]
+    fn legacy_png_bundles_still_load_and_new_previews_are_jxl() {
+        let f = Fixture::new();
+        f.save(1, b"retained", 100);
+        let directory = data_paths::state_slot_directory(&f.store.core(), 1);
+        let files = f.store.files(&directory, 1);
+        assert_eq!(files.screenshot.extension().unwrap(), "jxl");
+        let mut metadata: Metadata =
+            serde_json::from_slice(&fs::read(&files.metadata).unwrap()).unwrap();
+        assert_eq!(metadata.format_version, 2);
+        let legacy = data_paths::legacy_state_bundle_paths(
+            &directory,
+            &f.store.folder.manifest.file_stem,
+            1,
+        );
+        let image = image::RgbaImage::from_raw(240, 160, f.frame.rgba.clone()).unwrap();
+        image.save(&legacy.screenshot).unwrap();
+        metadata.format_version = 1;
+        metadata.preview_sha256 = hash(&fs::read(&legacy.screenshot).unwrap());
+        fs::write(&files.metadata, serde_json::to_vec(&metadata).unwrap()).unwrap();
+        fs::remove_file(&files.screenshot).unwrap();
+        assert_eq!(f.store.load(1).unwrap().unwrap().preview.rgba, f.frame.rgba);
+        f.save(1, b"new", 200);
+        assert_eq!(f.store.load(1).unwrap().unwrap().metadata.format_version, 2);
+        assert!(f.store.backups(1).unwrap().iter().any(|dir| {
+            data_paths::legacy_state_bundle_paths(dir, &f.store.folder.manifest.file_stem, 1)
+                .screenshot
+                .exists()
+        }));
     }
     #[test]
     fn replacement_recovers_complete_previous_bundle_after_damage_or_crash_gap() {

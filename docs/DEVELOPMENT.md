@@ -9,7 +9,7 @@ Flatpak runtime: `26.08`
 Use GNOME Builder with that manifest for the normal iterative build. Native
 builds also need SDL3, a C compiler, pkg-config, FFmpeg development libraries
 (libavformat, libavcodec, libavutil, libswscale, libswresample) and PipeWire
-(libpipewire-0.3). Slint uses Winit/Skia, not Qt.
+(libpipewire-0.3) and libjxl (JPEG XL encoding). Slint uses Winit/Skia, not Qt.
 
 ## Checks
 

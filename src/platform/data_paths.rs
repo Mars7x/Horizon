@@ -58,10 +58,10 @@ pub struct CoreSettingsPaths {
     pub mgba: PathBuf,
 }
 
-const PROFILE_PICTURE_FILE: &str = "profile/pictures/custom.png";
-const PROFILE_ANIMATED_FILE: &str = "profile/pictures/custom-original";
-const STEAM_PICTURE_FILE: &str = "profile/pictures/steam.png";
-const STEAM_ANIMATED_FILE: &str = "profile/pictures/steam-original";
+const PROFILE_PICTURE_FILE: &str = "profile/pictures/custom.jxl";
+const PROFILE_ANIMATED_FILE: &str = "profile/pictures/custom-animation.jxl";
+const STEAM_PICTURE_FILE: &str = "profile/pictures/steam.jxl";
+const STEAM_ANIMATED_FILE: &str = "profile/pictures/steam-animation.jxl";
 
 /// Filesystem-safe, readable names with a bounded UTF-8 byte length.
 pub fn game_file_stem(title: &str) -> String {
@@ -255,8 +255,7 @@ pub fn profile_picture_path() -> Result<PathBuf, DataPathError> {
     Ok(app_dir(BaseDir::Data)?.join(PROFILE_PICTURE_FILE))
 }
 
-/// The chosen profile picture's original file, when it is animated (a GIF,
-/// an animated PNG), so it can play; `profile.png` is its still.
+/// The chosen profile animation, converted to lossless JPEG XL.
 pub fn profile_animated_path() -> Result<PathBuf, DataPathError> {
     Ok(app_dir(BaseDir::Data)?.join(PROFILE_ANIMATED_FILE))
 }
@@ -266,10 +265,23 @@ pub fn steam_profile_picture_path() -> Result<PathBuf, DataPathError> {
     Ok(app_dir(BaseDir::Data)?.join(STEAM_PICTURE_FILE))
 }
 
-/// The Steam animated avatar last fetched, as Steam's original file (a GIF);
+/// The Steam animated avatar last fetched, converted to lossless JPEG XL;
 /// absent when none is equipped.
 pub fn steam_animated_avatar_path() -> Result<PathBuf, DataPathError> {
     Ok(app_dir(BaseDir::Data)?.join(STEAM_ANIMATED_FILE))
+}
+
+/// Read compatibility for retained pre-JXL profile copies. New writes always
+/// use the JXL path; this never renames or deletes the older data.
+pub fn legacy_profile_image_path(path: &Path) -> Option<PathBuf> {
+    let name = match path.file_name()?.to_str()? {
+        "custom.jxl" => "custom.png",
+        "custom-animation.jxl" => "custom-original",
+        "steam.jxl" => "steam.png",
+        "steam-animation.jxl" => "steam-original",
+        _ => return None,
+    };
+    Some(path.with_file_name(name))
 }
 
 /// Reserved durable custom covers; no folder is made until something is stored.
@@ -497,7 +509,7 @@ mod game_layout_tests {
             root.join("states/mgba/slot-01/Pokemon - Emerald Version.slot-01.state")
         );
         assert_eq!(paths.metadata.extension().unwrap(), "json");
-        assert_eq!(paths.screenshot.extension().unwrap(), "png");
+        assert_eq!(paths.screenshot.extension().unwrap(), "jxl");
         assert!(!root.exists());
         let automatic = state_bundle_paths(
             &state_slot_directory(&state_core_directory(root), 0),
@@ -533,8 +545,14 @@ pub fn state_bundle_paths(bundle: &Path, stem: &str, slot: u8) -> SaveStatePaths
     SaveStatePaths {
         state: bundle.join(format!("{name}.state")),
         metadata: bundle.join(format!("{name}.json")),
-        screenshot: bundle.join(format!("{name}.png")),
+        screenshot: bundle.join(format!("{name}.jxl")),
     }
+}
+/// Version-1 state bundles used PNG previews; keep those bundles loadable.
+pub fn legacy_state_bundle_paths(bundle: &Path, stem: &str, slot: u8) -> SaveStatePaths {
+    let mut paths = state_bundle_paths(bundle, stem, slot);
+    paths.screenshot.set_extension("png");
+    paths
 }
 pub fn state_staging_directory(core: &Path, slot: u8, nonce: &str) -> PathBuf {
     core.join(format!(".slot-{slot:02}-{nonce}.part"))

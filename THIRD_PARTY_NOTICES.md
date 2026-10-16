@@ -375,3 +375,22 @@ only on explicit Save; key content and clipboard data must not be logged.
 No ROMs or No-Intro catalogs are bundled. Catalog names are provenance supplied
 by the selected local DAT, not a statement of redistribution rights. The exact
 resolved dependency-license inventory remains a release gate.
+
+## JPEG XL screenshot encoder
+
+- Source: libjxl, by the JPEG XL Project Authors,
+  https://github.com/libjxl/libjxl. Horizon links the unmodified library supplied
+  by the Freedesktop 26.08 runtime (SDK verification used libjxl 0.12.0).
+- License: `BSD-3-Clause`; upstream copyright and full license are retained in
+  `LICENSES/libjxl-BSD-3-Clause.txt` from
+  https://github.com/libjxl/libjxl/blob/v0.12.0/LICENSE.
+- The original Horizon C shim encodes screenshots, state previews, profiles/animations and normalized
+  artwork/Album caches as lossless sRGB RGBA8 JPEG XL on workers. No upstream source or
+  example code is copied or modified. Decoding still uses jxl-oxide in Rust.
+
+## Original image regression fixture
+
+`tests/fixtures/animation-8x4.png` is an original Horizon-generated three-frame
+APNG (solid colours, partial alpha and unequal delays), used to verify conversion
+to animated JXL. No external image or code is included. Copyright Horizon
+contributors; `GPL-3.0-or-later`, covered by the tests annotation in REUSE.toml.

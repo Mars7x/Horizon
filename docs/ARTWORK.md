@@ -34,6 +34,10 @@ never fabricate a catalog identity. SteamGridDB is independent of Steam Account.
 ## Rendering and cache
 
 Canonical artwork/cache metadata retain the native-square contract and provenance.
+Local and SteamGridDB normalized caches store lossless 512×512 JXL, with existing
+filter markers and source/checksum provenance. Incoming SteamGridDB PNG/JPEG
+images are decoded before conversion; downloading JXL from the provider is not
+required. Version-7 cache directories rebuild only disposable copies.
 Pixel-art-like sources use nearest-neighbor normalization and Slint pixelated
 rendering; smooth imagery uses appropriate smooth filtering. Scale cover artwork
 and focus as one visual unit. Cache-version changes invalidate only the relevant

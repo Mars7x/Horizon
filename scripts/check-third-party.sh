@@ -36,6 +36,7 @@ required_licenses=(
   "mGBA-inih-BSD-3-Clause.txt"
   "libretro-header-MIT.txt"
   "libloading-ISC.txt"
+  "libjxl-BSD-3-Clause.txt"
 )
 
 for asset in "${required_assets[@]}"; do
@@ -55,6 +56,7 @@ grep -Fq "zbus 5.x" "$notice" || { echo "zbus provenance missing from THIRD_PART
 grep -Fq "**FFmpeg**" "$notice" || { echo "FFmpeg provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
 grep -Fq "**PipeWire**" "$notice" || { echo "PipeWire provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
 grep -Fq "**jxl-oxide 0.12.x**" "$notice" || { echo "jxl-oxide provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
+grep -Fq "## JPEG XL screenshot encoder" "$notice" || { echo "libjxl encoder provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
 
 grep -Fq '**xbrz-rs 0.1.0**' "$notice" || { echo "xBRZ provenance missing" >&2; exit 1; }
 grep -Fq "Pokefan531" "$notice" || { echo "GBA colour profile provenance missing" >&2; exit 1; }

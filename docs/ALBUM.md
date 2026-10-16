@@ -19,23 +19,27 @@ writer creates screenshots only. The new layout does not scan or migrate old
 source/hash folders. See [Storage](STORAGE.md).
 Writes use a temporary `.part` path, published atomically only when complete. The file is the record; no media
 table is needed. External changes appear on the next visit. Thumbnails/durations
-are disposable caches, not the original media. Version 4 thumbnails are lossless
-PNG. Large photos are centre-cropped to the grid's 16:9 shape before shrinking
-to at most 960×540, so portrait/square pictures retain enough detail for 4K tiles.
+are disposable caches, not the original media. Version 5 thumbnails are lossless
+JPEG XL, including video posters. Large photos are centre-cropped to the grid's
+16:9 shape before shrinking to at most 960×540, so portrait/square pictures retain enough detail for 4K tiles.
 Small originals keep their native pixels and alpha. Only the disposable thumbnail
 cache is regenerated after an update; originals and full-screen decoding are unchanged.
 Small still images use nearest pixel sampling when enlarged in the grid, viewer,
 slide and landing layers;
 downscaled images and videos keep smooth sampling.
 
-Supported extensions include PNG, JPEG, GIF, JPEG XL, MP4, M4V, MKV, WebM and
-MOV; decoding follows content/runtime support. Animated GIFs play silently in
-place of stills; animated JPEG XL uses its first frame. FFmpeg video decoding
-and PipeWire audio use [native shims](../csrc/) behind the VideoBackend contract.
+Pictures use JPEG XL (`.jxl`) only; MP4, M4V, MKV, WebM and MOV remain supported
+for videos. Other picture extensions are ignored, including existing PNG/JPEG/GIF
+captures; these files are preserved without conversion or deletion. Animated
+JPEG XL plays on a bounded media worker, preserving frame timing and transparency.
+Closing/leaving cancels playback; backgrounding pauses it and Reduced Motion
+keeps it still. Thumbnails use the first frame. Decoding follows content/runtime support. FFmpeg
+video decoding and PipeWire audio use [native shims](../csrc/) behind the VideoBackend contract.
 No download or recorder implementation is implied by the viewer.
 
 The GBA pause panel's Take screenshot action captures the native unfiltered
-240×160 game frame. PNG encoding/writes run on the core worker through the shared
+240×160 game frame. Lossless sRGB RGBA8 JPEG XL encoding/writes run on the core
+worker through the runtime libjxl encoder and the shared
 HorizonAlbum path allocator, under the game's readable GBA folder with its full ROM identity in `game.json`.
 No pause UI, speed badge or video filter is included. Complete captures appear
 on the next Album visit. Failed writes preserve existing media and report an error.
@@ -60,4 +64,4 @@ escape/symlink cases; it removes selected files and tidies empty capture-type fo
 so subsequent captures keep their folder name.
 Failures remain visible. No Steam screenshot/thumbnail deletion code remains.
 Media fixtures under [tests](../tests/fixtures/) exercise decoding; runtime audio,
-seeking, animated images and real scaling still require a built app.
+seeking and real scaling still require a built app.

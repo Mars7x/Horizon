@@ -6,7 +6,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use image::{ImageFormat, RgbaImage, imageops};
+use image::{RgbaImage, imageops};
 use tracing::{debug, warn};
 
 use crate::{
@@ -17,9 +17,9 @@ use crate::{
 const NORMALIZED_SQUARE_ARTWORK_PX: u32 = 512;
 const ARTWORK_CACHE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 /// Bump when the local cover cache format changes; the folder is cleared.
-pub const LOCAL_ARTWORK_CACHE_VERSION: &str = "square-v6";
+pub const LOCAL_ARTWORK_CACHE_VERSION: &str = "square-v7";
 /// Bump when the SteamGridDB cache format changes; the folder is cleared.
-pub const STEAMGRIDDB_CACHE_VERSION: &str = "steamgriddb-v6";
+pub const STEAMGRIDDB_CACHE_VERSION: &str = "steamgriddb-v7";
 
 /// Source-neutral decoded artwork ready for presentation.
 ///
@@ -201,7 +201,7 @@ impl ArtworkService {
     fn cache_path(&self, game: &LibraryGame) -> Option<PathBuf> {
         self.cache_root.as_ref().map(|root| {
             root.join(format!(
-                "{}-{:016x}.png",
+                "{}-{:016x}.jxl",
                 game.game().id().get(),
                 artwork_cache_identity(game)
             ))
@@ -220,15 +220,15 @@ impl ArtworkService {
             return;
         }
 
-        let temporary = path.with_extension("tmp.png");
-        let write_result = image::save_buffer_with_format(
-            &temporary,
-            artwork.rgba(),
-            artwork.size(),
-            artwork.size(),
-            image::ColorType::Rgba8,
-            ImageFormat::Png,
-        );
+        let temporary = path.with_extension("tmp.jxl");
+        let write_result = fs::File::create(&temporary).and_then(|file| {
+            crate::platform::jpeg_xl::write_rgba(
+                &file,
+                artwork.rgba(),
+                artwork.size(),
+                artwork.size(),
+            )
+        });
         if let Err(error) = write_result {
             debug!(path = %temporary.display(), %error, "normalized artwork cache entry could not be encoded");
             let _ = fs::remove_file(&temporary);

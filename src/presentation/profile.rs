@@ -9,7 +9,7 @@
 //! thread only shows results. Each source keeps its own copy on disk, so
 //! switching between them is instant and Steam's shows offline. A Steam
 //! animated avatar, and an animated picture the user chose, are kept as their
-//! original files and decoded whole, small, so Slint can play them
+//! normalized JXL animations and decoded whole, small, so Slint can play them
 //! (`AnimatedPicture`).
 
 use std::{
@@ -213,9 +213,10 @@ impl ProfileController {
             spawn("profile-load", move || {
                 let _ = sender.send(ProfileEvent::Loaded {
                     chosen: profile::load(&chosen),
-                    chosen_animated: std::fs::read(&chosen_animated).ok().and_then(|bytes| {
-                        profile::decode_chosen_animation(&bytes, profile::ANIMATED_SIDE)
-                    }),
+                    chosen_animated: profile::load_chosen_animation(
+                        &chosen_animated,
+                        profile::ANIMATED_SIDE,
+                    ),
                     steam: profile::load(&steam),
                     animated: profile::load_animation(&animated, profile::ANIMATED_SIDE),
                 });
@@ -599,21 +600,8 @@ impl ProfileController {
         let started = spawn("profile-choose", move || {
             let result = match file_chooser::choose_image("Choose a profile picture") {
                 Ok(None) => Ok(None),
-                Ok(Some(source)) => profile::prepare(&source)
-                    .and_then(|picture| profile::save(&path, &picture).map(|()| picture))
-                    .map(|picture| {
-                        // An animated picture keeps its original, to play.
-                        let animation = std::fs::read(&source).ok().and_then(|bytes| {
-                            let animation =
-                                profile::decode_chosen_animation(&bytes, profile::ANIMATED_SIDE)?;
-                            profile::save_bytes(&animated_path, &bytes).ok()?;
-                            Some(animation)
-                        });
-                        if animation.is_none() {
-                            let _ = profile::remove(&animated_path);
-                        }
-                        Some((picture, animation))
-                    })
+                Ok(Some(source)) => profile::import_chosen(&source, &path, &animated_path)
+                    .map(Some)
                     .map_err(|error| error.to_string()),
                 Err(error) => Err(error.to_string()),
             };
@@ -896,12 +884,14 @@ impl ProfileController {
     }
 }
 
-/// Keep an equipped item's original file and decode it, or forget it when
+/// Keep an equipped item as JXL, or forget it when
 /// none is equipped; `Keep` when it couldn't be fetched, decoded or kept.
 fn keep_item(item: &ProfileItem, path: &std::path::Path, side: u32) -> Update<Animation> {
     match item {
         ProfileItem::Downloaded(bytes) => match profile::decode_animation(bytes, side) {
-            Ok(animation) if profile::save_bytes(path, bytes).is_ok() => Update::Set(animation),
+            Ok(animation) if profile::save_animation(path, &animation).is_ok() => {
+                Update::Set(animation)
+            }
             _ => Update::Keep,
         },
         ProfileItem::NotEquipped => {
@@ -927,4 +917,83 @@ fn slint_image(picture: RgbaImage) -> Image {
         width,
         height,
     ))
+}
+
+#[cfg(test)]
+mod jxl_runtime_tests {
+    use super::*;
+    use slint::{Model, Timer};
+    use std::time::Duration;
+
+    #[test]
+    #[ignore = "requires Wayland and a fresh HORIZON_JXL_PROFILE_TEST_DIR"]
+    fn converted_jxl_profile_animates_and_obeys_reduced_motion() {
+        let output = PathBuf::from(std::env::var_os("HORIZON_JXL_PROFILE_TEST_DIR").unwrap());
+        std::fs::create_dir_all(&output).unwrap();
+        let source =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/animation-8x4.png");
+        let still = output.join("custom.jxl");
+        let moving = output.join("custom-animation.jxl");
+        profile::import_chosen(&source, &still, &moving).unwrap();
+        let decoded = profile::load_chosen_animation(&moving, profile::ANIMATED_SIDE).unwrap();
+        let moving = Moving::from(decoded);
+        assert_eq!(moving.frames.row_count(), 3);
+        let ui = AppWindow::new().unwrap();
+        let reduced = std::env::var_os("HORIZON_JXL_TEST_REDUCED").is_some();
+        ui.global::<crate::Motion>().set_reduced_motion(reduced);
+        ui.set_current_route(crate::AppRouteView::Profile);
+        ui.set_profile_picture(moving.still);
+        ui.set_profile_picture_frames(moving.frames);
+        ui.set_profile_has_picture(true);
+        ui.window().set_size(slint::PhysicalSize::new(1280, 720));
+        ui.show().unwrap();
+        let ticks = Cell::new(0);
+        let red = Cell::new(0);
+        let green = Cell::new(0);
+        let weak = ui.as_weak();
+        let timer = Timer::default();
+        timer.start(
+            slint::TimerMode::Repeated,
+            Duration::from_millis(80),
+            move || {
+                let ui = weak.upgrade().unwrap();
+                ticks.set(ticks.get() + 1);
+                let snapshot = ui.window().take_snapshot().unwrap();
+                let red_pixels = snapshot
+                    .as_slice()
+                    .iter()
+                    .filter(|p| p.r > 230 && p.g < 180 && p.b < 180)
+                    .count();
+                let green_pixels = snapshot
+                    .as_slice()
+                    .iter()
+                    .filter(|p| p.g > 230 && p.r < 180 && p.b < 180)
+                    .count();
+                red.set(red.get().max(red_pixels));
+                green.set(green.get().max(green_pixels));
+                if ticks.get() < 20 {
+                    return;
+                }
+                assert!(red.get() > 500, "profile still must render");
+                if reduced {
+                    assert!(green.get() < 500, "reduced motion must keep the still");
+                } else {
+                    assert!(
+                        green.get() > 500,
+                        "JXL profile must advance to the green frame"
+                    );
+                }
+                image::save_buffer(
+                    output.join("profile.png"),
+                    snapshot.as_bytes(),
+                    snapshot.width(),
+                    snapshot.height(),
+                    image::ColorType::Rgba8,
+                )
+                .unwrap();
+                slint::quit_event_loop().unwrap();
+            },
+        );
+        slint::run_event_loop().unwrap();
+    }
 }

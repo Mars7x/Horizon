@@ -272,7 +272,7 @@ mod tests {
         let album = HorizonAlbum::new(root.join("album"));
         let now = Utc.with_ymd_and_hms(2026, 10, 15, 12, 0, 0).unwrap();
         let own = album
-            .new_capture_path(None, "Horizon", "png", now)
+            .new_capture_path(None, "Horizon", "jxl", now)
             .expect("capture path");
         fs::write(&own, b"own capture").expect("capture");
         let steam = root.join("Steam/userdata/123/760/remote/480/screenshots");
@@ -302,9 +302,9 @@ mod tests {
         let heroic = game("heroic", "Some/Game");
 
         let first = album
-            .new_capture_path(Some(&heroic), "Some Game", "png", now)
+            .new_capture_path(Some(&heroic), "Some Game", "jxl", now)
             .unwrap();
-        assert_eq!(first.file_name().unwrap(), "2026-10-10_14-30-12-345.png");
+        assert_eq!(first.file_name().unwrap(), "2026-10-10_14-30-12-345.jxl");
         assert!(first.parent().unwrap().ends_with("screenshots"));
         assert!(
             first
@@ -317,13 +317,13 @@ mod tests {
                 .to_string_lossy()
                 .starts_with("Some Game [")
         );
-        fs::write(&first, b"png").unwrap();
+        fs::write(&first, b"jxl").unwrap();
         // The same millisecond never overwrites.
         let second = album
-            .new_capture_path(Some(&heroic), "Some Game", "png", now)
+            .new_capture_path(Some(&heroic), "Some Game", "jxl", now)
             .unwrap();
-        assert_eq!(second.file_name().unwrap(), "2026-10-10_14-30-12-345-2.png");
-        fs::write(&second, b"png").unwrap();
+        assert_eq!(second.file_name().unwrap(), "2026-10-10_14-30-12-345-2.jxl");
+        fs::write(&second, b"jxl").unwrap();
         // A capture still being written is invisible.
         let writing = album.new_capture_path(None, "Horizon", "mp4", now).unwrap();
         assert_eq!(
@@ -332,9 +332,14 @@ mod tests {
         );
         fs::write(part_path(&writing), b"mp4").unwrap();
 
+        // Retired image formats remain untouched but are no longer listed.
+        let legacy = first.parent().unwrap().join("legacy.png");
+        fs::write(&legacy, b"preserved legacy picture").unwrap();
+        assert!(album.new_capture_path(None, "Horizon", "png", now).is_err());
         let mut captures = album.scan();
         captures.sort_by(newest_first);
         assert_eq!(captures.len(), 2);
+        assert_eq!(fs::read(&legacy).unwrap(), b"preserved legacy picture");
         assert!(captures.iter().all(|c| c.game() == Some(&heroic)));
         assert!(
             captures
@@ -360,11 +365,11 @@ mod tests {
         let album = HorizonAlbum::new(root.join("album"));
         let now = Utc.with_ymd_and_hms(2026, 10, 10, 14, 30, 12).unwrap();
         let shot = album
-            .new_capture_path(Some(&game("steam", "10")), "Test game", "png", now)
+            .new_capture_path(Some(&game("steam", "10")), "Test game", "jxl", now)
             .unwrap();
-        fs::write(&shot, b"png").unwrap();
-        let outside = root.join("steam-screenshot.png");
-        fs::write(&outside, b"png").unwrap();
+        fs::write(&shot, b"jxl").unwrap();
+        let outside = root.join("steam-screenshot.jxl");
+        fs::write(&outside, b"jxl").unwrap();
         let not_media = root.join("album/horizon/notes.txt");
         fs::create_dir_all(not_media.parent().unwrap()).unwrap();
         fs::write(&not_media, b"text").unwrap();
@@ -374,7 +379,7 @@ mod tests {
         assert!(album.delete(&not_media).is_err(), "not a capture");
         assert!(
             album
-                .delete(&root.join("album/../steam-screenshot.png"))
+                .delete(&root.join("album/../steam-screenshot.jxl"))
                 .is_err()
         );
         album.delete(&shot).unwrap();
@@ -400,12 +405,12 @@ mod tests {
         let reference = game("gba", &format!("sha256:{}", "a".repeat(64)));
         let now = Utc.with_ymd_and_hms(2026, 10, 10, 14, 30, 12).unwrap();
         let shot = album
-            .new_capture_path(Some(&reference), "Readable title", "png", now)
+            .new_capture_path(Some(&reference), "Readable title", "jxl", now)
             .unwrap();
         fs::write(&shot, b"keep capture").unwrap();
-        let outside = root.join("outside.png");
+        let outside = root.join("outside.jxl");
         fs::write(&outside, b"outside").unwrap();
-        let link = shot.parent().unwrap().join("linked.png");
+        let link = shot.parent().unwrap().join("linked.jxl");
         std::os::unix::fs::symlink(&outside, &link).unwrap();
         assert_eq!(album.scan().len(), 1);
         assert!(album.delete(&link).is_err());

@@ -72,17 +72,131 @@ pub fn decode(bytes: &[u8], format: Option<ImageFormat>) -> ImageResult<DynamicI
     reader(ImageReader::new(Cursor::new(bytes)), format)?.decode()
 }
 
-/// A GIF's frames, decoded one at a time as they are taken (each a whole
-/// composited picture), under the same limits. `None` when the file isn't
-/// a GIF, whatever its name says.
-pub fn gif_frames(path: &Path) -> ImageResult<Option<Frames<'static>>> {
-    let reader = reader(ImageReader::open(path)?, None)?;
-    if reader.format() != Some(ImageFormat::Gif) {
-        return Ok(None);
+/// Original input imports are bounded independently of decoded image limits.
+pub fn read_bytes(path: &Path) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)?
+        .take(64 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > 64 * 1024 * 1024 {
+        return Err(std::io::Error::other("image input exceeds its size limit"));
     }
-    let mut decoder = GifDecoder::new(reader.into_inner())?;
-    decoder.set_limits(limits())?;
-    Ok(Some(decoder.into_frames()))
+    Ok(bytes)
+}
+
+/// A worker-side lossless write; callers own temporary paths/publication.
+pub fn write_jxl(path: &Path, image: &RgbaImage) -> std::io::Result<()> {
+    let file = std::fs::File::create(path)?;
+    crate::platform::jpeg_xl::write_rgba(&file, image.as_raw(), image.width(), image.height())
+}
+
+pub fn is_jxl(bytes: &[u8]) -> bool {
+    bytes.starts_with(&[0xff, 0x0a]) || bytes.starts_with(b"\0\0\0\x0cJXL \r\n\x87\n")
+}
+
+/// Bounded frame-by-frame JPEG XL reader. Rendered frames include composition,
+/// orientation and alpha; the low-level API handles animation unavailable in
+/// the image-rs integration. Used by profiles and Album media workers.
+pub struct JxlAnimation {
+    image: jxl_oxide::JxlImage,
+    index: usize,
+    tick_numerator: u32,
+    tick_denominator: u32,
+    pub loops: u32,
+}
+
+fn jxl_error(error: impl std::fmt::Display) -> image::ImageError {
+    image::ImageError::IoError(std::io::Error::other(error.to_string()))
+}
+
+impl JxlAnimation {
+    pub fn frame_count(&self) -> usize {
+        self.image.num_loaded_keyframes()
+    }
+    pub fn from_bytes(bytes: &[u8]) -> ImageResult<Option<Self>> {
+        if !is_jxl(bytes) {
+            return Ok(None);
+        }
+        if bytes.len() > 64 * 1024 * 1024 {
+            return Err(jxl_error("JXL input too large"));
+        }
+        let mut image = jxl_oxide::JxlImage::builder()
+            .alloc_tracker(jxl_oxide::AllocTracker::with_limit(MAX_ALLOC as usize))
+            .read(bytes)
+            .map_err(jxl_error)?;
+        if image.width() > MAX_SIDE
+            || image.height() > MAX_SIDE
+            || u64::from(image.width()) * u64::from(image.height()) * 4 > 64 * 1024 * 1024
+            || image.num_loaded_keyframes() > 600
+            || !image.is_loading_done()
+        {
+            return Err(jxl_error("JXL animation exceeds limits or is incomplete"));
+        }
+        let Some(header) = image.image_header().metadata.animation.as_ref() else {
+            return Ok(None);
+        };
+        if image.num_loaded_keyframes() < 2 {
+            return Ok(None);
+        }
+        let (tick_numerator, tick_denominator, loops) = (
+            header.tps_numerator,
+            header.tps_denominator,
+            header.num_loops,
+        );
+        if tick_numerator == 0 || tick_denominator == 0 {
+            return Err(jxl_error("invalid JXL animation timing"));
+        }
+        image.request_color_encoding(jxl_oxide::EnumColourEncoding::srgb(
+            jxl_oxide::RenderingIntent::Relative,
+        ));
+        Ok(Some(Self {
+            image,
+            index: 0,
+            tick_numerator,
+            tick_denominator,
+            loops,
+        }))
+    }
+
+    pub fn rewind(&mut self) {
+        self.index = 0;
+    }
+
+    pub fn next_frame(&mut self) -> ImageResult<Option<(RgbaImage, Duration)>> {
+        if self.index >= self.image.num_loaded_keyframes() {
+            return Ok(None);
+        }
+        let render = self.image.render_frame(self.index).map_err(jxl_error)?;
+        self.index += 1;
+        let nanos =
+            (u128::from(render.duration()) * u128::from(self.tick_denominator) * 1_000_000_000
+                / u128::from(self.tick_numerator))
+            .max(1_000_000);
+        let delay = Duration::from_nanos(u64::try_from(nanos).map_err(jxl_error)?);
+        let mut stream = render.stream();
+        let (width, height, channels) = (stream.width(), stream.height(), stream.channels());
+        if !(1..=4).contains(&channels) {
+            return Err(jxl_error("unsupported JXL channels"));
+        }
+        let mut samples = vec![0u8; width as usize * height as usize * channels as usize];
+        if stream.write_to_buffer(&mut samples) != samples.len() {
+            return Err(jxl_error("incomplete JXL frame"));
+        }
+        let mut rgba = RgbaImage::new(width, height);
+        for (pixel, source) in rgba
+            .pixels_mut()
+            .zip(samples.chunks_exact(channels as usize))
+        {
+            pixel.0 = match channels {
+                1 => [source[0], source[0], source[0], 255],
+                2 => [source[0], source[0], source[0], source[1]],
+                3 => [source[0], source[1], source[2], 255],
+                _ => [source[0], source[1], source[2], source[3]],
+            };
+        }
+        Ok(Some((rgba, delay)))
+    }
 }
 
 /// Frame delays below this play at [`UNSET_FRAME_DELAY`], as browsers do
@@ -109,6 +223,29 @@ pub fn small_animation(
     max_frames: usize,
     square: bool,
 ) -> ImageResult<Option<Vec<(RgbaImage, Duration)>>> {
+    if is_jxl(bytes) {
+        let Some(mut animation) = JxlAnimation::from_bytes(bytes)? else {
+            return Ok(None);
+        };
+        if animation.frame_count() > max_frames {
+            return Err(jxl_error("animation has too many frames"));
+        }
+        let mut frames = Vec::new();
+        while frames.len() < max_frames {
+            let Some((image, delay)) = animation.next_frame()? else {
+                break;
+            };
+            frames.push((
+                fit_animation_frame(DynamicImage::ImageRgba8(image), max, square),
+                delay,
+            ));
+            let total: usize = frames.iter().map(|(image, _)| image.as_raw().len()).sum();
+            if total > 128 * 1024 * 1024 {
+                return Err(jxl_error("animation frames exceed memory limit"));
+            }
+        }
+        return Ok((frames.len() > 1).then_some(frames));
+    }
     let format = image::guess_format(bytes)?;
     let frames: Frames<'_> = match format {
         ImageFormat::Gif => {
@@ -125,25 +262,36 @@ pub fn small_animation(
         }
         _ => return Ok(None),
     };
-    let decoded: Vec<_> = frames
-        .take(max_frames)
-        .map_while(Result::ok)
-        .map(|frame| {
-            let delay = frame_delay(frame.delay().into());
-            let mut image = DynamicImage::ImageRgba8(frame.into_buffer());
-            if square {
-                let side = image.width().min(image.height());
-                image = image.crop_imm(
-                    (image.width() - side) / 2,
-                    (image.height() - side) / 2,
-                    side,
-                    side,
-                );
-            }
-            (fit(image, max), delay)
-        })
-        .collect();
+    let mut decoded = Vec::new();
+    let mut total = 0usize;
+    for frame in frames {
+        if decoded.len() == max_frames {
+            return Err(jxl_error("animation has too many frames"));
+        }
+        let frame = frame?;
+        let delay = frame_delay(frame.delay().into());
+        let image = fit_animation_frame(DynamicImage::ImageRgba8(frame.into_buffer()), max, square);
+        total = total.saturating_add(image.as_raw().len());
+        if total > 128 * 1024 * 1024 {
+            return Err(jxl_error("animation exceeds memory limit"));
+        }
+        decoded.push((image, delay));
+    }
+
     Ok((decoded.len() > 1).then_some(decoded))
+}
+
+fn fit_animation_frame(mut image: DynamicImage, max: (u32, u32), square: bool) -> RgbaImage {
+    if square {
+        let side = image.width().min(image.height());
+        image = image.crop_imm(
+            (image.width() - side) / 2,
+            (image.height() - side) / 2,
+            side,
+            side,
+        );
+    }
+    fit(image, max)
 }
 
 /// Width and height from the header alone.
@@ -218,13 +366,7 @@ mod tests {
         assert_eq!(frames[0].1, Duration::from_millis(30));
         let squared = small_animation(&gif, (3, 3), 10, true).unwrap().unwrap();
         assert_eq!(squared[0].0.dimensions(), (3, 3));
-        assert_eq!(
-            small_animation(&gif, (3, 3), 2, false)
-                .unwrap()
-                .unwrap()
-                .len(),
-            2
-        );
+        assert!(small_animation(&gif, (3, 3), 2, false).is_err());
         assert!(
             small_animation(&animated_gif(1), (3, 3), 10, false)
                 .unwrap()
@@ -257,25 +399,6 @@ mod tests {
             assert_eq!(image.get_pixel(31, 0).0, [248, 0, 200, 255]);
             assert_eq!(image.get_pixel(0, 23).0, [0, 230, 200, 255]);
         }
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn gif_frames_come_one_by_one_and_only_from_gifs() {
-        let dir = std::env::temp_dir().join(format!("horizon-gif-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let gif = dir.join("clip.gif");
-        std::fs::write(&gif, animated_gif(3)).unwrap();
-        let frames = gif_frames(&gif).unwrap().unwrap();
-        let reds: Vec<u8> = frames
-            .map(|frame| frame.unwrap().buffer().get_pixel(0, 0).0[0])
-            .collect();
-        assert_eq!(reds, [0, 80, 160]);
-        // The first frame is the photo.
-        assert_eq!(decode_file(&gif).unwrap().width(), 6);
-        let not_gif = dir.join("fake.gif");
-        std::fs::write(&not_gif, png(2, 2)).unwrap();
-        assert!(gif_frames(&not_gif).unwrap().is_none());
         std::fs::remove_dir_all(dir).unwrap();
     }
 

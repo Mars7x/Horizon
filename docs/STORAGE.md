@@ -16,15 +16,15 @@ data/
     backups/<game name>.previous.sav
   album/gba/<game>/
     game.json
-    screenshots/<UTC timestamp>.png
+    screenshots/<UTC timestamp>.jxl
     recordings/<UTC timestamp>.<extension>
   album/horizon/screenshots/                 # captures without a game
   profile/
     profile.json
-    pictures/custom.png
-    pictures/custom-original
-    pictures/steam.png
-    pictures/steam-original
+    pictures/custom.jxl
+    pictures/custom-animation.jxl
+    pictures/steam.jxl
+    pictures/steam-animation.jxl
   artwork/custom/                            # reserved for custom originals
 config/
   appearance.json
@@ -40,8 +40,8 @@ cache/
 ```
 
 Only implemented writers create files. There is no recording implementation or
-custom-cover picker. Profile animation originals are extensionless because their
-content can be GIF or APNG. The existing local/SteamGridDB artwork and Album cache
+custom-cover picker. Profile stills and normalized animations are lossless JXL. Retained pre-JXL
+profile files remain readable until the user replaces/removes the picture. The existing local/SteamGridDB artwork and Album cache
 locations already follow the new grouping; they are not moved or reclassified.
 
 ## Game identity and readable names
@@ -96,8 +96,8 @@ Four manual slots and one automatic resume point use complete bundles:
 
 ```text
 saves/gba/<game>/states/mgba/
-  resume/<game name>.resume.{state,json,png}
-  slot-01/<game name>.slot-01.{state,json,png}
+  resume/<game name>.resume.{state,json,jxl}
+  slot-01/<game name>.slot-01.{state,json,jxl}
   slot-02/…
   slot-03/…
   slot-04/…
@@ -106,7 +106,8 @@ saves/gba/<game>/states/mgba/
 
 Metadata records format version, full ROM identity, slot, UTC timestamp, exact
 core name/version/binary hash, byte count and SHA-256 hashes of state and preview.
-Previews are native 240×160 PNGs and stay with durable states. Regular saves remain
+Version-2 previews are native 240×160 lossless JXL and stay with durable states.
+Version-1 bundles with PNG previews remain readable and are preserved. Regular saves remain
 core-independent. State reads are bounded, reject symlink components, validate
 metadata/checksums/dimensions and run on the player worker. No state directory
 is created before the first write.

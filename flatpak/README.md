@@ -2,7 +2,7 @@
 
 The [manifest](io.github.Mars7x.Horizon.yml) is authoritative for app ID, runtime,
 SDK, permissions and native modules. It builds the Rust/Slint Winit/Skia app,
-SDL3 and bundled LINE Seed JP fonts. FFmpeg and PipeWire come from the runtime.
+SDL3 and bundled LINE Seed JP fonts. FFmpeg, PipeWire and libjxl come from the runtime.
 Use GNOME Builder with this manifest; [development](../docs/DEVELOPMENT.md) covers
 checks and verification boundaries.
 

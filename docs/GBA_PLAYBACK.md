@@ -67,7 +67,7 @@ can still exhaust a bounded buffer.
 Restart retains the current speed; launching another game starts at 1×.
 
 Take screenshot writes the native unfiltered frame to Horizon's Album, without
-the pause panel, HUD or shader/grid treatment. Only after PNG publication, a native-pixel
+the pause panel, HUD or shader/grid treatment. Only after lossless JXL publication, a native-pixel
 thumbnail appears beside the unchanged action label, scales from 90% to full size
 and fades in over the shared 180 ms value duration. It holds for one second,
 then fades away. A quiet 120 ms shutter cue follows UI Sounds. The paused frame,
