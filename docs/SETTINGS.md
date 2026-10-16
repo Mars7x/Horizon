@@ -29,7 +29,7 @@ always released/blocked while inactive. Explicit pause remains paused.
 Cores → mGBA contains Sunlight level (0–10), Video filter and Colour correction.
 Sunlight is a manual value for solar-sensor games, default zero, without hardware
 sensor access. Video filter cycles between None (sharp pixels), LCD (subtle
-subpixel/grid effect), Smooth (bilinear scaling) and Smooth pixel art (3× xBRZ).
+subpixel/grid effect), Smooth (bilinear scaling) and Smooth pixel art (6× xBRZ).
 Colour correction independently approximates the original GBA display using the
 credited sRGB profile. Filter/correction default off. These are Horizon presets;
 RetroArch shader files, audio smoothing controls, BIOS, core download, advanced

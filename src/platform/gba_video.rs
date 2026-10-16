@@ -8,17 +8,18 @@ pub(super) fn apply(mut frame: Frame, filter: VideoFilter) -> Frame {
         VideoFilter::Smooth | VideoFilter::Lcd | VideoFilter::Xbrz
     );
     if filter == VideoFilter::Xbrz {
-        // The validated native frame is tiny; 3× preserves the aspect ratio.
+        // Reconstruct at 6× before the final fit, so a 3× intermediate
+        // is not magnified into soft edges on larger windows.
         // Bound output allocation even if a future core reports larger frames.
         if frame.width <= 512
             && frame.height <= 512
             && frame.rgba.len() == frame.width as usize * frame.height as usize * 4
         {
             let rgba =
-                xbrz::scale_rgba(&frame.rgba, frame.width as usize, frame.height as usize, 3);
+                xbrz::scale_rgba(&frame.rgba, frame.width as usize, frame.height as usize, 6);
             return Frame {
-                width: frame.width * 3,
-                height: frame.height * 3,
+                width: frame.width * 6,
+                height: frame.height * 6,
                 rgba,
                 // Fit the filtered subpixels smoothly at fractional window
                 // scales; nearest-neighbour would enlarge their small steps.
@@ -164,7 +165,7 @@ mod tests {
             },
             VideoFilter::Xbrz,
         );
-        assert_eq!((frame.width, frame.height), (24, 24));
+        assert_eq!((frame.width, frame.height), (48, 48));
         assert!(frame.smooth);
         assert!(
             frame
@@ -237,6 +238,11 @@ mod tests {
             slint::TimerMode::Repeated,
             std::time::Duration::from_millis(400),
             move || {
+                // A large snapshot can take longer than the timer interval;
+                // ignore a queued tick after requesting event-loop shutdown.
+                if progress.get() >= 4 {
+                    return;
+                }
                 let ui = weak.upgrade().unwrap();
                 let filter = [
                     VideoFilter::None,
