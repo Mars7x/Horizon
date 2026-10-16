@@ -21,7 +21,7 @@ import and Ready. Completed setup is skipped; unfinished confirmed steps resume.
 | Activity | Retained session totals, recent history and distinct lifetime counters |
 | Album | Horizon-owned pictures/clips, viewer, video playback and confirmed deletion |
 | Achievements | Retained page and Milestones layout; no provider, “Achievements unavailable” |
-| Settings | Appearance, Controller, Cores → mGBA, Third-Party → SteamGridDB and Steam Account |
+| Settings | Appearance, Controller → GBA button mapping, Cores → mGBA, Third-Party → SteamGridDB and Steam Account |
 | Profile | Local name/picture, Steam profile picture and read-only Steam friends |
 
 Utilities are **Album, Activity, Achievements, Settings**, in that order.

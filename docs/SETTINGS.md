@@ -14,7 +14,25 @@ Focus is distinct from the selected value. See [UI standards](UI_STANDARDS.md).
 
 Controller has Swap Select and Back, plus Swap Hints. The first changes controller
 menu actions and gameplay A/B; the second determines whether hints follow the swap. Keyboard
-Enter/Escape remains unchanged. Values live in `controller.json`.
+Enter/Escape remains unchanged. Button mapping opens a shared settings subpage
+for GBA A, B, L, R, Start and Select. Each row pairs a named GBA control with
+its assigned controller input in a keycap, using controller-family labels;
+selecting either side changes the same
+assignment. Select a row, release held controls, then
+press a face button, shoulder, trigger, Start or Select. A binding already used by
+another action swaps those two assignments. D-pad/stick directions and the
+Guide/stick-click quick-menu controls stay fixed. Stick click, Guide, Escape or
+the dialog's Cancel button cancels capture. Capture times out after ten seconds;
+disconnect, device changes and focus loss cancel it without saving.
+
+Mappings apply to all controllers after family normalization, independently of
+keyboard gameplay. Swap Select and Back exchanges mapped gameplay A/B; the rows
+show the effective assignment. Restore defaults asks for confirmation with Cancel
+focused and preserves the two menu/hint switches. Values live in `controller.json`.
+Loads/writes use a serial worker and the shared atomic settings store. Old files
+without mappings get the existing defaults; invalid files remain intact and
+report an error. Values and live input publish only after a successful write.
+See [ADR 0208](adr/0208-controller-remapping-and-playback-speed.md).
 
 ## Cores
 

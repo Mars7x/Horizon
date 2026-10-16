@@ -1,5 +1,5 @@
 //! Controller-first Settings pages; Slint displays state only.
-use slint::ComponentHandle;
+use slint::{ComponentHandle, Model};
 use std::{
     cell::{Cell, RefCell},
     path::PathBuf,
@@ -53,6 +53,13 @@ struct PageState {
     confirm_focus: i32,
 }
 
+struct BindingCapture {
+    row: usize,
+    since: std::time::Instant,
+    armed: bool,
+    device: Option<u64>,
+}
+
 pub struct SettingsController {
     page: RefCell<PageState>,
     location_changed: CallbackSlot<dyn Fn(crate::navigation::PageLocation)>,
@@ -62,7 +69,14 @@ pub struct SettingsController {
     steam_account_changed: CallbackSlot<dyn Fn()>,
     appearance: AppearanceController,
     controller: Cell<ControllerPreferences>,
-    controller_path: PathBuf,
+    controller_io: controller_settings::ControllerSettings,
+    controller_ready: Cell<bool>,
+    controller_busy: Cell<bool>,
+    controller_feedback: RefCell<String>,
+    mapping_source: CallbackSlot<dyn Fn() -> Option<(u16, u64)>>,
+    capture: RefCell<Option<BindingCapture>>,
+    capture_timer: slint::Timer,
+    binding_model: Rc<slint::VecModel<crate::ControllerBindingRow>>,
     cores: crate::services::core_settings::CoreSettings,
     core_values: Cell<crate::domain::core_settings::CorePreferences>,
     core_ready: Cell<bool>,
@@ -90,6 +104,7 @@ impl SettingsController {
         let (notify, drain) = super::wake::drain_notify(move |controller: &Self| {
             if let Some(ui) = weak_ui.upgrade() {
                 controller.drain_cores(&ui);
+                controller.drain_controller(&ui);
             }
         });
         let controller = Rc::new(Self {
@@ -100,8 +115,18 @@ impl SettingsController {
             steam_account,
             steam_account_changed: RefCell::new(None),
             appearance,
-            controller: Cell::new(controller_settings::load_preferences(&controller_path)),
-            controller_path,
+            controller: Cell::default(),
+            controller_io: controller_settings::ControllerSettings::new(
+                controller_path,
+                notify.clone(),
+            ),
+            controller_ready: Cell::new(false),
+            controller_busy: Cell::new(false),
+            controller_feedback: RefCell::new("Loading…".into()),
+            mapping_source: RefCell::new(None),
+            capture: RefCell::new(None),
+            capture_timer: slint::Timer::default(),
+            binding_model: Rc::new(slint::VecModel::default()),
             cores: crate::services::core_settings::CoreSettings::new(core_path, notify),
             core_values: Cell::default(),
             core_ready: Cell::new(false),
@@ -118,6 +143,17 @@ impl SettingsController {
         drain.bind(&controller);
         controller.publish(ui);
         controller.bind_callbacks(ui);
+        let weak = Rc::downgrade(&controller);
+        let weak_ui = ui.as_weak();
+        controller.capture_timer.start(
+            slint::TimerMode::Repeated,
+            std::time::Duration::from_millis(16),
+            move || {
+                if let (Some(controller), Some(ui)) = (weak.upgrade(), weak_ui.upgrade()) {
+                    controller.poll_binding(&ui);
+                }
+            },
+        );
         controller
     }
 
@@ -232,22 +268,137 @@ impl SettingsController {
         if next == current {
             return;
         }
-        let result = controller_settings::save_preferences(&self.controller_path, &next);
-        if let Err(error) = &result {
-            tracing::warn!(%error, "could not save controller settings");
-        } else {
-            self.controller.set(next);
-            if let Some(callback) = self.controller_changed.borrow().as_ref() {
-                callback(next);
-            }
-            self.cue(UiSoundCue::Ok);
+        self.save_controller(ui, next);
+    }
+    fn save_controller(&self, ui: &AppWindow, next: ControllerPreferences) {
+        if !self.controller_ready.get() || self.controller_busy.get() {
+            self.publish(ui);
+            return;
         }
-        self.page.borrow_mut().feedback = if result.is_ok() {
-            String::new()
+        if self.controller_io.requests.send(next).is_ok() {
+            self.controller_busy.set(true);
+            self.controller_feedback.borrow_mut().clear();
         } else {
-            "Couldn't save".into()
-        };
+            *self.controller_feedback.borrow_mut() = "Couldn't save controller settings".into();
+        }
         self.publish(ui);
+    }
+    fn drain_controller(&self, ui: &AppWindow) {
+        for result in self.controller_io.results.try_iter() {
+            let saving = self.controller_busy.replace(false);
+            match result {
+                Ok(values) => {
+                    self.controller.set(values);
+                    self.controller_ready.set(true);
+                    self.controller_feedback.borrow_mut().clear();
+                    if let Some(callback) = self.controller_changed.borrow().as_ref() {
+                        callback(values);
+                    }
+                    if saving {
+                        self.cue(UiSoundCue::Ok);
+                    }
+                }
+                Err(_) => {
+                    *self.controller_feedback.borrow_mut() = if saving {
+                        "Couldn't save. Previous bindings retained."
+                    } else {
+                        "Couldn't load controller settings. Check the saved file and restart."
+                    }
+                    .into();
+                }
+            }
+        }
+        self.publish(ui);
+    }
+    pub fn set_mapping_source(&self, source: Rc<dyn Fn() -> Option<(u16, u64)>>) {
+        *self.mapping_source.borrow_mut() = Some(source);
+    }
+    pub fn cancel_binding(&self, ui: &AppWindow) {
+        if self.capture.borrow_mut().take().is_some() {
+            self.capture_timer.stop();
+            self.cue(UiSoundCue::Back);
+            self.publish(ui);
+        }
+    }
+    fn begin_binding(&self, ui: &AppWindow, row: usize) {
+        if !self.controller_ready.get() || self.controller_busy.get() {
+            return;
+        }
+        *self.capture.borrow_mut() = Some(BindingCapture {
+            row,
+            since: std::time::Instant::now(),
+            armed: false,
+            device: None,
+        });
+        self.capture_timer.restart();
+        self.controller_feedback.borrow_mut().clear();
+        self.publish(ui);
+    }
+    fn poll_binding(&self, ui: &AppWindow) {
+        if self.capture.borrow().is_none() {
+            self.capture_timer.stop();
+            return;
+        }
+        if ui.get_current_route() != crate::AppRouteView::Settings {
+            self.cancel_binding(ui);
+            return;
+        }
+        let snapshot = self
+            .mapping_source
+            .borrow()
+            .as_ref()
+            .and_then(|source| source());
+        let mut capture = self.capture.borrow_mut();
+        let Some(current) = capture.as_mut() else {
+            return;
+        };
+        if current.since.elapsed() >= std::time::Duration::from_secs(10) {
+            capture.take();
+            drop(capture);
+            *self.controller_feedback.borrow_mut() = "No button received. Try again.".into();
+            self.publish(ui);
+            return;
+        }
+        let Some((buttons, device)) = snapshot else {
+            if current.device.is_some() {
+                capture.take();
+                drop(capture);
+                *self.controller_feedback.borrow_mut() =
+                    "Controller disconnected. Try again.".into();
+                self.publish(ui);
+            }
+            return;
+        };
+        if current.device.is_some_and(|previous| previous != device) {
+            capture.take();
+            drop(capture);
+            *self.controller_feedback.borrow_mut() = "Controller changed. Try again.".into();
+            self.publish(ui);
+            return;
+        }
+        current.device = Some(device);
+        if buttons == 0 {
+            current.armed = true;
+            return;
+        }
+        if !current.armed {
+            return;
+        }
+        let pressed: Vec<_> = crate::domain::controller::SOURCES
+            .into_iter()
+            .filter(|source| buttons & (1 << source) != 0)
+            .collect();
+        if pressed.len() != 1 {
+            current.armed = false;
+            return;
+        }
+        let row = current.row;
+        let source = pressed[0];
+        capture.take();
+        drop(capture);
+        let mut values = self.controller.get();
+        values.gba_bindings = values.gba_bindings.assign(row, source, values.swap_confirm);
+        self.save_controller(ui, values);
     }
 
     pub fn set_sound_changed(&self, callback: Rc<dyn Fn(bool)>) {
@@ -299,7 +450,10 @@ impl SettingsController {
     }
     pub fn has_transient(&self, ui: &AppWindow) -> bool {
         let page = self.page.borrow();
-        page.editing_key || page.confirm.is_some() || ui.get_settings_refresh_open()
+        self.capture.borrow().is_some()
+            || page.editing_key
+            || page.confirm.is_some()
+            || ui.get_settings_refresh_open()
     }
     pub fn restore_page(&self, ui: &AppWindow, view: SettingsView) {
         let mut page = self.page.borrow_mut();
@@ -325,6 +479,8 @@ impl SettingsController {
     }
 
     fn reset(&self, ui: &AppWindow) {
+        self.capture.borrow_mut().take();
+        self.capture_timer.stop();
         self.paste_generation.fetch_add(1, Ordering::Relaxed);
         *self.page.borrow_mut() = PageState::default();
         ui.set_settings_editing_key(false);
@@ -337,6 +493,16 @@ impl SettingsController {
     /// Back from the category root is left to the normal Navigator.
     pub fn handle_action(&self, ui: &AppWindow, event: UiActionEvent) -> bool {
         let action = event.action;
+        if self.capture.borrow().is_some() {
+            let keyboard =
+                ui.global::<crate::InputGlyphs>().get_family() == crate::GlyphFamily::Keyboard;
+            if matches!(action, UiAction::Home | UiAction::StickPress)
+                || (keyboard && matches!(action, UiAction::Back | UiAction::Accept))
+            {
+                self.cancel_binding(ui);
+            }
+            return true;
+        }
         // A modal refresh owns navigation until dismissed. Hide does not cancel
         // the worker; existing covers continue updating in the background.
         if ui.get_settings_refresh_open() {
@@ -490,6 +656,13 @@ impl SettingsController {
             }
         });
         let weak = ui.as_weak();
+        let capture_self = Rc::clone(self);
+        let capture_ui = ui.as_weak();
+        ui.on_settings_cancel_binding(move || {
+            if let Some(ui) = capture_ui.upgrade() {
+                capture_self.cancel_binding(&ui);
+            }
+        });
         let controller = Rc::clone(self);
         ui.on_settings_activate(move |index| {
             if let Some(ui) = weak.upgrade() {
@@ -641,7 +814,36 @@ impl SettingsController {
                 self.change_core(ui, selected, None);
                 return;
             }
+            SettingsView::GameBindings => {
+                if !self.controller_ready.get() || self.controller_busy.get() {
+                    return;
+                }
+                if self.capture.borrow().is_some() {
+                    return;
+                }
+                if (0..6).contains(&selected) {
+                    self.page.borrow_mut().selected = selected;
+                    self.begin_binding(ui, selected as usize);
+                } else if selected == 6 {
+                    let mut page = self.page.borrow_mut();
+                    page.selected = 6;
+                    page.confirm = Some(6);
+                    page.confirm_focus = 0;
+                    drop(page);
+                    self.publish(ui);
+                }
+                return;
+            }
             SettingsView::Controller => {
+                if selected == 2 {
+                    let mut page = self.page.borrow_mut();
+                    page.view = SettingsView::GameBindings;
+                    page.selected = 0;
+                    drop(page);
+                    self.cue(UiSoundCue::Ok);
+                    self.publish(ui);
+                    return;
+                }
                 let current = self.controller.get();
                 let on = match selected {
                     0 => !current.swap_confirm,
@@ -750,7 +952,11 @@ impl SettingsController {
         let Some(row) = self.page.borrow_mut().confirm.take() else {
             return;
         };
-        if choice == 1 {
+        if choice == 1 && self.page.borrow().view == SettingsView::GameBindings {
+            let mut next = self.controller.get();
+            next.gba_bindings = Default::default();
+            self.save_controller(ui, next);
+        } else if choice == 1 {
             self.remove(ui, row);
         } else {
             self.cue(UiSoundCue::Back);
@@ -981,6 +1187,10 @@ impl SettingsController {
     }
 
     fn back_inside(&self, ui: &AppWindow) -> bool {
+        if self.capture.borrow().is_some() {
+            self.cancel_binding(ui);
+            return true;
+        }
         if ui.get_settings_refresh_open() {
             ui.set_settings_refresh_open(false);
             self.cue(UiSoundCue::Back);
@@ -1013,9 +1223,48 @@ impl SettingsController {
             SettingsView::SteamAccount => 3,
             SettingsView::SteamGridDb => 4,
             SettingsView::Controller => 5,
+            SettingsView::GameBindings => 8,
             SettingsView::Cores => 6,
             SettingsView::Mgba => 7,
         });
+        ui.set_settings_binding_open(self.capture.borrow().is_some());
+        ui.set_settings_binding_title(
+            self.capture
+                .borrow()
+                .as_ref()
+                .map(|capture| {
+                    format!(
+                        "Assign GBA {}",
+                        crate::domain::controller::ACTION_NAMES[capture.row]
+                    )
+                })
+                .unwrap_or_default()
+                .into(),
+        );
+        let values = self.controller.get();
+        let rows: Vec<_> = crate::domain::controller::ACTION_NAMES
+            .into_iter()
+            .enumerate()
+            .map(|(row, title)| crate::ControllerBindingRow {
+                title: title.into(),
+                value: binding_label(
+                    values.gba_bindings.source(row, values.swap_confirm),
+                    ui.global::<crate::InputGlyphs>().get_family(),
+                )
+                .into(),
+            })
+            .collect();
+        for (index, row) in rows.into_iter().enumerate() {
+            if let Some(previous) = self.binding_model.row_data(index) {
+                if previous.title != row.title || previous.value != row.value {
+                    self.binding_model.set_row_data(index, row);
+                }
+            } else {
+                self.binding_model.push(row);
+            }
+        }
+        ui.set_settings_binding_rows(self.binding_model.clone().into());
+        ui.set_settings_controller_ready(self.controller_ready.get());
         ui.set_settings_core_ready(self.core_ready.get());
         ui.set_settings_core_filter(self.core_values.get().mgba.video_filter.label().into());
         ui.set_settings_core_color(self.core_values.get().mgba.color_correction);
@@ -1049,21 +1298,35 @@ impl SettingsController {
         ui.set_settings_prefer_artwork(settings.prefer_steamgriddb_artwork());
         ui.set_settings_editing_key(page.editing_key);
         ui.set_settings_editor_target(page.editor_target);
-        ui.set_settings_feedback(page.feedback.clone().into());
+        ui.set_settings_feedback(
+            if matches!(
+                page.view,
+                SettingsView::Controller | SettingsView::GameBindings
+            ) {
+                self.controller_feedback.borrow().clone()
+            } else {
+                page.feedback.clone()
+            }
+            .into(),
+        );
         ui.set_settings_confirm_open(page.confirm.is_some());
         ui.set_settings_confirm_focus(page.confirm_focus);
         let (title, action) = match page.view {
+            SettingsView::GameBindings => ("Restore default controls?", "Restore"),
             SettingsView::SteamAccount => ("Disconnect Steam?", "Disconnect"),
             _ => ("Remove your SteamGridDB key?", "Remove"),
         };
         ui.set_settings_confirm_title(title.into());
         ui.set_settings_confirm_action(action.into());
-        let secondary =
-            if page.editing_key || page.confirm.is_some() || ui.get_settings_refresh_open() {
-                ""
-            } else {
-                self.secondary_label(page.view, page.selected)
-            };
+        let secondary = if self.capture.borrow().is_some()
+            || page.editing_key
+            || page.confirm.is_some()
+            || ui.get_settings_refresh_open()
+        {
+            ""
+        } else {
+            self.secondary_label(page.view, page.selected)
+        };
         ui.set_settings_secondary_label(secondary.into());
         let view = page.view;
         drop(page);
@@ -1089,6 +1352,7 @@ fn settings_parent(view: SettingsView) -> Option<(SettingsView, i32)> {
         SettingsView::Mgba => Some((SettingsView::Cores, 0)),
         SettingsView::Appearance => Some((SettingsView::Root, 0)),
         SettingsView::Controller => Some((SettingsView::Root, 1)),
+        SettingsView::GameBindings => Some((SettingsView::Controller, 2)),
         SettingsView::ThirdParty => Some((SettingsView::Root, 2)),
         SettingsView::SteamGridDb => Some((SettingsView::ThirdParty, 0)),
         SettingsView::SteamAccount => Some((SettingsView::ThirdParty, 1)),
@@ -1102,7 +1366,8 @@ fn selection_count(view: SettingsView) -> i32 {
         SettingsView::Cores => 3,
         SettingsView::Mgba => 3,
         SettingsView::Appearance => 15,
-        SettingsView::Controller => 2,
+        SettingsView::Controller => 3,
+        SettingsView::GameBindings => 7,
         SettingsView::ThirdParty => 2,
         SettingsView::SteamGridDb => 3,
         SettingsView::SteamAccount => 2,
@@ -1257,7 +1522,7 @@ mod editor_navigation_tests {
     #[test]
     fn refresh_row_is_included_only_with_saved_key() {
         assert_eq!(super::selection_count(SettingsView::Root), 4);
-        assert_eq!(super::selection_count(SettingsView::Controller), 2);
+        assert_eq!(super::selection_count(SettingsView::Controller), 3);
         assert_eq!(super::selection_count(SettingsView::Appearance), 15);
         assert_eq!(super::selection_count(SettingsView::ThirdParty), 2);
         // Removing a key is X on its row, not a row of its own.
@@ -1589,5 +1854,297 @@ mod core_runtime_tests {
         );
         assert!(saved.mgba.color_correction);
         assert!(!saved.freeze_when_unfocused);
+    }
+}
+
+fn binding_label(source: Option<u8>, family: crate::GlyphFamily) -> &'static str {
+    let ps = family == crate::GlyphFamily::Playstation;
+    match source {
+        Some(8) => {
+            if ps {
+                "Cross"
+            } else {
+                "A"
+            }
+        }
+        Some(0) => {
+            if ps {
+                "Circle"
+            } else {
+                "B"
+            }
+        }
+        Some(9) => {
+            if ps {
+                "Square"
+            } else {
+                "X"
+            }
+        }
+        Some(1) => {
+            if ps {
+                "Triangle"
+            } else {
+                "Y"
+            }
+        }
+        Some(10) => match family {
+            crate::GlyphFamily::Xbox => "LB",
+            crate::GlyphFamily::Nintendo => "L",
+            crate::GlyphFamily::Keyboard => "Left shoulder",
+            _ => "L1",
+        },
+        Some(11) => match family {
+            crate::GlyphFamily::Xbox => "RB",
+            crate::GlyphFamily::Nintendo => "R",
+            crate::GlyphFamily::Keyboard => "Right shoulder",
+            _ => "R1",
+        },
+        Some(12) => match family {
+            crate::GlyphFamily::Nintendo => "ZL",
+            crate::GlyphFamily::Xbox => "LT",
+            crate::GlyphFamily::Keyboard => "Left trigger",
+            _ => "L2",
+        },
+        Some(13) => match family {
+            crate::GlyphFamily::Nintendo => "ZR",
+            crate::GlyphFamily::Xbox => "RT",
+            crate::GlyphFamily::Keyboard => "Right trigger",
+            _ => "R2",
+        },
+        Some(3) => match family {
+            crate::GlyphFamily::Playstation => "Options",
+            crate::GlyphFamily::Nintendo => "+",
+            _ => "Start",
+        },
+        Some(2) => match family {
+            crate::GlyphFamily::Playstation => "Share",
+            crate::GlyphFamily::Nintendo => "−",
+            _ => "Select",
+        },
+        _ => "Unavailable",
+    }
+}
+
+#[cfg(test)]
+mod mapping_runtime_tests {
+    use super::*;
+    use crate::{appearance::store::AppearanceStore, persistence::settings::SettingsStore};
+    #[test]
+    #[ignore = "requires Wayland and a fresh HORIZON_MAPPING_TEST_DIR"]
+    fn controller_mapping_capture_persist_cancel_and_restore() {
+        let directory = PathBuf::from(std::env::var_os("HORIZON_MAPPING_TEST_DIR").unwrap());
+        std::fs::create_dir_all(&directory).unwrap();
+        let ui = AppWindow::new().unwrap();
+        ui.window().set_size(slint::PhysicalSize::new(1280, 720));
+        ui.set_current_route(crate::AppRouteView::Settings);
+        let appearance =
+            AppearanceController::new(&ui, AppearanceStore::new(directory.join("appearance.json")))
+                .unwrap();
+        let theme = match std::env::var("HORIZON_MAPPING_THEME").as_deref() {
+            Ok("light") => ThemePreference::Light,
+            Ok("dark") => ThemePreference::Dark,
+            _ => ThemePreference::Black,
+        };
+        appearance.set_theme_preference(&ui, theme).unwrap();
+        ui.global::<crate::Motion>()
+            .set_reduced_motion(std::env::var_os("HORIZON_MAPPING_REDUCED").is_some());
+        let controller = SettingsController::new(
+            &ui,
+            SettingsService::load(SettingsStore::new(directory.join("artwork.json"))).unwrap(),
+            appearance,
+            Rc::new(RefCell::new(
+                SteamAccountService::load(directory.join("steam.json")).unwrap(),
+            )),
+            directory.join("controller.json"),
+            crate::platform::data_paths::CoreSettingsPaths {
+                playback: directory.join("playback.json"),
+                mgba: directory.join("cores/mgba.json"),
+            },
+        );
+        let snapshot = Rc::new(Cell::new(Some((1 << 8, 7))));
+        let source = snapshot.clone();
+        controller.set_mapping_source(Rc::new(move || source.get()));
+        ui.global::<crate::InputGlyphs>()
+            .set_family(crate::GlyphFamily::Xbox);
+        ui.show().unwrap();
+        let stage = Rc::new(Cell::new(0));
+        let progress = stage.clone();
+        let count = Cell::new(0);
+        let timer = slint::Timer::default();
+        let weak_ui = ui.as_weak();
+        let live = controller.clone();
+        let output = directory.clone();
+        timer.start(
+            slint::TimerMode::Repeated,
+            std::time::Duration::from_millis(150),
+            move || {
+                let ui = weak_ui.upgrade().unwrap();
+                count.set(count.get() + 1);
+                assert!(
+                    count.get() < 100,
+                    "mapping timed out: {}",
+                    ui.get_settings_feedback()
+                );
+                if count.get() < 10 || !live.controller_ready.get() || live.controller_busy.get() {
+                    return;
+                }
+                let shot = |name: &str| {
+                    let pixels = ui.window().take_snapshot().unwrap();
+                    image::save_buffer(
+                        output.join(format!("{name}.png")),
+                        pixels.as_bytes(),
+                        pixels.width(),
+                        pixels.height(),
+                        image::ColorType::Rgba8,
+                    )
+                    .unwrap();
+                };
+                match progress.get() {
+                    0 => {
+                        ui.invoke_settings_activate(1);
+                        assert_eq!(ui.get_settings_view(), 5);
+                        ui.invoke_settings_activate(2);
+                        assert_eq!(ui.get_settings_view(), 8);
+                        progress.set(100);
+                    }
+                    100 => {
+                        progress.set(101);
+                    }
+                    101 => {
+                        shot("mapping-defaults");
+                        ui.invoke_settings_activate(0);
+                        live.poll_binding(&ui);
+                        assert!(!live.capture.borrow().as_ref().unwrap().armed);
+                        snapshot.set(Some((0, 7)));
+                        live.poll_binding(&ui);
+                        assert!(live.capture.borrow().as_ref().unwrap().armed);
+                        progress.set(102);
+                    }
+                    102 => {
+                        progress.set(103);
+                    }
+                    103 => {
+                        shot("mapping-capture");
+                        live.handle_action(&ui, UiActionEvent::fresh(UiAction::Back));
+                        assert!(ui.get_settings_binding_open());
+                        snapshot.set(Some((1, 7)));
+                        live.poll_binding(&ui);
+                        assert!(!ui.get_settings_binding_open());
+                        progress.set(1);
+                    }
+                    1 => {
+                        assert_eq!(live.controller.get().gba_bindings.source(0, false), Some(0));
+                        assert_eq!(live.controller.get().gba_bindings.source(1, false), Some(8));
+                        assert_eq!(
+                            SettingsStore::new(output.join("controller.json"))
+                                .load_value::<ControllerPreferences>()
+                                .unwrap(),
+                            live.controller.get()
+                        );
+                        snapshot.set(Some((0, 7)));
+                        ui.invoke_settings_activate(1);
+                        live.poll_binding(&ui);
+                        snapshot.set(Some(((1 << 9) | (1 << 10), 7)));
+                        live.poll_binding(&ui);
+                        assert!(ui.get_settings_binding_open());
+                        snapshot.set(Some((0, 7)));
+                        live.poll_binding(&ui);
+                        snapshot.set(Some((1 << 9, 7)));
+                        live.poll_binding(&ui);
+                        progress.set(2);
+                    }
+                    2 => {
+                        assert_eq!(live.controller.get().gba_bindings.source(1, false), Some(9));
+                        shot("mapping-custom");
+                        live.set_controller_switch(&ui, 0, true);
+                        progress.set(3);
+                    }
+                    3 => {
+                        assert_eq!(live.controller.get().gba_bindings.source(0, true), Some(9));
+                        let saved = live.controller.get();
+                        snapshot.set(Some((0, 7)));
+                        ui.invoke_settings_activate(0);
+                        live.poll_binding(&ui);
+                        live.handle_action(&ui, UiActionEvent::fresh(UiAction::StickPress));
+                        assert!(!ui.get_settings_binding_open());
+                        assert_eq!(saved, live.controller.get());
+                        ui.invoke_settings_activate(0);
+                        live.poll_binding(&ui);
+                        snapshot.set(None);
+                        live.poll_binding(&ui);
+                        assert!(!ui.get_settings_binding_open());
+                        assert!(ui.get_settings_feedback().contains("disconnected"));
+                        snapshot.set(Some((0, 7)));
+                        ui.invoke_settings_activate(0);
+                        live.poll_binding(&ui);
+                        snapshot.set(Some((1, 8)));
+                        live.poll_binding(&ui);
+                        assert!(!ui.get_settings_binding_open());
+                        assert!(ui.get_settings_feedback().contains("changed"));
+                        snapshot.set(Some((0, 7)));
+                        ui.invoke_settings_activate(0);
+                        live.capture.borrow_mut().as_mut().unwrap().since -=
+                            std::time::Duration::from_secs(11);
+                        live.poll_binding(&ui);
+                        assert!(!ui.get_settings_binding_open());
+                        ui.invoke_settings_activate(6);
+                        assert_eq!(ui.get_settings_confirm_focus(), 0);
+                        live.choose_confirm(&ui, 0);
+                        assert_eq!(saved, live.controller.get());
+                        ui.invoke_settings_activate(6);
+                        progress.set(104);
+                    }
+                    104 => {
+                        progress.set(105);
+                    }
+                    105 => {
+                        shot("mapping-restore");
+                        live.choose_confirm(&ui, 1);
+                        progress.set(4);
+                    }
+                    4 => {
+                        assert_eq!(live.controller.get().gba_bindings, Default::default());
+                        assert!(live.controller.get().swap_confirm);
+                        assert!(live.back_inside(&ui));
+                        assert_eq!(
+                            (ui.get_settings_view(), ui.get_settings_selection()),
+                            (5, 2)
+                        );
+                        std::fs::rename(
+                            output.join("controller.json"),
+                            output.join("preserved.json"),
+                        )
+                        .unwrap();
+                        std::fs::create_dir(output.join("controller.json")).unwrap();
+                        let mut changed = live.controller.get();
+                        changed.gba_bindings = changed.gba_bindings.assign(0, 9, false);
+                        live.save_controller(&ui, changed);
+                        progress.set(5);
+                    }
+                    5 => {
+                        assert_eq!(live.controller.get().gba_bindings, Default::default());
+                        assert!(ui.get_settings_feedback().contains("retained"));
+                        std::fs::remove_dir(output.join("controller.json")).unwrap();
+                        std::fs::rename(
+                            output.join("preserved.json"),
+                            output.join("controller.json"),
+                        )
+                        .unwrap();
+                        assert_eq!(
+                            SettingsStore::new(output.join("controller.json"))
+                                .load_value::<ControllerPreferences>()
+                                .unwrap(),
+                            live.controller.get()
+                        );
+                        progress.set(6);
+                        slint::quit_event_loop().unwrap();
+                    }
+                    _ => {}
+                }
+            },
+        );
+        slint::run_event_loop().unwrap();
+        assert_eq!(stage.get(), 6);
     }
 }

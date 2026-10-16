@@ -50,18 +50,23 @@ shared 180 ms forward/back zoom and crossfade inside the stationary drawer;
 Reduced Motion switches views immediately. Saving stays paused; a successful load continues
 the game and clears queued audio/input, respecting background freeze.
 
-Playback speed toggles 1×/2× for this loaded game (Left/Right also selects speed).
-At 2× the worker doubles its frame pace and plays audio twice as fast, one octave
-higher. A stereo low-pass filter prevents aliasing when reducing the doubled
-sample flow to the output rate. Buffered audio is cleared on speed changes and
+Playback speed offers 1×, 2×, 3× and 4× for this loaded game. Left/Right steps
+between the limits; Select cycles through all four. The worker multiplies its
+frame pace and plays audio at the corresponding faster, higher pitch. A stereo
+low-pass filter matched to the factor prevents aliasing before integer decimation
+back to the output sample rate. Buffered audio is cleared on speed changes and
 kept to at most 50 ms in the application queue. Speed is shown only in the pause
 panel, with a directional 180 ms slide/crossfade when the value changes
 (immediate with Reduced Motion). Returning to 1× clears queued audio before playback resumes.
 
 The game worker publishes atomic stereo frames to a bounded queue; PipeWire does
 not lock against core filtering or allocate. Playback builds about 40 ms of
-headroom on startup/resume and after a real underrun, with short ramps at audio
-boundaries. Brief frame jitter no longer repeatedly drains an empty queue or
+headroom on startup and after a real underrun, with short ramps at audio
+boundaries. Ordinary pauses, including focus freeze, keep the PipeWire stream
+connected and render silence without consuming the bounded queued audio. Resume
+continues that timeline without restarting the output or rebuilding headroom;
+speed changes, restart and state loads still discard obsolete audio. Brief frame
+jitter no longer repeatedly drains an empty queue or
 produces silence because the worker holds a mutex. Long core/storage/device stalls
 can still exhaust a bounded buffer.
 Restart retains the current speed; launching another game starts at 1×.
@@ -164,3 +169,11 @@ also needs Wayland/PipeWire and a fresh `HORIZON_GBA_TEST_DIR`. Set
 alongside the runtime test's semantic sound trace. Both use generated
 original homebrew, never personal ROMs or the production database. See
 [ADR 0198](adr/0198-first-gba-playback.md) and [licensing](LICENSING.md).
+
+The ignored `real_core_pipewire_audio_soak` test runs generated tone homebrew
+through the actual core, audio queue and PipeWire callbacks for ten minutes.
+It cycles through 1×/2×/3×/4× each minute and pauses/resumes every fifteen seconds.
+`HORIZON_AUDIO_SOAK_SECONDS` can set a shorter diagnostic run (10–3600 seconds).
+It reports queue size, callback gaps, unexpected silence/underruns, invalid
+samples and pause/resume failures. Its quiet test tone and callback measurements
+do not verify physical speaker/headphone quality or game-specific music.

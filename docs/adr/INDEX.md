@@ -20,6 +20,7 @@
 | [0205](0205-human-readable-storage.md) | Purpose-first storage, readable game folders and reserved state slots |
 | [0206](0206-save-states-and-resume.md) | Manual state slots and automatic save-on-exit/resume |
 | [0207](0207-jxl-only-album-pictures.md) | Canonical JXL raster storage, animation and retained durable-file compatibility |
+| [0208](0208-controller-remapping-and-playback-speed.md) | GBA controller remapping and four session playback speeds |
 
 Earlier decisions and their supporting phase notes are in
 [history](../history/INDEX.md). Their numbered identifiers remain reserved.

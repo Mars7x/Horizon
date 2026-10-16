@@ -21,7 +21,8 @@ export component GamePlayer inherits Rectangle {
     in property <image> screenshot-preview;
     in property <bool> screenshot-visible: false;
     in property <int> screenshot-sequence: 0;
-    in property <bool> fast-forward;
+    in property <int> speed: 1;
+    in property <bool> speed-forward: true;
     in property <int> state-mode;
     in property <int> state-focus;
     in property <[SaveStateRow]> state-rows;
@@ -83,7 +84,7 @@ export component GamePlayer inherits Rectangle {
             width: min(Metrics.pause-panel-width, root.width);
             height: root.height;
             shadow-strength: root.pause-reveal;
-            open: root.paused; busy: root.busy; fast-forward: root.fast-forward;
+            open: root.paused; busy: root.busy; speed: root.speed; speed-forward: root.speed-forward;
             screenshot-preview: root.screenshot-preview;
             screenshot-visible: root.screenshot-visible;
             screenshot-sequence: root.screenshot-sequence;

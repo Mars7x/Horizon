@@ -34,6 +34,15 @@ card during its shrink; never replace a fully opaque frame at the endpoint.
 Reduced Motion bypasses these handoffs. Background freezing is independent of
 the quick menu: deactivation must not open it or change manual menu selection.
 
+Controller button mapping uses the shared Settings header, breadcrumb,
+forward/back transition and compact ListRows. Game controls are named on the left;
+assigned controller inputs appear in keycaps beneath their own column label, with
+a change chevron. Each pair is one focus/click target. Restore defaults is separated
+from the mapping rows by a section gap. Capture names the game control and uses ModalDialog with
+a single Cancel action and suppresses page hints/navigation underneath it;
+Restore defaults uses ConfirmDialog with Cancel initially focused. Pending
+writes retain the existing row instances, focus and previous values until saved.
+
 ## Shared components
 
 | Element | Contract | Implementation |

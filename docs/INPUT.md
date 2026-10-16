@@ -31,13 +31,16 @@ recognition is separate from Steam account services.
 During [GBA playback](GBA_PLAYBACK.md), held buttons and key releases drive the
 core independently of menu repeats. Keyboard: arrows move, Z/X are A/B, A/S are
 L/R, Enter is Start and Backspace is Select. Escape/F10, Guide or a stick click
-opens Pause. Its vertical menu skips disabled state placeholders; Left/Right
+opens Pause. Its vertical menu includes save/load state browsers; Left/Right
 adjusts the focused speed choice. Back continues, or cancels restart confirmation. Focus loss clears and blocks
 gameplay input without opening this menu; optional background freezing resumes
 automatically, while an explicit pause remains paused.
 Controller face-button conventions follow the device family;
 Start/Back are game Start/Select. Swap Select and Back also exchanges controller gameplay A/B after device-family
-mapping. It leaves keyboard controls and all other game buttons unchanged. Pause, window deactivation and player entry/exit release held state.
+mapping. [Button mapping](SETTINGS.md) can reassign controller A/B/L/R/Start/Select
+from face buttons, shoulders, triggers and Start/Select; conflicting bindings
+swap assignments. The menu swap applies after that mapping. D-pad/stick directions,
+quick-menu access and keyboard controls remain unchanged. Pause, window deactivation and player entry/exit release held state.
 
 ## Mouse and touch
 

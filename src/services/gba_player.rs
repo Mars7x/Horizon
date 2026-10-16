@@ -1,4 +1,5 @@
 //! First GBA session: validated ROM snapshots, core lifecycle and battery saves.
+use crate::domain::core_settings::PlaybackSpeed;
 use crate::{
     domain::{GameId, SessionTrackingMethod, SourceId},
     persistence::SqliteLibraryRepository,
@@ -39,7 +40,7 @@ pub enum Command {
     Pause(bool),
     Stop,
     Shutdown,
-    FastForward(bool),
+    Speed(PlaybackSpeed),
     Screenshot,
     Restart,
     ListStates,
@@ -55,7 +56,7 @@ pub enum Event {
     Stopped,
     Failed(String),
     SaveFailed(String),
-    SpeedChanged(bool),
+    SpeedChanged(PlaybackSpeed),
     ScreenshotSaved(crate::platform::gba_core::Frame),
     Restarted,
     States(Vec<crate::services::save_states::Entry>),
@@ -232,7 +233,9 @@ fn play(
         Arc::clone(&audio),
         core.av.sample_rate.round() as u32,
     );
-    let stream = AudioStream::open(
+    // Keep the PipeWire graph connected until this session ends. Pauses gate
+    // the reader instead of paying device/graph activation latency on resume.
+    let _stream = AudioStream::open(
         "Horizon GBA",
         Role::Game,
         core.av.sample_rate.round() as u32,
@@ -246,7 +249,7 @@ fn play(
     let mut deadline = Instant::now();
     let mut checkpoint = Instant::now();
     let mut paused = false;
-    let mut fast_forward = false;
+    let mut speed = PlaybackSpeed::Normal;
     let mut pending = None;
     let mut session = None;
     let mut frame_attempts = 0u32;
@@ -260,21 +263,18 @@ fn play(
                 match command {
                     Command::Pause(value) => {
                         paused = value;
-                        core.set_fast_forward(fast_forward);
                         buttons.store(0, Ordering::Release);
-                        stream.set_active(false);
-                        audio.clear();
-                        stream.set_active(!value);
+                        audio.set_paused(value);
                         deadline = Instant::now();
                     }
-                    Command::FastForward(enabled) => {
-                        fast_forward = enabled;
-                        core.set_fast_forward(enabled);
-                        stream.set_active(false);
+                    Command::Speed(next) => {
+                        speed = next;
+                        core.set_speed(next);
+                        audio.set_paused(true);
                         audio.clear();
-                        stream.set_active(!paused);
+                        audio.set_paused(paused);
                         deadline = Instant::now();
-                        let _ = events.send(Event::SpeedChanged(enabled));
+                        let _ = events.send(Event::SpeedChanged(next));
                     }
                     Command::Screenshot => {
                         let result = core.capture_frame().and_then(|frame| {
@@ -307,11 +307,11 @@ fn play(
                     Command::LoadState(slot) => match states.load(slot) {
                         Ok(Some(snapshot)) => {
                             save_current(&core, &save_path, &mut last_save)?;
-                            stream.set_active(false);
+                            audio.set_paused(true);
                             buttons.store(0, Ordering::Release);
                             audio.clear();
                             core.restore_state(&snapshot.bytes)?;
-                            core.set_fast_forward(fast_forward);
+                            core.set_speed(speed);
                             core.run_frame();
                             audio.clear();
                             deadline = Instant::now();
@@ -328,24 +328,24 @@ fn play(
                     Command::Restart => {
                         if let Err(error) = save_current(&core, &save_path, &mut last_save) {
                             paused = true;
-                            stream.set_active(false);
+                            audio.set_paused(true);
                             let _ = events.send(Event::SaveFailed(error));
                             continue;
                         }
                         core.restart();
-                        core.set_fast_forward(fast_forward);
+                        core.set_speed(speed);
                         if !last_save.is_empty()
                             && let Err(error) = core.restore_save(&last_save)
                         {
                             paused = true;
-                            stream.set_active(false);
+                            audio.set_paused(true);
                             let _ = events.send(Event::ActionFailed(error));
                             continue;
                         }
                         buttons.store(0, Ordering::Release);
                         audio.clear();
                         paused = false;
-                        stream.set_active(true);
+                        audio.set_paused(false);
                         deadline = Instant::now();
                         let _ = events.send(Event::Restarted);
                     }
@@ -364,7 +364,7 @@ fn play(
                                 return Err(error);
                             }
                             paused = true;
-                            stream.set_active(false);
+                            audio.set_paused(true);
                             let _ = events.send(Event::SaveFailed(error));
                             continue;
                         }
@@ -391,7 +391,7 @@ fn play(
                     );
                     let _ = events.send(Event::Started(location.title.clone()));
                 }
-                deadline += if fast_forward { interval / 2 } else { interval };
+                deadline += interval / u32::from(speed.factor());
                 if Instant::now().saturating_duration_since(deadline) > Duration::from_millis(100) {
                     deadline = Instant::now();
                 }
@@ -403,7 +403,7 @@ fn play(
                     Ok(())
                 } {
                     paused = true;
-                    stream.set_active(false);
+                    audio.set_paused(true);
                     buttons.store(0, Ordering::Release);
                     let _ = events.send(Event::SaveFailed(error));
                 }
