@@ -132,7 +132,10 @@ See [storage](STORAGE.md).
 Manual states and the automatic resume point are separate from battery saves.
 Every normal game exit or application close writes an automatic point before
 return/close completes. Resume last state loads the newest compatible automatic
-or manual point at launch, before the first displayed frame. Turning this option
+or manual point at launch, before the first displayed frame. Metadata orders the
+candidates so older slots can skip state-data reads/hashing and preview decoding
+on the launch path; each candidate that could win still undergoes complete integrity
+and compatibility checks, including backup recovery. Turning this option
 off starts normally but continues saving the automatic point on exit. A missing
 state starts normally; if states exist but none can be read compatibly, launch
 reports the problem and preserves them. Disable the option to start normally.

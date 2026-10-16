@@ -110,7 +110,10 @@ Version-2 previews are native 240×160 lossless JXL and stay with durable states
 Version-1 bundles with PNG previews remain readable and are preserved. Regular saves remain
 core-independent. State reads are bounded, reject symlink components, validate
 metadata/checksums/dimensions and run on the player worker. No state directory
-is created before the first write.
+is created before the first write. Resume orders slots by metadata timestamp
+ceilings, including retained backups, and fully validates only candidates that
+can still be newest. Unknown/unreadable metadata forces normal validation, never
+an empty-slot assumption. Exact timestamp ties keep the lower slot first.
 
 A private staging directory receives all three flushed files. Replacement moves
 the previous bundle to backups, then publishes the complete staged bundle.
