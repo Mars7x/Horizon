@@ -42,10 +42,17 @@ pub struct Snapshot {
 pub struct Store {
     folder: GameFolder,
     core_build: String,
+    #[cfg(test)]
+    preview_decodes: std::cell::Cell<usize>,
 }
 impl Store {
     pub fn new(folder: GameFolder, core_build: String) -> Self {
-        Self { folder, core_build }
+        Self {
+            folder,
+            core_build,
+            #[cfg(test)]
+            preview_decodes: std::cell::Cell::new(0),
+        }
     }
     fn core(&self) -> PathBuf {
         data_paths::state_core_directory(&self.folder.directory)
@@ -53,7 +60,7 @@ impl Store {
     fn files(&self, directory: &Path, slot: u8) -> data_paths::SaveStatePaths {
         data_paths::state_bundle_paths(directory, &self.folder.manifest.file_stem, slot)
     }
-    fn read_bundle(&self, directory: &Path, slot: u8) -> io::Result<Snapshot> {
+    fn read_metadata(&self, directory: &Path, slot: u8) -> io::Result<Metadata> {
         if !fs::symlink_metadata(directory)?.is_dir() {
             return Err(io::Error::other("Saved state is not an owned folder"));
         }
@@ -72,6 +79,11 @@ impl Store {
                 "Saved state is incompatible with this game or core build",
             ));
         }
+        Ok(metadata)
+    }
+    fn read_bundle(&self, directory: &Path, slot: u8) -> io::Result<Snapshot> {
+        let metadata = self.read_metadata(directory, slot)?;
+        let files = self.files(directory, slot);
         let bytes = read(&files.state, 16 * 1024 * 1024).map_err(incomplete)?;
         let files = if metadata.format_version == 1 {
             data_paths::legacy_state_bundle_paths(directory, &self.folder.manifest.file_stem, slot)
@@ -92,6 +104,8 @@ impl Store {
         {
             return Err(io::Error::other("Invalid saved state preview"));
         }
+        #[cfg(test)]
+        self.preview_decodes.set(self.preview_decodes.get() + 1);
         let rgba = crate::services::image::decode(&preview, None)
             .map_err(io::Error::other)?
             .into_rgba8();
@@ -126,10 +140,8 @@ impl Store {
         }
         Ok(paths)
     }
-    pub fn load(&self, slot: u8) -> io::Result<Option<Snapshot>> {
-        if slot > MANUAL_SLOTS {
-            return Err(io::Error::other("Invalid state slot"));
-        }
+    /// Check every parent before probing metadata, including for an empty store.
+    fn available_core(&self) -> io::Result<Option<PathBuf>> {
         let core = self.core();
         for directory in [
             self.folder.directory.clone(),
@@ -143,6 +155,15 @@ impl Store {
                 Err(error) => return Err(error),
             }
         }
+        Ok(Some(core))
+    }
+    pub fn load(&self, slot: u8) -> io::Result<Option<Snapshot>> {
+        if slot > MANUAL_SLOTS {
+            return Err(io::Error::other("Invalid state slot"));
+        }
+        let Some(core) = self.available_core()? else {
+            return Ok(None);
+        };
         let current = data_paths::state_slot_directory(&core, slot);
         let mut failure = None;
         match self.read_bundle(&current, slot) {
@@ -196,14 +217,52 @@ impl Store {
             })
             .collect()
     }
+    /// A timestamp ceiling, not a validity decision. Current bundles still
+    /// precede backups within a slot; a backup can win only after current data
+    /// fails full validation. Unreadable metadata forces a normal load attempt.
+    fn newest_possible_time(&self, core: &Path, slot: u8) -> io::Result<i64> {
+        let mut newest = -1;
+        for directory in
+            std::iter::once(data_paths::state_slot_directory(core, slot)).chain(self.backups(slot)?)
+        {
+            match self.read_metadata(&directory, slot) {
+                Ok(metadata) => newest = newest.max(metadata.saved_at),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(newest)
+    }
     pub fn latest(&self) -> io::Result<Option<Snapshot>> {
-        let mut newest = None;
+        let Some(core) = self.available_core()? else {
+            return Ok(None);
+        };
+        let mut candidates: Vec<_> = (0..=MANUAL_SLOTS)
+            .map(|slot| {
+                let ceiling = self.newest_possible_time(&core, slot).unwrap_or(i64::MAX);
+                (ceiling, std::cmp::Reverse(slot))
+            })
+            .collect();
+        candidates.sort_by_key(|key| std::cmp::Reverse(*key));
+        let mut newest: Option<Snapshot> = None;
         let mut failure = None;
-        for slot in 0..=MANUAL_SLOTS {
+        for (ceiling, std::cmp::Reverse(slot)) in candidates {
+            if ceiling < 0 {
+                continue;
+            }
+            if newest.as_ref().is_some_and(|snapshot| {
+                (
+                    snapshot.metadata.saved_at,
+                    std::cmp::Reverse(snapshot.metadata.slot),
+                ) >= (ceiling, std::cmp::Reverse(slot))
+            }) {
+                break;
+            }
             match self.load(slot) {
                 Ok(Some(snapshot))
-                    if newest.as_ref().is_none_or(|old: &Snapshot| {
-                        snapshot.metadata.saved_at > old.metadata.saved_at
+                    if newest.as_ref().is_none_or(|old| {
+                        (snapshot.metadata.saved_at, std::cmp::Reverse(slot))
+                            > (old.metadata.saved_at, std::cmp::Reverse(old.metadata.slot))
                     }) =>
                 {
                     newest = Some(snapshot)
@@ -453,6 +512,93 @@ mod tests {
         assert!(f.store.save(5, b"bad", &f.frame).is_err());
     }
     #[test]
+    fn resume_decodes_only_the_winning_slot_and_keeps_tie_order() {
+        let f = Fixture::new();
+        for slot in 0..=MANUAL_SLOTS {
+            f.save(slot, &[slot + 1], 100 + i64::from(slot));
+        }
+        f.store.preview_decodes.set(0);
+        assert_eq!(f.store.latest().unwrap().unwrap().metadata.slot, 4);
+        assert_eq!(f.store.preview_decodes.get(), 1);
+        f.save(0, b"automatic tie", 104);
+        assert_eq!(f.store.latest().unwrap().unwrap().metadata.slot, 0);
+    }
+    #[test]
+    fn metadata_priority_preserves_current_precedence_and_damaged_state_recovery() {
+        let f = Fixture::new();
+        f.save(1, b"backup with newer clock", 400);
+        f.save(1, b"valid current with older clock", 100);
+        f.save(2, b"other slot", 200);
+        assert_eq!(f.store.latest().unwrap().unwrap().bytes, b"other slot");
+        let files = f
+            .store
+            .files(&data_paths::state_slot_directory(&f.store.core(), 1), 1);
+        fs::write(&files.state, b"broken").unwrap();
+        assert_eq!(
+            f.store.latest().unwrap().unwrap().bytes,
+            b"backup with newer clock"
+        );
+        // Bad metadata is unknown, so the slot still attempts backup recovery.
+        fs::write(files.metadata, b"broken metadata").unwrap();
+        assert_eq!(
+            f.store.latest().unwrap().unwrap().bytes,
+            b"backup with newer clock"
+        );
+    }
+    #[test]
+    #[ignore = "opt-in resume I/O and preview decode benchmark"]
+    fn resume_selection_benchmark() {
+        let mut f = Fixture::new();
+        f.frame.rgba = (0..240 * 160)
+            .flat_map(|i| {
+                [
+                    ((i % 240) / 8 * 7) as u8,
+                    ((i / 240) / 8 * 11) as u8,
+                    (i % 97) as u8,
+                    255,
+                ]
+            })
+            .collect();
+        let state = vec![7; 512 * 1024];
+        for slot in 0..=MANUAL_SLOTS {
+            f.save(slot, &state, 100 + i64::from(slot));
+            f.save(slot, &state, 200 + i64::from(slot));
+        }
+        let mut baseline = Vec::new();
+        let mut ordered = Vec::new();
+        for _ in 0..20 {
+            f.store.preview_decodes.set(0);
+            let start = std::time::Instant::now();
+            // Previous production selection: fully load every slot.
+            let mut newest: Option<Snapshot> = None;
+            for slot in 0..=MANUAL_SLOTS {
+                if let Some(snapshot) = f.store.load(slot).unwrap()
+                    && newest
+                        .as_ref()
+                        .is_none_or(|old| snapshot.metadata.saved_at > old.metadata.saved_at)
+                {
+                    newest = Some(snapshot);
+                }
+            }
+            baseline.push(start.elapsed());
+            assert_eq!(f.store.preview_decodes.get(), 5);
+            f.store.preview_decodes.set(0);
+            let start = std::time::Instant::now();
+            let selected = f.store.latest().unwrap().unwrap();
+            ordered.push(start.elapsed());
+            assert_eq!(selected.bytes, newest.unwrap().bytes);
+            assert_eq!(selected.metadata.slot, 4);
+            assert_eq!(f.store.preview_decodes.get(), 1);
+        }
+        baseline.sort();
+        ordered.sort();
+        println!(
+            "5 slots + 5 backups, 512 KiB states, 20 paired warm-cache samples: all-slot median {:.3} ms, metadata-ordered median {:.3} ms; preview decodes 5 -> 1",
+            baseline[10].as_secs_f64() * 1000.0,
+            ordered[10].as_secs_f64() * 1000.0
+        );
+    }
+    #[test]
     fn legacy_png_bundles_still_load_and_new_previews_are_jxl() {
         let f = Fixture::new();
         f.save(1, b"retained", 100);
@@ -524,6 +670,7 @@ mod tests {
         let states = data_paths::state_root_directory(&f.store.folder.directory);
         std::os::unix::fs::symlink(&outside, &states).unwrap();
         assert!(f.store.load(1).is_err());
+        assert!(f.store.latest().is_err());
         assert!(f.store.save(1, b"bad", &f.frame).is_err());
         assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
         fs::remove_file(&states).unwrap();
