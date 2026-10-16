@@ -7,6 +7,7 @@ notice="$root/THIRD_PARTY_NOTICES.md"
 required_assets=(
   "horizon-quick-menu-open.wav"
   "horizon-quick-menu-close.wav"
+  "horizon-screenshot.wav"
   "controllers/controller_xbox360.svg"
   "controllers/controller_xboxseries.svg"
   "controllers/controller_playstation3.svg"

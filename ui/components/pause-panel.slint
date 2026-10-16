@@ -1,9 +1,10 @@
 import { SaveStateRow } from "../models/save-state.slint";
-import { Theme, Metrics, Typography } from "../theme/theme.slint";
+import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { MarqueeText } from "marquee-text.slint";
 import { ListRow } from "list-row.slint";
 import { ActionButton } from "action-button.slint";
 import { HintBar } from "hint-bar.slint";
+import { TransitionDriver, TransitionLayer } from "transition.slint";
 import { ScrollEdgeShadow } from "page-header.slint";
 
 component PauseAction inherits ListRow {
@@ -13,14 +14,40 @@ component PauseAction inherits ListRow {
     trailing-width: Metrics.spacing-xxl * 2;
     accessible-description: root.available ? root.value : "Not available yet";
     opacity: root.available ? 1.0 : 0.48;
-    Text {
+    in property <bool> forward: true;
+    private property <string> shown-value: root.value;
+    private property <string> old-value: "";
+    private property <int> swaps: 0;
+    private property <float> phase: 0;
+    animate phase { duration: Motion.value-swap-duration; easing: ease-out; }
+    private property <float> progress: Motion.reduced-motion ? 1.0 : 1.0 - min(1.0, root.swaps - root.phase);
+    changed value => {
+        root.old-value = root.shown-value;
+        root.shown-value = root.value;
+        root.swaps += 1;
+        root.phase = root.swaps;
+    }
+    Rectangle {
         x: parent.width - Metrics.spacing-xxl * 2;
         width: Metrics.spacing-xxl * 2 - Metrics.spacing-lg;
         height: parent.height;
-        text: root.value;
-        color: root.focused ? Theme.accent : Theme.secondary-foreground;
-        font-size: Typography.body-size;
-        horizontal-alignment: right; vertical-alignment: center;
+        background: transparent; clip: true;
+        if root.progress < 1.0 : Text {
+            x: (root.forward ? -1 : 1) * Metrics.spacing-lg * root.progress;
+            width: parent.width; height: parent.height;
+            text: root.old-value; opacity: 1.0 - root.progress;
+            color: root.focused ? Theme.accent : Theme.secondary-foreground;
+            font-size: Typography.body-size;
+            horizontal-alignment: right; vertical-alignment: center;
+        }
+        Text {
+            x: (root.forward ? 1 : -1) * Metrics.spacing-lg * (1.0 - root.progress);
+            width: parent.width; height: parent.height;
+            text: root.shown-value; opacity: root.progress;
+            color: root.focused ? Theme.accent : Theme.secondary-foreground;
+            font-size: Typography.body-size;
+            horizontal-alignment: right; vertical-alignment: center;
+        }
     }
 }
 
@@ -30,6 +57,15 @@ export component PausePanel inherits Rectangle {
     in property <length> footer-center: Metrics.hint-row-center-from-bottom;
     in property <bool> busy;
     in property <bool> fast-forward;
+    in property <image> screenshot-preview;
+    in property <bool> screenshot-visible;
+    in property <int> screenshot-sequence;
+    private property <float> screenshot-phase: 0;
+    animate screenshot-phase { duration: Motion.value-swap-duration; easing: ease-out; }
+    changed screenshot-sequence => { root.screenshot-phase = root.screenshot-sequence; }
+    private property <float> screenshot-reveal: Motion.reduced-motion ? 1.0 : 1.0 - min(1.0, root.screenshot-sequence - root.screenshot-phase);
+    private property <float> screenshot-opacity: root.screenshot-visible ? 1.0 : 0.0;
+    animate screenshot-opacity { duration: Motion.value-swap-duration; easing: ease-out; }
     in property <int> state-mode;
     in property <int> state-focus;
     in property <[SaveStateRow]> state-rows;
@@ -47,6 +83,14 @@ export component PausePanel inherits Rectangle {
     function answer(index: int) {
         if root.open && !root.busy { root.restart-answer(index); }
     }
+    // Rust owns the destination; these keys only describe its visual depth.
+    private property <int> view: root.restart-confirm ? 4 : root.state-mode;
+    private property <length> content-top: Metrics.spacing-lg * 3 + Metrics.compact-title-height + Metrics.compact-row-height;
+    private property <length> content-height: root.height - root.content-top - root.footer-center - Metrics.hint-row-height * 2;
+    view-transition := TransitionDriver { key: root.view; prewarm: true; retargetable: true; }
+    private property <int> view-phase: Motion.reduced-motion ? 3 : view-transition.phase;
+    private property <bool> view-back: root.view-depth(root.view) < root.view-depth(view-transition.from-key);
+    pure function view-depth(view: int) -> int { return view == 0 ? 0 : (view == 1 || view == 2 ? 1 : 2); }
     background: Theme.background;
     ScrollEdgeShadow {
         x: root.width;
@@ -66,52 +110,86 @@ export component PausePanel inherits Rectangle {
         text: root.title; text-color: Theme.foreground;
         font-size: Typography.heading-size; font-weight: Typography.heading-weight;
     }
-    if !root.restart-confirm && root.state-mode == 0 : VerticalLayout {
-        x: Metrics.spacing-lg; y: Metrics.spacing-lg * 3 + Metrics.compact-title-height + Metrics.compact-row-height;
-        width: parent.width - Metrics.spacing-lg * 2;
-        height: Metrics.pause-row-height * 7 + Metrics.spacing-xs * 8 + Metrics.spacing-sm * 2;
-        spacing: Metrics.spacing-xs;
-        PauseAction { title: "Continue"; focused: root.focused == 0; enabled: root.open; activated => { root.activate(0); } }
-        PauseAction { title: "Playback speed"; value: root.fast-forward ? "2×" : "1×"; focused: root.focused == 1; enabled: root.open; activated => { root.activate(1); } }
-        Rectangle { height: Metrics.spacing-sm; background: transparent; }
-        PauseAction { title: "Save state"; focused: root.focused == 2; enabled: root.open; activated => { root.activate(2); } }
-        PauseAction { title: "Load state"; focused: root.focused == 3; enabled: root.open; activated => { root.activate(3); } }
-        Rectangle { height: Metrics.spacing-sm; background: transparent; }
-        PauseAction { title: "Take screenshot"; focused: root.focused == 4; enabled: root.open; activated => { root.activate(4); } }
-        PauseAction { title: "Restart"; focused: root.focused == 5; enabled: root.open; activated => { root.activate(5); } }
-        PauseAction { title: "Return to Horizon"; focused: root.focused == 6; enabled: root.open; activated => { root.activate(6); } }
-    }
-    if root.state-mode == 1 || root.state-mode == 2 : Rectangle {
-        x: Metrics.spacing-lg; y: Metrics.spacing-lg * 3 + Metrics.compact-title-height + Metrics.compact-row-height;
-        width: parent.width - Metrics.spacing-lg * 2;
-        height: Metrics.list-row-height * 5 + Metrics.spacing-xs * 4;
-        background: transparent;
-        for row[index] in root.state-rows : ListRow {
-            y: index * (Metrics.list-row-height + Metrics.spacing-xs);
-            width: parent.width; height: Metrics.list-row-height;
-            title: row.title; subtitle: row.detail;
-            focused: row.slot == root.state-focus;
-            enabled: root.open && row.available;
-            trailing-width: Metrics.spacing-xxl * 2 + Metrics.spacing-lg;
-            opacity: row.available ? 1 : 0.48;
-            activated => { if root.open && !root.busy { root.state-choose(row.slot); } }
-            Rectangle {
-                x: parent.width - Metrics.spacing-lg - self.width;
-                y: Metrics.spacing-sm;
-                width: Metrics.spacing-xxl * 2; height: parent.height - Metrics.spacing-sm * 2;
-                background: Theme.surface-raised; border-radius: Metrics.radius-sm; clip: true;
-                Image { width: parent.width; height: parent.height; source: row.preview;
-                    visible: row.occupied; image-fit: contain; image-rendering: pixelated; }
+    Rectangle {
+        y: root.content-top; width: root.width; height: root.content-height;
+        background: transparent; clip: true;
+        TransitionLayer {
+            active: root.view == 0; outgoing: view-transition.from-key == 0;
+            returning: root.view-back; phase: root.view-phase;
+            x: Metrics.spacing-lg; rest-y: 0px;
+            width: root.width - Metrics.spacing-lg * 2; height: root.content-height;
+            VerticalLayout {
+                y: 0px; width: parent.width;
+                height: Metrics.pause-row-height * 7 + Metrics.spacing-xs * 8 + Metrics.spacing-sm * 2;
+                spacing: Metrics.spacing-xs;
+                PauseAction { title: "Continue"; focused: root.view == 0 && root.focused == 0; enabled: root.open && root.view == 0; activated => { root.activate(0); } }
+                PauseAction { title: "Playback speed"; value: root.fast-forward ? "2×" : "1×"; forward: root.fast-forward; focused: root.view == 0 && root.focused == 1; enabled: root.open && root.view == 0; activated => { root.activate(1); } }
+                Rectangle { height: Metrics.spacing-sm; background: transparent; }
+                PauseAction { title: "Save state"; focused: root.view == 0 && root.focused == 2; enabled: root.open && root.view == 0; activated => { root.activate(2); } }
+                PauseAction { title: "Load state"; focused: root.view == 0 && root.focused == 3; enabled: root.open && root.view == 0; activated => { root.activate(3); } }
+                Rectangle { height: Metrics.spacing-sm; background: transparent; }
+                PauseAction {
+                    title: "Take screenshot"; focused: root.view == 0 && root.focused == 4;
+                    enabled: root.open && root.view == 0;
+                    accessible-description: root.screenshot-visible ? "Screenshot saved to Album" : "";
+                    activated => { root.activate(4); }
+                    Rectangle {
+                        x: parent.width - Metrics.spacing-lg - self.width;
+                        y: (parent.height - self.height) / 2;
+                        width: Metrics.spacing-xxl; height: Metrics.spacing-xl;
+                        background: Theme.surface-raised; border-radius: Metrics.radius-sm; clip: true;
+                        visible: root.screenshot-opacity > 0;
+                        opacity: root.screenshot-opacity * root.screenshot-reveal;
+                        transform-scale: Motion.reduced-motion ? 1.0 : 0.9 + 0.1 * root.screenshot-reveal;
+                        Image { width: parent.width; height: parent.height; source: root.screenshot-preview;
+                            image-fit: contain; image-rendering: pixelated; }
+                    }
+                }
+                PauseAction { title: "Restart"; focused: root.view == 0 && root.focused == 5; enabled: root.open && root.view == 0; activated => { root.activate(5); } }
+                PauseAction { title: "Return to Horizon"; focused: root.view == 0 && root.focused == 6; enabled: root.open && root.view == 0; activated => { root.activate(6); } }
             }
         }
-    }
-    if root.restart-confirm || root.state-mode == 3 : VerticalLayout {
-        x: Metrics.spacing-lg; y: Metrics.spacing-lg * 3 + Metrics.compact-title-height + Metrics.compact-row-height;
-        width: parent.width - Metrics.spacing-lg * 2; height: Metrics.compact-row-height * 4 + Metrics.spacing-lg;
-        alignment: start; spacing: Metrics.spacing-lg;
-        Text { height: Metrics.compact-row-height + Metrics.spacing-md; text: root.state-mode == 3 ? "Replace the saved state in this slot?\nThe previous copy is kept" : "Restart from the beginning?\nBattery saves are kept"; wrap: word-wrap; color: Theme.foreground; font-size: Typography.body-size; }
-        ActionButton { height: Metrics.pause-row-height; label: "Cancel"; focused: root.restart-focus == 0; enabled: root.open; activated => { root.answer(0); } }
-        ActionButton { height: Metrics.pause-row-height; label: root.state-mode == 3 ? "Replace state" : "Restart game"; focused: root.restart-focus == 1; enabled: root.open; activated => { root.answer(1); } }
+        for view in [1, 2] : TransitionLayer {
+            active: root.view == view; outgoing: view-transition.from-key == view;
+            returning: root.view-back; phase: root.view-phase;
+            x: Metrics.spacing-lg; rest-y: 0px;
+            width: parent.width - Metrics.spacing-lg * 2;
+            height: root.content-height;
+            background: transparent;
+            for row in root.state-rows : ListRow {
+                visible: view == 2 || row.slot > 0;
+                y: (row.slot - (view == 1 ? 1 : 0)) * (Metrics.list-row-height + Metrics.spacing-xs);
+                width: parent.width; height: Metrics.list-row-height;
+                title: row.title; subtitle: row.detail;
+                focused: root.view == view && row.slot == root.state-focus;
+                enabled: root.open && root.view == view && (view == 1 || row.available);
+                trailing-width: Metrics.spacing-xxl * 2 + Metrics.spacing-lg;
+                opacity: view == 1 || row.available ? 1 : 0.48;
+                activated => { if root.open && root.view == view && !root.busy { root.state-choose(row.slot); } }
+                Rectangle {
+                    x: parent.width - Metrics.spacing-lg - self.width;
+                    y: Metrics.spacing-sm;
+                    width: Metrics.spacing-xxl * 2; height: parent.height - Metrics.spacing-sm * 2;
+                    background: Theme.surface-raised; border-radius: Metrics.radius-sm; clip: true;
+                    Image { width: parent.width; height: parent.height; source: row.preview;
+                        visible: row.occupied; image-fit: contain; image-rendering: pixelated; }
+                }
+            }
+        }
+        for view in [3, 4] : TransitionLayer {
+            active: root.view == view; outgoing: view-transition.from-key == view;
+            returning: root.view-back; phase: root.view-phase;
+            x: Metrics.spacing-lg; rest-y: 0px;
+            width: root.width - Metrics.spacing-lg * 2; height: root.content-height;
+            VerticalLayout {
+                y: 0px; width: parent.width;
+                height: Metrics.compact-row-height * 4 + Metrics.spacing-lg;
+                alignment: start; spacing: Metrics.spacing-lg;
+                Text { height: Metrics.compact-row-height + Metrics.spacing-md; text: view == 3 ? "Replace the saved state in this slot?\nThe previous copy is kept" : "Restart from the beginning?\nBattery saves are kept"; wrap: word-wrap; color: Theme.foreground; font-size: Typography.body-size; }
+                ActionButton { height: Metrics.pause-row-height; label: "Cancel"; focused: root.view == view && root.restart-focus == 0; enabled: root.open && root.view == view; activated => { root.answer(0); } }
+                ActionButton { height: Metrics.pause-row-height; label: view == 3 ? "Replace state" : "Restart game"; focused: root.view == view && root.restart-focus == 1; enabled: root.open && root.view == view; activated => { root.answer(1); } }
+            }
+        }
     }
     Text {
         x: Metrics.spacing-lg; y: parent.height - root.footer-center - Metrics.hint-row-height / 2 - Metrics.spacing-md - Metrics.hint-row-height;

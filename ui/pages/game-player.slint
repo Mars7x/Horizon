@@ -18,6 +18,9 @@ export component GamePlayer inherits Rectangle {
     in property <bool> frozen;
     out property <float> picture-opacity: root.phase == 3
         ? max(0.0, min(1.0, root.progress / Motion.player-card-blend-window)) : 1.0;
+    in property <image> screenshot-preview;
+    in property <bool> screenshot-visible: false;
+    in property <int> screenshot-sequence: 0;
     in property <bool> fast-forward;
     in property <int> state-mode;
     in property <int> state-focus;
@@ -81,6 +84,9 @@ export component GamePlayer inherits Rectangle {
             height: root.height;
             shadow-strength: root.pause-reveal;
             open: root.paused; busy: root.busy; fast-forward: root.fast-forward;
+            screenshot-preview: root.screenshot-preview;
+            screenshot-visible: root.screenshot-visible;
+            screenshot-sequence: root.screenshot-sequence;
             title: root.title; message: root.message; focused: root.focused;
             state-mode: root.state-mode; state-focus: root.state-focus; state-rows: root.state-rows;
             state-choose(slot) => { root.state-choose(slot); }

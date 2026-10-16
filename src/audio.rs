@@ -31,7 +31,8 @@ const OK_WAV: &[u8] = include_bytes!("../ui/assets/horizon-ok.wav");
 const BACK_WAV: &[u8] = include_bytes!("../ui/assets/horizon-back.wav");
 const MENU_OPEN_WAV: &[u8] = include_bytes!("../ui/assets/horizon-quick-menu-open.wav");
 const MENU_CLOSE_WAV: &[u8] = include_bytes!("../ui/assets/horizon-quick-menu-close.wav");
-const CUE_COUNT: usize = 5;
+const SCREENSHOT_WAV: &[u8] = include_bytes!("../ui/assets/horizon-screenshot.wav");
+const CUE_COUNT: usize = 6;
 const CANCEL_CUE: u8 = u8::MAX;
 
 const SAMPLE_RATE: u32 = 48_000;
@@ -52,6 +53,7 @@ pub enum UiSoundCue {
     Back,
     QuickMenuOpen,
     QuickMenuClose,
+    Screenshot,
 }
 
 impl UiSoundCue {
@@ -62,6 +64,7 @@ impl UiSoundCue {
             Self::Back => 2,
             Self::QuickMenuOpen => 3,
             Self::QuickMenuClose => 4,
+            Self::Screenshot => 5,
         }
     }
 }
@@ -110,6 +113,7 @@ impl UiSounds {
             BACK_WAV,
             MENU_OPEN_WAV,
             MENU_CLOSE_WAV,
+            SCREENSHOT_WAV,
         ]
         .map(|wav| {
             decode_pcm16_mono_48k(wav)
@@ -334,6 +338,7 @@ mod tests {
             (UiSoundCue::Back, BACK_WAV, 6306),
             (UiSoundCue::QuickMenuOpen, MENU_OPEN_WAV, 7680),
             (UiSoundCue::QuickMenuClose, MENU_CLOSE_WAV, 6720),
+            (UiSoundCue::Screenshot, SCREENSHOT_WAV, 5760),
         ] {
             assert_eq!(decode_pcm16_mono_48k(wav).unwrap().len(), frames);
             assert!(cue.index() < CUE_COUNT);
@@ -343,7 +348,7 @@ mod tests {
     #[test]
     fn quick_menu_pair_is_distinct_quiet_and_has_silent_boundaries() {
         assert_ne!(MENU_OPEN_WAV, MENU_CLOSE_WAV);
-        for wav in [MENU_OPEN_WAV, MENU_CLOSE_WAV] {
+        for wav in [MENU_OPEN_WAV, MENU_CLOSE_WAV, SCREENSHOT_WAV] {
             assert_ne!(wav, BACK_WAV);
             assert_ne!(wav, OK_WAV);
             let samples = decode_pcm16_mono_48k(wav).unwrap();

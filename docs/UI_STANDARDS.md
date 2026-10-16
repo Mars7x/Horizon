@@ -17,9 +17,16 @@ following the slide; the panel has no edge outline.
 The panel uses Theme.background (true black in Black), shared typography/marquee,
 spacing and focus animation; hints share Home's footer baseline. Pointer and
 keyboard/controller actions use the same UI sound boundary. Pending actions preserve row styling, focus and footer hints. Speed changes update
-only the pause-panel value, with no gameplay badge or progress/success text; only failures need feedback. Save/load state browsers use shared ListRows with native-pixel previews and
-timestamps. Empty/unavailable load slots never take focus. Save replacement and
-restart confirmations default to Cancel. Rust owns player mode, handoff
+only the pause-panel value with the shared value-swap duration and a directional
+slide/crossfade, with no gameplay badge or progress/success text; only failures need feedback. Save/load state browsers use shared ListRows with native-pixel previews and
+timestamps. Internal quick-menu views use shared TransitionDriver/TransitionLayer
+forward/back zoom/crossfade, clipped inside the stationary drawer; header, shadow
+and footer stay fixed. Reduced Motion makes view/value changes immediate. Empty/unavailable load slots never take focus. Save replacement and
+restart confirmations default to Cancel. Screenshot success uses a small native-pixel
+thumbnail in its action row: shared 180 ms fade/90%→100% scale, one-second hold,
+then fade out. The label, focus, menu and paused game stay still; no flash or bottom
+success message. Reduced Motion shows a static thumbnail for the same hold. A quiet
+shutter follows UI Sounds and plays only after the file is published. Rust owns player mode, handoff
 phases and focus. Launch/return use card-origin zooms with shared Motion tokens;
 keep the card press/rebound, preserve video aspect ratio, and hold the last frame
 until saving succeeds. The returning game picture crossfades into the existing

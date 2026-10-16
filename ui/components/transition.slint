@@ -19,8 +19,13 @@ import { Theme, Motion } from "../theme/theme.slint";
 export component TransitionDriver {
     // Routes prewarm; in-page sub-views are already drawn and start at 1.
     in property <bool> prewarm: false;
+    // Local menus can reverse before settling. Retain their immediately
+    // previous destination, so an interrupted Back never exposes an empty layer.
+    in property <bool> retargetable: false;
+    private property <int> last-key: 0;
     // What is being shown (a route or a view index). Changing it starts a
-    // transition from `from-key`, the last settled value.
+    // transition from `from-key`: the last settled value, or the previous
+    // destination when retargetable.
     in property <int> key: 0;
     out property <int> from-key: 0;
     private property <int> raw-phase: 3;
@@ -30,9 +35,11 @@ export component TransitionDriver {
     out property <int> phase: root.key != root.from-key && root.raw-phase == 3
         ? (root.prewarm ? 0 : 1) : root.raw-phase;
 
-    init => { root.from-key = root.key; }
+    init => { root.from-key = root.key; root.last-key = root.key; }
     changed key => {
         timer.stop();
+        if root.retargetable { root.from-key = root.last-key; }
+        root.last-key = root.key;
         root.raw-phase = root.prewarm ? 0 : 1;
         timer.interval = 16ms;
         timer.start();

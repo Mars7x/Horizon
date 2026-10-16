@@ -45,7 +45,9 @@ cancelling a nested confirmation keeps the usual Back sound. Save state opens fo
 manual slots with native-pixel previews and local timestamps. Occupied or damaged
 slots require confirmation, initially Cancel. Load state includes these slots and
 the separate Automatic resume point; empty/unavailable entries do not take focus.
-Back returns to the main panel. Saving stays paused; a successful load continues
+Back returns to the main panel. Save/load browsers and confirmations use the
+shared 180 ms forward/back zoom and crossfade inside the stationary drawer;
+Reduced Motion switches views immediately. Saving stays paused; a successful load continues
 the game and clears queued audio/input, respecting background freeze.
 
 Playback speed toggles 1×/2× for this loaded game (Left/Right also selects speed).
@@ -53,7 +55,8 @@ At 2× the worker doubles its frame pace and plays audio twice as fast, one octa
 higher. A stereo low-pass filter prevents aliasing when reducing the doubled
 sample flow to the output rate. Buffered audio is cleared on speed changes and
 kept to at most 50 ms in the application queue. Speed is shown only in the pause
-panel. Returning to 1× clears queued audio before playback resumes.
+panel, with a directional 180 ms slide/crossfade when the value changes
+(immediate with Reduced Motion). Returning to 1× clears queued audio before playback resumes.
 
 The game worker publishes atomic stereo frames to a bounded queue; PipeWire does
 not lock against core filtering or allocate. Playback builds about 40 ms of
@@ -64,8 +67,14 @@ can still exhaust a bounded buffer.
 Restart retains the current speed; launching another game starts at 1×.
 
 Take screenshot writes the native unfiltered frame to Horizon's Album, without
-the pause panel, HUD or shader/grid treatment. It stays paused and reports success
-only after PNG publication. Restart asks for confirmation with Cancel focused,
+the pause panel, HUD or shader/grid treatment. Only after PNG publication, a native-pixel
+thumbnail appears beside the unchanged action label, scales from 90% to full size
+and fades in over the shared 180 ms value duration. It holds for one second,
+then fades away. A quiet 120 ms shutter cue follows UI Sounds. The paused frame,
+menu layout and focus stay still, with no flash or bottom success text. Reduced
+Motion shows/hides the thumbnail immediately and retains the one-second hold.
+Repeated captures restart the confirmation; leaving the menu clears it. Failed
+writes show an error without a thumbnail or shutter cue. Restart asks for confirmation with Cancel focused,
 saves battery RAM before reset, restores it, then resumes. If storage fails it
 stays paused without resetting. Restart remains within the same observed session.
 Return to Horizon saves and closes the game through the card return animation.
@@ -98,7 +107,10 @@ are added. Audio smoothing is no longer a user preference.
 LCD applies an original subtle RGB subpixel/grid treatment at 3× on the core
 worker, then uses smooth scaling. Smooth uses native bilinear scaling without
 changing source pixels. Smooth pixel art uses the pinned xbrz-rs implementation
-at 3× to round pixel-art diagonals, with sharp final scaling. Colour correction
+at 3× to round pixel-art diagonals, then smoothly fits the filtered output to the
+window. This avoids enlarging the filter's small steps with nearest-neighbour
+scaling at fractional sizes; it does not remove intentional pixel-art details.
+Colour correction
 independently applies the credited sRGB GBA display profile before any filter;
 it approximates the original screen rather than calibrating the user's display.
 All presets preserve aspect ratio. Native screenshots exclude these display
@@ -143,7 +155,7 @@ the production Flatpak always uses its packaged path.
 The ignored `real_core_draws_responds_to_held_input_and_restores_battery_memory`
 test needs the built core. `real_player_window_input_pause_quit_and_relaunch`
 also needs Wayland/PipeWire and a fresh `HORIZON_GBA_TEST_DIR`. Set
-`HORIZON_TEST_VIDEO_FILTER` to `none`, `lcd` or `smooth` to review each preset. `HORIZON_TEST_MENU_AUDIO=1` enables real UI cue playback
+`HORIZON_TEST_VIDEO_FILTER` to `none`, `lcd`, `smooth` or `xbrz` to review each preset. `HORIZON_TEST_MENU_AUDIO=1` enables real UI cue playback
 alongside the runtime test's semantic sound trace. Both use generated
 original homebrew, never personal ROMs or the production database. See
 [ADR 0198](adr/0198-first-gba-playback.md) and [licensing](LICENSING.md).

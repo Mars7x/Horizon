@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Horizon's original paired quick-menu cues (stdlib only).
+"""Generate Horizon's original quick-menu and screenshot cues (stdlib only).
 
 SPDX-FileCopyrightText: Horizon contributors
 SPDX-License-Identifier: GPL-3.0-or-later
@@ -49,7 +49,31 @@ def cue(opening: bool) -> bytes:
         release = math.sin(min(1.0, (duration - time) / 0.055) * math.pi / 2) ** 2
         weight = math.exp(-position * (1.8 if opening else 2.3))
         samples.append((softened - low) * texture * attack * release * weight)
-    # Keep the pair quiet alongside the existing owner-supplied menu cues. Their
+    return encode(samples)
+
+
+def shutter() -> bytes:
+    """A quiet two-part shutter brush, softened rather than a sharp click."""
+    noise = random.Random(0x485A03)
+    samples = []
+    body = softened = low = 0.0
+    duration = 0.120
+    for frame in range(round(duration * RATE)):
+        time = frame / RATE
+        raw = noise.random() * 2 - 1
+        body += 0.19 * (raw - body)
+        softened += 0.19 * (body - softened)
+        low += 0.025 * (softened - low)
+        envelope = math.exp(-0.5 * ((time - 0.025) / 0.009) ** 2)
+        envelope += 0.55 * math.exp(-0.5 * ((time - 0.066) / 0.013) ** 2)
+        attack = math.sin(min(1.0, time / 0.008) * math.pi / 2) ** 2
+        release = math.sin(min(1.0, (duration - time) / 0.025) * math.pi / 2) ** 2
+        samples.append((softened - low) * envelope * attack * release)
+    return encode(samples)
+
+
+def encode(samples: list[float]) -> bytes:
+    # Keep the cues quiet alongside the existing owner-supplied menu cues. Their
     # original bytes stay untouched. Every cue begins/ends at digital silence.
     scale = 0.048 * 32767 / max(map(abs, samples))
     pcm = [round(sample * scale) for sample in samples]
@@ -65,12 +89,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="verify bundled bytes without writing")
     args = parser.parse_args()
-    for name, opening in [("open", True), ("close", False)]:
-        path = ROOT / f"ui/assets/horizon-quick-menu-{name}.wav"
-        data = cue(opening)
+    for name, data in [("horizon-quick-menu-open", cue(True)),
+                       ("horizon-quick-menu-close", cue(False)),
+                       ("horizon-screenshot", shutter())]:
+        path = ROOT / f"ui/assets/{name}.wav"
         if args.check:
             if not path.is_file() or path.read_bytes() != data:
-                raise SystemExit(f"Quick-menu sound differs from its source: {path.name}")
+                raise SystemExit(f"UI sound differs from its source: {path.name}")
         else:
             path.write_bytes(data)
 

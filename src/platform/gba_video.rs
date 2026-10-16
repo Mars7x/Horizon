@@ -3,7 +3,10 @@ use super::gba_core::Frame;
 use crate::domain::core_settings::VideoFilter;
 
 pub(super) fn apply(mut frame: Frame, filter: VideoFilter) -> Frame {
-    frame.smooth = matches!(filter, VideoFilter::Smooth | VideoFilter::Lcd);
+    frame.smooth = matches!(
+        filter,
+        VideoFilter::Smooth | VideoFilter::Lcd | VideoFilter::Xbrz
+    );
     if filter == VideoFilter::Xbrz {
         // The validated native frame is tiny; 3× preserves the aspect ratio.
         // Bound output allocation even if a future core reports larger frames.
@@ -17,7 +20,9 @@ pub(super) fn apply(mut frame: Frame, filter: VideoFilter) -> Frame {
                 width: frame.width * 3,
                 height: frame.height * 3,
                 rgba,
-                smooth: false,
+                // Fit the filtered subpixels smoothly at fractional window
+                // scales; nearest-neighbour would enlarge their small steps.
+                smooth: true,
             };
         }
         return frame;
@@ -160,7 +165,7 @@ mod tests {
             VideoFilter::Xbrz,
         );
         assert_eq!((frame.width, frame.height), (24, 24));
-        assert!(!frame.smooth);
+        assert!(frame.smooth);
         assert!(
             frame
                 .rgba
@@ -187,6 +192,12 @@ mod tests {
             std::path::PathBuf::from(std::env::var_os("HORIZON_VIDEO_FILTER_TEST_DIR").unwrap());
         std::fs::create_dir_all(&directory).unwrap();
         let ui = crate::AppWindow::new().unwrap();
+        let height: u32 = std::env::var("HORIZON_VIDEO_FILTER_TEST_HEIGHT")
+            .unwrap_or_else(|_| "720".into())
+            .parse()
+            .unwrap();
+        ui.window()
+            .set_size(slint::PhysicalSize::new(height * 16 / 9, height));
         ui.set_player_phase(2);
         ui.set_player_open(true);
         ui.set_player_has_frame(true);
@@ -260,6 +271,10 @@ mod tests {
                         assert!(subpixel);
                     }
                     VideoFilter::Xbrz => {
+                        assert!(
+                            intermediate,
+                            "xBRZ output must interpolate when fitted to a fractional scale"
+                        );
                         assert!(!subpixel);
                     }
                     VideoFilter::Smooth => {
