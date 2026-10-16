@@ -1,3 +1,4 @@
+import { SaveStateRow } from "../models/save-state.slint";
 import { PausePanel } from "../components/pause-panel.slint";
 import { CardRect } from "../models/game-card.slint";
 import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
@@ -18,6 +19,10 @@ export component GamePlayer inherits Rectangle {
     out property <float> picture-opacity: root.phase == 3
         ? max(0.0, min(1.0, root.progress / Motion.player-card-blend-window)) : 1.0;
     in property <bool> fast-forward;
+    in property <int> state-mode;
+    in property <int> state-focus;
+    in property <[SaveStateRow]> state-rows;
+    callback state-choose(int);
     in property <bool> restart-confirm;
     in property <int> restart-focus;
     callback restart-answer(int);
@@ -60,24 +65,29 @@ export component GamePlayer inherits Rectangle {
     }
     Rectangle {
         width: parent.width; height: parent.height;
-        visible: root.phase == 2 && !root.failed && root.pause-reveal > 0.001;
-        background: #00000070; opacity: root.pause-reveal;
-        TouchArea { width: parent.width; height: parent.height; enabled: root.paused && !root.busy;
-            clicked => { if root.restart-confirm { root.restart-answer(0); } else { root.choose(0); } }
-        }
-    }
-    PausePanel {
-        x: Metrics.page-margin - Metrics.spacing-lg * (1.0 - root.pause-reveal);
-        y: Metrics.spacing-lg;
-        width: min(Metrics.pause-panel-width, root.width - Metrics.page-margin * 2);
-        height: root.height - Metrics.spacing-lg * 2;
         visible: root.phase == 2 && !root.failed && (root.paused || root.pause-reveal > 0.001);
-        opacity: root.pause-reveal;
-        open: root.paused; busy: root.busy; fast-forward: root.fast-forward;
-        title: root.title; message: root.message; focused: root.focused;
-        restart-confirm: root.restart-confirm; restart-focus: root.restart-focus;
-        choose(index) => { root.choose(index); }
-        restart-answer(choice) => { root.restart-answer(choice); }
+        background: transparent;
+        clip: true;
+        Rectangle {
+            width: parent.width; height: parent.height;
+            background: #00000070; opacity: root.pause-reveal;
+            TouchArea { width: parent.width; height: parent.height; enabled: root.paused && !root.busy;
+                clicked => { if root.restart-confirm || root.state-mode == 3 { root.restart-answer(0); } else { root.choose(0); } }
+            }
+        }
+        PausePanel {
+            x: -self.width * (1.0 - root.pause-reveal);
+            width: min(Metrics.pause-panel-width, root.width);
+            height: root.height;
+            shadow-strength: root.pause-reveal;
+            open: root.paused; busy: root.busy; fast-forward: root.fast-forward;
+            title: root.title; message: root.message; focused: root.focused;
+            state-mode: root.state-mode; state-focus: root.state-focus; state-rows: root.state-rows;
+            state-choose(slot) => { root.state-choose(slot); }
+            restart-confirm: root.restart-confirm; restart-focus: root.restart-focus;
+            choose(index) => { root.choose(index); }
+            restart-answer(choice) => { root.restart-answer(choice); }
+        }
     }
     if root.phase == 2 : ModalDialog {
         open: root.failed || (root.busy && !root.paused);

@@ -1119,7 +1119,10 @@ mod runtime_tests {
                 SteamAccountService::load(directory.join("steam.json")).unwrap(),
             )),
             directory.join("controller.json"),
-            directory.join("cores.json"),
+            crate::platform::data_paths::CoreSettingsPaths {
+                playback: directory.join("playback.json"),
+                mgba: directory.join("cores/mgba.json"),
+            },
         );
         let navigation = NavigationController::new(&ui, home, library, settings);
         let showcase = crate::presentation::activity::ActivityShowcaseController::new(

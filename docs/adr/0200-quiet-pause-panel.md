@@ -1,6 +1,6 @@
 # ADR 0200 — Quiet pause panel and first game actions
 
-Status: Accepted. The user chose the quiet side panel, deferred save states and
+Status: Accepted. Save-state placeholders were replaced by [ADR 0206](0206-save-states-and-resume.md). The user chose the quiet side panel, deferred save states and
 explicitly requested working 2× speed, restart and screenshots.
 
 Use a dimmed frozen game and a compact side panel built with shared focus,

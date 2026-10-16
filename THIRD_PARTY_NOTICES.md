@@ -352,6 +352,18 @@ only on explicit Save; key content and clipboard data must not be logged.
 - **Use:** Successful menu confirmation and actual back/dismissal only. The
   existing navigation sound is unchanged. The UI Sounds setting mutes all cues.
 
+## Original quick-menu audio
+
+- **Assets:** `ui/assets/horizon-quick-menu-open.wav`, `ui/assets/horizon-quick-menu-close.wav`
+- **Author/license:** Horizon contributors, GPL-3.0-or-later; see `LICENSE` and
+  `LICENSES/GPL-3.0-or-later.txt`. Asset annotations are in `REUSE.toml`.
+- **Source:** `scripts/generate-quick-menu-sounds.py` synthesizes the original
+  smooth shuffle pair from seeded noise, two low-pass stages and overlapping
+  grain envelopes using Python's standard library, with no recordings, external samples or third-party
+  synthesis. PCM16 mono, 48 kHz; 160/140 ms.
+- **Use:** Actual quick-menu opening and successful closing. The UI Sounds
+  preference mutes both. Existing owner-supplied WAVs are preserved unmodified.
+
 ## Local ROM recognition
 
 - **quick-xml 0.41.x** (MIT): parses user-selected XML DAT catalogs.

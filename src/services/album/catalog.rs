@@ -1,16 +1,8 @@
 //! Finding captures: Horizon's own folder plus every capture source.
 //!
-//! Horizon's folder layout (see docs/ALBUM.md):
-//!
-//! ```text
-//! album/<source>/<external id>/<UTC stamp>.<ext>   a game's captures
-//! album/horizon/<UTC stamp>.<ext>                   Horizon's own screens
-//! ```
-//!
-//! Folder names are `encode_path_segment` of the ids; the stamp is
-//! `YYYYMMDD-HHMMSS-mmm` in UTC. A writer saves to `<name>.part` and publishes
-//! only when complete, so a scan never lists a half-written file (`.part` is not a
-//! media extension).
+//! Game captures live in album/<system>/<readable game folder>/screenshots or
+//! recordings, alongside game.json. Unassigned captures use album/horizon/.
+//! UTC stamps use YYYY-MM-DD_HH-MM-SS-mmm; .part files are unpublished.
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -22,17 +14,14 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 
 use crate::{
     domain::{
-        ExternalGameId, SourceGameRef, SourceId,
-        album::{
-            Capture, CaptureOrigin, MediaKind, decode_path_segment, encode_path_segment,
-            newest_first,
-        },
+        SourceGameRef,
+        album::{Capture, CaptureOrigin, MediaKind, newest_first},
     },
     sources::CaptureSource,
 };
 
 const HORIZON_FOLDER: &str = "horizon";
-const STAMP_FORMAT: &str = "%Y%m%d-%H%M%S";
+const STAMP_FORMAT: &str = "%Y-%m-%d_%H-%M-%S";
 
 /// Horizon's own capture folder.
 #[derive(Debug, Clone)]
@@ -51,27 +40,36 @@ impl HorizonAlbum {
     pub fn new_capture_path(
         &self,
         game: Option<&SourceGameRef>,
+        title: &str,
         extension: &str,
         now: DateTime<Utc>,
     ) -> std::io::Result<PathBuf> {
-        let folder = match game {
-            Some(game) => self
-                .root
-                .join(encode_path_segment(game.source_id().as_str()))
-                .join(encode_path_segment(game.external_id().as_str())),
-            None => self.root.join(HORIZON_FOLDER),
+        use crate::{
+            platform::data_paths,
+            services::game_storage::{GameFolder, ensure_directory},
         };
-        fs::create_dir_all(&folder)?;
+        let kind = MediaKind::from_extension(extension)
+            .ok_or_else(|| std::io::Error::other("unsupported capture format"))?;
+        let directory = match game {
+            Some(game) => GameFolder::prepare(&self.root, game, title)?.directory,
+            None => data_paths::unassigned_album_directory(&self.root),
+        };
+        let folder = data_paths::capture_directory(&directory, kind == MediaKind::Video);
+        ensure_directory(&self.root, &folder)?;
         let stamp = format!(
             "{}-{:03}",
             now.format(STAMP_FORMAT),
             now.timestamp_subsec_millis()
         );
-        let mut candidate = folder.join(format!("{stamp}.{extension}"));
-        let mut copy = 2;
-        while candidate.exists() || part_path(&candidate).exists() {
-            candidate = folder.join(format!("{stamp}-{copy}.{extension}"));
-            copy += 1;
+        let mut copy = 1;
+        let mut candidate = data_paths::capture_file(&folder, &stamp, extension, copy);
+        while candidate.symlink_metadata().is_ok()
+            || part_path(&candidate).symlink_metadata().is_ok()
+        {
+            copy = copy
+                .checked_add(1)
+                .ok_or_else(|| std::io::Error::other("too many captures at this timestamp"))?;
+            candidate = data_paths::capture_file(&folder, &stamp, extension, copy);
         }
         Ok(candidate)
     }
@@ -80,6 +78,14 @@ impl HorizonAlbum {
     /// folder it leaves empty. Refuses anything outside this album or that
     /// is not a capture, so a source's files can never be deleted here.
     pub fn delete(&self, path: &Path) -> std::io::Result<()> {
+        if !fs::symlink_metadata(path)?.is_file()
+            || !self.scan().iter().any(|capture| capture.path() == path)
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "not one of Horizon's captures",
+            ));
+        }
         let root = fs::canonicalize(&self.root)?;
         let file = fs::canonicalize(path)?;
         if !file.starts_with(&root) || !file.is_file() || MediaKind::from_path(&file).is_none() {
@@ -101,39 +107,46 @@ impl HorizonAlbum {
 
     pub fn scan(&self) -> Vec<Capture> {
         let mut captures = Vec::new();
+        if !fs::symlink_metadata(&self.root).is_ok_and(|m| m.is_dir()) {
+            return captures;
+        }
         let Ok(entries) = fs::read_dir(&self.root) else {
             return captures;
         };
         for entry in entries.filter_map(Result::ok) {
-            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
-                continue;
-            };
-            let path = entry.path();
-            if !path.is_dir() {
+            if !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
                 continue;
             }
-            if name == HORIZON_FOLDER {
-                collect_files(&path, None, &mut captures);
+            if entry.file_name() == HORIZON_FOLDER {
+                collect_capture_types(&entry.path(), None, &mut captures);
                 continue;
             }
-            let Some(source_id) = decode_path_segment(&name).and_then(|n| SourceId::new(n).ok())
-            else {
-                continue;
-            };
-            let Ok(games) = fs::read_dir(&path) else {
+            let Ok(games) = fs::read_dir(entry.path()) else {
                 continue;
             };
             for game in games.filter_map(Result::ok) {
-                let Some(external_id) = game
-                    .file_name()
-                    .to_str()
-                    .and_then(decode_path_segment)
-                    .and_then(|id| ExternalGameId::new(id).ok())
-                else {
+                if !game.file_type().is_ok_and(|kind| kind.is_dir()) {
                     continue;
-                };
-                let link = SourceGameRef::new(source_id.clone(), external_id);
-                collect_files(&game.path(), Some(&link), &mut captures);
+                }
+                match crate::services::game_storage::GameFolder::read(&game.path()) {
+                    Ok(folder) => {
+                        let Ok(link) = folder.manifest.game() else {
+                            continue;
+                        };
+                        if crate::platform::data_paths::game_system_directory(
+                            &self.root,
+                            link.source_id().as_str(),
+                        ) != entry.path()
+                        {
+                            continue;
+                        }
+                        collect_capture_types(&folder.directory, Some(&link), &mut captures);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => {
+                        tracing::warn!(%error, "Album game metadata unavailable; files preserved")
+                    }
+                }
             }
         }
         captures
@@ -147,6 +160,15 @@ pub fn part_path(path: &Path) -> PathBuf {
     PathBuf::from(name)
 }
 
+fn collect_capture_types(folder: &Path, game: Option<&SourceGameRef>, out: &mut Vec<Capture>) {
+    for video in [false, true] {
+        let path = crate::platform::data_paths::capture_directory(folder, video);
+        if fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_dir()) {
+            collect_files(&path, game, out);
+        }
+    }
+}
+
 fn collect_files(folder: &Path, game: Option<&SourceGameRef>, out: &mut Vec<Capture>) {
     let Ok(files) = fs::read_dir(folder) else {
         return;
@@ -156,7 +178,7 @@ fn collect_files(folder: &Path, game: Option<&SourceGameRef>, out: &mut Vec<Capt
         let Some(kind) = MediaKind::from_path(&path) else {
             continue;
         };
-        let Ok(metadata) = file.metadata() else {
+        let Ok(metadata) = fs::symlink_metadata(&path) else {
             continue;
         };
         if !metadata.is_file() {
@@ -178,11 +200,11 @@ fn collect_files(folder: &Path, game: Option<&SourceGameRef>, out: &mut Vec<Capt
     }
 }
 
-/// `YYYYMMDD-HHMMSS-mmm`, optionally followed by `-<copy>`.
+/// `YYYY-MM-DD_HH-MM-SS-mmm`, optionally followed by `-<copy>`.
 fn parse_stamp(stem: &str) -> Option<i64> {
-    let seconds = NaiveDateTime::parse_from_str(stem.get(..15)?, STAMP_FORMAT).ok()?;
-    let millis: i64 = stem.get(16..19)?.parse().ok()?;
-    (stem.as_bytes().get(15) == Some(&b'-')).then(|| seconds.and_utc().timestamp_millis() + millis)
+    let seconds = NaiveDateTime::parse_from_str(stem.get(..19)?, STAMP_FORMAT).ok()?;
+    let millis: i64 = stem.get(20..23)?.parse().ok()?;
+    (stem.as_bytes().get(19) == Some(&b'-')).then(|| seconds.and_utc().timestamp_millis() + millis)
 }
 
 fn unix_millis(time: SystemTime) -> Option<i64> {
@@ -223,6 +245,7 @@ pub fn scan_all(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::{ExternalGameId, SourceId};
     use chrono::TimeZone;
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -249,7 +272,7 @@ mod tests {
         let album = HorizonAlbum::new(root.join("album"));
         let now = Utc.with_ymd_and_hms(2026, 10, 15, 12, 0, 0).unwrap();
         let own = album
-            .new_capture_path(None, "png", now)
+            .new_capture_path(None, "Horizon", "png", now)
             .expect("capture path");
         fs::write(&own, b"own capture").expect("capture");
         let steam = root.join("Steam/userdata/123/760/remote/480/screenshots");
@@ -278,19 +301,35 @@ mod tests {
             + chrono::Duration::milliseconds(345);
         let heroic = game("heroic", "Some/Game");
 
-        let first = album.new_capture_path(Some(&heroic), "png", now).unwrap();
-        assert_eq!(
-            first,
-            root.join("heroic/Some%2FGame/20261010-143012-345.png")
+        let first = album
+            .new_capture_path(Some(&heroic), "Some Game", "png", now)
+            .unwrap();
+        assert_eq!(first.file_name().unwrap(), "2026-10-10_14-30-12-345.png");
+        assert!(first.parent().unwrap().ends_with("screenshots"));
+        assert!(
+            first
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("Some Game [")
         );
         fs::write(&first, b"png").unwrap();
         // The same millisecond never overwrites.
-        let second = album.new_capture_path(Some(&heroic), "png", now).unwrap();
-        assert_eq!(second.file_name().unwrap(), "20261010-143012-345-2.png");
+        let second = album
+            .new_capture_path(Some(&heroic), "Some Game", "png", now)
+            .unwrap();
+        assert_eq!(second.file_name().unwrap(), "2026-10-10_14-30-12-345-2.png");
         fs::write(&second, b"png").unwrap();
         // A capture still being written is invisible.
-        let writing = album.new_capture_path(None, "mp4", now).unwrap();
-        assert_eq!(writing, root.join("horizon/20261010-143012-345.mp4"));
+        let writing = album.new_capture_path(None, "Horizon", "mp4", now).unwrap();
+        assert_eq!(
+            writing,
+            root.join("horizon/recordings/2026-10-10_14-30-12-345.mp4")
+        );
         fs::write(part_path(&writing), b"mp4").unwrap();
 
         let mut captures = album.scan();
@@ -321,7 +360,7 @@ mod tests {
         let album = HorizonAlbum::new(root.join("album"));
         let now = Utc.with_ymd_and_hms(2026, 10, 10, 14, 30, 12).unwrap();
         let shot = album
-            .new_capture_path(Some(&game("steam", "10")), "png", now)
+            .new_capture_path(Some(&game("steam", "10")), "Test game", "png", now)
             .unwrap();
         fs::write(&shot, b"png").unwrap();
         let outside = root.join("steam-screenshot.png");
@@ -341,8 +380,8 @@ mod tests {
         album.delete(&shot).unwrap();
         assert!(!shot.exists());
         assert!(
-            !root.join("album/steam").exists(),
-            "empty game folders removed"
+            !shot.parent().unwrap().exists(),
+            "empty capture folders removed; game metadata retained"
         );
         assert!(root.join("album").exists(), "the album itself stays");
         fs::remove_dir_all(root).unwrap();
@@ -355,14 +394,41 @@ mod tests {
     }
 
     #[test]
+    fn metadata_and_media_symlinks_cannot_retarget_captures() {
+        let root = temp_dir("metadata");
+        let album = HorizonAlbum::new(root.join("album"));
+        let reference = game("gba", &format!("sha256:{}", "a".repeat(64)));
+        let now = Utc.with_ymd_and_hms(2026, 10, 10, 14, 30, 12).unwrap();
+        let shot = album
+            .new_capture_path(Some(&reference), "Readable title", "png", now)
+            .unwrap();
+        fs::write(&shot, b"keep capture").unwrap();
+        let outside = root.join("outside.png");
+        fs::write(&outside, b"outside").unwrap();
+        let link = shot.parent().unwrap().join("linked.png");
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        assert_eq!(album.scan().len(), 1);
+        assert!(album.delete(&link).is_err());
+        let manifest = crate::platform::data_paths::game_manifest_path(
+            shot.parent().unwrap().parent().unwrap(),
+        );
+        fs::write(&manifest, b"invalid metadata").unwrap();
+        assert!(album.scan().is_empty());
+        assert!(album.delete(&shot).is_err());
+        assert_eq!(fs::read(&shot).unwrap(), b"keep capture");
+        assert_eq!(fs::read(&outside).unwrap(), b"outside");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn stamps_parse_with_or_without_a_copy_suffix() {
         let at = Utc
             .with_ymd_and_hms(2026, 1, 2, 3, 4, 5)
             .unwrap()
             .timestamp_millis()
             + 6;
-        assert_eq!(parse_stamp("20260102-030405-006"), Some(at));
-        assert_eq!(parse_stamp("20260102-030405-006-3"), Some(at));
+        assert_eq!(parse_stamp("2026-01-02_03-04-05-006"), Some(at));
+        assert_eq!(parse_stamp("2026-01-02_03-04-05-006-3"), Some(at));
         assert_eq!(parse_stamp("holiday"), None);
     }
 }

@@ -5,6 +5,8 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 notice="$root/THIRD_PARTY_NOTICES.md"
 
 required_assets=(
+  "horizon-quick-menu-open.wav"
+  "horizon-quick-menu-close.wav"
   "controllers/controller_xbox360.svg"
   "controllers/controller_xboxseries.svg"
   "controllers/controller_playstation3.svg"
@@ -59,5 +61,7 @@ grep -Fq "Pokefan531" "$notice" || { echo "GBA colour profile provenance missing
 for license in "${required_licenses[@]}"; do
   test -s "$root/LICENSES/$license" || { echo "missing license text: $license" >&2; exit 1; }
 done
+
+python3 "$root/scripts/generate-quick-menu-sounds.py" --check
 
 echo "third-party attribution checks passed"

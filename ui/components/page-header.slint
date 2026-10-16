@@ -52,9 +52,10 @@ export component Breadcrumb inherits Rectangle {
 export component ScrollEdgeShadow inherits Rectangle {
     in property <bool> bottom: false;
     in property <float> strength: 1.0;
+    in property <angle> direction: 180deg;
     height: Metrics.scroll-edge-shadow-height;
     opacity: max(0.0, min(1.0, root.strength));
-    background: @linear-gradient(180deg,
+    background: @linear-gradient(root.direction,
         Theme.shadow.with-alpha(root.bottom ? 0.0 : (Theme.is-dark ? 0.23 : 0.11)) 0%,
         Theme.shadow.with-alpha(root.bottom ? (Theme.is-dark ? 0.23 : 0.11) : 0.0) 100%);
 }

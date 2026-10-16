@@ -18,7 +18,10 @@ Enter/Escape remains unchanged. Values live in `controller.json`.
 
 ## Cores
 
-The Cores page contains the mGBA entry and a shared Freeze when unfocused switch.
+The Cores page contains the mGBA entry and shared Freeze when unfocused and
+Resume last state switches. Resume defaults on and loads the newest compatible
+manual or automatic state at launch. Off starts normally; exit still updates the
+automatic point. Manual slots remain separate.
 Freezing defaults on: the game and audio freeze without opening the quick menu,
 and resume automatically on return. Off allows background playback; input is
 always released/blocked while inactive. Explicit pause remains paused.
@@ -32,16 +35,17 @@ credited sRGB profile. Filter/correction default off. These are Horizon presets;
 RetroArch shader files, audio smoothing controls, BIOS, core download, advanced
 timing and developer controls are not exposed.
 
-All preferences apply on the next game launch. Existing files retain their saved
-freeze value when the former mGBA-specific field moves to shared storage. An
-explicit shared value takes precedence; the retired audio smoothing field is
-ignored. Saving writes the current shape through the same atomic boundary.
+All preferences apply on the next game launch. Shared focus freezing and resume are stored
+in `playback.json`; mGBA sunlight, filtering and colour correction are stored in
+`cores/mgba.json`. Old `cores.json` files are not loaded or migrated. Invalid
+files and failed writes preserve prior data and remain visible as errors.
 
 Left/Right turns switches off/on or adjusts sunlight. Select toggles a switch
 or increases sunlight; the sunlight row also has a pointer decrement button.
 On Video filter, Left/Right cycles presets and Select/click chooses the next one.
 Back restores mGBA's row in Cores, then Cores' row in Settings. Preferences load
-and save on a serial worker using the shared atomic store in `cores.json`.
+and save on a serial worker using independent atomic files. Each action commits
+only the file that owns the changed preference.
 Changes publish only after a successful save. Pending writes preserve row styling,
 focus and hints instead of disabling/repainting the whole page. Failed writes retain prior values;
 unreadable/invalid files are preserved and reported, not replaced with defaults.
@@ -50,7 +54,7 @@ See [GBA playback](GBA_PLAYBACK.md) and [ADR 0199](adr/0199-curated-core-prefere
 ## Third-party services
 
 SteamGridDB and Steam Account have separate service pages, credentials and
-storage. SteamGridDB offers its API key, artwork preference and cover refresh.
+files under `config/integrations/`. SteamGridDB offers its API key, artwork preference and cover refresh.
 With no active games there are no cover jobs. Refresh runs off-thread and does
 not overwrite explicit user choices. See [Artwork](ARTWORK.md).
 

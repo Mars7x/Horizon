@@ -6,8 +6,8 @@
 //! shared with every other program, so Horizon uses an `<app-id>` subfolder.
 //!
 //! ```text
-//! data/    library.sqlite3  album/  profile.png  profile-animated  profile-steam.png  profile-steam-animated
-//! config/  appearance.json  controller.json  cores.json  profile.json  steamgriddb.json  steam-account.json   (0700 dir)
+//! data/    library/  saves/  album/  profile/  artwork/custom/
+//! config/  appearance.json  controller.json  playback.json  cores/  integrations/   (0700 dirs)
 //! cache/   artwork/local/  artwork/steamgriddb/  album/  (disposable)
 //! ```
 //!
@@ -26,11 +26,11 @@ use std::os::unix::fs::PermissionsExt;
 use thiserror::Error;
 
 const APP_ID: &str = "io.github.Mars7x.Horizon";
-const DATABASE_FILE: &str = "library.sqlite3";
-const STEAMGRIDDB_FILE: &str = "steamgriddb.json";
+const DATABASE_FILE: &str = "library/library.sqlite3";
+const STEAMGRIDDB_FILE: &str = "integrations/steamgriddb.json";
 const APPEARANCE_FILE: &str = "appearance.json";
-const STEAM_ACCOUNT_FILE: &str = "steam-account.json";
-const PROFILE_FILE: &str = "profile.json";
+const STEAM_ACCOUNT_FILE: &str = "integrations/steam.json";
+const PROFILE_FILE: &str = "profile/profile.json";
 const CONTROLLER_FILE: &str = "controller.json";
 const CACHE_VERSION_FILE: &str = ".version";
 const ALBUM_DIR: &str = "album";
@@ -48,16 +48,109 @@ pub fn gba_core_path() -> PathBuf {
 }
 
 pub fn gba_save_directory() -> Result<PathBuf, DataPathError> {
-    Ok(app_dir(BaseDir::Data)?.join("saves/gba"))
+    Ok(app_dir(BaseDir::Data)?.join("saves"))
 }
 
-pub fn gba_save_file(directory: &Path, sha256: &str) -> PathBuf {
-    directory.join(format!("{sha256}.sav"))
+/// Shared playback policy and core-specific preferences have separate owners.
+#[derive(Debug, Clone)]
+pub struct CoreSettingsPaths {
+    pub playback: PathBuf,
+    pub mgba: PathBuf,
 }
-const PROFILE_PICTURE_FILE: &str = "profile.png";
-const PROFILE_ANIMATED_FILE: &str = "profile-animated";
-const STEAM_PICTURE_FILE: &str = "profile-steam.png";
-const STEAM_ANIMATED_FILE: &str = "profile-steam-animated";
+
+const PROFILE_PICTURE_FILE: &str = "profile/pictures/custom.png";
+const PROFILE_ANIMATED_FILE: &str = "profile/pictures/custom-original";
+const STEAM_PICTURE_FILE: &str = "profile/pictures/steam.png";
+const STEAM_ANIMATED_FILE: &str = "profile/pictures/steam-original";
+
+/// Filesystem-safe, readable names with a bounded UTF-8 byte length.
+pub fn game_file_stem(title: &str) -> String {
+    let cleaned: String = title
+        .chars()
+        .map(|c| {
+            if c.is_control() || "/\\:*?\"<>|".contains(c) {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect();
+    let cleaned = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut stem = String::new();
+    for c in cleaned.trim_matches([' ', '.']).chars() {
+        if stem.len() + c.len_utf8() > 120 {
+            break;
+        }
+        stem.push(c);
+    }
+    let stem = stem.trim_end_matches([' ', '.']);
+    if stem.is_empty() {
+        return "Untitled game".into();
+    }
+    let device = stem.split('.').next().unwrap_or("").to_ascii_uppercase();
+    let reserved = matches!(device.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || (device.len() == 4
+            && (device.starts_with("COM") || device.starts_with("LPT"))
+            && matches!(device.as_bytes()[3], b'1'..=b'9'));
+    if reserved {
+        game_file_stem(&format!("Game {stem}"))
+    } else {
+        stem.to_owned()
+    }
+}
+
+pub fn game_system_directory(root: &Path, system: &str) -> PathBuf {
+    root.join(crate::domain::album::encode_path_segment(system))
+}
+pub fn game_directory(system: &Path, stem: &str, suffix: &str) -> PathBuf {
+    system.join(format!("{stem} [{suffix}]"))
+}
+pub fn game_manifest_path(directory: &Path) -> PathBuf {
+    directory.join("game.json")
+}
+pub fn game_manifest_temporary_path(directory: &Path, nonce: u64) -> PathBuf {
+    directory.join(format!(".game.json.{}.{nonce}.part", std::process::id()))
+}
+pub fn game_save_path(directory: &Path, stem: &str) -> PathBuf {
+    directory.join(format!("{stem}.sav"))
+}
+pub fn save_backup_path(save: &Path) -> std::io::Result<PathBuf> {
+    let parent = save
+        .parent()
+        .ok_or_else(|| std::io::Error::other("save has no folder"))?;
+    let stem = save
+        .file_stem()
+        .ok_or_else(|| std::io::Error::other("save has no name"))?;
+    let mut name = stem.to_os_string();
+    name.push(".previous.sav");
+    Ok(parent.join("backups").join(name))
+}
+pub fn save_temporary_path(save: &Path) -> PathBuf {
+    let mut name = save.as_os_str().to_owned();
+    name.push(".part");
+    PathBuf::from(name)
+}
+pub fn capture_directory(directory: &Path, video: bool) -> PathBuf {
+    directory.join(if video { "recordings" } else { "screenshots" })
+}
+pub fn unassigned_album_directory(root: &Path) -> PathBuf {
+    root.join("horizon")
+}
+pub fn capture_file(directory: &Path, timestamp: &str, extension: &str, copy: u32) -> PathBuf {
+    directory.join(if copy == 1 {
+        format!("{timestamp}.{extension}")
+    } else {
+        format!("{timestamp}-{copy}.{extension}")
+    })
+}
+
+/// Paths for a complete state bundle; selectors never create files.
+#[derive(Debug)]
+pub struct SaveStatePaths {
+    pub state: PathBuf,
+    pub metadata: PathBuf,
+    pub screenshot: PathBuf,
+}
 
 #[derive(Debug, Error)]
 pub enum DataPathError {
@@ -68,14 +161,8 @@ pub enum DataPathError {
         variable: &'static str,
         path: PathBuf,
     },
-    #[error("failed to create Horizon data directory {path}: {source}")]
-    CreateDataDirectory {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("failed to create or secure Horizon config directory {path}: {source}")]
-    CreateConfigDirectory {
+    #[error("failed to create or secure Horizon storage directory {path}: {source}")]
+    CreateStorageDirectory {
         path: PathBuf,
         #[source]
         source: std::io::Error,
@@ -110,12 +197,7 @@ impl BaseDir {
 }
 
 pub fn library_database_path() -> Result<PathBuf, DataPathError> {
-    let data_dir = app_dir(BaseDir::Data)?;
-    fs::create_dir_all(&data_dir).map_err(|source| DataPathError::CreateDataDirectory {
-        path: data_dir.clone(),
-        source,
-    })?;
-    Ok(data_dir.join(DATABASE_FILE))
+    data_file_path(DATABASE_FILE)
 }
 
 /// SteamGridDB API key and artwork preference.
@@ -132,8 +214,11 @@ pub fn appearance_settings_path() -> Result<PathBuf, DataPathError> {
 }
 
 /// Curated preferences for the bundled core.
-pub fn core_settings_path() -> Result<PathBuf, DataPathError> {
-    config_file_path("cores.json")
+pub fn core_settings_paths() -> Result<CoreSettingsPaths, DataPathError> {
+    Ok(CoreSettingsPaths {
+        playback: config_file_path("playback.json")?,
+        mgba: config_file_path("cores/mgba.json")?,
+    })
 }
 
 /// Controller preferences (swapping confirm/back and gameplay A/B).
@@ -144,7 +229,7 @@ pub fn controller_settings_path() -> Result<PathBuf, DataPathError> {
 /// Which profile picture to show (a chosen picture, Steam's, or a built-in
 /// avatar).
 pub fn profile_settings_path() -> Result<PathBuf, DataPathError> {
-    config_file_path(PROFILE_FILE)
+    data_file_path(PROFILE_FILE)
 }
 
 /// Normalized cover art built from each source's own files.
@@ -165,7 +250,7 @@ pub fn album_dir() -> Result<PathBuf, DataPathError> {
 
 /// The profile picture chosen on the Profile page: Horizon's own square copy, not
 /// a link to the original (which may be moved, or live behind the document
-/// portal only for a session). Data, not cache. Its folder is the data folder.
+/// portal only for a session). Data, not cache, under profile/pictures/.
 pub fn profile_picture_path() -> Result<PathBuf, DataPathError> {
     Ok(app_dir(BaseDir::Data)?.join(PROFILE_PICTURE_FILE))
 }
@@ -187,25 +272,45 @@ pub fn steam_animated_avatar_path() -> Result<PathBuf, DataPathError> {
     Ok(app_dir(BaseDir::Data)?.join(STEAM_ANIMATED_FILE))
 }
 
+/// Reserved durable custom covers; no folder is made until something is stored.
+pub fn custom_artwork_directory() -> Result<PathBuf, DataPathError> {
+    Ok(app_dir(BaseDir::Data)?.join("artwork/custom"))
+}
+
 /// Album thumbnails and video durations.
 pub fn album_cache_dir(version: &str) -> Option<PathBuf> {
     cache_dir("album", version)
 }
 
 fn config_file_path(filename: &str) -> Result<PathBuf, DataPathError> {
-    let dir = app_dir(BaseDir::Config)?;
-    fs::create_dir_all(&dir).map_err(|source| DataPathError::CreateConfigDirectory {
-        path: dir.clone(),
-        source,
-    })?;
-    // Holds API keys: owner-only, even though this is not encryption.
-    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).map_err(|source| {
-        DataPathError::CreateConfigDirectory {
-            path: dir.clone(),
-            source,
+    private_file_path(BaseDir::Config, filename)
+}
+fn data_file_path(filename: &str) -> Result<PathBuf, DataPathError> {
+    private_file_path(BaseDir::Data, filename)
+}
+fn private_file_path(base: BaseDir, filename: &str) -> Result<PathBuf, DataPathError> {
+    let root = app_dir(base)?;
+    let path = root.join(filename);
+    // Secure the root and every new nested directory, including credentials.
+    let mut directory = root.clone();
+    for segment in std::iter::once(None).chain(
+        Path::new(filename)
+            .parent()
+            .into_iter()
+            .flat_map(|p| p.components())
+            .map(Some),
+    ) {
+        if let Some(segment) = segment {
+            directory.push(segment);
         }
-    })?;
-    Ok(dir.join(filename))
+        fs::create_dir_all(&directory)
+            .and_then(|()| fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)))
+            .map_err(|source| DataPathError::CreateStorageDirectory {
+                path: directory.clone(),
+                source,
+            })?;
+    }
+    Ok(path)
 }
 
 /// A private, versioned cache folder. Caches are best-effort: any failure
@@ -358,4 +463,85 @@ mod tests {
             PathBuf::from("/home/user/.local/share/io.github.Mars7x.Horizon")
         );
     }
+}
+
+#[cfg(test)]
+mod game_layout_tests {
+    use super::*;
+    #[test]
+    fn safe_names_keep_unicode_and_cannot_create_path_components() {
+        assert_eq!(
+            game_file_stem("  Pokemon / Emerald: Version?  "),
+            "Pokemon Emerald Version"
+        );
+        assert_eq!(game_file_stem("..\\..//"), "Untitled game");
+        assert_eq!(game_file_stem("CON"), "Game CON");
+        let long = game_file_stem(&"遊".repeat(100));
+        assert!(long.len() <= 120);
+        assert!(long.is_char_boundary(long.len()));
+        assert_eq!(game_file_stem(&long), long);
+        let reserved = game_file_stem(&format!("CON.{}", "x".repeat(200)));
+        assert!(reserved.len() <= 120);
+        assert_eq!(game_file_stem(&reserved), reserved);
+    }
+    #[test]
+    fn state_paths_are_core_specific_and_do_not_create_directories() {
+        let root = Path::new("/nonexistent/horizon-state-layout");
+        let paths = state_bundle_paths(
+            &state_slot_directory(&state_core_directory(root), 1),
+            "Pokemon - Emerald Version",
+            1,
+        );
+        assert_eq!(
+            paths.state,
+            root.join("states/mgba/slot-01/Pokemon - Emerald Version.slot-01.state")
+        );
+        assert_eq!(paths.metadata.extension().unwrap(), "json");
+        assert_eq!(paths.screenshot.extension().unwrap(), "png");
+        assert!(!root.exists());
+        let automatic = state_bundle_paths(
+            &state_slot_directory(&state_core_directory(root), 0),
+            "Game",
+            0,
+        );
+        assert_eq!(
+            automatic.state,
+            root.join("states/mgba/resume/Game.resume.state")
+        );
+    }
+}
+
+pub fn state_root_directory(game: &Path) -> PathBuf {
+    game.join("states")
+}
+pub fn state_core_directory(game: &Path) -> PathBuf {
+    state_root_directory(game).join("mgba")
+}
+pub fn state_slot_directory(core: &Path, slot: u8) -> PathBuf {
+    core.join(if slot == 0 {
+        "resume".into()
+    } else {
+        format!("slot-{slot:02}")
+    })
+}
+pub fn state_bundle_paths(bundle: &Path, stem: &str, slot: u8) -> SaveStatePaths {
+    let name = if slot == 0 {
+        format!("{stem}.resume")
+    } else {
+        format!("{stem}.slot-{slot:02}")
+    };
+    SaveStatePaths {
+        state: bundle.join(format!("{name}.state")),
+        metadata: bundle.join(format!("{name}.json")),
+        screenshot: bundle.join(format!("{name}.png")),
+    }
+}
+pub fn state_staging_directory(core: &Path, slot: u8, nonce: &str) -> PathBuf {
+    core.join(format!(".slot-{slot:02}-{nonce}.part"))
+}
+pub fn state_backup_root(core: &Path) -> PathBuf {
+    core.join("backups")
+}
+pub fn state_backup_directory(core: &Path, slot: u8, nonce: &str) -> PathBuf {
+    state_backup_root(core).join(format!("slot-{slot:02}-{nonce}"))
 }

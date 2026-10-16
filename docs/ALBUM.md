@@ -11,8 +11,12 @@ filters, selection and dialogs for [the page](../ui/pages/album.slint).
 ## Files and media
 
 The durable folder is `data/album/`, resolved by [data paths](../src/platform/data_paths.rs).
-Captures are filed by escaped source/game identity or the Horizon folder; old
-identity references can still supply titles without becoming active games.
+Captures are filed under `<system>/<readable game folder>/screenshots/` or
+`recordings/`, with a versioned `game.json` carrying full identity. Captures
+without a game use `horizon/screenshots/` or `horizon/recordings/`. UTC filenames
+use `YYYY-MM-DD_HH-MM-SS-mmm`, with a collision suffix when needed. The current
+writer creates screenshots only. The new layout does not scan or migrate old
+source/hash folders. See [Storage](STORAGE.md).
 Writes use a temporary `.part` path, published atomically only when complete. The file is the record; no media
 table is needed. External changes appear on the next visit. Thumbnails/durations
 are disposable caches, not the original media. Version 4 thumbnails are lossless
@@ -32,7 +36,7 @@ No download or recorder implementation is implied by the viewer.
 
 The GBA pause panel's Take screenshot action captures the native unfiltered
 240×160 game frame. PNG encoding/writes run on the core worker through the shared
-HorizonAlbum path allocator, under the game's `gba` / SHA-256 source identity.
+HorizonAlbum path allocator, under the game's readable GBA folder with its full ROM identity in `game.json`.
 No pause UI, speed badge or video filter is included. Complete captures appear
 on the next Album visit. Failed writes preserve existing media and report an error.
 
@@ -52,7 +56,8 @@ Bounded caches/workers and cancellation protect rapid browsing and resizing.
 
 Only selected Horizon-owned files are deleted, after the confirmation dialog
 with Cancel focused. HorizonAlbum refuses paths outside its own root, including
-escape/symlink cases; it removes selected files and tidies empty game folders.
+escape/symlink cases; it removes selected files and tidies empty capture-type folders. Game metadata remains
+so subsequent captures keep their folder name.
 Failures remain visible. No Steam screenshot/thumbnail deletion code remains.
 Media fixtures under [tests](../tests/fixtures/) exercise decoding; runtime audio,
 seeking, animated images and real scaling still require a built app.

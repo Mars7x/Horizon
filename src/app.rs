@@ -227,7 +227,7 @@ pub fn run() -> Result<(), AppError> {
             database: database_path.clone(),
             core: data_paths::gba_core_path(),
             saves: data_paths::gba_save_directory()?,
-            settings: data_paths::core_settings_path()?,
+            settings: data_paths::core_settings_paths()?,
             album: data_paths::album_dir()?,
         },
     );
@@ -324,7 +324,7 @@ pub fn run() -> Result<(), AppError> {
         appearance.clone(),
         Rc::clone(&steam_account),
         data_paths::controller_settings_path()?,
-        data_paths::core_settings_path()?,
+        data_paths::core_settings_paths()?,
     );
     let navigation_sound = Rc::new(RefCell::new(UiSounds::new(
         appearance.preferences().ui_sounds_enabled,
@@ -658,23 +658,22 @@ pub fn run() -> Result<(), AppError> {
             input.set_ui_input_enabled(false);
             input.set_ui_input_enabled(active.get());
         });
-        player_sound.borrow_mut().set_foreground(
-            player_active.get()
-                && (!open || player_ui.upgrade().is_some_and(|ui| ui.get_player_paused())),
-        );
+        // The embedded player still belongs to Horizon. Keep UI audio warm
+        // so opening is immediate and a closing cue is never suspended midway.
+        player_sound
+            .borrow_mut()
+            .set_foreground(player_active.get());
         if let Some(ui) = player_ui.upgrade() {
             ui.global::<crate::Motion>()
                 .set_loops_paused((open && !ui.get_player_paused()) || !player_active.get());
         }
     });
 
-    let pause_sound = Rc::clone(&navigation_sound);
     let pause_ui = ui.as_weak();
     let pause_active = Rc::clone(&window_active);
     ui.on_player_paused_changed(move |paused| {
         if let Some(ui) = pause_ui.upgrade() {
             let menu_active = pause_active.get() && (!ui.get_player_open() || paused);
-            pause_sound.borrow_mut().set_foreground(menu_active);
             ui.global::<crate::Motion>().set_loops_paused(!menu_active);
         }
     });
@@ -730,7 +729,7 @@ pub fn run() -> Result<(), AppError> {
         activation_input.set_ui_input_enabled(active);
         if let Some(ui) = activation_ui.upgrade() {
             let menu_active = active && (!activation_player.is_open() || ui.get_player_paused());
-            activation_sound.borrow_mut().set_foreground(menu_active);
+            activation_sound.borrow_mut().set_foreground(active);
             ui.global::<crate::Motion>().set_loops_paused(!menu_active);
         }
 

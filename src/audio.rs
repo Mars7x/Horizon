@@ -1,5 +1,5 @@
-//! Optional UI feedback sounds (Navigate, OK, Back).
-//! This module owns UI sound playback. Presentation and input adapters remain silent.
+//! Optional UI feedback sounds, including paired quick-menu cues.
+//! This module owns playback; presentation/input adapters forward semantic cues.
 //!
 //! Sounds play on a native PipeWire stream (`platform::pipewire`) that asks
 //! the graph for about 5 ms per cycle. Playing a cue is one atomic store,
@@ -7,8 +7,9 @@
 //! the sound. A small controller thread opens the stream and keeps it
 //! running whenever Horizon is in front (silence costs little, and an output
 //! that falls asleep drops the first cue on waking, Bluetooth especially).
-//! It pauses only while a game has the foreground, and restarts the moment
-//! Horizon is back. After any restart, a cue waits until the output has run
+//! It stays warm during embedded gameplay in Horizon's own window so quick-menu
+//! opening is immediate and closing cues can finish. It pauses when another
+//! application has the foreground, and restarts when Horizon is back. After any restart, a cue waits until the output has run
 //! for `WARM_UP`, so it is delayed rather than lost.
 //! The UI thread never waits on PipeWire: a stalled server only silences
 //! the clicks.
@@ -28,6 +29,10 @@ use crate::platform::pipewire::{AudioStream, Role};
 const NAVIGATION_WAV: &[u8] = include_bytes!("../ui/assets/horizon-navigation.wav");
 const OK_WAV: &[u8] = include_bytes!("../ui/assets/horizon-ok.wav");
 const BACK_WAV: &[u8] = include_bytes!("../ui/assets/horizon-back.wav");
+const MENU_OPEN_WAV: &[u8] = include_bytes!("../ui/assets/horizon-quick-menu-open.wav");
+const MENU_CLOSE_WAV: &[u8] = include_bytes!("../ui/assets/horizon-quick-menu-close.wav");
+const CUE_COUNT: usize = 5;
+const CANCEL_CUE: u8 = u8::MAX;
 
 const SAMPLE_RATE: u32 = 48_000;
 /// Frames per PipeWire cycle while sounds are live (about 5 ms).
@@ -45,6 +50,8 @@ pub enum UiSoundCue {
     Navigation,
     Ok,
     Back,
+    QuickMenuOpen,
+    QuickMenuClose,
 }
 
 impl UiSoundCue {
@@ -53,6 +60,8 @@ impl UiSoundCue {
             Self::Navigation => 0,
             Self::Ok => 1,
             Self::Back => 2,
+            Self::QuickMenuOpen => 3,
+            Self::QuickMenuClose => 4,
         }
     }
 }
@@ -64,9 +73,15 @@ struct Request(AtomicU64);
 
 impl Request {
     fn post(&self, cue: UiSoundCue) {
+        self.post_index(cue.index() as u8);
+    }
+    fn cancel(&self) {
+        self.post_index(CANCEL_CUE);
+    }
+    fn post_index(&self, index: u8) {
         let sequence = (self.0.load(Ordering::Relaxed) >> 8) + 1;
         self.0
-            .store(sequence << 8 | cue.index() as u64, Ordering::Release);
+            .store(sequence << 8 | u64::from(index), Ordering::Release);
     }
 }
 
@@ -79,7 +94,8 @@ enum Command {
 
 pub struct UiSounds {
     enabled: bool,
-    samples: Arc<[Vec<f32>; 3]>,
+    foreground: bool,
+    samples: Arc<[Vec<f32>; CUE_COUNT]>,
     request: Arc<Request>,
     controller: Option<SyncSender<Command>>,
     last_failed_open: Option<Instant>,
@@ -88,7 +104,14 @@ pub struct UiSounds {
 impl UiSounds {
     pub fn new(enabled: bool) -> Self {
         // A malformed bundled asset is a packaging error, not a user's runtime error.
-        let samples = [NAVIGATION_WAV, OK_WAV, BACK_WAV].map(|wav| {
+        let samples = [
+            NAVIGATION_WAV,
+            OK_WAV,
+            BACK_WAV,
+            MENU_OPEN_WAV,
+            MENU_CLOSE_WAV,
+        ]
+        .map(|wav| {
             decode_pcm16_mono_48k(wav)
                 .expect("bundled Horizon UI WAV must be PCM16 mono 48 kHz")
                 .into_iter()
@@ -97,6 +120,7 @@ impl UiSounds {
         });
         Self {
             enabled,
+            foreground: true,
             samples: Arc::new(samples),
             request: Arc::new(Request::default()),
             controller: None,
@@ -118,7 +142,7 @@ impl UiSounds {
 
     /// Open the stream before the user navigates. Never blocks.
     pub fn prepare(&mut self) {
-        if !self.enabled || self.controller.is_some() {
+        if !self.enabled || !self.foreground || self.controller.is_some() {
             return;
         }
         if self
@@ -130,8 +154,11 @@ impl UiSounds {
         let (sender, commands) = mpsc::sync_channel(8);
         let samples = Arc::clone(&self.samples);
         let request = Arc::clone(&self.request);
+        // Snapshot before spawning: a cue posted immediately after prepare()
+        // must not be mistaken for an already consumed request by the worker.
+        let seen = request.0.load(Ordering::Acquire);
         if crate::services::worker::spawn("ui-sounds", move || {
-            control(&samples, &request, &commands)
+            control(&samples, &request, &commands, seen)
         }) {
             self.controller = Some(sender);
         } else {
@@ -142,7 +169,7 @@ impl UiSounds {
     /// Call only after a semantic UI action succeeds; no sound on ignored
     /// input. Never blocks.
     pub fn play(&mut self, cue: UiSoundCue) {
-        if !self.enabled {
+        if !self.enabled || !self.foreground {
             return;
         }
         self.prepare();
@@ -150,8 +177,14 @@ impl UiSounds {
         self.send(Command::Wake);
     }
 
-    /// While another app (a game) has the foreground the stream stays paused.
+    /// Pause only when Horizon loses the foreground, including its embedded player.
     pub fn set_foreground(&mut self, foreground: bool) {
+        self.foreground = foreground;
+        if !foreground {
+            // Cancel both a pending cue and a half-played tail before sleeping.
+            // Returning to Horizon must never replay an old Back/menu sound.
+            self.request.cancel();
+        }
         self.send(Command::Foreground(foreground));
     }
 
@@ -171,13 +204,13 @@ impl UiSounds {
 
 /// The controller thread: owns the stream, pauses it when quiet.
 fn control(
-    samples: &Arc<[Vec<f32>; 3]>,
+    samples: &Arc<[Vec<f32>; CUE_COUNT]>,
     request: &Arc<Request>,
     commands: &mpsc::Receiver<Command>,
+    mut seen: u64,
 ) {
     let voice = Arc::clone(samples);
     let cues = Arc::clone(request);
-    let mut seen = cues.0.load(Ordering::Acquire);
     let mut playing: Option<(usize, usize)> = None;
     let mut last_call: Option<Instant> = None;
     let mut warm = 0usize;
@@ -192,15 +225,17 @@ fn control(
             let now = Instant::now();
             if last_call.is_none_or(|last| now.duration_since(last) > RESTART_GAP) {
                 warm = 0; // the output (re)started
+                playing = None; // Never resume a stale partial cue after a gap.
             }
             last_call = Some(now);
             // A newer cue replaces the one playing (no pile-up on held
             // input). While the output warms up it waits, rather than being
             // lost in the first moments the device drops.
             let latest = cues.0.load(Ordering::Acquire);
-            if latest != seen && warm >= warm_up {
+            let cue = (latest & 0xff) as usize;
+            if latest != seen && (cue >= voice.len() || warm >= warm_up) {
                 seen = latest;
-                playing = Some(((latest & 0xff) as usize, 0));
+                playing = voice.get(cue).map(|_| (cue, 0));
             }
             let mut written = 0;
             if let Some((cue, position)) = playing.as_mut() {
@@ -224,7 +259,7 @@ fn control(
         }
     };
     // Running whenever Horizon is in front, so the output never falls asleep
-    // under the user; paused while a game has the foreground.
+    // under the user, including embedded gameplay; paused when Horizon is inactive.
     let mut foreground = true;
     let mut active = true;
     for command in commands {
@@ -297,9 +332,29 @@ mod tests {
             (UiSoundCue::Navigation, NAVIGATION_WAV, 4080),
             (UiSoundCue::Ok, OK_WAV, 9120),
             (UiSoundCue::Back, BACK_WAV, 6306),
+            (UiSoundCue::QuickMenuOpen, MENU_OPEN_WAV, 7680),
+            (UiSoundCue::QuickMenuClose, MENU_CLOSE_WAV, 6720),
         ] {
             assert_eq!(decode_pcm16_mono_48k(wav).unwrap().len(), frames);
-            assert!(cue.index() < 3);
+            assert!(cue.index() < CUE_COUNT);
+        }
+    }
+
+    #[test]
+    fn quick_menu_pair_is_distinct_quiet_and_has_silent_boundaries() {
+        assert_ne!(MENU_OPEN_WAV, MENU_CLOSE_WAV);
+        for wav in [MENU_OPEN_WAV, MENU_CLOSE_WAV] {
+            assert_ne!(wav, BACK_WAV);
+            assert_ne!(wav, OK_WAV);
+            let samples = decode_pcm16_mono_48k(wav).unwrap();
+            assert_eq!(samples.first(), Some(&0));
+            assert_eq!(samples.last(), Some(&0));
+            let peak = samples
+                .iter()
+                .map(|sample| i32::from(*sample).abs())
+                .max()
+                .unwrap();
+            assert!((1500..=2000).contains(&peak));
         }
     }
 
@@ -316,6 +371,23 @@ mod tests {
         let mut sound = UiSounds::new(false);
         sound.prepare();
         sound.play_navigation();
+        sound.play(UiSoundCue::QuickMenuOpen);
+        sound.play(UiSoundCue::QuickMenuClose);
+        assert!(sound.controller.is_none());
+    }
+
+    #[test]
+    fn inactive_horizon_cancels_old_sound_and_does_not_queue_new_cues() {
+        let mut sound = UiSounds::new(true);
+        sound.request.post(UiSoundCue::Back);
+        let old = sound.request.0.load(Ordering::Acquire);
+        sound.set_foreground(false);
+        let cancelled = sound.request.0.load(Ordering::Acquire);
+        assert_ne!(old, cancelled);
+        assert_eq!(cancelled & 0xff, u64::from(CANCEL_CUE));
+        sound.play(UiSoundCue::QuickMenuOpen);
+        sound.play(UiSoundCue::QuickMenuClose);
+        assert_eq!(sound.request.0.load(Ordering::Acquire), cancelled);
         assert!(sound.controller.is_none());
     }
 

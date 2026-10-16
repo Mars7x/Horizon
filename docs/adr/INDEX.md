@@ -17,6 +17,8 @@
 | [0202](0202-background-freeze-and-return-blend.md) | Independent background freezing and continuous return to the game card |
 | [0203](0203-shared-page-history-and-pointer-actions.md) | Shared page history, working pointer activation and crisp Album images |
 | [0204](0204-shared-playback-preferences-and-stable-audio.md) | Shared playback freezing, stable quick-menu feedback and bounded game audio |
+| [0205](0205-human-readable-storage.md) | Purpose-first storage, readable game folders and reserved state slots |
+| [0206](0206-save-states-and-resume.md) | Manual state slots and automatic save-on-exit/resume |
 
 Earlier decisions and their supporting phase notes are in
 [history](../history/INDEX.md). Their numbered identifiers remain reserved.

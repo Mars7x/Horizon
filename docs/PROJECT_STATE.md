@@ -29,6 +29,11 @@ Steam account setup uses a SteamID64 and Web API key; interactive Steam login
 is not implemented. SteamGridDB is independent of Steam account features.
 RetroAchievements is intended future work, not an available backend.
 
+Storage uses the fresh [purpose-first layout](STORAGE.md), with readable game
+folders, game-named saves and independent playback/core preference files. Old
+layout files remain untouched and are not migrated. Four manual save slots and a separate automatic exit state support seamless
+resume, enabled by default. States include previews and compatibility checks.
+
 ## Inactive boundaries
 
 GBA launches only its imported content through the embedded player; no capture
