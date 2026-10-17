@@ -155,7 +155,7 @@ impl GameLaunchService {
                     source,
                 })?;
 
-            if matches!(target, SourceLaunchTarget::EmbeddedGba { .. }) {
+            if matches!(target, SourceLaunchTarget::EmbeddedMgba { .. }) {
                 return Ok(GameLaunchReceipt::new(source_id, GameLaunchMode::Embedded));
             }
 
@@ -433,29 +433,37 @@ mod tests {
     }
 
     #[test]
-    fn gba_dispatch_uses_embedded_content_identity_without_external_handoff() {
+    fn cartridge_dispatch_uses_embedded_content_identity_without_external_handoff() {
+        use crate::sources::gba::{CartridgeSource, recognition::RomSystem};
         let mut registry = SourceRegistry::new();
-        registry
-            .register(crate::sources::gba::GbaSource::new().unwrap())
-            .unwrap();
+        for system in RomSystem::ALL {
+            registry
+                .register(CartridgeSource::new(system).unwrap())
+                .unwrap();
+        }
         let executor = Rc::new(RecordingExecutor::default());
         let service = GameLaunchService::new(Rc::new(registry), executor.clone());
         let sha256 = "a".repeat(64);
-        let game = LibraryGame::new(
-            Game::new(GameId::new(1).unwrap(), GameTitle::new("GBA").unwrap()),
-            vec![SourceGameRef::new(
-                SourceId::new("gba").unwrap(),
-                ExternalGameId::new(format!("sha256:{sha256}")).unwrap(),
-            )],
-        );
-        assert_eq!(
-            service.launch_game(&game).unwrap().mode(),
-            GameLaunchMode::Embedded
-        );
-        assert_eq!(
-            *executor.targets.borrow(),
-            vec![SourceLaunchTarget::EmbeddedGba { sha256 }]
-        );
+        for system in RomSystem::ALL {
+            let game = LibraryGame::new(
+                Game::new(GameId::new(1).unwrap(), GameTitle::new("Game").unwrap()),
+                vec![SourceGameRef::new(
+                    SourceId::new(system.source_id()).unwrap(),
+                    ExternalGameId::new(format!("sha256:{sha256}")).unwrap(),
+                )],
+            );
+            assert_eq!(
+                service.launch_game(&game).unwrap().mode(),
+                GameLaunchMode::Embedded
+            );
+            assert_eq!(
+                executor.targets.borrow().last(),
+                Some(&SourceLaunchTarget::EmbeddedMgba {
+                    system,
+                    sha256: sha256.clone()
+                })
+            );
+        }
     }
 
     #[test]

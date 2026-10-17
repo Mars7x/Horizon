@@ -2,14 +2,17 @@
 
 Horizon includes or derives small portions of artwork and other resources from third-party projects. This file records the source, attribution, license, and modification status for those materials.
 
-## GBA hash catalog — `data/catalogs/gba.xml`
+## Hash catalogs — `data/catalogs/gb.xml`, `data/catalogs/gbc.xml`, `data/catalogs/gba.xml`
 
 - Source: No-Intro metadata maintained in Libretro's database, revision
   `9a899f5b13ed1c355491e342203be29bc573323b`, catalog version `2026.10.07`:
+  https://github.com/libretro/libretro-database/blob/9a899f5b13ed1c355491e342203be29bc573323b/metadat/no-intro/Nintendo%20-%20Game%20Boy.dat,
+  https://github.com/libretro/libretro-database/blob/9a899f5b13ed1c355491e342203be29bc573323b/metadat/no-intro/Nintendo%20-%20Game%20Boy%20Color.dat
+  and
   https://github.com/libretro/libretro-database/blob/9a899f5b13ed1c355491e342203be29bc573323b/metadat/no-intro/Nintendo%20-%20Game%20Boy%20Advance.dat
 - Copyright/attribution: No-Intro and Libretro database contributors.
 - License: `CC-BY-SA-4.0`; complete upstream text in `LICENSES/CC-BY-SA-4.0.txt`.
-- Modified: `scripts/generate-gba-catalog.py` extracts only exact titles, SHA-1
+- Modified: `scripts/generate-hash-catalog.py` extracts only exact titles, SHA-1
   hashes and byte sizes into XML. No ROMs, images, cheats or emulator code are
   bundled. Names/hashes are retained verbatim, apart from lowercase hash encoding
   and deterministic ordering. The generated metadata retains `CC-BY-SA-4.0`.
@@ -25,7 +28,8 @@ Horizon includes or derives small portions of artwork and other resources from t
 - The core includes inih by Ben Hoyt (`BSD-3-Clause`, retained upstream notice
   in `LICENSES/mGBA-inih-BSD-3-Clause.txt`) and blip-buf by Shay Green
   (`LGPL-2.1-or-later`, `LICENSES/LGPL-2.1-or-later.txt`). These notices/licenses
-  are installed alongside the unmodified core. mGBA also credits the public-domain
+  are installed alongside the unmodified core. It is built with its Game Boy
+  and Game Boy Advance cores. mGBA also credits the public-domain
   MurmurHash3 implementation by Austin Appleby. Optional external codec, scripting,
   desktop frontend and database integrations are disabled for this build.
 - Horizon uses the libretro v1 C interface to this core. No RetroArch UI, ROM,

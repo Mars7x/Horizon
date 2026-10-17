@@ -43,7 +43,7 @@ Reconciliation must preserve archived identities and games with session/lifetime
 history. Successful source batches are atomic. Partial/unavailable snapshots
 cannot prune prior membership. Earlier retirement migrations retain their
 original behavior; later archives cannot restore data those earlier versions
-deleted. GBA imports readable files after folder selection; its startup snapshot is empty
+deleted. The `gb`, `gbc` and `gba` sources import readable files after folder selection; their startup snapshots are empty
 and partial.
 
 ## History and checks
@@ -58,7 +58,7 @@ Rust tests cover repository behavior and migration policy. The toolchain-free
 schema, upgrades, retention and failure rollback using in-memory databases only.
 They do not establish Rust compilation or access user data.
 
-ROM identity uses GBA plus SHA-256; SHA-1 and size support catalog matching.
+ROM identity uses the system's source (`gb`, `gbc` or `gba`) plus SHA-256; SHA-1 and size support catalog matching.
 `rom_files` retains path bytes and catalog provenance. A changed file at the same
 path retains both content records; a future launch must validate content again.
 Import preferences and selected files commit together. No automatic pruning runs.

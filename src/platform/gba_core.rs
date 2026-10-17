@@ -1,4 +1,5 @@
-//! Narrow mGBA libretro host. All core calls and callbacks stay on one worker.
+//! Narrow mGBA libretro host for GB, GBC and GBA games. All core calls and
+//! callbacks stay on one worker.
 use crate::domain::core_settings::MgbaPreferences;
 use crate::domain::core_settings::PlaybackSpeed;
 use libloading::Library;
@@ -46,6 +47,12 @@ struct Callbacks {
     frames: Arc<AtomicU64>,
 }
 thread_local! { static CALLBACKS: RefCell<Option<Callbacks>> = const { RefCell::new(None) }; }
+
+/// libretro memory ids.
+const SAVE_RAM: u32 = 0;
+const RTC: u32 = 1;
+/// Battery memory and any cartridge clock together; the save files match.
+const MAX_SAVE: usize = 128 * 1024;
 
 #[repr(C)]
 struct GameInfo {
@@ -321,31 +328,48 @@ impl Core {
             }
         })
     }
-    pub fn save_ram(&self) -> Result<Vec<u8>, String> {
-        // SAFETY: memory belongs to the loaded core; copied before its next call.
-        unsafe {
-            let size = (self.memory_size)(0);
-            if size == 0 {
-                return Ok(Vec::new());
-            }
-            let data = (self.memory)(0);
-            if size > 128 * 1024 || data.is_null() {
-                return Err("mGBA returned invalid save memory".into());
-            }
-            Ok(std::slice::from_raw_parts(data.cast::<u8>(), size).to_vec())
+    /// Battery memory, then a Game Boy cartridge clock when the game has
+    /// one: the same .sav layout standalone mGBA writes.
+    fn save_regions(&self) -> Result<[(*mut u8, usize); 2], String> {
+        // SAFETY: libretro v1 symbols from the retained core, on its worker.
+        let regions = [SAVE_RAM, RTC]
+            .map(|id| unsafe { ((self.memory)(id).cast::<u8>(), (self.memory_size)(id)) });
+        if regions
+            .iter()
+            .any(|&(data, size)| size > 0 && data.is_null())
+            || regions[0].1 + regions[1].1 > MAX_SAVE
+        {
+            return Err("mGBA returned invalid save memory".into());
         }
+        Ok(regions)
     }
+    pub fn save_ram(&self) -> Result<Vec<u8>, String> {
+        let regions = self.save_regions()?;
+        let mut bytes = Vec::with_capacity(regions[0].1 + regions[1].1);
+        for (data, size) in regions.into_iter().filter(|&(_, size)| size > 0) {
+            // SAFETY: checked above; copied before the core's next call.
+            bytes.extend_from_slice(unsafe { std::slice::from_raw_parts(data, size) });
+        }
+        Ok(bytes)
+    }
+    /// Must run before the first frame: mGBA reads a cartridge clock then.
     pub fn restore_save(&mut self, bytes: &[u8]) -> Result<(), String> {
+        let [(save, capacity), (clock, clock_size)] = self
+            .save_regions()
+            .ok()
+            .filter(|_| bytes.len() <= MAX_SAVE)
+            .ok_or("The existing save does not fit this game. It has been preserved.")?;
+        let (battery, rest) = bytes.split_at(bytes.len().min(capacity));
+        if rest.len() > clock_size {
+            return Err("The existing save does not fit this game. It has been preserved.".into());
+        }
+        // SAFETY: lengths checked against the core's allocations above; the
+        // input is a distinct Vec. A save without a clock leaves it as is.
         unsafe {
-            let capacity = (self.memory_size)(0);
-            let data = (self.memory)(0);
-            if bytes.len() > capacity || capacity > 128 * 1024 || data.is_null() {
-                return Err(
-                    "The existing save does not fit this game. It has been preserved.".into(),
-                );
+            ptr::copy_nonoverlapping(battery.as_ptr(), save, battery.len());
+            if !rest.is_empty() {
+                ptr::copy_nonoverlapping(rest.as_ptr(), clock, rest.len());
             }
-            // SAFETY: checked the core's allocation above; input is a distinct Vec.
-            ptr::copy_nonoverlapping(bytes.as_ptr(), data.cast::<u8>(), bytes.len());
         }
         Ok(())
     }
@@ -397,6 +421,11 @@ extern "C" fn environment(command: u32, data: *mut c_void) -> bool {
                 true
             } else if CStr::from_ptr(variable.key).to_bytes() == b"mgba_skip_bios" {
                 variable.value = c"ON".as_ptr();
+                true
+            } else if CStr::from_ptr(variable.key).to_bytes() == b"mgba_sgb_borders" {
+                // Super Game Boy colours stay; its border would turn the
+                // 160x144 picture into 256x224 for some games only.
+                variable.value = c"OFF".as_ptr();
                 true
             } else {
                 let value = CALLBACKS.with(|state| {
@@ -609,9 +638,83 @@ pub(crate) fn test_rom() -> Vec<u8> {
     rom
 }
 
+/// Original Game Boy homebrew that idles with the screen on. Only the
+/// 4-byte header signature mGBA checks is included, no logo or game data.
+/// `clock` makes it an MBC3 cartridge with a clock and 32 KiB battery RAM;
+/// `sgb` marks it Super Game Boy enhanced.
+#[cfg(test)]
+pub(crate) fn test_gb_rom(color: bool, clock: bool, sgb: bool) -> Vec<u8> {
+    let mut rom = vec![0; 32 * 1024];
+    // nop; jp 0x150 / at 0x150: jr -2
+    rom[0x100..0x104].copy_from_slice(&[0x00, 0xC3, 0x50, 0x01]);
+    rom[0x104..0x108].copy_from_slice(&[0xCE, 0xED, 0x66, 0x66]);
+    rom[0x134..0x140].copy_from_slice(b"HORIZON TEST");
+    rom[0x143] = if color { 0xC0 } else { 0 };
+    if sgb {
+        rom[0x146] = 0x03;
+        rom[0x14B] = 0x33;
+    }
+    if clock {
+        rom[0x147] = 0x10;
+        rom[0x149] = 0x03;
+    }
+    rom[0x150..0x152].copy_from_slice(&[0x18, 0xFE]);
+    rom
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires the built pinned mGBA core with Game Boy support"]
+    fn real_core_plays_game_boy_games_at_their_own_size_and_keeps_their_clock() {
+        let path = std::env::var_os("HORIZON_GBA_CORE").unwrap();
+        for (color, sgb) in [(false, false), (true, false), (false, true)] {
+            let frame = Arc::new(Mutex::new(None));
+            let mut core = Core::load(
+                Path::new(&path),
+                &test_gb_rom(color, true, sgb),
+                MgbaPreferences::default(),
+                Arc::clone(&frame),
+                Arc::new(super::super::gba_audio::GameAudio::default()),
+                Arc::new(AtomicU16::new(0)),
+            )
+            .unwrap();
+            assert_eq!((core.av.base_width, core.av.base_height), (160, 144));
+            assert!((core.av.fps - 59.73).abs() < 0.01, "{}", core.av.fps);
+            // Battery RAM, then the clock, as one save.
+            let saved = core.save_ram().unwrap();
+            assert_eq!(saved.len(), 32 * 1024 + 48);
+            core.restore_save(&saved).unwrap();
+            core.restore_save(&saved[..32 * 1024]).unwrap();
+            assert!(core.restore_save(&[0; 32 * 1024 + 49]).is_err());
+            for _ in 0..10 {
+                core.run_frame();
+            }
+            // No Super Game Boy border: every game keeps 160x144.
+            assert_eq!(core.capture_frame().unwrap().width, 160);
+            assert_eq!(core.capture_frame().unwrap().height, 144);
+            assert!(core.frames.load(Ordering::Acquire) >= 10);
+            assert!(core.serialize_state().is_ok());
+        }
+        // A cartridge without a clock saves its battery RAM only.
+        let core = Core::load(
+            Path::new(&path),
+            &{
+                let mut rom = test_gb_rom(false, false, false);
+                rom[0x147] = 0x03;
+                rom[0x149] = 0x02;
+                rom
+            },
+            MgbaPreferences::default(),
+            Arc::new(Mutex::new(None)),
+            Arc::new(super::super::gba_audio::GameAudio::default()),
+            Arc::new(AtomicU16::new(0)),
+        )
+        .unwrap();
+        assert_eq!(core.save_ram().unwrap().len(), 8 * 1024);
+    }
     #[test]
     #[ignore = "requires the built pinned mGBA core"]
     fn real_core_state_restores_machine_and_rejects_damage_without_changing_it() {

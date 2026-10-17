@@ -79,7 +79,7 @@ pub fn run() -> Result<(), AppError> {
         .spawn(move || -> Result<SqliteLibraryRepository, String> {
             let mut repository = SqliteLibraryRepository::open(recognition_database)
                 .map_err(|error| error.to_string())?;
-            let catalog = crate::services::rom_import::GbaCatalog::bundled()
+            let catalog = crate::services::rom_import::RomCatalogs::bundled()
                 .map_err(|error| error.to_string())?;
             let recognized = repository
                 .recognize_saved_rom_titles(&catalog)

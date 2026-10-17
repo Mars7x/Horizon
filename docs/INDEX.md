@@ -16,8 +16,8 @@ these guides describe the current contracts. The root README is intentionally bl
 | [Navigation](NAVIGATION.md) | Routes, focus, history and page entry |
 | [Input](INPUT.md) | Controller/keyboard/mouse behavior and on-screen keyboard |
 | [Library](LIBRARY.md) | Catalog, grid, sorting and current empty state |
-| [ROM import](ROM_IMPORT.md) | Folder selection, automatic import and GBA recognition |
-| [GBA playback](GBA_PLAYBACK.md) | Embedded mGBA, gameplay controls, battery saves, save states and lifecycle |
+| [ROM import](ROM_IMPORT.md) | Folder selection, automatic import and GB/GBC/GBA recognition |
+| [Playback](GBA_PLAYBACK.md) | Embedded mGBA for GB/GBC/GBA, gameplay controls, battery saves, save states and lifecycle |
 | [Activity](ACTIVITY.md) | Observed sessions, lifetime records and history |
 | [Album](ALBUM.md) | Horizon-owned media, playback and deletion |
 | [Settings](SETTINGS.md) | Appearance, controllers, core preferences and third-party configuration |

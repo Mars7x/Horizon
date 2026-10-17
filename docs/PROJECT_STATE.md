@@ -2,11 +2,11 @@
 
 Horizon is an early-development Rust/Slint Linux desktop Flatpak. Its approved
 direction is embedded emulator cores. Game folder selection automatically scans and imports
-supported files; GBA is the first backend. A bundled offline hash catalog provides
-exact title recognition, with unverified filename fallbacks for unknown files.
-Existing local XML catalogs remain supported. Imported GBA games launch in Horizon
-using a bundled mGBA libretro core on an in-process worker. See
-[GBA playback](GBA_PLAYBACK.md). BIOS management, other cores and a permanent
+supported files: Game Boy, Game Boy Color and Game Boy Advance. Bundled offline
+hash catalogs provide exact title recognition, with unverified filename fallbacks
+for unknown files. Existing local XML catalogs remain supported. Imported games
+launch in Horizon using a bundled mGBA libretro core on an in-process worker. See
+[playback](GBA_PLAYBACK.md). BIOS management, other cores and a permanent
 multi-system hosting API remain unimplemented.
 
 First launch presents [Welcome/Profile setup](ONBOARDING.md), then optional game
@@ -16,12 +16,12 @@ import and Ready. Completed setup is skipped; unfinished confirmed steps resume.
 
 | Surface | Current behavior |
 | --- | --- |
-| Home | Established carousel, Library tile, four utilities/profile avatar; Accept plays imported GBA games |
-| Library | Full-shell grid/sort/filter; Accept opens imported GBA games in the embedded player |
+| Home | Established carousel, Library tile, four utilities/profile avatar; Accept plays imported games |
+| Library | Full-shell grid/sort/filter; Accept opens imported games in the embedded player |
 | Activity | Retained session totals, recent history and distinct lifetime counters |
 | Album | Horizon-owned pictures/clips, viewer, video playback and confirmed deletion |
 | Achievements | Retained page and Milestones layout; no provider, “Achievements unavailable” |
-| Settings | Appearance, Controller → GBA button mapping, Cores → mGBA, Third-Party → SteamGridDB and Steam Account |
+| Settings | Appearance, Controller → Button mapping, Cores → mGBA, Third-Party → SteamGridDB and Steam Account |
 | Profile | Local name/picture, Steam profile picture and read-only Steam friends |
 
 Utilities are **Album, Activity, Achievements, Settings**, in that order.
@@ -38,7 +38,7 @@ supported, with import decoders retained for external PNG/JPEG/GIF/APNG images.
 
 ## Inactive boundaries
 
-GBA launches only its imported content through the embedded player; no capture
+The mGBA systems launch only their imported content through the embedded player; no capture
 sources are registered. External URI/foreground-handoff execution remains dormant.
 Optional SteamGridDB lookup can supply covers for imported games. The reusable importer
 opens from first-run setup.

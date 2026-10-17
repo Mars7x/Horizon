@@ -1,4 +1,5 @@
-//! Imported GBA content is played by Horizon's bundled mGBA core.
+//! Imported Game Boy, Game Boy Color and GBA content is played by Horizon's
+//! bundled mGBA core. Each system is its own source.
 
 pub mod recognition;
 use super::{
@@ -7,22 +8,25 @@ use super::{
 };
 use super::{SourceCapability, SourceLaunchTarget};
 use crate::domain::{ExternalGameId, SourceId};
+use recognition::RomSystem;
 
-pub struct GbaSource {
+pub struct CartridgeSource {
+    system: RomSystem,
     descriptor: SourceDescriptor,
 }
-impl GbaSource {
-    pub fn new() -> Result<Self, SourceInitializationError> {
+impl CartridgeSource {
+    pub fn new(system: RomSystem) -> Result<Self, SourceInitializationError> {
         Ok(Self {
+            system,
             descriptor: SourceDescriptor::new(
-                SourceId::new("gba")?,
-                "Game Boy Advance",
+                SourceId::new(system.source_id())?,
+                system.name(),
                 vec![SourceCapability::Launch],
             )?,
         })
     }
 }
-impl GameSource for GbaSource {
+impl GameSource for CartridgeSource {
     fn launch_target(
         &self,
         id: &ExternalGameId,
@@ -31,7 +35,8 @@ impl GameSource for GbaSource {
             .as_str()
             .strip_prefix("sha256:")
             .filter(|hash| hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
-            .map(|hash| SourceLaunchTarget::EmbeddedGba {
+            .map(|hash| SourceLaunchTarget::EmbeddedMgba {
+                system: self.system,
                 sha256: hash.to_owned(),
             }))
     }
@@ -106,7 +111,7 @@ mod tests {
 
     #[test]
     fn artwork_title_removes_only_known_trailing_release_metadata() {
-        let source = GbaSource::new().unwrap();
+        let source = CartridgeSource::new(RomSystem::GameBoyAdvance).unwrap();
         for (title, expected) in [
             (
                 "Pokemon - LeafGreen Version (USA)",

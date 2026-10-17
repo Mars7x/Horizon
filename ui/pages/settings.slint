@@ -476,7 +476,7 @@ export component SettingsPage inherits Rectangle {
             y: Metrics.breadcrumb-height + Metrics.spacing-sm;
             width: parent.width;
             title: "mGBA";
-            subtitle: "Game Boy Advance";
+            subtitle: "Game Boy, Color and Advance";
             trailing: "Open";
             focused: root.view == 6 && root.selection == 0;
             activated => { if (root.view == 6) { root.activate(0); } }
@@ -606,7 +606,7 @@ export component SettingsPage inherits Rectangle {
         }
         SettingsRow {
             x: 0px; y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 2;
-            width: parent.width; title: "Button mapping"; subtitle: "GBA gameplay controls"; trailing: "Open";
+            width: parent.width; title: "Button mapping"; subtitle: "Game Boy gameplay controls"; trailing: "Open";
             focused: root.view == 5 && root.selection == 2;
             activated => { if (root.view == 5 && !root.binding-open) {root.activate(2);} }
         }
@@ -626,13 +626,13 @@ export component SettingsPage inherits Rectangle {
         width: root.content-width; height: root.height - Metrics.page-header-height - Metrics.page-bottom-bar-height;
         opaque: true; active: root.view == 8; outgoing: view-transition.from-key == 8;
         returning: root.view-back; phase: view-transition.phase;
-        Breadcrumb { x: 0px; y: 0px; width: parent.width; section: "Controller"; page: "GBA button mapping"; back => {if (root.view == 8 && !root.binding-open) {root.go-back();}} }
+        Breadcrumb { x: 0px; y: 0px; width: parent.width; section: "Controller"; page: "Button mapping"; back => {if (root.view == 8 && !root.binding-open) {root.go-back();}} }
         // The action and assigned physical input have distinct visual roles.
         // Keep each pair one shared focus/click target, including its keycap.
         Text {
             x: Metrics.spacing-lg; y: Metrics.breadcrumb-height + Metrics.spacing-md;
             width: parent.width / 2; height: Metrics.spacing-lg;
-            text: "GBA control"; color: Theme.secondary-foreground; font-size: Typography.caption-size;
+            text: "Game Boy control"; color: Theme.secondary-foreground; font-size: Typography.caption-size;
             vertical-alignment: center;
         }
         Text {

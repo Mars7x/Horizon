@@ -23,7 +23,7 @@ pub struct PortalLaunchExecutor;
 impl LaunchExecutor for PortalLaunchExecutor {
     fn execute(&self, target: &SourceLaunchTarget) -> Result<(), LaunchExecutionError> {
         match target {
-            SourceLaunchTarget::EmbeddedGba { .. } => Err(LaunchExecutionError::new(
+            SourceLaunchTarget::EmbeddedMgba { .. } => Err(LaunchExecutionError::new(
                 std::io::Error::other("Embedded games require the in-app player"),
             )),
             SourceLaunchTarget::Uri(value) => open_uri(value).map_err(LaunchExecutionError::new),

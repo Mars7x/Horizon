@@ -21,6 +21,7 @@
 | [0206](0206-save-states-and-resume.md) | Manual state slots and automatic save-on-exit/resume |
 | [0207](0207-jxl-only-album-pictures.md) | Canonical JXL raster storage, animation and retained durable-file compatibility |
 | [0208](0208-controller-remapping-and-playback-speed.md) | GBA controller remapping and four session playback speeds |
+| [0209](0209-game-boy-and-game-boy-color.md) | Game Boy and Game Boy Color through the bundled mGBA core |
 
 Earlier decisions and their supporting phase notes are in
 [history](../history/INDEX.md). Their numbered identifiers remain reserved.

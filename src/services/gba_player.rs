@@ -1,4 +1,5 @@
-//! First GBA session: validated ROM snapshots, core lifecycle and battery saves.
+//! mGBA sessions (GB, GBC and GBA): validated ROM snapshots, core lifecycle
+//! and battery saves.
 use crate::domain::core_settings::PlaybackSpeed;
 use crate::{
     domain::{GameId, SessionTrackingMethod, SourceId},
@@ -7,7 +8,7 @@ use crate::{
         gba_core::{AudioBuffer, Core, LatestFrame},
         pipewire::{AudioStream, Role},
     },
-    services::{activity::ActivityRepository, worker::Notify},
+    services::{activity::ActivityRepository, rom_import::RomSystem, worker::Notify},
 };
 use std::{
     fs::{self, File, OpenOptions},
@@ -74,7 +75,12 @@ pub struct RunningGame {
 impl RunningGame {
     /// `frame_ready` is called on the worker each time a new frame is ready
     /// in `frame`, so the UI shows it as soon as it exists.
-    pub fn start(paths: PlayerPaths, sha256: String, frame_ready: Notify) -> Result<Self, String> {
+    pub fn start(
+        paths: PlayerPaths,
+        system: RomSystem,
+        sha256: String,
+        frame_ready: Notify,
+    ) -> Result<Self, String> {
         if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err("Invalid ROM identity".into());
         }
@@ -87,7 +93,7 @@ impl RunningGame {
         let buttons = Arc::new(AtomicU16::new(0));
         let (worker_frame, worker_buttons) = (Arc::clone(&frame), Arc::clone(&buttons));
         let worker = thread::Builder::new()
-            .name("horizon-gba".into())
+            .name("horizon-mgba".into())
             .spawn(move || {
                 struct CoreLease;
                 impl Drop for CoreLease {
@@ -98,7 +104,7 @@ impl RunningGame {
                 let _lease = CoreLease;
                 let result = play(
                     paths,
-                    &sha256,
+                    (system, &sha256),
                     receiver,
                     &sender,
                     worker_frame,
@@ -120,7 +126,7 @@ impl RunningGame {
             }),
             Err(_) => {
                 CORE_RUNNING.store(false, Ordering::Release);
-                Err("Could not start the GBA worker".into())
+                Err("Could not start the game worker".into())
             }
         }
     }
@@ -129,7 +135,7 @@ impl RunningGame {
         match self.worker.take() {
             Some(worker) => worker
                 .join()
-                .map_err(|_| "The GBA worker stopped unexpectedly".to_owned())?,
+                .map_err(|_| "The game worker stopped unexpectedly".to_owned())?,
             None => Ok(()),
         }
     }
@@ -150,7 +156,7 @@ pub fn read_rom_snapshot(path: &Path, sha256: &str) -> Result<Vec<u8>, String> {
         .metadata()
         .map_err(|_| "Could not read the game file".to_owned())?;
     if !metadata.is_file() || !(192..=32 * 1024 * 1024).contains(&metadata.len()) {
-        return Err("This game file is not a supported raw GBA ROM".into());
+        return Err("This game file is not a supported cartridge file".into());
     }
     let mut bytes = Vec::with_capacity(metadata.len() as usize);
     (&mut file)
@@ -170,7 +176,7 @@ pub fn read_rom_snapshot(path: &Path, sha256: &str) -> Result<Vec<u8>, String> {
 
 fn play(
     paths: PlayerPaths,
-    sha256: &str,
+    (system, sha256): (RomSystem, &str),
     commands: Receiver<Command>,
     events: &Sender<Event>,
     frame: LatestFrame,
@@ -182,7 +188,7 @@ fn play(
     let mut repository =
         SqliteLibraryRepository::open(&paths.database).map_err(|e| e.to_string())?;
     let locations = repository
-        .gba_rom_locations(sha256)
+        .rom_locations(system, sha256)
         .map_err(|e| e.to_string())?;
     let mut selected = None;
     let mut failure =
@@ -203,8 +209,13 @@ fn play(
     let preferences = crate::persistence::core_settings::CoreSettingsStore::new(paths.settings)
         .load()
         .map_err(|_| "Could not read playback or core settings".to_owned())?;
+    let mut mgba = preferences.mgba;
+    // The correction models the GBA's own screen; GB and GBC games keep
+    // mGBA's colours.
+    mgba.color_correction &= system == RomSystem::GameBoyAdvance;
+    let source = SourceId::new(system.source_id()).map_err(|e| e.to_string())?;
     let game = crate::domain::SourceGameRef::new(
-        SourceId::new("gba").map_err(|e| e.to_string())?,
+        source.clone(),
         crate::domain::ExternalGameId::new(format!("sha256:{sha256}"))
             .map_err(|e| e.to_string())?,
     );
@@ -217,7 +228,7 @@ fn play(
     let mut core = Core::load(
         &paths.core,
         &rom,
-        preferences.mgba,
+        mgba,
         frame,
         Arc::clone(&audio),
         Arc::clone(&buttons),
@@ -240,7 +251,7 @@ fn play(
     // Keep the PipeWire graph connected until this session ends. Pauses gate
     // the reader instead of paying device/graph activation latency on resume.
     let _stream = AudioStream::open(
-        "Horizon GBA",
+        "Horizon game",
         Role::Game,
         core.av.sample_rate.round() as u32,
         2,
@@ -248,7 +259,6 @@ fn play(
         Box::new(move |output, _| audio_reader.render(output)),
     )
     .map_err(|_| "Could not open game audio. Check the audio output and try again.".to_owned())?;
-    let source = SourceId::new("gba").map_err(|e| e.to_string())?;
     let interval = Duration::from_secs_f64(1.0 / core.av.fps);
     let mut deadline = Instant::now();
     let mut checkpoint = Instant::now();

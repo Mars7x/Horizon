@@ -1,15 +1,17 @@
 # Architecture
 
 Horizon keeps behavior in Rust and rendering in Slint. The first approved host is
-an in-process mGBA libretro worker, scoped to GBA rather than a permanent multi-core
-framework. [ADR 0198](adr/0198-first-gba-playback.md) records the decision.
+an in-process mGBA libretro worker, scoped to mGBA's systems (Game Boy, Game Boy
+Color and GBA) rather than a permanent multi-core framework.
+[ADR 0198](adr/0198-first-gba-playback.md) and
+[ADR 0209](adr/0209-game-boy-and-game-boy-color.md) record the decision.
 
 | Layer | Responsibility | Source |
 | --- | --- | --- |
 | Domain | Validated identities, session states, settings and media concepts | [domain](../src/domain/) |
 | Services | Library, import, launch/activity, artwork, media, account and friend coordination | [services](../src/services/) |
 | Persistence | SQLite repositories, atomic writes, private settings and migrations | [persistence](../src/persistence/) |
-| Source boundaries | Capability-driven interfaces; GBA recognition and import-only adapter | [sources](../src/sources/mod.rs) |
+| Source boundaries | Capability-driven interfaces; cartridge recognition and import-only adapters | [sources](../src/sources/mod.rs) |
 | Platform | Data paths, portals, Winit/Skia, native media and read-only host status | [platform](../src/platform/) |
 | Input/navigation | Semantic actions, repeat, routes, history and focus | [input](../src/input/), [navigation](../src/navigation/) |
 | Presentation | Controllers, workers, shared catalog and Rust→Slint projections | [presentation](../src/presentation/) |
@@ -23,7 +25,7 @@ not string checks spread through presentation.
 ## Composition and workers
 
 [Startup](../src/app.rs) resolves paths, opens/migrates SQLite, constructs the
-GBA registry and reads the active library. Runtime services share the
+cartridge-system registry and reads the active library. Runtime services share the
 repository. Home, Library and Activity share an append-only catalog whose indices
 never move during a run; reloads append and mark removals.
 
