@@ -2,6 +2,7 @@
 use crate::domain::core_settings::MgbaPreferences;
 use crate::domain::core_settings::PlaybackSpeed;
 use libloading::Library;
+use slint::{Rgba8Pixel, SharedPixelBuffer};
 use std::{
     cell::RefCell,
     ffi::{CStr, c_char, c_void},
@@ -20,7 +21,13 @@ pub struct Frame {
     pub rgba: Vec<u8>,
     pub smooth: bool,
 }
-pub type LatestFrame = Arc<Mutex<Option<Frame>>>;
+/// A filtered frame ready to show: Slint's own buffer, so the UI hands it to
+/// an `Image` without copying it again.
+pub struct Presented {
+    pub pixels: SharedPixelBuffer<Rgba8Pixel>,
+    pub smooth: bool,
+}
+pub type LatestFrame = Arc<Mutex<Option<Presented>>>;
 pub type AudioBuffer = Arc<super::gba_audio::GameAudio>;
 
 struct Callbacks {
@@ -29,7 +36,12 @@ struct Callbacks {
     buttons: Arc<AtomicU16>,
     pixel_format: u32,
     preferences: MgbaPreferences,
+    /// The core's newest frame, unfiltered (screenshots and states use it).
     raw_frame: Option<Frame>,
+    /// `raw_frame` has not been presented yet.
+    fresh: bool,
+    /// Reused for colour correction, which must leave `raw_frame` alone.
+    scratch: Vec<u8>,
     audio_speed: super::gba_audio::SpeedAudio,
     frames: Arc<AtomicU64>,
 }
@@ -180,6 +192,8 @@ impl Core {
                     pixel_format: 0,
                     preferences,
                     raw_frame: None,
+                    fresh: false,
+                    scratch: Vec::new(),
                     audio_speed: super::gba_audio::SpeedAudio::default(),
                     frames: Arc::clone(&core.frames),
                 })
@@ -268,6 +282,44 @@ impl Core {
     }
     pub fn run_frame(&mut self) {
         unsafe { (self.run)() }
+    }
+    /// Filters the newest frame for display and hands it to the UI. The
+    /// worker calls this at most once per display refresh, so frames that
+    /// fast-forward never shows are not filtered. False when nothing new.
+    pub fn present(&self) -> bool {
+        CALLBACKS.with(|state| {
+            let Ok(mut state) = state.try_borrow_mut() else {
+                return false;
+            };
+            let Some(state) = state.as_mut() else {
+                return false;
+            };
+            let Callbacks {
+                raw_frame,
+                fresh,
+                scratch,
+                preferences,
+                frame,
+                ..
+            } = state;
+            let Some(raw) = raw_frame.as_ref().filter(|_| *fresh) else {
+                return false;
+            };
+            *fresh = false;
+            let presented = super::gba_video::present(
+                raw,
+                preferences.color_correction,
+                preferences.video_filter,
+                scratch,
+            );
+            match frame.lock() {
+                Ok(mut frame) => {
+                    *frame = Some(presented);
+                    true
+                }
+                Err(_) => false,
+            }
+        })
     }
     pub fn save_ram(&self) -> Result<Vec<u8>, String> {
         // SAFETY: memory belongs to the loaded core; copied before its next call.
@@ -421,26 +473,37 @@ extern "C" fn video(data: *const c_void, width: u32, height: u32, pitch: usize) 
         }
         // SAFETY: libretro provides a frame with `height` rows of `pitch` bytes.
         let data = unsafe { std::slice::from_raw_parts(data.cast::<u8>(), bytes) };
-        let mut rgba = vec![0; width as usize * height as usize * 4];
-        for y in 0..height as usize {
-            for x in 0..width as usize {
-                let offset = y * pitch + x * bpp;
-                let color = if bpp == 4 {
-                    let value = u32::from_ne_bytes([
-                        data[offset],
-                        data[offset + 1],
-                        data[offset + 2],
-                        data[offset + 3],
-                    ]);
+        let pixel_format = state.pixel_format;
+        let (width, height) = (width as usize, height as usize);
+        // Reuse the buffer: frames keep their size, so this rarely allocates.
+        let raw = state.raw_frame.get_or_insert_with(|| Frame {
+            width: 0,
+            height: 0,
+            rgba: Vec::new(),
+            smooth: false,
+        });
+        raw.width = width as u32;
+        raw.height = height as u32;
+        raw.rgba.resize(width * height * 4, 0);
+        for (y, row) in raw.rgba.chunks_exact_mut(width * 4).enumerate() {
+            let line = &data[y * pitch..][..width * bpp];
+            for (pixel, source) in row
+                .as_chunks_mut::<4>()
+                .0
+                .iter_mut()
+                .zip(line.chunks_exact(bpp))
+            {
+                *pixel = if bpp == 4 {
+                    let value = u32::from_ne_bytes([source[0], source[1], source[2], source[3]]);
                     [(value >> 16) as u8, (value >> 8) as u8, value as u8, 255]
                 } else {
-                    let value = u16::from_ne_bytes([data[offset], data[offset + 1]]);
-                    let green = if state.pixel_format == 2 {
+                    let value = u16::from_ne_bytes([source[0], source[1]]);
+                    let green = if pixel_format == 2 {
                         ((value >> 5) & 63) * 255 / 63
                     } else {
                         ((value >> 5) & 31) * 255 / 31
                     };
-                    let red = if state.pixel_format == 2 {
+                    let red = if pixel_format == 2 {
                         (value >> 11) & 31
                     } else {
                         (value >> 10) & 31
@@ -452,25 +515,10 @@ extern "C" fn video(data: *const c_void, width: u32, height: u32, pitch: usize) 
                         255,
                     ]
                 };
-                rgba[(y * width as usize + x) * 4..(y * width as usize + x + 1) * 4]
-                    .copy_from_slice(&color);
             }
         }
-        let mut raw = Frame {
-            width,
-            height,
-            rgba,
-            smooth: false,
-        };
-        state.raw_frame = Some(raw.clone());
-        if state.preferences.color_correction {
-            super::gba_video::correct_color(&mut raw);
-        }
-        let filtered = super::gba_video::apply(raw, state.preferences.video_filter);
-        if let Ok(mut frame) = state.frame.lock() {
-            *frame = Some(filtered);
-            state.frames.fetch_add(1, Ordering::Release);
-        }
+        state.fresh = true;
+        state.frames.fetch_add(1, Ordering::Release);
     });
 }
 extern "C" fn audio_sample(left: i16, right: i16) {
@@ -661,6 +709,18 @@ mod tests {
         assert_eq!(unfiltered, filtered);
     }
 
+    /// Presents the newest frame and reads it back as a plain frame.
+    fn shown(core: &Core, frame: &LatestFrame) -> Frame {
+        assert!(core.present(), "a new frame to present");
+        let frame = frame.lock().unwrap().take().unwrap();
+        Frame {
+            width: frame.pixels.width(),
+            height: frame.pixels.height(),
+            rgba: frame.pixels.as_bytes().to_vec(),
+            smooth: frame.smooth,
+        }
+    }
+
     #[test]
     #[ignore = "requires the built pinned mGBA core"]
     fn real_core_combines_colour_and_pixel_art_without_changing_capture() {
@@ -682,7 +742,7 @@ mod tests {
         for _ in 0..6 {
             core.run_frame();
         }
-        let display = frame.lock().unwrap().clone().unwrap();
+        let display = shown(&core, &frame);
         let raw = core.capture_frame().unwrap();
         assert_eq!((display.width, display.height), (1440, 960));
         assert_eq!((raw.width, raw.height), (240, 160));
@@ -713,14 +773,14 @@ mod tests {
             core.run_frame();
         }
         assert_eq!((core.av.base_width, core.av.base_height), (240, 160));
-        let image = frame.lock().unwrap().clone().unwrap();
+        let image = shown(&core, &frame);
         assert!(image.rgba[1] > 200);
         assert!(image.rgba[0] < 30);
         buttons.store(1 << 8, Ordering::Release);
         for _ in 0..3 {
             core.run_frame();
         }
-        let image = frame.lock().unwrap().clone().unwrap();
+        let image = shown(&core, &frame);
         assert!(image.rgba[0] > 200);
         assert!(image.rgba[1] < 30);
         let saved = core.save_ram().unwrap();
@@ -729,7 +789,7 @@ mod tests {
         for _ in 0..3 {
             core.run_frame();
         }
-        assert!(frame.lock().unwrap().as_ref().unwrap().rgba[1] > 200);
+        assert!(shown(&core, &frame).rgba[1] > 200);
         assert!(!audio.is_empty());
         assert!(audio.drain().iter().any(|sample| sample.abs() > 0.01));
         audio.clear();

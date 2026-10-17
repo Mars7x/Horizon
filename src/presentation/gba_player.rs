@@ -72,6 +72,8 @@ pub struct GbaPlayer {
     stage: Cell<PlayerStage>,
     stage_since: Cell<Instant>,
     first_frame_at: Cell<Option<Instant>>,
+    /// Called by the game worker when a frame is ready (see `show_frame`).
+    frame_ready: std::cell::OnceCell<crate::services::worker::Notify>,
 }
 impl GbaPlayer {
     pub fn new(ui: &AppWindow, paths: PlayerPaths) -> Rc<Self> {
@@ -95,7 +97,16 @@ impl GbaPlayer {
             stage: Cell::new(PlayerStage::Waiting),
             stage_since: Cell::new(Instant::now()),
             first_frame_at: Cell::new(None),
+            frame_ready: std::cell::OnceCell::new(),
         });
+        let weak = Rc::downgrade(&player);
+        let _ = player.frame_ready.set(super::wake::ui_notify(move || {
+            if let Some(player) = weak.upgrade()
+                && let Some(ui) = player.ui.upgrade()
+            {
+                player.show_frame(&ui);
+            }
+        }));
         let weak = Rc::downgrade(&player);
         ui.on_player_choose(move |index| {
             if let Some(player) = weak.upgrade() {
@@ -699,6 +710,28 @@ impl GbaPlayer {
             tracing::warn!(%error,"could not close Horizon after saving");
         }
     }
+    /// Shows the worker's newest frame, if one is waiting. Runs as soon as
+    /// the worker reports it (`frame_ready`), and from the tick as a fallback.
+    fn show_frame(&self, ui: &AppWindow) {
+        if self.stage.get() == PlayerStage::Exiting {
+            return;
+        }
+        let running = self.running.borrow();
+        let Some(frame) = running
+            .as_ref()
+            .and_then(|game| game.frame.lock().ok()?.take())
+        else {
+            return;
+        };
+        if self.first_frame_at.get().is_none() {
+            self.first_frame_at.set(Some(Instant::now()));
+        }
+        ui.set_player_smooth(frame.smooth);
+        // The worker built Slint's buffer: no copy here.
+        ui.set_player_frame(Image::from_rgba8(frame.pixels));
+        ui.set_player_has_frame(true);
+        self.sync_pause(ui);
+    }
     fn tick(&self) {
         let Some(ui) = self.ui.upgrade() else {
             return;
@@ -845,23 +878,7 @@ impl GbaPlayer {
                 ui.set_player_busy(false);
                 ui.set_player_message("The GBA session stopped unexpectedly".into());
             }
-            if let Ok(mut frame) = game.frame.lock()
-                && let Some(frame) = frame.take()
-            {
-                if self.first_frame_at.get().is_none() {
-                    self.first_frame_at.set(Some(Instant::now()));
-                }
-                ui.set_player_smooth(frame.smooth);
-                ui.set_player_frame(Image::from_rgba8(
-                    SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
-                        &frame.rgba,
-                        frame.width,
-                        frame.height,
-                    ),
-                ));
-                ui.set_player_has_frame(true);
-                self.sync_pause(&ui);
-            }
+            self.show_frame(&ui);
             let pad = self.gamepads.borrow().as_ref().map_or(0, |source| source());
             if self.foreground.get() && pad == 0 {
                 self.pad_ready.set(true);
@@ -947,7 +964,12 @@ impl LaunchExecutor for GbaPlayer {
             let Some(ui) = self.ui.upgrade() else {
                 return Err("Horizon is closing".into());
             };
-            let running = RunningGame::start(self.paths.clone(), sha256.clone())?;
+            let frame_ready = self
+                .frame_ready
+                .get()
+                .cloned()
+                .ok_or("The player is not ready")?;
+            let running = RunningGame::start(self.paths.clone(), sha256.clone(), frame_ready)?;
             *self.running.borrow_mut() = Some(running);
             ui.set_player_origin(ui.invoke_player_capture_origin());
             self.set_stage(&ui, PlayerStage::Waiting);

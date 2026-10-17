@@ -6,7 +6,9 @@ Missing folder access or changed bytes require selecting the game folder again.
 Playback does not depend on hash-catalog recognition or SteamGridDB availability.
 
 The game uses its original aspect ratio and black bars as needed. The default
-None filter preserves sharp pixels. Software frames are paced at the core's reported rate; audio goes through
+None filter preserves sharp pixels. Software frames are paced at the core's reported rate. The
+worker filters the newest frame straight into Slint's pixel buffer and wakes the UI, which shows
+it at once without copying it; audio goes through
 the existing native PipeWire boundary. mGBA's built-in BIOS implementation allows
 the first version to run without a BIOS setup screen or distributed BIOS file.
 
@@ -52,7 +54,9 @@ the game and clears queued audio/input, respecting background freeze.
 
 Playback speed offers 1×, 2×, 3× and 4× for this loaded game. Left/Right steps
 between the limits; Select cycles through all four. The worker multiplies its
-frame pace and plays audio at the corresponding faster, higher pitch. A stereo
+frame pace and plays audio at the corresponding faster, higher pitch. Only the newest frame is
+filtered and shown once per display refresh, so frames fast-forward skips over are never filtered
+(xBRZ costs about 8 ms a frame on a Ryzen 7 5800X3D, which 4× could not otherwise keep up with). A stereo
 low-pass filter matched to the factor prevents aliasing before integer decimation
 back to the output sample rate. Buffered audio is cleared on speed changes and
 kept to at most 50 ms in the application queue. Speed is shown only in the pause
