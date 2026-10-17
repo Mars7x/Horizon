@@ -23,6 +23,7 @@
 | [0208](0208-controller-remapping-and-playback-speed.md) | GBA controller remapping and four session playback speeds |
 | [0209](0209-game-boy-and-game-boy-color.md) | Game Boy and Game Boy Color through the bundled mGBA core |
 | [0210](0210-live-game-folder.md) | The chosen game folder is checked again so new games appear |
+| [0211](0211-states-follow-the-core-release.md) | Save states follow the mGBA release, not its exact binary |
 
 Earlier decisions and their supporting phase notes are in
 [history](../history/INDEX.md). Their numbered identifiers remain reserved.

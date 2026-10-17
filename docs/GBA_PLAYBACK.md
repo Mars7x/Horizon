@@ -164,10 +164,14 @@ and compatibility checks, including backup recovery. Turning this option
 off starts normally but continues saving the automatic point on exit. A missing
 state starts normally; if states exist but none can be read compatibly, launch
 reports the problem and preserves them. Disable the option to start normally.
-States match the full ROM hash, metadata format and exact mGBA version/build
-hash. Core upgrades can make states unavailable; battery saves stay independent.
+States match the full ROM hash, metadata format and mGBA release (for example
+`mGBA@0.10.5`); a rebuild of the same release keeps them, and mGBA rejects any
+state it cannot read with the session rolled back. A new mGBA release makes
+states unavailable; battery saves stay independent. Previews keep the game's
+native size (240×160, or 160×144 for Game Boy and Game Boy Color).
 There is no automatic state checkpoint during gameplay, so a forced exit can lose
-progress since the latest manual/automatic state. See [ADR 0206](adr/0206-save-states-and-resume.md).
+progress since the latest manual/automatic state. See [ADR 0206](adr/0206-save-states-and-resume.md) and
+[ADR 0211](adr/0211-states-follow-the-core-release.md).
 
 Observed Activity sessions begin after the core produces a frame, include time
 while the loaded game is paused, and finish after normal shutdown. Failed sessions

@@ -13,6 +13,18 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 pub const MANUAL_SLOTS: u8 = 4;
+/// Native frame sizes: GBA, then Game Boy and Game Boy Color.
+const PREVIEW_SIZES: [(u32, u32); 2] = [(240, 160), (160, 144)];
+
+/// States follow the mGBA release (`mGBA@<version>`), not the exact binary:
+/// rebuilding the same release, such as adding its Game Boy core, keeps
+/// them. mGBA itself rejects a state it cannot read, and the session rolls back.
+fn same_release(saved: &str, current: &str) -> bool {
+    fn release(build: &str) -> &str {
+        build.rsplit_once(':').map_or(build, |(release, _)| release)
+    }
+    release(saved) == release(current)
+}
 static NONCE: AtomicU64 = AtomicU64::new(0);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -72,7 +84,7 @@ impl Store {
             || metadata.saved_at < 0
             || metadata.slot != slot
             || metadata.core != "mgba"
-            || metadata.core_build != self.core_build
+            || !same_release(&metadata.core_build, &self.core_build)
             || metadata.rom_identity != self.folder.manifest.game_id
         {
             return Err(io::Error::other(
@@ -98,8 +110,9 @@ impl Store {
         {
             return Err(io::Error::other("Saved state is incomplete or damaged"));
         }
-        if crate::services::image::dimensions(&preview, None).map_err(io::Error::other)?
-            != (240, 160)
+        let (width, height) =
+            crate::services::image::dimensions(&preview, None).map_err(io::Error::other)?;
+        if !PREVIEW_SIZES.contains(&(width, height))
             || (metadata.format_version == 2 && !crate::services::image::is_jxl(&preview))
         {
             return Err(io::Error::other("Invalid saved state preview"));
@@ -113,8 +126,8 @@ impl Store {
             bytes,
             metadata,
             preview: Frame {
-                width: 240,
-                height: 160,
+                width,
+                height,
                 rgba: rgba.into_raw(),
                 smooth: false,
             },
@@ -283,9 +296,8 @@ impl Store {
         if slot > MANUAL_SLOTS
             || bytes.is_empty()
             || bytes.len() > 16 * 1024 * 1024
-            || frame.width != 240
-            || frame.height != 160
-            || frame.rgba.len() != 240 * 160 * 4
+            || !PREVIEW_SIZES.contains(&(frame.width, frame.height))
+            || frame.rgba.len() != (frame.width * frame.height * 4) as usize
         {
             return Err(io::Error::other("Invalid saved state data"));
         }
@@ -309,7 +321,7 @@ impl Store {
             .create_new(true)
             .mode(0o600)
             .open(&files.screenshot)?;
-        crate::platform::jpeg_xl::write_rgba(&file, &frame.rgba, 240, 160)?;
+        crate::platform::jpeg_xl::write_rgba(&file, &frame.rgba, frame.width, frame.height)?;
         file.sync_all()?;
         let preview = read(&files.screenshot, 512 * 1024)?;
         let metadata = Metadata {
@@ -650,6 +662,11 @@ mod tests {
         f.store.core_build = "different core".into();
         assert!(f.store.latest().is_err());
         assert!(f.store.list()[2].issue.is_some());
+        // A rebuild of the same release keeps its states.
+        f.store.core_build = "mGBA@test:build-two".into();
+        assert_eq!(f.store.latest().unwrap().unwrap().bytes, b"valid");
+        f.store.core_build = "mGBA@other:build-one".into();
+        assert!(f.store.latest().is_err());
         f.store.core_build = "mGBA@test:build-one".into();
         let identity = f.store.folder.manifest.game_id.clone();
         f.store.folder.manifest.game_id = format!("sha256:{}", "b".repeat(64));
@@ -692,5 +709,29 @@ mod tests {
         fs::remove_file(&state).unwrap();
         std::os::unix::fs::symlink(&outside, &state).unwrap();
         assert!(f.store.load(1).is_err());
+    }
+    #[test]
+    fn game_boy_states_keep_their_own_preview_size() {
+        let f = Fixture::new();
+        let frame = Frame {
+            width: 160,
+            height: 144,
+            rgba: [0, 0, 255, 255].repeat(160 * 144),
+            smooth: false,
+        };
+        f.store.save(1, b"game boy", &frame).unwrap();
+        let snapshot = f.store.load(1).unwrap().unwrap();
+        assert_eq!(
+            (snapshot.preview.width, snapshot.preview.height),
+            (160, 144)
+        );
+        assert_eq!(snapshot.preview.rgba, frame.rgba);
+        let wrong = Frame {
+            width: 256,
+            height: 224,
+            rgba: vec![0; 256 * 224 * 4],
+            smooth: false,
+        };
+        assert!(f.store.save(2, b"bordered", &wrong).is_err());
     }
 }
