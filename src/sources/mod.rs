@@ -64,7 +64,11 @@ impl SourceArtworkCandidate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceLaunchTarget {
     Uri(String),
-    EmbeddedGba { sha256: String },
+    /// A verified cartridge, played in-process by the bundled mGBA core.
+    EmbeddedMgba {
+        system: gba::recognition::RomSystem,
+        sha256: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -438,7 +442,9 @@ pub enum SourceRegistryBuildError {
 /// GBA is the first embedded core; external launcher adapters remain retired.
 pub fn production_source_registry() -> Result<SourceRegistry, SourceRegistryBuildError> {
     let mut registry = SourceRegistry::new();
-    registry.register(gba::GbaSource::new()?)?;
+    for system in gba::recognition::RomSystem::ALL {
+        registry.register(gba::CartridgeSource::new(system)?)?;
+    }
     Ok(registry)
 }
 
@@ -525,8 +531,10 @@ mod tests {
     fn production_registry_has_no_external_game_sources() {
         let registry = production_source_registry().expect("production registry");
 
-        assert_eq!(registry.len(), 1);
-        assert!(registry.get(&source_id("gba")).is_some());
+        assert_eq!(registry.len(), 3);
+        for id in ["gb", "gbc", "gba"] {
+            assert!(registry.get(&source_id(id)).is_some());
+        }
         assert!(registry.get(&source_id("flatpak")).is_none());
         assert!(registry.get(&source_id("steam")).is_none());
         assert!(registry.get(&source_id("bottles")).is_none());

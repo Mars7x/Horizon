@@ -56,18 +56,19 @@ impl SqliteLibraryRepository {
     }
 
     /// Retain every location for a content identity; launch revalidates bytes.
-    pub fn gba_rom_locations(
+    pub fn rom_locations(
         &self,
+        system: crate::services::rom_import::RomSystem,
         sha256: &str,
     ) -> Result<Vec<crate::services::gba_player::RomLocation>, PersistenceError> {
         use std::os::unix::ffi::OsStringExt;
         let mut statement = self.connection.prepare(
             "SELECT DISTINCT g.id, g.title, r.path FROM games g \
-             JOIN game_sources s ON s.game_id = g.id AND s.source_id = 'gba' \
+             JOIN game_sources s ON s.game_id = g.id AND s.source_id = ?2 \
              JOIN rom_files r ON r.game_id = g.id \
              WHERE r.sha256 = ?1 AND s.external_id = 'sha256:' || r.sha256 ORDER BY r.path",
         )?;
-        let rows = statement.query_map([sha256], |row| {
+        let rows = statement.query_map(params![sha256, system.source_id()], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
                 row.get::<_, String>(1)?,
@@ -142,15 +143,16 @@ impl SqliteLibraryRepository {
     /// A conflicting/unknown hash or existing catalog provenance is untouched.
     pub fn recognize_saved_rom_titles(
         &mut self,
-        catalog: &crate::services::rom_import::GbaCatalog,
+        catalogs: &crate::services::rom_import::RomCatalogs,
     ) -> Result<usize, PersistenceError> {
+        use crate::services::rom_import::RomSystem;
         let transaction = self.connection.transaction()?;
-        let mut titles = std::collections::BTreeMap::<i64, Option<String>>::new();
+        let mut titles = std::collections::BTreeMap::<i64, Option<(String, String)>>::new();
         {
             let mut statement = transaction.prepare(
-                "SELECT DISTINCT r.game_id, r.sha1, r.size FROM rom_files r \
+                "SELECT DISTINCT r.game_id, gs.source_id, r.sha1, r.size FROM rom_files r \
                  INNER JOIN game_sources gs ON gs.game_id = r.game_id \
-                 AND gs.source_id = 'gba' AND gs.external_id = 'sha256:' || r.sha256 \
+                 AND gs.external_id = 'sha256:' || r.sha256 \
                  WHERE NOT EXISTS (SELECT 1 FROM rom_files verified \
                  WHERE verified.game_id = r.game_id AND verified.catalog_name IS NOT NULL)",
             )?;
@@ -158,12 +160,19 @@ impl SqliteLibraryRepository {
                 Ok((
                     row.get::<_, i64>(0)?,
                     row.get::<_, String>(1)?,
-                    row.get::<_, u64>(2)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, u64>(3)?,
                 ))
             })?;
             for row in rows {
-                let (id, sha1, size) = row?;
-                let title = catalog.title_for_hash(&sha1, size).map(str::to_owned);
+                let (id, source, sha1, size) = row?;
+                let Some(catalog) = RomSystem::from_source_id(&source).map(|s| catalogs.get(s))
+                else {
+                    continue;
+                };
+                let title = catalog
+                    .title_for_hash(&sha1, size)
+                    .map(|title| (title.to_owned(), catalog.name.clone()));
                 titles
                     .entry(id)
                     .and_modify(|known| {
@@ -176,7 +185,7 @@ impl SqliteLibraryRepository {
         }
         let mut recognized = 0;
         for (id, title) in titles {
-            let Some(title) = title else {
+            let Some((title, catalog)) = title else {
                 continue;
             };
             transaction.execute(
@@ -185,7 +194,7 @@ impl SqliteLibraryRepository {
             )?;
             transaction.execute(
                 "UPDATE rom_files SET catalog_name = ?1 WHERE game_id = ?2",
-                params![catalog.name, id],
+                params![catalog, id],
             )?;
             recognized += 1;
         }
@@ -208,8 +217,9 @@ impl SqliteLibraryRepository {
                     "selected file has no fingerprint",
                 ));
             };
+            let source_id = candidate.system.source_id();
             let discovered = DiscoveredGame::new(
-                SourceId::new("gba").map_err(|source| {
+                SourceId::new(source_id).map_err(|source| {
                     PersistenceError::InvalidStoredDomainValue {
                         field: "ROM source",
                         source,
@@ -232,7 +242,7 @@ impl SqliteLibraryRepository {
             let existing: Option<i64> = transaction
                 .query_row(
                     "SELECT game_id FROM game_sources WHERE source_id = ?1 AND external_id = ?2",
-                    params!["gba", discovered.external_id().as_str()],
+                    params![source_id, discovered.external_id().as_str()],
                     |row| row.get(0),
                 )
                 .optional()?;
@@ -1717,11 +1727,12 @@ mod tests {
 #[cfg(test)]
 mod rom_import_tests {
     use super::*;
-    use crate::services::rom_import::{RomCandidate, RomFingerprint, RomSetup};
+    use crate::services::rom_import::{RomCandidate, RomFingerprint, RomSetup, RomSystem};
 
     fn candidate(path: &str, title: &str, hash: &str, verified: bool) -> RomCandidate {
         RomCandidate {
             path: path.into(),
+            system: RomSystem::GameBoyAdvance,
             title: title.into(),
             selected: true,
             fingerprint: Some(RomFingerprint {
@@ -1737,7 +1748,8 @@ mod rom_import_tests {
     #[test]
     fn bundled_hash_titles_upgrade_old_filenames_but_preserve_verified_and_unknown_games() {
         let mut repository = SqliteLibraryRepository::open_in_memory().unwrap();
-        let catalog = crate::services::rom_import::GbaCatalog::bundled().unwrap();
+        let catalogs = crate::services::rom_import::RomCatalogs::bundled().unwrap();
+        let catalog = catalogs.get(RomSystem::GameBoyAdvance);
         let mut recognized = candidate("/roms/completely-wrong.gba", "Wrong filename", "1", false);
         recognized.fingerprint.as_mut().unwrap().sha1 =
             "f3ae088181bf583e55daf962a92bb46f4f1d07b7".into();
@@ -1748,6 +1760,16 @@ mod rom_import_tests {
         verified.catalog = Some("Custom XML DAT".into());
         verified.fingerprint.as_mut().unwrap().sha256 = "2".repeat(64);
         let unknown = candidate("/roms/homebrew.gba", "Homebrew", "3", false);
+        // Each system is checked against its own catalog only.
+        let mut red = candidate("/roms/red.gb", "red", "5", false);
+        red.system = RomSystem::GameBoy;
+        red.fingerprint.as_mut().unwrap().sha1 = "ea9bcae617fdf159b045185467ae58b2e4a48b9a".into();
+        red.fingerprint.as_mut().unwrap().size = 1_048_576;
+        let mut misfiled = red.clone();
+        misfiled.path = "/roms/red-as-color.gbc".into();
+        misfiled.title = "red as color".into();
+        misfiled.system = RomSystem::GameBoyColor;
+        misfiled.fingerprint.as_mut().unwrap().sha256 = "6".repeat(64);
         let mut wrong_size = recognized.clone();
         wrong_size.path = "/roms/wrong-size.gba".into();
         wrong_size.title = "Size mismatch".into();
@@ -1756,11 +1778,11 @@ mod rom_import_tests {
         repository
             .save_rom_import(
                 &RomSetup::default(),
-                &[recognized, verified, unknown, wrong_size],
+                &[recognized, verified, unknown, wrong_size, red, misfiled],
             )
             .unwrap();
         let before = repository.list_games().unwrap();
-        assert_eq!(repository.recognize_saved_rom_titles(&catalog).unwrap(), 1);
+        assert_eq!(repository.recognize_saved_rom_titles(&catalogs).unwrap(), 2);
         let after = repository.list_games().unwrap();
         assert_eq!(
             before.iter().map(|g| g.game().id()).collect::<Vec<_>>(),
@@ -1776,10 +1798,12 @@ mod rom_import_tests {
                 "Pokemon - Emerald Version (USA, Europe)",
                 "Previously verified title",
                 "Homebrew",
-                "Size mismatch"
+                "Size mismatch",
+                "Pokemon - Red Version (USA, Europe) (SGB Enhanced)",
+                "red as color"
             ]
         );
-        assert_eq!(repository.recognize_saved_rom_titles(&catalog).unwrap(), 0);
+        assert_eq!(repository.recognize_saved_rom_titles(&catalogs).unwrap(), 0);
         let provenance: String = repository
             .connection
             .query_row(

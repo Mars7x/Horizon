@@ -8,7 +8,7 @@ use crate::{
     presentation::{library_reload::LibraryReloader, wake::drain_notify},
     services::{
         library::LibraryRepository,
-        rom_import::{self, GbaCatalog, RomSetup},
+        rom_import::{self, RomCatalog, RomSetup},
         worker::{WorkerSender, spawn, worker_channel},
     },
 };
@@ -138,11 +138,11 @@ impl RomSetupController {
                 // Existing catalog configuration is automatic; an unavailable
                 // catalog must not stop folder import or fabricate an exact match.
                 let catalog = setup.catalog_path.as_deref().and_then(|path| {
-                    GbaCatalog::load(path).inspect_err(|error| {
+                    RomCatalog::load(path).inspect_err(|error| {
                         tracing::warn!(%error, "saved ROM catalog unavailable; using unverified filenames");
                     }).ok()
                 });
-                let scan = rom_import::scan_folder(&folder, catalog.as_ref()).map_err(|e| e.to_string())?;
+                let scan = rom_import::scan_folder(&folder, catalog).map_err(|e| e.to_string())?;
                 if !scan.candidates.iter().any(|candidate| candidate.selected) {
                     return Err(if scan.candidates.is_empty() { "No supported games were found in this folder" } else { "The game files in this folder could not be read" }.into());
                 }

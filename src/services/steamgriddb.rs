@@ -653,7 +653,12 @@ mod tests {
     fn imported_pokemon_names_resolve_without_renaming_library_games() {
         let mut registry = SourceRegistry::new();
         registry
-            .register(crate::sources::gba::GbaSource::new().unwrap())
+            .register(
+                crate::sources::gba::CartridgeSource::new(
+                    crate::sources::gba::recognition::RomSystem::GameBoyAdvance,
+                )
+                .unwrap(),
+            )
             .unwrap();
         for (title, response, expected_query, expected_id) in [
             (

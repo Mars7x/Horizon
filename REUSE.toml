@@ -1,7 +1,7 @@
 version = 1
 
 [[annotations]]
-path = "data/catalogs/gba.xml"
+path = ["data/catalogs/gb.xml", "data/catalogs/gbc.xml", "data/catalogs/gba.xml"]
 precedence = "override"
 SPDX-FileCopyrightText = "No-Intro and Libretro database contributors"
 SPDX-License-Identifier = "CC-BY-SA-4.0"

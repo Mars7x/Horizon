@@ -66,7 +66,7 @@ modules:
   - name: mgba-core
     buildsystem: simple
     build-commands:
-      - cmake -S . -B build -G Ninja -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -DBUILD_LIBRETRO=ON -DBUILD_QT=OFF -DBUILD_SDL=OFF -DSKIP_LIBRARY=ON -DDISABLE_DEPS=ON -DM_CORE_GB=OFF -DM_CORE_GBA=ON -DUSE_DEBUGGERS=OFF -DENABLE_SCRIPTING=OFF -DBUILD_GL=OFF -DBUILD_GLES2=OFF -DBUILD_GLES3=OFF
+      - cmake -S . -B build -G Ninja -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -DBUILD_LIBRETRO=ON -DBUILD_QT=OFF -DBUILD_SDL=OFF -DSKIP_LIBRARY=ON -DDISABLE_DEPS=ON -DM_CORE_GB=ON -DM_CORE_GBA=ON -DUSE_DEBUGGERS=OFF -DENABLE_SCRIPTING=OFF -DBUILD_GL=OFF -DBUILD_GLES2=OFF -DBUILD_GLES3=OFF
       - cmake --build build
       - install -Dm0755 build/mgba_libretro.so /app/lib/horizon/mgba_libretro.so
       - install -Dm0644 LICENSE /app/share/licenses/mgba/MPL-2.0.txt

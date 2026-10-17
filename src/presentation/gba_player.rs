@@ -876,7 +876,7 @@ impl GbaPlayer {
             if game.finished() && !ui.get_player_failed() && !close {
                 ui.set_player_failed(true);
                 ui.set_player_busy(false);
-                ui.set_player_message("The GBA session stopped unexpectedly".into());
+                ui.set_player_message("The game stopped unexpectedly".into());
             }
             self.show_frame(&ui);
             let pad = self.gamepads.borrow().as_ref().map_or(0, |source| source());
@@ -954,7 +954,7 @@ impl GbaPlayer {
 }
 impl LaunchExecutor for GbaPlayer {
     fn execute(&self, target: &SourceLaunchTarget) -> Result<(), LaunchExecutionError> {
-        let SourceLaunchTarget::EmbeddedGba { sha256 } = target else {
+        let SourceLaunchTarget::EmbeddedMgba { system, sha256 } = target else {
             return crate::platform::launcher::PortalLaunchExecutor.execute(target);
         };
         let result = (|| -> Result<(), String> {
@@ -969,7 +969,8 @@ impl LaunchExecutor for GbaPlayer {
                 .get()
                 .cloned()
                 .ok_or("The player is not ready")?;
-            let running = RunningGame::start(self.paths.clone(), sha256.clone(), frame_ready)?;
+            let running =
+                RunningGame::start(self.paths.clone(), *system, sha256.clone(), frame_ready)?;
             *self.running.borrow_mut() = Some(running);
             ui.set_player_origin(ui.invoke_player_capture_origin());
             self.set_stage(&ui, PlayerStage::Waiting);

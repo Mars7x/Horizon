@@ -1235,7 +1235,7 @@ impl SettingsController {
                 .as_ref()
                 .map(|capture| {
                     format!(
-                        "Assign GBA {}",
+                        "Assign {}",
                         crate::domain::controller::ACTION_NAMES[capture.row]
                     )
                 })

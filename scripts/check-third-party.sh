@@ -44,8 +44,10 @@ for asset in "${required_assets[@]}"; do
   grep -Fq "$asset" "$notice" || { echo "asset missing from THIRD_PARTY_NOTICES.md: $asset" >&2; exit 1; }
 done
 
-test -s "$root/data/catalogs/gba.xml" || { echo "missing GBA hash catalog" >&2; exit 1; }
-grep -Fq 'data/catalogs/gba.xml' "$notice" || { echo "GBA catalog attribution missing" >&2; exit 1; }
+for catalog in gb gbc gba; do
+  test -s "$root/data/catalogs/$catalog.xml" || { echo "missing $catalog hash catalog" >&2; exit 1; }
+  grep -Fq "data/catalogs/$catalog.xml" "$notice" || { echo "$catalog catalog attribution missing" >&2; exit 1; }
+done
 
 grep -Fq "LINE Seed JP" "$notice" || { echo "LINE Seed JP missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
 grep -Fq "© LY Corporation" "$notice" || { echo "LINE Seed JP copyright missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }

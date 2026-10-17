@@ -2,7 +2,7 @@
 
 Horizon opens a full-screen setup flow until it has been completed:
 Welcome → Profile → Add your games → Ready. Titles remain system-neutral;
-[ROM import](ROM_IMPORT.md) currently supports raw GBA files only. The introduction
+[ROM import](ROM_IMPORT.md) currently supports raw Game Boy, Game Boy Color and GBA files. The introduction
 contains a welcome, one short line and one action. It has no sound/motion toggles,
 progress rail or third-party connection forms. Preferences remain in Settings.
 

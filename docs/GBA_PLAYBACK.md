@@ -1,6 +1,7 @@
-# GBA playback
+# Playback
 
-Select an imported GBA game in Home or Library and press Accept. Horizon validates
+Game Boy, Game Boy Color and Game Boy Advance games all play in the bundled mGBA
+core. Select an imported game in Home or Library and press Accept. Horizon validates
 the ROM's content hash and opens the bundled mGBA player inside the same window.
 Missing folder access or changed bytes require selecting the game folder again.
 Playback does not depend on hash-catalog recognition or SteamGridDB availability.
@@ -11,6 +12,11 @@ worker filters the newest frame straight into Slint's pixel buffer and wakes the
 it at once without copying it; audio goes through
 the existing native PipeWire boundary. mGBA's built-in BIOS implementation allows
 the first version to run without a BIOS setup screen or distributed BIOS file.
+
+mGBA picks the hardware from the cartridge header: colour games and dual-mode
+games run as a Game Boy Color, Super Game Boy enhanced games as a Super Game Boy
+(with its colours) and others as a Game Boy, using mGBA's default palette.
+The Super Game Boy border is off, so every Game Boy picture stays 160×144.
 
 ## Launch and return motion
 
@@ -33,7 +39,7 @@ saving and skips the decorative return animation.
 | --- | --- | --- |
 | Direction | Arrows | D-pad or left stick |
 | A / B | Z / X | Device-family A/B equivalents |
-| L / R | A / S | Left / right shoulder |
+| L / R (GBA only) | A / S | Left / right shoulder |
 | Start / Select | Enter / Backspace | Start / Back |
 | Pause | Escape or F10 | Guide or stick click |
 
@@ -128,15 +134,19 @@ softness of enlarging a 3× intermediate. Smooth fitting avoids enlarging the
 filter's small steps with nearest-neighbour scaling at fractional sizes; it does
 not remove intentional pixel-art details.
 Colour correction
-independently applies the credited sRGB GBA display profile before any filter;
+independently applies the credited sRGB GBA display profile before any filter,
+for GBA games only;
 it approximates the original screen rather than calibrating the user's display.
 All presets preserve aspect ratio. Native screenshots exclude these display
 treatments. No RetroArch shader runtime or imported presets are supported.
 
 ## Saves and sessions
 
-Battery saves belong to Horizon under `saves/gba/<game>/<game name>.sav`,
-with full ROM identity in `game.json`. Changing a
+Battery saves belong to Horizon under `saves/<system>/<game>/<game name>.sav`
+(`gb`, `gbc` or `gba`), with full ROM identity in `game.json`. A Game Boy
+cartridge clock (MBC3, as in Pokémon Gold, Silver and Crystal) is saved after the
+battery RAM in the same file, the layout standalone mGBA uses, so the clock keeps
+real time between sessions. Changing a
 filename does not change the save identity. Changed RAM is saved every five
 seconds and on quit. The previous valid save is retained as `backups/<game name>.previous.sav`; invalid
 existing saves are preserved and reported. Save errors pause the game so the
@@ -173,7 +183,8 @@ development can set `HORIZON_GBA_CORE` to that core built in a development prefi
 the production Flatpak always uses its packaged path.
 
 The ignored `real_core_draws_responds_to_held_input_and_restores_battery_memory`
-test needs the built core. `real_player_window_input_pause_quit_and_relaunch`
+test needs the built core; `real_core_plays_game_boy_games_at_their_own_size_and_keeps_their_clock`
+checks Game Boy picture size, Super Game Boy borders and the cartridge clock. `real_player_window_input_pause_quit_and_relaunch`
 also needs Wayland/PipeWire and a fresh `HORIZON_GBA_TEST_DIR`. Set
 `HORIZON_TEST_VIDEO_FILTER` to `none`, `lcd`, `smooth` or `xbrz` to review each preset. `HORIZON_TEST_MENU_AUDIO=1` enables real UI cue playback
 alongside the runtime test's semantic sound trace. Both use generated

@@ -10,11 +10,11 @@ builds use an `io.github.Mars7x.Horizon` subdirectory beneath each XDG root.
 ```text
 data/
   library/library.sqlite3
-  saves/gba/<game>/
+  saves/<system>/<game>/      (gb, gbc or gba)
     game.json
     <game name>.sav
     backups/<game name>.previous.sav
-  album/gba/<game>/
+  album/<system>/<game>/
     game.json
     screenshots/<UTC timestamp>.jxl
     recordings/<UTC timestamp>.<extension>
@@ -49,7 +49,7 @@ locations already follow the new grouping; they are not moved or reclassified.
 A game folder looks like `Pokemon - Emerald Version [abcd1234]`. The suffix is a
 short ROM-hash prefix; a collision extends the prefix rather than merging games.
 `game.json` stores format version, system, full source identity (`sha256:` and
-all 64 hex digits for GBA), original title and a filesystem-safe file stem.
+all 64 hex digits for these systems), original title and a filesystem-safe file stem.
 This metadata is shared by [save and Album storage](../src/services/game_storage.rs).
 
 Full identity chooses an existing folder. Display-title changes do not rename a
@@ -95,7 +95,7 @@ owner's file atomically; a failed save does not update the published preferences
 Four manual slots and one automatic resume point use complete bundles:
 
 ```text
-saves/gba/<game>/states/mgba/
+saves/<system>/<game>/states/mgba/
   resume/<game name>.resume.{state,json,jxl}
   slot-01/<game name>.slot-01.{state,json,jxl}
   slot-02/…

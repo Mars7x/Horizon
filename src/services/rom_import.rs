@@ -1,6 +1,7 @@
-//! Folder import coordination; GBA file formats belong to the source adapter.
+//! Folder import coordination; cartridge formats belong to the source adapter.
 pub use crate::sources::gba::recognition::{
-    GbaCatalog, RomCandidate, RomFingerprint, RomImportError, RomScan, fingerprint, scan,
+    RomCandidate, RomCatalog, RomCatalogs, RomFingerprint, RomImportError, RomScan, RomSystem,
+    fingerprint, scan,
 };
 use std::path::PathBuf;
 
@@ -13,20 +14,17 @@ pub struct RomSetup {
 
 /// Select every readable supported file, retaining exact catalog metadata when
 /// available and unverified filename metadata otherwise. Import never asks the
-/// user to classify or approve individual files.
+/// user to classify or approve individual files. A chosen catalog replaces
+/// the bundled one for its system only.
 pub fn scan_folder(
     folder: &std::path::Path,
-    catalog: Option<&GbaCatalog>,
+    catalog: Option<RomCatalog>,
 ) -> Result<RomScan, RomImportError> {
-    let bundled;
-    let catalog = match catalog {
-        Some(catalog) => catalog,
-        None => {
-            bundled = GbaCatalog::bundled()?;
-            &bundled
-        }
-    };
-    let mut result = scan(folder, Some(catalog))?;
+    let mut catalogs = RomCatalogs::bundled()?;
+    if let Some(catalog) = catalog {
+        catalogs = catalogs.with(catalog);
+    }
+    let mut result = scan(folder, Some(&catalogs))?;
     for candidate in &mut result.candidates {
         candidate.selected = candidate.fingerprint.is_some();
     }
@@ -115,8 +113,8 @@ mod tests {
         let second = fingerprint(&ambiguous).unwrap();
         let path = dir.join("catalog.dat");
         fs::write(&path,format!(r#"<datafile><header><name>Nintendo - Game Boy Advance</name></header><game name="Exact Title (Europe)"><rom size="192" sha1="{}"/></game><game name="One (USA)"><rom size="192" sha1="{}"/></game><game name="Two (Japan)"><rom size="192" sha1="{}"/></game></datafile>"#,first.sha1,second.sha1,second.sha1)).unwrap();
-        let catalog = GbaCatalog::load(&path).unwrap();
-        let scan = scan_folder(&dir, Some(&catalog)).unwrap();
+        let catalog = RomCatalog::load(&path).unwrap();
+        let scan = scan_folder(&dir, Some(catalog)).unwrap();
         assert!(scan.candidates.iter().all(|c| c.selected));
         let exact = scan.candidates.iter().find(|c| c.path == exact).unwrap();
         assert_eq!(exact.title, "Exact Title (Europe)");

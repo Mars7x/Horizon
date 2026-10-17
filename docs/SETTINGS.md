@@ -15,7 +15,8 @@ Focus is distinct from the selected value. See [UI standards](UI_STANDARDS.md).
 Controller has Swap Select and Back, plus Swap Hints. The first changes controller
 menu actions and gameplay A/B; the second determines whether hints follow the swap. Keyboard
 Enter/Escape remains unchanged. Button mapping opens a shared settings subpage
-for GBA A, B, L, R, Start and Select. Each row pairs a named GBA control with
+for A, B, L, R, Start and Select, shared by Game Boy, Game Boy Color and GBA
+games (L and R are GBA only). Each row pairs a named game control with
 its assigned controller input in a keycap, using controller-family labels;
 selecting either side changes the same
 assignment. Select a row, release held controls, then
