@@ -18,7 +18,7 @@ The panel uses Theme.background (true black in Black), shared typography/marquee
 spacing and focus animation; hints share Home's footer baseline. Pointer and
 keyboard/controller actions use the same UI sound boundary. Pending actions preserve row styling, focus and footer hints. Speed changes update
 only the pause-panel value with the shared value-swap duration and a directional
-slide/crossfade, with no gameplay badge or progress/success text; only failures need feedback. Save/load state browsers use shared ListRows with native-pixel previews and
+slide/fade, with no gameplay badge or progress/success text; only failures need feedback. Save/load state browsers use shared ListRows with native-pixel previews and
 timestamps. Internal quick-menu views use shared TransitionDriver/TransitionLayer
 forward/back zoom/crossfade, clipped inside the stationary drawer; header, shadow
 and footer stay fixed. Reduced Motion makes view/value changes immediate. Empty/unavailable load slots never take focus. Save replacement and
@@ -36,8 +36,7 @@ the quick menu: deactivation must not open it or change manual menu selection.
 
 Controller button mapping uses the shared Settings header, breadcrumb,
 forward/back transition and compact ListRows. Game controls are named on the left;
-assigned controller inputs appear in keycaps beneath their own column label, with
-a change chevron. Each pair is one focus/click target. Restore defaults is separated
+assigned controller inputs appear in keycaps beneath their own column label. Each pair is one focus/click target. Restore defaults is separated
 from the mapping rows by a section gap. Capture names the game control and uses ModalDialog with
 a single Cancel action and suppresses page hints/navigation underneath it;
 Restore defaults uses ConfirmDialog with Cancel initially focused. Pending
@@ -48,6 +47,7 @@ writes retain the existing row instances, focus and previous values until saved.
 | Element | Contract | Implementation |
 | --- | --- | --- |
 | Header | Stable section title, shared title baseline and margins | [PageHeader](../ui/components/page-header.slint) |
+| Changing values | Shared directional slide/fade; stationary row and focus | [ValueText](../ui/components/value-text.slint) |
 | Header values | Right-aligned read-outs/pickers with shared value transitions | [HeaderValue](../ui/components/page-header.slint) |
 | Sub-page | Breadcrumb in the content area; click means Back | [Breadcrumb](../ui/components/page-header.slint) |
 | Focusable rows | One exclusive animated outline; hover is not selection | [ListRow](../ui/components/list-row.slint), [SettingsRow](../ui/components/settings-row.slint) |
@@ -62,6 +62,16 @@ families. Authored SVG geometry/colors stay intact; generated chrome uses
 semantic tokens. Do not set hand cursors; hover color communicates clickability.
 
 ## Motion and scrolling
+
+Changing text values use shared ValueText: a 180 ms horizontal slide/fade,
+matching quick-menu speed, header pickers, core settings and controller bindings.
+Outgoing text fades before incoming text appears, avoiding doubled long labels.
+The row, label, focus and click target remain still. Core settings and quick-menu speed pass
+the actual change direction from Rust. Initial/empty values appear immediately;
+rapid changes replace the current transition without queuing stale values.
+Reduced Motion presents the new value immediately. Toggles retain their animated
+track/thumb; row focus keeps its shared 140 ms fade.
+
 
 Use shared TransitionDriver/TransitionLayer for forward/back zoom and crossfade.
 Section headers stay fixed while content transitions. Incoming pages prewarm
@@ -105,7 +115,11 @@ reproducible with [the generator](../scripts/generate-quick-menu-sounds.py).
 
 ## Text and dialogs
 
-Use short, plain labels without trailing full stops or visible ellipses. Do
+Use short, plain labels without trailing full stops or visible ellipses.
+Use plain action verbs (Open, Edit, Choose), without decorative arrow suffixes
+or chevrons on editable rows. Keep arrows for actual directional navigation,
+such as breadcrumb Back and Album previous/next. Keyboard Enter remains a
+button glyph in the hint bar, where it explains the active action. Do
 not expose implementation details, credentials, URLs containing secrets or
 unavailable data as zero. Missing achievement artwork uses a neutral fallback,
 never an invented badge. Match marquee edge color to the actual background.

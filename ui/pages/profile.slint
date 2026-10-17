@@ -345,7 +345,7 @@ export component ProfilePage inherits Rectangle {
             width: parent.width - root.rows-x - 28px;
             title: "Name";
             subtitle: root.name != "" ? root.name : "Not set";
-            trailing: "Edit  ›";
+            trailing: "Edit";
             focused: root.edit-selection == 0;
             activated => { root.activate-option(0); }
         }
@@ -354,7 +354,7 @@ export component ProfilePage inherits Rectangle {
             width: parent.width - root.rows-x - 28px;
             title: "Choose a picture";
             subtitle: "From this device";
-            trailing: "Choose  ›";
+            trailing: "Choose";
             secondary: root.has-chosen && !root.busy ? "Remove" : "";
             secondary-activated => { root.remove-picture(); }
             enabled: !root.busy;

@@ -1,0 +1,59 @@
+import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
+import { MarqueeText } from "marquee-text.slint";
+
+// One value-change treatment for settings, header pickers and the quick menu.
+// Only the value moves; its row, focus and hit target remain stationary.
+// Fade through the midpoint so longer labels never overlap into doubled text.
+export component ValueText inherits Rectangle {
+    in property <string> text;
+    in property <bool> forward: true;
+    in property <bool> active: false;
+    in property <color> text-color: Theme.foreground;
+    in property <color> edge-color: Theme.background;
+    in property <length> font-size: Typography.body-size;
+    in property <int> font-weight: Typography.emphasis-weight;
+    in property <TextHorizontalAlignment> horizontal-alignment: right;
+    out property <length> text-width: measure.preferred-width;
+    private property <string> shown;
+    private property <string> previous;
+    private property <bool> ready: false;
+    private property <bool> slide-forward: true;
+    private property <int> swaps: 0;
+    private property <float> phase: 0;
+    animate phase { duration: Motion.value-swap-duration; easing: ease-out; }
+    private property <float> progress: 1.0 - min(1.0, root.swaps - root.phase)
+        * (Motion.reduced-motion || root.previous == "" || root.shown == "" ? 0.0 : 1.0);
+    background: transparent;
+    clip: true;
+    init => { root.shown = root.text; root.ready = true; }
+    changed text => {
+        if root.ready && root.text != root.shown {
+            root.previous = root.shown;
+            root.shown = root.text;
+            root.slide-forward = root.forward;
+            root.swaps += 1;
+            root.phase = root.swaps;
+        }
+    }
+    measure := Text {
+        text: root.text; font-size: root.font-size; font-weight: root.font-weight;
+        visible: false;
+    }
+    if root.progress < 1.0 : MarqueeText {
+        x: (root.slide-forward ? -1 : 1) * Metrics.spacing-lg * root.progress;
+        width: parent.width; height: parent.height;
+        text: root.previous; opacity: max(0.0, 1.0 - root.progress * 2.0);
+        text-color: root.text-color; edge-color: root.edge-color;
+        font-size: root.font-size; font-weight: root.font-weight;
+        horizontal-alignment: root.horizontal-alignment;
+    }
+    MarqueeText {
+        x: (root.slide-forward ? 1 : -1) * Metrics.spacing-lg * (1.0 - root.progress);
+        width: parent.width; height: parent.height;
+        text: root.shown; opacity: max(0.0, root.progress * 2.0 - 1.0);
+        active: root.active && root.progress >= 1.0;
+        text-color: root.text-color; edge-color: root.edge-color;
+        font-size: root.font-size; font-weight: root.font-weight;
+        horizontal-alignment: root.horizontal-alignment;
+    }
+}
