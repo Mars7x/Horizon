@@ -1,6 +1,6 @@
 //! Choose a folder, then scan and import without a configuration/review menu.
 //! The chosen folder is then checked again at startup and every few seconds,
-//! so games added to it appear without asking.
+//! so games added to it appear, and games deleted from it leave, without asking.
 use crate::{
     AppWindow,
     domain::LibraryGame,
@@ -143,8 +143,8 @@ impl RomSetupController {
         }
     }
 
-    /// Add any new games from the chosen folder in the background. Nothing
-    /// is shown, and games whose files are gone are kept.
+    /// Add new games from the chosen folder, and retire games whose files
+    /// are gone (history and saves kept), in the background without a dialog.
     fn refresh(&self) {
         let setup = self.setup.borrow().clone();
         let Some(folder) = setup.folder.clone() else {
@@ -171,13 +171,20 @@ impl RomSetupController {
                     std::time::SystemTime::now(),
                 )
                 .map_err(|e| e.to_string())?;
-                if !scan.candidates.iter().any(|candidate| candidate.selected) {
+                let added = scan.candidates.iter().any(|candidate| candidate.selected);
+                if added {
+                    rom_import::revalidate(&scan.candidates).map_err(|e| e.to_string())?;
+                    repository
+                        .add_rom_files(&scan.candidates)
+                        .map_err(|e| e.to_string())?;
+                }
+                // Only a complete scan gets here, so missing files are gone.
+                let retired = repository
+                    .retire_missing_rom_files(&folder, &scan.seen.into_iter().collect())
+                    .map_err(|e| e.to_string())?;
+                if !added && retired == 0 {
                     return Ok(None);
                 }
-                rom_import::revalidate(&scan.candidates).map_err(|e| e.to_string())?;
-                repository
-                    .add_rom_files(&scan.candidates)
-                    .map_err(|e| e.to_string())?;
                 repository.list_games().map(Some).map_err(|e| e.to_string())
             })();
             let _ = sender.send(ResultMessage::Refreshed(result));

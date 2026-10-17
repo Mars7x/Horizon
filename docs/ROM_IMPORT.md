@@ -8,10 +8,19 @@ second confirmation. Cancelling the picker leaves the library/setup unchanged.
 The chosen folder stays live. Horizon checks it again at startup and every
 10 seconds while running, on a worker, and adds new supported files silently.
 Files already imported at the same size are not reread, and a file changed in the
-last 5 seconds (still copying) waits for a later check. A refresh never removes
-games, history or saves, never changes the saved setup, and an unavailable folder
-only logs a warning (once until a check succeeds again). See
-[ADR 0210](adr/0210-live-game-folder.md).
+last 5 seconds (still copying) waits for a later check.
+
+A game whose files have all been deleted from the folder leaves Home and Library
+after the next complete check. It is retired, not deleted: its GameId, title,
+play history, saves, states and Album pictures stay, and if the same file comes
+back under any name it returns as the same game. Only files under the chosen
+folder are checked. A check that cannot read the folder, or finds none of the
+folder's imported files (an unmounted drive, say), changes nothing; deleting
+every game at once therefore keeps them until at least one imported file is seen
+again. A refresh never changes the saved setup, and an unavailable folder only
+logs a warning (once until a check succeeds again). See
+[ADR 0210](adr/0210-live-game-folder.md) and
+[ADR 0215](adr/0215-deleted-games-leave-the-library.md).
 
 The current backend supports raw Game Boy (`.gb`), Game Boy Color (`.gbc`) and
 Game Boy Advance (`.gba`) files, each its own Library source. Scans recurse through regular folders,

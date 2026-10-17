@@ -44,7 +44,10 @@ history. Successful source batches are atomic. Partial/unavailable snapshots
 cannot prune prior membership. Earlier retirement migrations retain their
 original behavior; later archives cannot restore data those earlier versions
 deleted. The `gb`, `gbc` and `gba` sources import readable files after folder selection; their startup snapshots are empty
-and partial.
+and partial. A complete scan of the chosen folder that still finds some of its
+imported files removes the missing files' `rom_files` rows and moves a game whose
+last file went into `retired_game_sources`; importing that content again moves it
+back with its GameId.
 
 ## History and checks
 

@@ -219,6 +219,71 @@ impl SqliteLibraryRepository {
         rows.map(|row| row.map_err(Into::into)).collect()
     }
 
+    /// A complete scan of `folder` saw only `seen`: games whose every file in
+    /// the folder is gone leave the library, keeping their GameId, history,
+    /// saves and title, and return as they were if their file comes back.
+    /// Files outside the folder are untouched. A scan that finds none of the
+    /// folder's imported files looks like a missing drive, so it changes
+    /// nothing. Returns the games retired.
+    pub fn retire_missing_rom_files(
+        &mut self,
+        folder: &std::path::Path,
+        seen: &std::collections::HashSet<std::path::PathBuf>,
+    ) -> Result<usize, PersistenceError> {
+        use std::os::unix::ffi::{OsStrExt, OsStringExt};
+        let transaction = self.connection.transaction()?;
+        let files = {
+            let mut statement = transaction.prepare("SELECT path, game_id FROM rom_files")?;
+            statement
+                .query_map([], |row| {
+                    Ok((
+                        std::path::PathBuf::from(std::ffi::OsString::from_vec(
+                            row.get::<_, Vec<u8>>(0)?,
+                        )),
+                        row.get::<_, i64>(1)?,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        let in_folder: Vec<_> = files
+            .into_iter()
+            .filter(|(path, _)| path.starts_with(folder))
+            .collect();
+        if !in_folder.iter().any(|(path, _)| seen.contains(path)) {
+            return Ok(0);
+        }
+        let mut affected = std::collections::BTreeSet::new();
+        for (path, game_id) in in_folder.iter().filter(|(path, _)| !seen.contains(path)) {
+            transaction.execute(
+                "DELETE FROM rom_files WHERE path = ?1",
+                [path.as_os_str().as_bytes()],
+            )?;
+            affected.insert(*game_id);
+        }
+        let mut retired = 0;
+        for game_id in affected {
+            let remaining: i64 = transaction.query_row(
+                "SELECT COUNT(*) FROM rom_files WHERE game_id = ?1",
+                [game_id],
+                |row| row.get(0),
+            )?;
+            if remaining > 0 {
+                continue;
+            }
+            transaction.execute(
+                "INSERT OR REPLACE INTO retired_game_sources \
+                 (game_id, source_id, external_id, first_seen_at, last_seen_at) \
+                 SELECT game_id, source_id, external_id, first_seen_at, unixepoch() \
+                 FROM game_sources WHERE game_id = ?1",
+                [game_id],
+            )?;
+            retired +=
+                transaction.execute("DELETE FROM game_sources WHERE game_id = ?1", [game_id])?;
+        }
+        transaction.commit()?;
+        Ok(retired)
+    }
+
     /// Both registration and setup completion commit together. A repeat import
     /// reuses content identity, never title; unavailable folders never prune games.
     pub fn save_rom_import(
@@ -271,6 +336,18 @@ impl SqliteLibraryRepository {
                     }
                 })?,
             );
+            // A game retired because its file went missing returns as itself.
+            transaction.execute(
+                "INSERT OR IGNORE INTO game_sources \
+                 (game_id, source_id, external_id, first_seen_at, last_seen_at) \
+                 SELECT game_id, source_id, external_id, first_seen_at, unixepoch() \
+                 FROM retired_game_sources WHERE source_id = ?1 AND external_id = ?2",
+                params![source_id, discovered.external_id().as_str()],
+            )?;
+            transaction.execute(
+                "DELETE FROM retired_game_sources WHERE source_id = ?1 AND external_id = ?2",
+                params![source_id, discovered.external_id().as_str()],
+            )?;
             // An unverified filename must never overwrite an earlier catalog title.
             let existing: Option<i64> = transaction
                 .query_row(
@@ -1884,6 +1961,74 @@ mod rom_import_tests {
             .unwrap();
         assert_eq!(repository.list_games().unwrap()[0].game().id(), id);
         assert!(repository.rom_setup().unwrap().completed);
+    }
+
+    #[test]
+    fn deleted_files_retire_their_games_and_returning_files_restore_them() {
+        let mut repository = SqliteLibraryRepository::open_in_memory().unwrap();
+        let setup = RomSetup::default();
+        repository
+            .save_rom_import(
+                &setup,
+                &[
+                    candidate("/roms/kept.gba", "Kept", "1", false),
+                    candidate("/roms/gone.gba", "Gone (USA)", "2", true),
+                    candidate("/roms/copy-a.gba", "Copied", "3", false),
+                    candidate("/roms/copy-b.gba", "Copied", "3", false),
+                    candidate("/elsewhere/outside.gba", "Outside", "4", false),
+                ],
+            )
+            .unwrap();
+        let ids = |repository: &SqliteLibraryRepository| {
+            repository
+                .list_games()
+                .unwrap()
+                .iter()
+                .map(|g| (g.game().title().as_str().to_owned(), g.game().id()))
+                .collect::<std::collections::BTreeMap<_, _>>()
+        };
+        let before = ids(&repository);
+        let seen = |paths: &[&str]| {
+            paths
+                .iter()
+                .map(std::path::PathBuf::from)
+                .collect::<std::collections::HashSet<_>>()
+        };
+        let folder = std::path::Path::new("/roms");
+        // Nothing of the folder found: a missing drive, not deleted games.
+        assert_eq!(
+            repository
+                .retire_missing_rom_files(folder, &seen(&[]))
+                .unwrap(),
+            0
+        );
+        assert_eq!(ids(&repository), before);
+        // One copy left keeps its game; the folder outside is not checked.
+        assert_eq!(
+            repository
+                .retire_missing_rom_files(folder, &seen(&["/roms/kept.gba", "/roms/copy-b.gba"]))
+                .unwrap(),
+            1
+        );
+        let after = ids(&repository);
+        assert!(!after.contains_key("Gone (USA)"));
+        assert_eq!(after.len(), 3);
+        assert_eq!(
+            repository.retired_games().unwrap()[0].game().id(),
+            before["Gone (USA)"]
+        );
+        // The file comes back, under any name: same game, same catalog title.
+        repository
+            .add_rom_files(&[candidate("/roms/renamed.gba", "renamed", "2", false)])
+            .unwrap();
+        assert_eq!(
+            ids(&repository),
+            before
+                .iter()
+                .map(|(title, id)| (title.clone(), *id))
+                .collect()
+        );
+        assert!(repository.retired_games().unwrap().is_empty());
     }
 
     #[test]

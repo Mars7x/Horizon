@@ -158,7 +158,7 @@ mod tests {
     }
 
     #[test]
-    fn refresh_reads_only_new_settled_files_and_keeps_existing_games() {
+    fn refresh_adds_new_settled_files_and_retires_deleted_ones() {
         // Process IDs repeat between sandboxed runs: name it by time too, so
         // a folder left by an interrupted run is never reused.
         let stamp = SystemTime::now()
@@ -201,6 +201,24 @@ mod tests {
         assert_eq!(games[0].game().id(), id);
         // A refresh never changes the saved setup.
         assert!(!repository.rom_setup().unwrap().completed);
+        // Deleted from the folder: the next complete scan retires it.
+        let second = games[1].game().id();
+        fs::remove_file(dir.join("Second.gb")).unwrap();
+        let imported = repository.imported_rom_files().unwrap();
+        let scan = scan_folder_for_new(&dir, None, &imported, settled).unwrap();
+        assert!(scan.candidates.is_empty());
+        let seen = scan.seen.into_iter().collect();
+        assert_eq!(repository.retire_missing_rom_files(&dir, &seen).unwrap(), 1);
+        assert_eq!(repository.list_games().unwrap().len(), 1);
+        // Put back: the same game returns.
+        fs::write(dir.join("Second.gb"), [1u8; 192]).unwrap();
+        let imported = repository.imported_rom_files().unwrap();
+        let settled = SystemTime::now() + SETTLE;
+        let scan = scan_folder_for_new(&dir, None, &imported, settled).unwrap();
+        repository.add_rom_files(&scan.candidates).unwrap();
+        let games = repository.list_games().unwrap();
+        assert_eq!(games.len(), 2);
+        assert_eq!(games[1].game().id(), second);
         drop(repository);
         fs::remove_dir_all(dir).unwrap();
     }

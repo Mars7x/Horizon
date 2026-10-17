@@ -100,6 +100,9 @@ pub struct RomCandidate {
 pub struct RomScan {
     pub candidates: Vec<RomCandidate>,
     pub skipped: usize,
+    /// Every supported file found, read or skipped: a complete scan tells
+    /// which imported files are gone.
+    pub seen: Vec<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -364,6 +367,7 @@ pub fn scan_skipping(
                 scan.skipped += 1;
                 continue;
             }
+            scan.seen.push(path.clone());
             if skip(&path, &entry.metadata()?) {
                 continue;
             }
