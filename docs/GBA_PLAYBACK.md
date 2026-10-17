@@ -64,9 +64,15 @@ panel, with a directional 180 ms slide/crossfade when the value changes
 (immediate with Reduced Motion). Returning to 1× clears queued audio before playback resumes.
 
 The game worker publishes atomic stereo frames to a bounded queue; PipeWire does
-not lock against core filtering or allocate. Playback builds about 40 ms of
-headroom on startup and after a real underrun, with short ramps at audio
-boundaries. Ordinary pauses, including focus freeze, keep the PipeWire stream
+not lock against core filtering or allocate. Playback builds about 31 ms of
+headroom on startup and after a real underrun (anything queued beyond that before
+the first sample is heard is trimmed), with short ramps at audio boundaries.
+The core is paced by the system clock and the output device by its own, which
+differ slightly (about 15 ppm measured on a Ryzen desktop). The reader keeps the
+queue's average in a steady band by skipping or repeating a single sample now and
+then (at most 16 a second, enough for about 490 ppm), so long sessions never drop
+samples at the queue limit or open a refill gap. `real_core_audio_drift_at_normal_speed`
+measures this against real PipeWire. Ordinary pauses, including focus freeze, keep the PipeWire stream
 connected and render silence without consuming the bounded queued audio. Resume
 continues that timeline without restarting the output or rebuilding headroom;
 speed changes, restart and state loads still discard obsolete audio. Brief frame
