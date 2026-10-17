@@ -62,7 +62,7 @@ Playback speed offers 1×, 2×, 3× and 4× for this loaded game. Left/Right ste
 between the limits; Select cycles through all four. The worker multiplies its
 frame pace and plays audio at the corresponding faster, higher pitch. Only the newest frame is
 filtered and shown once per display refresh, so frames fast-forward skips over are never filtered
-(xBRZ costs about 8 ms a frame on a Ryzen 7 5800X3D, which 4× could not otherwise keep up with). A stereo
+(xBRZ costs about 5 ms a frame on a Ryzen 7 5800X3D, which 4× could not otherwise keep up with). A stereo
 low-pass filter matched to the factor prevents aliasing before integer decimation
 back to the output sample rate. Buffered audio is cleared on speed changes and
 kept to at most 50 ms in the application queue. Speed is shown only in the pause
@@ -128,11 +128,17 @@ are added. Audio smoothing is no longer a user preference.
 LCD applies an original subtle RGB subpixel/grid treatment at 3× on the core
 worker, then uses smooth scaling. Smooth uses native bilinear scaling without
 changing source pixels. Smooth pixel art uses the pinned xbrz-rs implementation
-at 6× (1440×960 for GBA) to round pixel-art diagonals, then smoothly fits the
-filtered output to the window. The higher reconstruction resolution reduces the
-softness of enlarging a 3× intermediate. Smooth fitting avoids enlarging the
-filter's small steps with nearest-neighbour scaling at fractional sizes; it does
-not remove intentional pixel-art details.
+to round pixel-art diagonals, scaled by whole numbers only so nothing is resampled
+by a fraction. The player tells the worker its size in physical pixels; the worker
+picks the largest whole-number scale that fits, runs xBRZ at the largest factor
+(2–6) dividing it, and the GPU repeats each xBRZ pixel the rest of the way with
+nearest-neighbour sampling, centred on whole screen pixels. On a 3440×1440
+ultrawide, GBA is xBRZ 3× shown at 9× (2160×1440) and Game Boy xBRZ 5× at 10×
+(1600×1440). A scale no factor divides (7, 11, 13…) steps down one, leaving thin
+bars: GBA on a 2160-pixel-tall screen is 12×, not 13×. When the window cannot fit
+twice the game, xBRZ 6× is fitted smoothly as before. The xBRZ cost barely depends
+on the factor (about 5 ms a GBA frame on a Ryzen 7 5800X3D); smaller factors mainly
+shrink the frame uploaded to the GPU. Window resizes apply from the next frame shown.
 Colour correction
 independently applies the credited sRGB GBA display profile before any filter,
 for GBA games only;

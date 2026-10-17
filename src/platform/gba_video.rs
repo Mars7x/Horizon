@@ -4,12 +4,29 @@ use super::gba_core::{Frame, Presented};
 use crate::domain::core_settings::VideoFilter;
 use slint::{Rgba8Pixel, SharedPixelBuffer};
 
+/// The whole-number screen scale for a `source` frame in a `window` (both in
+/// physical pixels), and the largest xBRZ factor (2–6) dividing it. The GPU
+/// repeats each xBRZ pixel the rest of the way, so nothing is resampled by a
+/// fraction. A scale no factor divides (7, 11, 13…) steps down by one,
+/// leaving thin bars. None when the window cannot fit twice the source.
+pub(super) fn xbrz_plan(source: (u32, u32), window: (u32, u32)) -> Option<(u32, u32)> {
+    if source.0 == 0 || source.1 == 0 {
+        return None;
+    }
+    let fit = (window.0 / source.0).min(window.1 / source.1);
+    (2..=fit)
+        .rev()
+        .find_map(|scale| (2..=6).rev().find(|f| scale % f == 0).map(|f| (f, scale)))
+}
+
 /// The frame to show for `raw` (left untouched: screenshots use it).
-/// `scratch` holds the colour-corrected copy between frames.
+/// `scratch` holds the colour-corrected copy between frames; `window` is
+/// the player's size in physical pixels (0×0 when unknown).
 pub(super) fn present(
     raw: &Frame,
     color_correction: bool,
     filter: VideoFilter,
+    window: (u32, u32),
     scratch: &mut Vec<u8>,
 ) -> Presented {
     let (width, height) = (raw.width, raw.height);
@@ -26,22 +43,24 @@ pub(super) fn present(
         VideoFilter::Smooth | VideoFilter::Lcd | VideoFilter::Xbrz
     );
     let whole = source.len() == width as usize * height as usize * 4;
+    // Bound output allocation even if a future core reports larger frames.
     if filter == VideoFilter::Xbrz && whole && width <= 512 && height <= 512 {
-        // Reconstruct at 6× before the final fit, so a 3× intermediate
-        // is not magnified into soft edges on larger windows.
-        // Bound output allocation even if a future core reports larger frames.
-        let scaled = xbrz::scale_rgba(source, width as usize, height as usize, 6);
+        let plan = xbrz_plan((width, height), window);
+        // Without a whole-number scale, reconstruct at 6× and fit smoothly,
+        // so a small intermediate is not magnified into soft edges.
+        let factor = plan.map_or(6, |(factor, _)| factor);
+        let scaled = xbrz::scale_rgba(source, width as usize, height as usize, factor as usize);
         return Presented {
-            pixels: SharedPixelBuffer::clone_from_slice(&scaled, width * 6, height * 6),
-            // Fit the filtered subpixels smoothly at fractional window
-            // scales; nearest-neighbour would enlarge their small steps.
-            smooth: true,
+            pixels: SharedPixelBuffer::clone_from_slice(&scaled, width * factor, height * factor),
+            smooth: plan.is_none(),
+            exact: plan.map(|(_, scale)| (width * scale, height * scale)),
         };
     }
     if filter != VideoFilter::Lcd || !whole {
         return Presented {
             pixels: SharedPixelBuffer::clone_from_slice(source, width, height),
             smooth,
+            exact: None,
         };
     }
     // Input is validated and bounded by the libretro video callback. Three
@@ -69,6 +88,7 @@ pub(super) fn present(
     Presented {
         pixels,
         smooth: true,
+        exact: None,
     }
 }
 
@@ -108,7 +128,7 @@ mod tests {
     /// Test shorthand: the presented frame for `frame`, without correction,
     /// read back as a plain frame.
     fn apply(frame: Frame, filter: VideoFilter) -> Frame {
-        let presented = present(&frame, false, filter, &mut Vec::new());
+        let presented = present(&frame, false, filter, (0, 0), &mut Vec::new());
         Frame {
             width: presented.pixels.width(),
             height: presented.pixels.height(),
@@ -331,5 +351,143 @@ mod tests {
         );
         slint::run_event_loop().unwrap();
         assert_eq!(stage.get(), 4);
+    }
+
+    #[test]
+    fn xbrz_scales_by_whole_numbers_only() {
+        let gba = (240, 160);
+        let game_boy = (160, 144);
+        // 3440×1440 ultrawide: 9× and 10× fill the height exactly.
+        assert_eq!(xbrz_plan(gba, (3440, 1440)), Some((3, 9)));
+        assert_eq!(xbrz_plan(game_boy, (3440, 1440)), Some((5, 10)));
+        // 1920×1080: GBA fits 6×; Game Boy 7× steps down to 6×.
+        assert_eq!(xbrz_plan(gba, (1920, 1080)), Some((6, 6)));
+        assert_eq!(xbrz_plan(game_boy, (1920, 1080)), Some((6, 6)));
+        // 4K: GBA 13× has no factor, so 12× (6× then 2×) with thin bars.
+        assert_eq!(xbrz_plan(gba, (3840, 2160)), Some((6, 12)));
+        assert_eq!(xbrz_plan(game_boy, (3840, 2160)), Some((5, 15)));
+        assert_eq!(xbrz_plan(gba, (2560, 1440)), Some((3, 9)));
+        assert_eq!(xbrz_plan(gba, (400, 300)), None);
+        assert_eq!(xbrz_plan(gba, (0, 0)), None);
+
+        let frame = Frame {
+            width: 240,
+            height: 160,
+            rgba: [40, 80, 120, 255].repeat(240 * 160),
+            smooth: false,
+        };
+        let shown = present(
+            &frame,
+            false,
+            VideoFilter::Xbrz,
+            (3440, 1440),
+            &mut Vec::new(),
+        );
+        assert_eq!((shown.pixels.width(), shown.pixels.height()), (720, 480));
+        assert_eq!(shown.exact, Some((2160, 1440)));
+        assert!(!shown.smooth);
+        let unknown = present(&frame, false, VideoFilter::Xbrz, (0, 0), &mut Vec::new());
+        assert_eq!((unknown.pixels.width(), unknown.exact), (1440, None));
+        assert!(unknown.smooth);
+    }
+
+    /// Old 6×-and-fit next to whole-number scaling, at a chosen window size
+    /// (default 3440×1440), on an original pattern of curves and diagonals.
+    #[test]
+    #[ignore = "requires Wayland and HORIZON_XBRZ_SCALE_TEST_DIR"]
+    fn xbrz_whole_number_scaling_is_pixel_exact_in_real_window() {
+        use slint::ComponentHandle;
+        let directory =
+            std::path::PathBuf::from(std::env::var_os("HORIZON_XBRZ_SCALE_TEST_DIR").unwrap());
+        std::fs::create_dir_all(&directory).unwrap();
+        let size = |name, default: u32| {
+            std::env::var(name)
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(default)
+        };
+        let window = (
+            size("HORIZON_XBRZ_SCALE_TEST_WIDTH", 3440),
+            size("HORIZON_XBRZ_SCALE_TEST_HEIGHT", 1440),
+        );
+        let (width, height) = (240u32, 160u32);
+        let mut rgba = Vec::with_capacity((width * height * 4) as usize);
+        for y in 0..height as i32 {
+            for x in 0..width as i32 {
+                let (dx, dy) = (x - 70, y - 80);
+                let ring = (dx * dx + dy * dy - 2500).abs() < 260;
+                let diagonal = (x - y - 120).abs() < 3 || (x + y / 2 - 230).abs() < 2;
+                let colour = if ring {
+                    [250, 210, 60, 255]
+                } else if diagonal {
+                    [70, 200, 255, 255]
+                } else if (x / 16 + y / 16) % 2 == 0 {
+                    [30, 40, 70, 255]
+                } else {
+                    [40, 60, 100, 255]
+                };
+                rgba.extend_from_slice(&colour);
+            }
+        }
+        let raw = Frame {
+            width,
+            height,
+            rgba,
+            smooth: false,
+        };
+        let ui = crate::AppWindow::new().unwrap();
+        ui.window()
+            .set_size(slint::PhysicalSize::new(window.0, window.1));
+        ui.set_player_phase(2);
+        ui.set_player_open(true);
+        ui.set_player_has_frame(true);
+        ui.show().unwrap();
+        let mut shots = Vec::new();
+        for (name, target) in [("fit-6x", (0, 0)), ("whole-number", window)] {
+            let shown = present(&raw, false, VideoFilter::Xbrz, target, &mut Vec::new());
+            let (w, h) = shown.exact.unwrap_or_default();
+            ui.set_player_exact_width(w as i32);
+            ui.set_player_exact_height(h as i32);
+            ui.set_player_smooth(shown.smooth);
+            let buffer = shown.pixels.clone();
+            ui.set_player_frame(slint::Image::from_rgba8(shown.pixels));
+            let pixels = ui.window().take_snapshot().unwrap();
+            image::save_buffer(
+                directory.join(format!("{name}-{}x{}.png", window.0, window.1)),
+                pixels.as_bytes(),
+                pixels.width(),
+                pixels.height(),
+                image::ColorType::Rgba8,
+            )
+            .unwrap();
+            // A 1:1 crop across the ring's edge, where softness shows.
+            let crop = image::RgbaImage::from_fn(480, 320, |x, y| {
+                let p = pixels.as_slice()[((pixels.height() / 2 - 400 + y) * pixels.width()
+                    + pixels.width() / 2
+                    - 900
+                    + x) as usize];
+                image::Rgba([p.r, p.g, p.b, p.a])
+            });
+            crop.save(directory.join(format!("{name}-crop.png")))
+                .unwrap();
+            shots.push((shown.exact, buffer, pixels));
+        }
+        let (exact, buffer, pixels) = &shots[1];
+        let (w, h) = exact.expect("a whole-number plan for this window");
+        let repeat = w / buffer.width();
+        let (left, top) = ((pixels.width() - w) / 2, (pixels.height() - h) / 2);
+        // Every screen pixel is exactly its xBRZ pixel: nothing resampled.
+        for y in (0..h).step_by(7) {
+            for x in (0..w).step_by(7) {
+                let screen = pixels.as_slice()[((top + y) * pixels.width() + left + x) as usize];
+                let source =
+                    buffer.as_slice()[((y / repeat) * buffer.width() + x / repeat) as usize];
+                assert_eq!(
+                    (screen.r, screen.g, screen.b),
+                    (source.r, source.g, source.b),
+                    "pixel {x},{y}"
+                );
+            }
+        }
     }
 }

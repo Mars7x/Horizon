@@ -27,7 +27,12 @@ pub struct Frame {
 pub struct Presented {
     pub pixels: SharedPixelBuffer<Rgba8Pixel>,
     pub smooth: bool,
+    /// Show at exactly this size in physical pixels, pixelated: the
+    /// buffer divides it evenly. None: fit to the window.
+    pub exact: Option<(u32, u32)>,
 }
+/// The player's size in physical pixels, `width << 32 | height`; 0 unknown.
+pub type DisplaySize = Arc<AtomicU64>;
 pub type LatestFrame = Arc<Mutex<Option<Presented>>>;
 pub type AudioBuffer = Arc<super::gba_audio::GameAudio>;
 
@@ -35,6 +40,7 @@ struct Callbacks {
     frame: LatestFrame,
     audio: AudioBuffer,
     buttons: Arc<AtomicU16>,
+    display: DisplaySize,
     pixel_format: u32,
     preferences: MgbaPreferences,
     /// The core's newest frame, unfiltered (screenshots and states use it).
@@ -98,6 +104,7 @@ impl Core {
         frame: LatestFrame,
         audio: AudioBuffer,
         buttons: Arc<AtomicU16>,
+        display: DisplaySize,
     ) -> Result<Self, String> {
         // SAFETY: only the application-packaged, pinned mGBA core is loaded;
         // the explicit development override is selected by data_paths.
@@ -196,6 +203,7 @@ impl Core {
                     frame,
                     audio,
                     buttons,
+                    display,
                     pixel_format: 0,
                     preferences,
                     raw_frame: None,
@@ -307,16 +315,19 @@ impl Core {
                 scratch,
                 preferences,
                 frame,
+                display,
                 ..
             } = state;
             let Some(raw) = raw_frame.as_ref().filter(|_| *fresh) else {
                 return false;
             };
             *fresh = false;
+            let size = display.load(Ordering::Acquire);
             let presented = super::gba_video::present(
                 raw,
                 preferences.color_correction,
                 preferences.video_filter,
+                ((size >> 32) as u32, size as u32),
                 scratch,
             );
             match frame.lock() {
@@ -679,6 +690,7 @@ mod tests {
                 Arc::clone(&frame),
                 Arc::new(super::super::gba_audio::GameAudio::default()),
                 Arc::new(AtomicU16::new(0)),
+                Arc::new(AtomicU64::new(0)),
             )
             .unwrap();
             assert_eq!((core.av.base_width, core.av.base_height), (160, 144));
@@ -711,6 +723,7 @@ mod tests {
             Arc::new(Mutex::new(None)),
             Arc::new(super::super::gba_audio::GameAudio::default()),
             Arc::new(AtomicU16::new(0)),
+            Arc::new(AtomicU64::new(0)),
         )
         .unwrap();
         assert_eq!(core.save_ram().unwrap().len(), 8 * 1024);
@@ -726,6 +739,7 @@ mod tests {
             Arc::new(Mutex::new(None)),
             Arc::new(super::super::gba_audio::GameAudio::default()),
             Arc::new(AtomicU16::new(0)),
+            Arc::new(AtomicU64::new(0)),
         )
         .unwrap();
         for _ in 0..10 {
@@ -780,6 +794,7 @@ mod tests {
                 Arc::new(Mutex::new(None)),
                 Arc::clone(&audio),
                 Arc::new(AtomicU16::new(0)),
+                Arc::new(AtomicU64::new(0)),
             )
             .unwrap();
             #[repr(C)]
@@ -840,6 +855,7 @@ mod tests {
             Arc::clone(&frame),
             Arc::new(super::super::gba_audio::GameAudio::default()),
             Arc::new(AtomicU16::new(0)),
+            Arc::new(AtomicU64::new(0)),
         )
         .unwrap();
         for _ in 0..6 {
@@ -870,6 +886,7 @@ mod tests {
             Arc::clone(&frame),
             Arc::clone(&audio),
             Arc::clone(&buttons),
+            Arc::new(AtomicU64::new(0)),
         )
         .unwrap();
         for _ in 0..10 {
@@ -920,6 +937,7 @@ mod tests {
             frame,
             audio,
             buttons,
+            Arc::new(AtomicU64::new(0)),
         )
         .unwrap();
         reopened.restore_save(&saved).unwrap();

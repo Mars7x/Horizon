@@ -437,6 +437,7 @@ mod queue_tests {
             Arc::new(Mutex::new(None)),
             audio.clone(),
             Default::default(),
+            Default::default(),
         )
         .unwrap();
         let rate = core.av.sample_rate.round() as u32;
@@ -544,6 +545,7 @@ mod queue_tests {
             Default::default(),
             Arc::new(Mutex::new(None)),
             audio.clone(),
+            Default::default(),
             Default::default(),
         )
         .unwrap();

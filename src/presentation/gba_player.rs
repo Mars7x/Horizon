@@ -726,7 +726,12 @@ impl GbaPlayer {
         if self.first_frame_at.get().is_none() {
             self.first_frame_at.set(Some(Instant::now()));
         }
+        publish_display(ui, running.as_ref());
         ui.set_player_smooth(frame.smooth);
+        // Whole-number xBRZ scaling is sized in physical pixels.
+        let (width, height) = frame.exact.unwrap_or_default();
+        ui.set_player_exact_width(width as i32);
+        ui.set_player_exact_height(height as i32);
         // The worker built Slint's buffer: no copy here.
         ui.set_player_frame(Image::from_rgba8(frame.pixels));
         ui.set_player_has_frame(true);
@@ -952,6 +957,18 @@ impl GbaPlayer {
         slint::CloseRequestResponse::KeepWindowShown
     }
 }
+/// Tell the game worker the player's size; it follows window resizes with
+/// the next frame shown.
+fn publish_display(ui: &AppWindow, running: Option<&RunningGame>) {
+    if let Some(running) = running {
+        let size = ui.window().size();
+        running.display.store(
+            u64::from(size.width) << 32 | u64::from(size.height),
+            std::sync::atomic::Ordering::Release,
+        );
+    }
+}
+
 impl LaunchExecutor for GbaPlayer {
     fn execute(&self, target: &SourceLaunchTarget) -> Result<(), LaunchExecutionError> {
         let SourceLaunchTarget::EmbeddedMgba { system, sha256 } = target else {
@@ -971,6 +988,7 @@ impl LaunchExecutor for GbaPlayer {
                 .ok_or("The player is not ready")?;
             let running =
                 RunningGame::start(self.paths.clone(), *system, sha256.clone(), frame_ready)?;
+            publish_display(&ui, Some(&running));
             *self.running.borrow_mut() = Some(running);
             ui.set_player_origin(ui.invoke_player_capture_origin());
             self.set_stage(&ui, PlayerStage::Waiting);

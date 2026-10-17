@@ -448,6 +448,8 @@ export component AppWindow inherits Window {
             width: rect.width / (root.logical-width / 1px), height: rect.height / (root.logical-height / 1px) };
     }
     in property <bool> player-smooth: false;
+    in property <int> player-exact-width;
+    in property <int> player-exact-height;
     in property <image> player-frame;
     in property <string> player-title;
     in property <string> player-message;
@@ -1140,7 +1142,7 @@ export component AppWindow inherits Window {
                 restart-confirm: root.player-restart-confirm; restart-focus: root.player-restart-focus;
                 restart-answer(choice) => { root.player-restart-answer(choice); }
                 open: root.player-open; paused: root.player-paused; frozen: root.player-frozen; busy: root.player-busy;
-                smooth: root.player-smooth; failed: root.player-failed; has-frame: root.player-has-frame; frame: root.player-frame;
+                smooth: root.player-smooth; exact-width: root.player-exact-width; exact-height: root.player-exact-height; screen-scale: root.ui-scale; failed: root.player-failed; has-frame: root.player-has-frame; frame: root.player-frame;
                 title: root.player-title; message: root.player-message; focused: root.player-focus;
                 choose(index) => { root.player-choose(index); }
             }

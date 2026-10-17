@@ -5,7 +5,7 @@ use crate::{
     domain::{GameId, SessionTrackingMethod, SourceId},
     persistence::SqliteLibraryRepository,
     platform::{
-        gba_core::{AudioBuffer, Core, LatestFrame},
+        gba_core::{AudioBuffer, Core, DisplaySize, LatestFrame},
         pipewire::{AudioStream, Role},
     },
     services::{activity::ActivityRepository, rom_import::RomSystem, worker::Notify},
@@ -70,6 +70,8 @@ pub struct RunningGame {
     pub events: Receiver<Event>,
     pub frame: LatestFrame,
     pub buttons: Arc<AtomicU16>,
+    /// The player's size in physical pixels, for whole-number xBRZ scaling.
+    pub display: DisplaySize,
     worker: Option<JoinHandle<Result<(), String>>>,
 }
 impl RunningGame {
@@ -91,7 +93,9 @@ impl RunningGame {
         let (sender, events) = mpsc::channel();
         let frame = Arc::new(Mutex::new(None));
         let buttons = Arc::new(AtomicU16::new(0));
+        let display = DisplaySize::default();
         let (worker_frame, worker_buttons) = (Arc::clone(&frame), Arc::clone(&buttons));
+        let worker_display = Arc::clone(&display);
         let worker = thread::Builder::new()
             .name("horizon-mgba".into())
             .spawn(move || {
@@ -107,7 +111,7 @@ impl RunningGame {
                     (system, &sha256),
                     receiver,
                     &sender,
-                    worker_frame,
+                    (worker_frame, worker_display),
                     worker_buttons,
                     frame_ready,
                 );
@@ -122,6 +126,7 @@ impl RunningGame {
                 events,
                 frame,
                 buttons,
+                display,
                 worker: Some(worker),
             }),
             Err(_) => {
@@ -179,7 +184,7 @@ fn play(
     (system, sha256): (RomSystem, &str),
     commands: Receiver<Command>,
     events: &Sender<Event>,
-    frame: LatestFrame,
+    (frame, display): (LatestFrame, DisplaySize),
     buttons: Arc<AtomicU16>,
     frame_ready: Notify,
 ) -> Result<(), String> {
@@ -232,6 +237,7 @@ fn play(
         frame,
         Arc::clone(&audio),
         Arc::clone(&buttons),
+        display,
     )?;
     let save_path = game_folder.save_path();
     let mut last_save = read_save(&save_path)?.unwrap_or_default();

@@ -36,6 +36,17 @@ export component GamePlayer inherits Rectangle {
     in property <bool> failed;
     in property <bool> has-frame;
     in property <bool> smooth;
+    // Nonzero: show the frame at exactly this many physical pixels when
+    // fully open, without resampling (it divides the frame evenly);
+    // otherwise fit it.
+    in property <int> exact-width;
+    in property <int> exact-height;
+    // The shell's scale: the player sits on a design surface scaled to the
+    // window, so one screen pixel is 1phx / screen-scale here.
+    in property <float> screen-scale: 1.0;
+    private property <length> screen-pixel: 1phx / max(root.screen-scale, 0.01);
+    private property <length> exact-w: root.exact-width * root.screen-pixel;
+    private property <length> exact-h: root.exact-height * root.screen-pixel;
     in property <image> frame;
     in property <string> title;
     in property <string> message;
@@ -59,12 +70,22 @@ export component GamePlayer inherits Rectangle {
         background: #000;
         border-radius: Metrics.game-shell-radius * (1.0 - max(0.0, min(1.0, root.progress)));
         clip: true;
-        Image {
-            width: parent.width; height: parent.height;
+        picture := Image {
+            private property <bool> exact: root.exact-width > 0 && root.exact-height > 0;
+            // Grows with the zoom like a fitted picture, ending at the exact
+            // size on whole physical pixels.
+            private property <float> grow: self.exact
+                ? min(parent.width / root.exact-w, parent.height / root.exact-h)
+                    / min(root.width / root.exact-w, root.height / root.exact-h)
+                : 1.0;
+            width: self.exact ? root.exact-w * self.grow : parent.width;
+            height: self.exact ? root.exact-h * self.grow : parent.height;
+            x: self.exact ? round((parent.width - self.width) / 2 / root.screen-pixel) * root.screen-pixel : 0px;
+            y: self.exact ? round((parent.height - self.height) / 2 / root.screen-pixel) * root.screen-pixel : 0px;
             source: root.frame;
             visible: root.has-frame;
-            image-fit: contain;
-            image-rendering: root.smooth ? ImageRendering.smooth : ImageRendering.pixelated;
+            image-fit: self.exact ? ImageFit.fill : ImageFit.contain;
+            image-rendering: root.smooth && !self.exact ? ImageRendering.smooth : ImageRendering.pixelated;
         }
     }
     Rectangle {
