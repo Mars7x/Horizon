@@ -45,17 +45,23 @@ Freezing defaults on: the game and audio freeze without opening the quick menu,
 and resume automatically on return. Off allows background playback; input is
 always released/blocked while inactive. Explicit pause remains paused.
 
-Cores → mGBA contains Sunlight level (0–10), Video filter and Colour correction.
+Cores → mGBA contains Sunlight level (0–10), Video filter, Colour correction,
+Game Boy palette and Super Game Boy border.
 Sunlight is a manual value for solar-sensor games, default zero, without hardware
 sensor access. Video filter cycles between None (sharp pixels), LCD (subtle
-subpixel/grid effect), Smooth (bilinear scaling) and Smooth pixel art (6× xBRZ).
-Colour correction independently approximates the original GBA display using the
-credited sRGB profile. Filter/correction default off. These are Horizon presets;
+subpixel/grid effect), Smooth (bilinear scaling) and Smooth pixel art (xBRZ
+resized to the screen). Colour correction independently approximates the original
+GBA and Game Boy Color screens using the credited sRGB profile. Game Boy palette
+cycles Grey (default), Original green, Pocket, Light and Game Boy Color, the GBC's
+own colours for the games it has them for (others stay grey); it applies to
+original Game Boy games only, as Super Game Boy and colour games bring their own.
+Super Game Boy border frames Super Game Boy games with their border (256×224).
+Filter, correction and border default off. These are Horizon presets;
 RetroArch shader files, audio smoothing controls, BIOS, core download, advanced
 timing and developer controls are not exposed.
 
 All preferences apply on the next game launch. Shared focus freezing and resume are stored
-in `playback.json`; mGBA sunlight, filtering and colour correction are stored in
+in `playback.json`; mGBA sunlight, filtering, colour correction, palette and border are stored in
 `cores/mgba.json`. Old `cores.json` files are not loaded or migrated. Invalid
 files and failed writes preserve prior data and remain visible as errors.
 

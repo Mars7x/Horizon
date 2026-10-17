@@ -332,6 +332,8 @@ export component AppWindow inherits Window {
     in property <bool> settings-core-freeze;
     in property <bool> settings-core-resume: true;
     in property <bool> settings-core-color;
+    in property <string> settings-core-palette: "Grey";
+    in property <bool> settings-core-border;
     in property <bool> settings-core-value-forward: true;
     in property <string> settings-core-filter: "None";
     in property <int> settings-core-sunlight: 0;
@@ -949,6 +951,8 @@ export component AppWindow inherits Window {
                     core-value-forward: root.settings-core-value-forward;
                     core-filter: root.settings-core-filter;
                     core-color: root.settings-core-color;
+                    core-palette: root.settings-core-palette;
+                    core-border: root.settings-core-border;
                     core-freeze: root.settings-core-freeze;
                     core-resume: root.settings-core-resume;
                     core-sunlight: root.settings-core-sunlight;

@@ -12,4 +12,5 @@ pub mod video;
 pub mod wayland_clipboard;
 
 pub(crate) mod gba_audio;
-mod gba_video;
+pub(crate) mod gba_present;
+pub(crate) mod gba_video;

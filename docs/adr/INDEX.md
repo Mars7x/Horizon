@@ -24,7 +24,9 @@
 | [0209](0209-game-boy-and-game-boy-color.md) | Game Boy and Game Boy Color through the bundled mGBA core |
 | [0210](0210-live-game-folder.md) | The chosen game folder is checked again so new games appear |
 | [0211](0211-states-follow-the-core-release.md) | Save states follow the mGBA release, not its exact binary |
-| [0212](0212-whole-number-pixel-art-scaling.md) | Smooth pixel art scales by whole numbers for crisp output |
+| [0212](0212-whole-number-pixel-art-scaling.md) | Smooth pixel art scales by whole numbers (superseded by 0214) |
+| [0213](0213-game-boy-display-options.md) | Game Boy palette, Super Game Boy border and GBC colour correction |
+| [0214](0214-screen-size-xbrz-and-display-paced-frames.md) | xBRZ resized to the screen, filtering on its own thread, frames paced to the display |
 
 Earlier decisions and their supporting phase notes are in
 [history](../history/INDEX.md). Their numbered identifiers remain reserved.

@@ -206,6 +206,13 @@ impl SettingsController {
             (SettingsView::Mgba, 2) => {
                 next.mgba.color_correction = direction.unwrap_or(!next.mgba.color_correction)
             }
+            (SettingsView::Mgba, 3) => {
+                next.mgba.game_boy_palette =
+                    next.mgba.game_boy_palette.step(direction != Some(false))
+            }
+            (SettingsView::Mgba, 4) => {
+                next.mgba.sgb_border = direction.unwrap_or(!next.mgba.sgb_border)
+            }
             _ => return,
         }
         if next == self.core_values.get() {
@@ -811,7 +818,7 @@ impl SettingsController {
                 return;
             }
             SettingsView::Mgba => {
-                self.page.borrow_mut().selected = selected.clamp(0, 2);
+                self.page.borrow_mut().selected = selected.clamp(0, 4);
                 self.change_core(ui, selected, None);
                 return;
             }
@@ -1247,7 +1254,12 @@ impl SettingsController {
             .into_iter()
             .enumerate()
             .map(|(row, title)| crate::ControllerBindingRow {
-                title: title.into(),
+                // Game Boy games have no shoulder buttons.
+                title: match title {
+                    "Start" | "Select" => title.into(),
+                    "L" | "R" => format!("{title} button (GBA)").into(),
+                    _ => format!("{title} button").into(),
+                },
                 value: binding_label(
                     values.gba_bindings.source(row, values.swap_confirm),
                     ui.global::<crate::InputGlyphs>().get_family(),
@@ -1269,6 +1281,8 @@ impl SettingsController {
         ui.set_settings_core_ready(self.core_ready.get());
         ui.set_settings_core_filter(self.core_values.get().mgba.video_filter.label().into());
         ui.set_settings_core_color(self.core_values.get().mgba.color_correction);
+        ui.set_settings_core_palette(self.core_values.get().mgba.game_boy_palette.label().into());
+        ui.set_settings_core_border(self.core_values.get().mgba.sgb_border);
         ui.set_settings_core_freeze(self.core_values.get().freeze_when_unfocused);
         ui.set_settings_core_resume(self.core_values.get().resume_last_state);
         ui.set_settings_core_sunlight(i32::from(self.core_values.get().mgba.sunlight.level()));
@@ -1365,7 +1379,7 @@ fn selection_count(view: SettingsView) -> i32 {
     match view {
         SettingsView::Root => 4,
         SettingsView::Cores => 3,
-        SettingsView::Mgba => 3,
+        SettingsView::Mgba => 5,
         SettingsView::Appearance => 15,
         SettingsView::Controller => 3,
         SettingsView::GameBindings => 7,
@@ -1754,7 +1768,14 @@ mod core_runtime_tests {
                         progress.set(7);
                     }
                     7 => {
-                        assert_eq!(ui.get_settings_core_filter(), "Smooth pixel art");
+                        assert_eq!(
+                            ui.get_settings_core_filter(),
+                            "Smooth pixel art",
+                            "feedback={} sel={} view={}",
+                            ui.get_settings_core_feedback(),
+                            ui.get_settings_selection(),
+                            ui.get_settings_view()
+                        );
                         tap(slint::platform::Key::RightArrow);
                         progress.set(8);
                     }

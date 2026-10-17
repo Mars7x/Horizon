@@ -420,10 +420,7 @@ mod queue_tests {
             gba_core,
             pipewire::{AudioStream, Role},
         };
-        use std::{
-            sync::Mutex,
-            time::{Duration, Instant},
-        };
+        use std::time::{Duration, Instant};
         let path = std::env::var_os("HORIZON_GBA_CORE").expect("set HORIZON_GBA_CORE");
         let seconds = std::env::var("HORIZON_AUDIO_DRIFT_SECONDS")
             .map(|value| value.parse::<u64>().unwrap())
@@ -434,9 +431,7 @@ mod queue_tests {
             std::path::Path::new(&path),
             &gba_core::test_rom(),
             Default::default(),
-            Arc::new(Mutex::new(None)),
             audio.clone(),
-            Default::default(),
             Default::default(),
         )
         .unwrap();
@@ -517,10 +512,7 @@ mod queue_tests {
             gba_core,
             pipewire::{AudioStream, Role},
         };
-        use std::{
-            sync::Mutex,
-            time::{Duration, Instant},
-        };
+        use std::time::{Duration, Instant};
         #[derive(Default)]
         struct Metrics {
             callbacks: AtomicU64,
@@ -543,9 +535,7 @@ mod queue_tests {
             std::path::Path::new(&path),
             &gba_core::test_rom(),
             Default::default(),
-            Arc::new(Mutex::new(None)),
             audio.clone(),
-            Default::default(),
             Default::default(),
         )
         .unwrap();

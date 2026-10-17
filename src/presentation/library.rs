@@ -147,8 +147,11 @@ fn source_title(id: &str) -> String {
     }
 }
 
-/// The sources the library's games come from, for the source filter.
+/// The sources the library's games come from, for the source filter: the
+/// cartridge systems in release order (Game Boy, Color, Advance), then any
+/// others by id.
 fn library_sources(catalog: &Catalog) -> Vec<String> {
+    use crate::sources::gba::recognition::RomSystem;
     let mut sources = catalog
         .iter()
         .flat_map(|(_, game)| {
@@ -157,7 +160,12 @@ fn library_sources(catalog: &Catalog) -> Vec<String> {
                 .map(|source| source.source_id().as_str().to_owned())
         })
         .collect::<Vec<_>>();
-    sources.sort();
+    sources.sort_by_key(|id| {
+        (
+            RomSystem::from_source_id(id).map_or(u8::MAX, |s| s as u8),
+            id.clone(),
+        )
+    });
     sources.dedup();
     sources
 }
@@ -714,6 +722,20 @@ mod tests {
             vec![0]
         );
         assert_eq!(super::library_sources(&catalog), vec!["steam"]);
+    }
+
+    #[test]
+    fn source_filter_lists_game_boy_systems_in_release_order() {
+        let catalog = Catalog::new(vec![
+            game(1, "Advance", "gba"),
+            game(2, "Other", "alpha"),
+            game(3, "Color", "gbc"),
+            game(4, "Mono", "gb"),
+        ]);
+        assert_eq!(
+            super::library_sources(&catalog),
+            vec!["gb", "gbc", "gba", "alpha"]
+        );
     }
 
     fn game(id: i64, title: &str, source: &str) -> LibraryGame {

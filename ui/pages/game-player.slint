@@ -36,9 +36,8 @@ export component GamePlayer inherits Rectangle {
     in property <bool> failed;
     in property <bool> has-frame;
     in property <bool> smooth;
-    // Nonzero: show the frame at exactly this many physical pixels when
-    // fully open, without resampling (it divides the frame evenly);
-    // otherwise fit it.
+    // Nonzero: the frame is already the screen's size; show it 1:1 when
+    // fully open, without resampling. Otherwise fit it.
     in property <int> exact-width;
     in property <int> exact-height;
     // The shell's scale: the player sits on a design surface scaled to the
@@ -85,7 +84,10 @@ export component GamePlayer inherits Rectangle {
             source: root.frame;
             visible: root.has-frame;
             image-fit: self.exact ? ImageFit.fill : ImageFit.contain;
-            image-rendering: root.smooth && !self.exact ? ImageRendering.smooth : ImageRendering.pixelated;
+            // 1:1 when open; during the card zoom it is shrunk, so smooth.
+            image-rendering: self.exact
+                ? (root.progress >= 1.0 ? ImageRendering.pixelated : ImageRendering.smooth)
+                : (root.smooth ? ImageRendering.smooth : ImageRendering.pixelated);
         }
     }
     Rectangle {

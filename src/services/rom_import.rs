@@ -159,7 +159,14 @@ mod tests {
 
     #[test]
     fn refresh_reads_only_new_settled_files_and_keeps_existing_games() {
-        let dir = std::env::temp_dir().join(format!("horizon-refresh-{}", std::process::id()));
+        // Process IDs repeat between sandboxed runs: name it by time too, so
+        // a folder left by an interrupted run is never reused.
+        let stamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("horizon-refresh-{}-{stamp}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("First.gba"), [0u8; 192]).unwrap();
         let mut repository = SqliteLibraryRepository::open(dir.join("library.sqlite3")).unwrap();

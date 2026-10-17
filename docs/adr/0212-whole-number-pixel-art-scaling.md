@@ -1,6 +1,7 @@
 # ADR 0212 — Whole-number pixel-art scaling
 
-Status: Accepted. Refines ADR 0201's xBRZ 6×-then-smooth-fit. The user asked for
+Status: Superseded by ADR 0214, after the user found its repeated pixels visible.
+It refined ADR 0201's xBRZ 6×-then-smooth-fit. The user asked for
 the crispest xBRZ output on a 3440×1440 ultrawide, where the old smooth 1.5×
 (GBA) or 1.67× (Game Boy) fit softened xBRZ's edges.
 

@@ -111,6 +111,8 @@ export component SettingsPage inherits Rectangle {
     in property <bool> core-freeze;
     in property <bool> core-resume: true;
     in property <bool> core-color;
+    in property <string> core-palette;
+    in property <bool> core-border;
     in property <bool> core-value-forward: true;
     in property <string> core-filter: "None";
     in property <int> core-sunlight;
@@ -551,15 +553,36 @@ export component SettingsPage inherits Rectangle {
             y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 2;
             width: parent.width;
             title: "Colour correction";
-            subtitle: "Approximate the original GBA display colours";
+            subtitle: "Approximate the original GBA and Game Boy Color screens";
             toggle: true;
             checked: root.core-color;
             enabled: root.view == 7 && root.core-ready;
             focused: root.view == 7 && root.selection == 2;
             activated => { if (root.view == 7) { root.activate(2); } }
         }
-        Text {
+        SettingsRow {
             y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 3;
+            width: parent.width;
+            title: "Game Boy palette";
+            subtitle: "Colours for original Game Boy games";
+            trailing: root.core-palette; value-forward: root.core-value-forward;
+            enabled: root.view == 7 && root.core-ready;
+            focused: root.view == 7 && root.selection == 3;
+            activated => { if (root.view == 7) { root.activate(3); } }
+        }
+        SettingsRow {
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 4;
+            width: parent.width;
+            title: "Super Game Boy border";
+            subtitle: "Frame Super Game Boy games with their border";
+            toggle: true;
+            checked: root.core-border;
+            enabled: root.view == 7 && root.core-ready;
+            focused: root.view == 7 && root.selection == 4;
+            activated => { if (root.view == 7) { root.activate(4); } }
+        }
+        Text {
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 5;
             width: parent.width; height: 60px;
             text: root.core-feedback != "" ? root.core-feedback : "Applies next time you launch a game";
             color: Theme.secondary-foreground;
@@ -646,7 +669,7 @@ export component SettingsPage inherits Rectangle {
             x: 0px;
             y: Metrics.breadcrumb-height + Metrics.spacing-xxl + index * (Metrics.compact-row-height + Metrics.list-row-gap);
             width: parent.width; compact: true;
-            title: row.title == "Start" || row.title == "Select" ? row.title : row.title + " button";
+            title: row.title;
             subtitle: "Assigned to controller input " + row.value + ". Select to change.";
             trailing-width: Metrics.spacing-xxl * 6;
             focused: root.view == 8 && root.selection == index && !root.binding-open;

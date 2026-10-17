@@ -74,6 +74,17 @@ pub struct GbaPlayer {
     first_frame_at: Cell<Option<Instant>>,
     /// Called by the game worker when a frame is ready (see `show_frame`).
     frame_ready: std::cell::OnceCell<crate::services::worker::Notify>,
+    /// When the last game frame was handed to the screen. Frames are shown
+    /// at most once per display refresh (`frame_period`); one arriving
+    /// sooner waits on `retry`.
+    last_shown: Cell<Option<Instant>>,
+    frame_period: Cell<Duration>,
+    retry: Timer,
+    this: RefCell<std::rc::Weak<Self>>,
+    /// Game frames shown in total, and the total at the instant of the last
+    /// once-a-second debug report.
+    shown: Cell<u64>,
+    shown_report: Cell<(Instant, u64)>,
 }
 impl GbaPlayer {
     pub fn new(ui: &AppWindow, paths: PlayerPaths) -> Rc<Self> {
@@ -98,6 +109,12 @@ impl GbaPlayer {
             stage_since: Cell::new(Instant::now()),
             first_frame_at: Cell::new(None),
             frame_ready: std::cell::OnceCell::new(),
+            last_shown: Cell::new(None),
+            frame_period: Cell::new(Duration::from_micros(16_667)),
+            retry: Timer::default(),
+            this: RefCell::new(std::rc::Weak::new()),
+            shown: Cell::new(0),
+            shown_report: Cell::new((Instant::now(), 0)),
         });
         let weak = Rc::downgrade(&player);
         let _ = player.frame_ready.set(super::wake::ui_notify(move || {
@@ -107,6 +124,8 @@ impl GbaPlayer {
                 player.show_frame(&ui);
             }
         }));
+        let weak = Rc::downgrade(&player);
+        *player.this.borrow_mut() = weak;
         let weak = Rc::downgrade(&player);
         ui.on_player_choose(move |index| {
             if let Some(player) = weak.upgrade() {
@@ -716,6 +735,24 @@ impl GbaPlayer {
         if self.stage.get() == PlayerStage::Exiting {
             return;
         }
+        // At most one frame per display refresh: a frame set sooner would be
+        // replaced before it is drawn, wasting its filtering.
+        let wait = self.last_shown.get().map_or(Duration::ZERO, |at| {
+            self.frame_period.get().saturating_sub(at.elapsed())
+        });
+        if wait > Duration::from_micros(500) {
+            if !self.retry.running() {
+                let weak = self.this.borrow().clone();
+                self.retry.start(TimerMode::SingleShot, wait, move || {
+                    if let Some(player) = weak.upgrade()
+                        && let Some(ui) = player.ui.upgrade()
+                    {
+                        player.show_frame(&ui);
+                    }
+                });
+            }
+            return;
+        }
         let running = self.running.borrow();
         let Some(frame) = running
             .as_ref()
@@ -728,13 +765,28 @@ impl GbaPlayer {
         }
         publish_display(ui, running.as_ref());
         ui.set_player_smooth(frame.smooth);
-        // Whole-number xBRZ scaling is sized in physical pixels.
+        // xBRZ's output is sized in physical pixels, shown 1:1.
         let (width, height) = frame.exact.unwrap_or_default();
         ui.set_player_exact_width(width as i32);
         ui.set_player_exact_height(height as i32);
         // The worker built Slint's buffer: no copy here.
         ui.set_player_frame(Image::from_rgba8(frame.pixels));
         ui.set_player_has_frame(true);
+        self.last_shown.set(Some(Instant::now()));
+        self.shown.set(self.shown.get() + 1);
+        let (since, before) = self.shown_report.get();
+        if since.elapsed() >= Duration::from_secs(1) {
+            let frames_per_second =
+                (self.shown.get() - before) as f64 / since.elapsed().as_secs_f64();
+            tracing::debug!(frames_per_second, "game frames shown");
+            self.shown_report.set((Instant::now(), self.shown.get()));
+            // The window may only learn its monitor after it appears, or move.
+            self.frame_period.set(display_period(ui));
+        }
+        // Filter the next while this one is drawn.
+        if let Some(game) = running.as_ref() {
+            game.stage.want();
+        }
         self.sync_pause(ui);
     }
     fn tick(&self) {
@@ -957,6 +1009,26 @@ impl GbaPlayer {
         slint::CloseRequestResponse::KeepWindowShown
     }
 }
+/// The display's refresh interval, a little short so a frame due right at a
+/// refresh is not pushed to the next; 60 Hz when the display does not say.
+/// (Pacing by Slint's rendering notifier is not possible: it is never called
+/// under Skia on Vulkan.)
+const PERIOD_SLACK: f64 = 0.95;
+fn display_period(ui: &AppWindow) -> Duration {
+    use slint::winit_030::WinitWindowAccessor;
+    let millihertz = ui
+        .window()
+        .with_winit_window(|window| {
+            window
+                .current_monitor()
+                .and_then(|monitor| monitor.refresh_rate_millihertz())
+        })
+        .flatten()
+        .filter(|rate| (24_000..=500_000).contains(rate))
+        .unwrap_or(60_000);
+    Duration::from_secs_f64(1000.0 / f64::from(millihertz) * PERIOD_SLACK)
+}
+
 /// Tell the game worker the player's size; it follows window resizes with
 /// the next frame shown.
 fn publish_display(ui: &AppWindow, running: Option<&RunningGame>) {
@@ -994,6 +1066,8 @@ impl LaunchExecutor for GbaPlayer {
             self.set_stage(&ui, PlayerStage::Waiting);
             self.closing.set(false);
             self.first_frame_at.set(None);
+            self.last_shown.set(None);
+            self.frame_period.set(display_period(&ui));
             self.timer.restart();
             self.keyboard.set(0);
             self.pad_ready.set(false);
@@ -1089,9 +1163,120 @@ mod runtime_tests {
         },
     };
     use std::path::PathBuf;
+    /// Frames shown per second at 1× and 4×, in a real window (default
+    /// 3440×1440) with the chosen filter (default Smooth pixel art).
+    #[test]
+    #[ignore = "requires Wayland, PipeWire, built mGBA core and HORIZON_GBA_TEST_DIR"]
+    fn real_player_frame_rate_report() {
+        let directory = PathBuf::from(std::env::var_os("HORIZON_GBA_TEST_DIR").unwrap());
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(
+            directory.join("Rate.gba"),
+            crate::platform::gba_core::test_rom(),
+        )
+        .unwrap();
+        let database = directory.join("library.sqlite3");
+        let mut repository = SqliteLibraryRepository::open(&database).unwrap();
+        let scan = rom_import::scan_folder(&directory, None).unwrap();
+        repository
+            .save_rom_import(&RomSetup::default(), &scan.candidates)
+            .unwrap();
+        let sha256 = scan.candidates[0]
+            .fingerprint
+            .as_ref()
+            .unwrap()
+            .sha256
+            .clone();
+        let core_paths = crate::platform::data_paths::CoreSettingsPaths {
+            playback: directory.join("playback.json"),
+            mgba: directory.join("cores/mgba.json"),
+        };
+        let mut preferences = crate::domain::core_settings::CorePreferences::default();
+        preferences.mgba.video_filter = serde_json::from_value(serde_json::Value::String(
+            std::env::var("HORIZON_TEST_VIDEO_FILTER").unwrap_or("xbrz".into()),
+        ))
+        .unwrap();
+        preferences.resume_last_state = false;
+        crate::persistence::core_settings::CoreSettingsStore::new(core_paths.clone())
+            .write_fixture(preferences);
+        let ui = AppWindow::new().unwrap();
+        let size = |name, default: u32| {
+            std::env::var(name)
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(default)
+        };
+        ui.window().set_size(slint::PhysicalSize::new(
+            size("HORIZON_PLAYER_TEST_WIDTH", 3440),
+            size("HORIZON_PLAYER_TEST_HEIGHT", 1440),
+        ));
+        let player = GbaPlayer::new(
+            &ui,
+            PlayerPaths {
+                database,
+                core: std::env::var_os("HORIZON_GBA_CORE").unwrap().into(),
+                saves: directory.join("saves"),
+                settings: core_paths,
+                album: directory.join("album"),
+            },
+        );
+        ui.show().unwrap();
+        player
+            .execute(&SourceLaunchTarget::EmbeddedMgba {
+                system: crate::services::rom_import::RomSystem::GameBoyAdvance,
+                sha256,
+            })
+            .unwrap();
+        let started = Instant::now();
+        let mark = Cell::new(None::<(Instant, u64)>);
+        let results = Rc::new(RefCell::new(Vec::new()));
+        let (live, out) = (Rc::clone(&player), Rc::clone(&results));
+        let weak = ui.as_weak();
+        let timer = Timer::default();
+        timer.start(TimerMode::Repeated, Duration::from_millis(100), move || {
+            let ui = weak.upgrade().unwrap();
+            let elapsed = started.elapsed();
+            let measure = |label: &str| {
+                if let Some((since, before)) = mark.take() {
+                    out.borrow_mut().push(format!(
+                        "{label}: {:.1} frames/s shown",
+                        (live.shown.get() - before) as f64 / since.elapsed().as_secs_f64()
+                    ));
+                }
+            };
+            match elapsed.as_millis() {
+                // Let the zoom finish, then measure 3 s at each speed.
+                1500..1600 => mark.set(Some((Instant::now(), live.shown.get()))),
+                4500..4600 => {
+                    measure("1x");
+                    live.set_speed(&ui, PlaybackSpeed::Quadruple);
+                }
+                5000..5100 => mark.set(Some((Instant::now(), live.shown.get()))),
+                8000..8100 => {
+                    measure("4x");
+                    slint::quit_event_loop().unwrap();
+                }
+                _ => {}
+            }
+        });
+        slint::run_event_loop().unwrap();
+        eprintln!(
+            "RATE display: {:.1} Hz",
+            PERIOD_SLACK / player.frame_period.get().as_secs_f64()
+        );
+        for line in results.borrow().iter() {
+            eprintln!("RATE {line}");
+        }
+        drop(player);
+    }
+
     #[test]
     #[ignore = "requires Wayland, PipeWire and built mGBA core"]
     fn real_player_window_input_pause_quit_and_relaunch() {
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .with_test_writer()
+            .try_init();
         let directory = PathBuf::from(
             std::env::var_os("HORIZON_GBA_TEST_DIR").expect("set a fresh HORIZON_GBA_TEST_DIR"),
         );

@@ -52,7 +52,10 @@ Horizon includes or derives small portions of artwork and other resources from t
   are adapted from Pokefan531's GBA colour shader, based on Color Mangler by
   hunterk and optimized by crashGG:
   https://github.com/libretro/slang-shaders/blob/master/handheld/shaders/color/gba-color.slang.
-  Upstream declares it public domain; the exact retained license statement is
+  Game Boy Color games use the same sRGB profile, which upstream's companion
+  gbc-color shader by the same authors defines identically:
+  https://github.com/libretro/slang-shaders/blob/master/handheld/shaders/color/gbc-color.slang.
+  Upstream declares both public domain; the exact retained license statement is
   `LICENSES/LicenseRef-GBA-Color-Public-Domain.txt` (SPDX identifier
   `LicenseRef-GBA-Color-Public-Domain`). Horizon converts the default sRGB
   profile to CPU RGBA processing with lookup tables, retains alpha, omits

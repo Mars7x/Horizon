@@ -6,6 +6,7 @@ use crate::{
     persistence::SqliteLibraryRepository,
     platform::{
         gba_core::{AudioBuffer, Core, DisplaySize, LatestFrame},
+        gba_present::FrameStage,
         pipewire::{AudioStream, Role},
     },
     services::{activity::ActivityRepository, rom_import::RomSystem, worker::Notify},
@@ -70,8 +71,10 @@ pub struct RunningGame {
     pub events: Receiver<Event>,
     pub frame: LatestFrame,
     pub buttons: Arc<AtomicU16>,
-    /// The player's size in physical pixels, for whole-number xBRZ scaling.
+    /// The player's size in physical pixels, for xBRZ's screen-size output.
     pub display: DisplaySize,
+    /// Tell it when the screen has drawn a frame, so the next is filtered.
+    pub stage: Arc<FrameStage>,
     worker: Option<JoinHandle<Result<(), String>>>,
 }
 impl RunningGame {
@@ -94,8 +97,9 @@ impl RunningGame {
         let frame = Arc::new(Mutex::new(None));
         let buttons = Arc::new(AtomicU16::new(0));
         let display = DisplaySize::default();
+        let stage = Arc::new(FrameStage::new());
         let (worker_frame, worker_buttons) = (Arc::clone(&frame), Arc::clone(&buttons));
-        let worker_display = Arc::clone(&display);
+        let (worker_display, worker_stage) = (Arc::clone(&display), Arc::clone(&stage));
         let worker = thread::Builder::new()
             .name("horizon-mgba".into())
             .spawn(move || {
@@ -111,7 +115,7 @@ impl RunningGame {
                     (system, &sha256),
                     receiver,
                     &sender,
-                    (worker_frame, worker_display),
+                    (worker_frame, worker_display, worker_stage),
                     worker_buttons,
                     frame_ready,
                 );
@@ -127,6 +131,7 @@ impl RunningGame {
                 frame,
                 buttons,
                 display,
+                stage,
                 worker: Some(worker),
             }),
             Err(_) => {
@@ -184,7 +189,7 @@ fn play(
     (system, sha256): (RomSystem, &str),
     commands: Receiver<Command>,
     events: &Sender<Event>,
-    (frame, display): (LatestFrame, DisplaySize),
+    (frame, display, stage): (LatestFrame, DisplaySize, Arc<FrameStage>),
     buttons: Arc<AtomicU16>,
     frame_ready: Notify,
 ) -> Result<(), String> {
@@ -215,9 +220,9 @@ fn play(
         .load()
         .map_err(|_| "Could not read playback or core settings".to_owned())?;
     let mut mgba = preferences.mgba;
-    // The correction models the GBA's own screen; GB and GBC games keep
-    // mGBA's colours.
-    mgba.color_correction &= system == RomSystem::GameBoyAdvance;
+    // The correction models the GBA and GBC screens (one shared profile);
+    // original Game Boy games keep their chosen palette.
+    mgba.color_correction &= system != RomSystem::GameBoy;
     let source = SourceId::new(system.source_id()).map_err(|e| e.to_string())?;
     let game = crate::domain::SourceGameRef::new(
         source.clone(),
@@ -234,11 +239,36 @@ fn play(
         &paths.core,
         &rom,
         mgba,
-        frame,
         Arc::clone(&audio),
         Arc::clone(&buttons),
-        display,
     )?;
+    // Filtering runs beside the core, so it never slows the game down.
+    struct Filter {
+        stage: Arc<FrameStage>,
+        thread: Option<JoinHandle<()>>,
+    }
+    impl Drop for Filter {
+        fn drop(&mut self) {
+            self.stage.stop();
+            if let Some(thread) = self.thread.take()
+                && thread.join().is_err()
+            {
+                tracing::warn!("the game's video filter stopped unexpectedly");
+            }
+        }
+    }
+    let _filter = Filter {
+        stage: Arc::clone(&stage),
+        thread: Some(
+            thread::Builder::new()
+                .name("horizon-frames".into())
+                .spawn({
+                    let stage = Arc::clone(&stage);
+                    move || stage.run(mgba, &display, &frame, &*frame_ready)
+                })
+                .map_err(|_| "Could not start the game's video".to_owned())?,
+        ),
+    };
     let save_path = game_folder.save_path();
     let mut last_save = read_save(&save_path)?.unwrap_or_default();
     if !last_save.is_empty() {
@@ -273,13 +303,10 @@ fn play(
     let mut pending = None;
     let mut session = None;
     let mut frame_attempts = 0u32;
-    // Filter the newest frame for display and wake the UI to show it.
-    let presented_at = std::cell::Cell::new(None::<Instant>);
+    // Hand each new frame to the filter thread, which shows the newest one
+    // whenever the screen has drawn the last.
     let present = |core: &Core| {
-        if core.present() {
-            frame_ready();
-            presented_at.set(Some(Instant::now()));
-        }
+        core.hand_off(&stage);
     };
     let _ = events.send(Event::Ready {
         title: location.title.clone(),
@@ -403,15 +430,7 @@ fn play(
             }
             if !paused {
                 core.run_frame();
-                // Every frame at normal speed. Fast-forward shows only the
-                // newest frame once per display refresh, so the frames it
-                // skips over are never filtered (xBRZ costs ~8 ms each).
-                let due = presented_at
-                    .get()
-                    .is_none_or(|at| at.elapsed() + Duration::from_millis(2) >= interval);
-                if speed == PlaybackSpeed::Normal || due {
-                    present(&core);
-                }
+                present(&core);
                 frame_attempts = frame_attempts.saturating_add(1);
                 if frame_attempts >= 120 && core.frames.load(Ordering::Acquire) == 0 {
                     return Err("mGBA could not produce a game frame".into());

@@ -1,7 +1,7 @@
 //! Narrow mGBA libretro host for GB, GBC and GBA games. All core calls and
 //! callbacks stay on one worker.
-use crate::domain::core_settings::MgbaPreferences;
 use crate::domain::core_settings::PlaybackSpeed;
+use crate::domain::core_settings::{GameBoyPalette, MgbaPreferences};
 use libloading::Library;
 use slint::{Rgba8Pixel, SharedPixelBuffer};
 use std::{
@@ -37,18 +37,14 @@ pub type LatestFrame = Arc<Mutex<Option<Presented>>>;
 pub type AudioBuffer = Arc<super::gba_audio::GameAudio>;
 
 struct Callbacks {
-    frame: LatestFrame,
     audio: AudioBuffer,
     buttons: Arc<AtomicU16>,
-    display: DisplaySize,
     pixel_format: u32,
     preferences: MgbaPreferences,
     /// The core's newest frame, unfiltered (screenshots and states use it).
     raw_frame: Option<Frame>,
-    /// `raw_frame` has not been presented yet.
+    /// `raw_frame` has not been handed to the filter stage yet.
     fresh: bool,
-    /// Reused for colour correction, which must leave `raw_frame` alone.
-    scratch: Vec<u8>,
     audio_speed: super::gba_audio::SpeedAudio,
     frames: Arc<AtomicU64>,
 }
@@ -101,10 +97,8 @@ impl Core {
         path: &Path,
         rom: &[u8],
         preferences: MgbaPreferences,
-        frame: LatestFrame,
         audio: AudioBuffer,
         buttons: Arc<AtomicU16>,
-        display: DisplaySize,
     ) -> Result<Self, String> {
         // SAFETY: only the application-packaged, pinned mGBA core is loaded;
         // the explicit development override is selected by data_paths.
@@ -200,15 +194,12 @@ impl Core {
             };
             CALLBACKS.with(|state| {
                 *state.borrow_mut() = Some(Callbacks {
-                    frame,
                     audio,
                     buttons,
-                    display,
                     pixel_format: 0,
                     preferences,
                     raw_frame: None,
                     fresh: false,
-                    scratch: Vec::new(),
                     audio_speed: super::gba_audio::SpeedAudio::default(),
                     frames: Arc::clone(&core.frames),
                 })
@@ -298,10 +289,9 @@ impl Core {
     pub fn run_frame(&mut self) {
         unsafe { (self.run)() }
     }
-    /// Filters the newest frame for display and hands it to the UI. The
-    /// worker calls this at most once per display refresh, so frames that
-    /// fast-forward never shows are not filtered. False when nothing new.
-    pub fn present(&self) -> bool {
+    /// Hands the newest frame to the filter stage, once. False when the core
+    /// has not drawn a new one since.
+    pub fn hand_off(&self, stage: &super::gba_present::FrameStage) -> bool {
         CALLBACKS.with(|state| {
             let Ok(mut state) = state.try_borrow_mut() else {
                 return false;
@@ -309,34 +299,12 @@ impl Core {
             let Some(state) = state.as_mut() else {
                 return false;
             };
-            let Callbacks {
-                raw_frame,
-                fresh,
-                scratch,
-                preferences,
-                frame,
-                display,
-                ..
-            } = state;
-            let Some(raw) = raw_frame.as_ref().filter(|_| *fresh) else {
+            let Some(raw) = state.raw_frame.as_ref().filter(|_| state.fresh) else {
                 return false;
             };
-            *fresh = false;
-            let size = display.load(Ordering::Acquire);
-            let presented = super::gba_video::present(
-                raw,
-                preferences.color_correction,
-                preferences.video_filter,
-                ((size >> 32) as u32, size as u32),
-                scratch,
-            );
-            match frame.lock() {
-                Ok(mut frame) => {
-                    *frame = Some(presented);
-                    true
-                }
-                Err(_) => false,
-            }
+            stage.submit(raw);
+            state.fresh = false;
+            true
         })
     }
     /// Battery memory, then a Game Boy cartridge clock when the game has
@@ -433,17 +401,34 @@ extern "C" fn environment(command: u32, data: *mut c_void) -> bool {
             } else if CStr::from_ptr(variable.key).to_bytes() == b"mgba_skip_bios" {
                 variable.value = c"ON".as_ptr();
                 true
-            } else if CStr::from_ptr(variable.key).to_bytes() == b"mgba_sgb_borders" {
-                // Super Game Boy colours stay; its border would turn the
-                // 160x144 picture into 256x224 for some games only.
-                variable.value = c"OFF".as_ptr();
-                true
             } else {
                 let value = CALLBACKS.with(|state| {
                     let state = state.borrow();
                     let preferences = state.as_ref()?.preferences;
                     match CStr::from_ptr(variable.key).to_bytes() {
                         b"mgba_audio_low_pass_filter" => Some(c"disabled"),
+                        // The border turns the 160x144 picture into 256x224,
+                        // for Super Game Boy games only; off unless chosen.
+                        b"mgba_sgb_borders" => Some(if preferences.sgb_border {
+                            c"ON"
+                        } else {
+                            c"OFF"
+                        }),
+                        b"mgba_gb_colors" => Some(match preferences.game_boy_palette {
+                            GameBoyPalette::Grey | GameBoyPalette::Color => c"Grayscale",
+                            GameBoyPalette::Green => c"DMG Green",
+                            GameBoyPalette::Pocket => c"GB Pocket",
+                            GameBoyPalette::Light => c"GB Light",
+                        }),
+                        // 1: the Game Boy Color's colours for games it has
+                        // them for; others fall back to grey, as on hardware.
+                        b"mgba_gb_colors_preset" => {
+                            Some(if preferences.game_boy_palette == GameBoyPalette::Color {
+                                c"1"
+                            } else {
+                                c"0"
+                            })
+                        }
                         b"mgba_solar_sensor_level" => Some(
                             [
                                 c"0", c"1", c"2", c"3", c"4", c"5", c"6", c"7", c"8", c"9", c"10",
@@ -682,15 +667,12 @@ mod tests {
     fn real_core_plays_game_boy_games_at_their_own_size_and_keeps_their_clock() {
         let path = std::env::var_os("HORIZON_GBA_CORE").unwrap();
         for (color, sgb) in [(false, false), (true, false), (false, true)] {
-            let frame = Arc::new(Mutex::new(None));
             let mut core = Core::load(
                 Path::new(&path),
                 &test_gb_rom(color, true, sgb),
                 MgbaPreferences::default(),
-                Arc::clone(&frame),
                 Arc::new(super::super::gba_audio::GameAudio::default()),
                 Arc::new(AtomicU16::new(0)),
-                Arc::new(AtomicU64::new(0)),
             )
             .unwrap();
             assert_eq!((core.av.base_width, core.av.base_height), (160, 144));
@@ -720,14 +702,59 @@ mod tests {
                 rom
             },
             MgbaPreferences::default(),
-            Arc::new(Mutex::new(None)),
             Arc::new(super::super::gba_audio::GameAudio::default()),
             Arc::new(AtomicU16::new(0)),
-            Arc::new(AtomicU64::new(0)),
         )
         .unwrap();
         assert_eq!(core.save_ram().unwrap().len(), 8 * 1024);
     }
+    #[test]
+    #[ignore = "requires the built pinned mGBA core with Game Boy support"]
+    fn real_core_applies_game_boy_palette_and_super_game_boy_border() {
+        let path = std::env::var_os("HORIZON_GBA_CORE").unwrap();
+        let picture = |rom: Vec<u8>, preferences| {
+            let mut core = Core::load(
+                Path::new(&path),
+                &rom,
+                preferences,
+                Arc::new(super::super::gba_audio::GameAudio::default()),
+                Arc::new(AtomicU16::new(0)),
+            )
+            .unwrap();
+            for _ in 0..10 {
+                core.run_frame();
+            }
+            core.capture_frame().unwrap()
+        };
+        let grey = picture(test_gb_rom(false, false, false), MgbaPreferences::default());
+        let green = picture(
+            test_gb_rom(false, false, false),
+            MgbaPreferences {
+                game_boy_palette: GameBoyPalette::Green,
+                ..MgbaPreferences::default()
+            },
+        );
+        let centre = ((72 * 160 + 80) * 4) as usize;
+        let (grey, green) = (
+            &grey.rgba[centre..centre + 3],
+            &green.rgba[centre..centre + 3],
+        );
+        // RGB565 output: neutral within one green step.
+        assert!(
+            grey[0].abs_diff(grey[1]) <= 6 && grey[0] == grey[2],
+            "{grey:?}"
+        );
+        assert!(green[1] > green[0] && green[1] > green[2], "{green:?}");
+        let bordered = picture(
+            test_gb_rom(false, false, true),
+            MgbaPreferences {
+                sgb_border: true,
+                ..MgbaPreferences::default()
+            },
+        );
+        assert_eq!((bordered.width, bordered.height), (256, 224));
+    }
+
     #[test]
     #[ignore = "requires the built pinned mGBA core"]
     fn real_core_state_restores_machine_and_rejects_damage_without_changing_it() {
@@ -736,10 +763,8 @@ mod tests {
             Path::new(&path),
             &test_rom(),
             MgbaPreferences::default(),
-            Arc::new(Mutex::new(None)),
             Arc::new(super::super::gba_audio::GameAudio::default()),
             Arc::new(AtomicU16::new(0)),
-            Arc::new(AtomicU64::new(0)),
         )
         .unwrap();
         for _ in 0..10 {
@@ -791,10 +816,8 @@ mod tests {
                 Path::new(&path),
                 &test_rom(),
                 preferences,
-                Arc::new(Mutex::new(None)),
                 Arc::clone(&audio),
                 Arc::new(AtomicU16::new(0)),
-                Arc::new(AtomicU64::new(0)),
             )
             .unwrap();
             #[repr(C)]
@@ -827,10 +850,16 @@ mod tests {
         assert_eq!(unfiltered, filtered);
     }
 
-    /// Presents the newest frame and reads it back as a plain frame.
-    fn shown(core: &Core, frame: &LatestFrame) -> Frame {
-        assert!(core.present(), "a new frame to present");
-        let frame = frame.lock().unwrap().take().unwrap();
+    /// The newest frame as the screen would show it, read back as a plain
+    /// frame (window size unknown, so xBRZ stays at 6×).
+    fn shown(core: &Core, preferences: MgbaPreferences) -> Frame {
+        let frame = super::super::gba_video::present(
+            &core.capture_frame().unwrap(),
+            preferences.color_correction,
+            preferences.video_filter,
+            (0, 0),
+            &mut super::super::gba_video::Scratch::default(),
+        );
         Frame {
             width: frame.pixels.width(),
             height: frame.pixels.height(),
@@ -843,25 +872,23 @@ mod tests {
     #[ignore = "requires the built pinned mGBA core"]
     fn real_core_combines_colour_and_pixel_art_without_changing_capture() {
         let path = std::env::var_os("HORIZON_GBA_CORE").unwrap();
-        let frame = Arc::new(Mutex::new(None));
+        let preferences = MgbaPreferences {
+            color_correction: true,
+            video_filter: crate::domain::core_settings::VideoFilter::Xbrz,
+            ..MgbaPreferences::default()
+        };
         let mut core = Core::load(
             Path::new(&path),
             &test_rom(),
-            MgbaPreferences {
-                color_correction: true,
-                video_filter: crate::domain::core_settings::VideoFilter::Xbrz,
-                ..MgbaPreferences::default()
-            },
-            Arc::clone(&frame),
+            preferences,
             Arc::new(super::super::gba_audio::GameAudio::default()),
             Arc::new(AtomicU16::new(0)),
-            Arc::new(AtomicU64::new(0)),
         )
         .unwrap();
         for _ in 0..6 {
             core.run_frame();
         }
-        let display = shown(&core, &frame);
+        let display = shown(&core, preferences);
         let raw = core.capture_frame().unwrap();
         assert_eq!((display.width, display.height), (1440, 960));
         assert_eq!((raw.width, raw.height), (240, 160));
@@ -876,31 +903,28 @@ mod tests {
     fn real_core_draws_responds_to_held_input_and_restores_battery_memory() {
         let path = std::env::var_os("HORIZON_GBA_CORE").expect("set HORIZON_GBA_CORE");
         let rom = test_rom();
-        let frame = Arc::new(Mutex::new(None));
         let audio = Arc::new(super::super::gba_audio::GameAudio::default());
         let buttons = Arc::new(AtomicU16::new(0));
         let mut core = Core::load(
             Path::new(&path),
             &rom,
             MgbaPreferences::default(),
-            Arc::clone(&frame),
             Arc::clone(&audio),
             Arc::clone(&buttons),
-            Arc::new(AtomicU64::new(0)),
         )
         .unwrap();
         for _ in 0..10 {
             core.run_frame();
         }
         assert_eq!((core.av.base_width, core.av.base_height), (240, 160));
-        let image = shown(&core, &frame);
+        let image = shown(&core, MgbaPreferences::default());
         assert!(image.rgba[1] > 200);
         assert!(image.rgba[0] < 30);
         buttons.store(1 << 8, Ordering::Release);
         for _ in 0..3 {
             core.run_frame();
         }
-        let image = shown(&core, &frame);
+        let image = shown(&core, MgbaPreferences::default());
         assert!(image.rgba[0] > 200);
         assert!(image.rgba[1] < 30);
         let saved = core.save_ram().unwrap();
@@ -909,7 +933,7 @@ mod tests {
         for _ in 0..3 {
             core.run_frame();
         }
-        assert!(shown(&core, &frame).rgba[1] > 200);
+        assert!(shown(&core, MgbaPreferences::default()).rgba[1] > 200);
         assert!(!audio.is_empty());
         assert!(audio.drain().iter().any(|sample| sample.abs() > 0.01));
         audio.clear();
@@ -934,10 +958,8 @@ mod tests {
             Path::new(&path),
             &rom,
             MgbaPreferences::default(),
-            frame,
             audio,
             buttons,
-            Arc::new(AtomicU64::new(0)),
         )
         .unwrap();
         reopened.restore_save(&saved).unwrap();

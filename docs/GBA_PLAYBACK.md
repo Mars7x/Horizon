@@ -8,15 +8,19 @@ Playback does not depend on hash-catalog recognition or SteamGridDB availability
 
 The game uses its original aspect ratio and black bars as needed. The default
 None filter preserves sharp pixels. Software frames are paced at the core's reported rate. The
-worker filters the newest frame straight into Slint's pixel buffer and wakes the UI, which shows
-it at once without copying it; audio goes through
+core worker hands each new frame to a separate filter thread, so filtering never slows the game.
+That thread filters the newest frame straight into Slint's pixel buffer only when the player has
+taken the last one, and wakes the UI, which shows it without copying it. The player takes at most
+one frame per display refresh (read from the monitor, 60 Hz if unknown), so on a high-refresh
+display fast-forward shows more frames, up to the refresh rate; audio goes through
 the existing native PipeWire boundary. mGBA's built-in BIOS implementation allows
 the first version to run without a BIOS setup screen or distributed BIOS file.
 
 mGBA picks the hardware from the cartridge header: colour games and dual-mode
 games run as a Game Boy Color, Super Game Boy enhanced games as a Super Game Boy
-(with its colours) and others as a Game Boy, using mGBA's default palette.
-The Super Game Boy border is off, so every Game Boy picture stays 160×144.
+(with its colours) and others as a Game Boy, in the chosen Game Boy palette.
+The Super Game Boy border is off by default, so every Game Boy picture stays
+160×144; turned on, Super Game Boy games show at 256×224 with their border.
 
 ## Launch and return motion
 
@@ -61,8 +65,8 @@ the game and clears queued audio/input, respecting background freeze.
 Playback speed offers 1×, 2×, 3× and 4× for this loaded game. Left/Right steps
 between the limits; Select cycles through all four. The worker multiplies its
 frame pace and plays audio at the corresponding faster, higher pitch. Only the newest frame is
-filtered and shown once per display refresh, so frames fast-forward skips over are never filtered
-(xBRZ costs about 5 ms a frame on a Ryzen 7 5800X3D, which 4× could not otherwise keep up with). A stereo
+filtered, once per frame shown, so frames fast-forward skips over are never filtered. On a 175 Hz
+display, 4× shows about 175 frames a second with Smooth pixel art (`real_player_frame_rate_report`). A stereo
 low-pass filter matched to the factor prevents aliasing before integer decimation
 back to the output sample rate. Buffered audio is cleared on speed changes and
 kept to at most 50 ms in the application queue. Speed is shown only in the pause
@@ -119,8 +123,9 @@ gameplay A/B; keyboard bindings stay unchanged. Home/Library focus and route are
 Settings → Cores contains shared Freeze when unfocused and Resume last state
 switches, both default on.
 Cores → mGBA contains Sunlight level (0–10) for solar-sensor games, Video filter
-(None, LCD, Smooth or Smooth pixel art), and Colour correction. Defaults keep
-filter/correction off and sunlight zero. Saved choices are read on the game worker
+(None, LCD, Smooth or Smooth pixel art), Colour correction, Game Boy palette and
+Super Game Boy border. Defaults keep filter/correction/border off, sunlight zero
+and the grey palette. Saved choices are read on the game worker
 at launch; restart the game to apply changes. Invalid/unreadable settings are
 reported without overwriting the file. No hardware sensors or BIOS configuration
 are added. Audio smoothing is no longer a user preference.
@@ -128,20 +133,24 @@ are added. Audio smoothing is no longer a user preference.
 LCD applies an original subtle RGB subpixel/grid treatment at 3× on the core
 worker, then uses smooth scaling. Smooth uses native bilinear scaling without
 changing source pixels. Smooth pixel art uses the pinned xbrz-rs implementation
-to round pixel-art diagonals, scaled by whole numbers only so nothing is resampled
-by a fraction. The player tells the worker its size in physical pixels; the worker
-picks the largest whole-number scale that fits, runs xBRZ at the largest factor
-(2–6) dividing it, and the GPU repeats each xBRZ pixel the rest of the way with
-nearest-neighbour sampling, centred on whole screen pixels. On a 3440×1440
-ultrawide, GBA is xBRZ 3× shown at 9× (2160×1440) and Game Boy xBRZ 5× at 10×
-(1600×1440). A scale no factor divides (7, 11, 13…) steps down one, leaving thin
-bars: GBA on a 2160-pixel-tall screen is 12×, not 13×. When the window cannot fit
-twice the game, xBRZ 6× is fitted smoothly as before. The xBRZ cost barely depends
-on the factor (about 5 ms a GBA frame on a Ryzen 7 5800X3D); smaller factors mainly
-shrink the frame uploaded to the GPU. Window resizes apply from the next frame shown.
+to round pixel-art diagonals, delivered at the screen's own size and shown 1:1.
+The player tells the filter its size in physical pixels; xBRZ runs at the fitted
+scale rounded up (at most 6×), and the result is resized on the CPU to exactly
+fill the screen's height by area averaging: each screen pixel averages the xBRZ
+pixels it covers, so an edge blends across at most one screen pixel and flat
+areas are untouched (neither the blur of a GPU stretch nor visible steps from
+repeating pixels). On a 3440×1440 ultrawide GBA is 2160×1440 and Game Boy
+1600×1440; 4K GBA fills its height at 13.5×. xBRZ runs in horizontal bands on up
+to four threads (with overlapping rows, so the result is identical to one pass)
+and the resize is split the same way: about 4.4 ms a frame at 3440×1440 and 8 ms
+at 4K on a Ryzen 7 5800X3D (`xbrz_screen_size_cost`). xBRZ's own corner rounding
+against the frame's outside is made opaque. When the window cannot fit twice the
+game, xBRZ 6× is fitted smoothly by the GPU. Window resizes apply from the next
+frame shown.
 Colour correction
-independently applies the credited sRGB GBA display profile before any filter,
-for GBA games only;
+independently applies the credited sRGB display profile before any filter, for
+GBA and Game Boy Color games (upstream's GBA and GBC profiles are identical);
+original Game Boy games keep their palette;
 it approximates the original screen rather than calibrating the user's display.
 All presets preserve aspect ratio. Native screenshots exclude these display
 treatments. No RetroArch shader runtime or imported presets are supported.
@@ -176,7 +185,8 @@ state it cannot read with the session rolled back. A new mGBA release makes
 states unavailable; battery saves stay independent. Previews keep the game's
 native size (240×160, or 160×144 for Game Boy and Game Boy Color).
 There is no automatic state checkpoint during gameplay, so a forced exit can lose
-progress since the latest manual/automatic state. See [ADR 0206](adr/0206-save-states-and-resume.md) and
+progress since the latest manual/automatic state. See [ADR 0214](adr/0214-screen-size-xbrz-and-display-paced-frames.md) for filtering and pacing,
+[ADR 0206](adr/0206-save-states-and-resume.md) and
 [ADR 0211](adr/0211-states-follow-the-core-release.md).
 
 Observed Activity sessions begin after the core produces a frame, include time

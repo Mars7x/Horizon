@@ -22,7 +22,50 @@ impl Default for CorePreferences {
 pub struct MgbaPreferences {
     pub sunlight: Sunlight,
     pub video_filter: VideoFilter,
+    /// GBA and Game Boy Color screens; original Game Boy games keep their palette.
     pub color_correction: bool,
+    pub game_boy_palette: GameBoyPalette,
+    /// Off keeps every Game Boy picture 160×144.
+    pub sgb_border: bool,
+}
+
+/// Colours for original Game Boy games; Super Game Boy and Game Boy Color
+/// games keep their own. A curated few of mGBA's presets.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GameBoyPalette {
+    #[default]
+    Grey,
+    Green,
+    Pocket,
+    Light,
+    /// The Game Boy Color's own colours for the games it knows.
+    Color,
+}
+impl GameBoyPalette {
+    const ALL: [Self; 5] = [
+        Self::Grey,
+        Self::Green,
+        Self::Pocket,
+        Self::Light,
+        Self::Color,
+    ];
+    pub fn step(self, forward: bool) -> Self {
+        let index = Self::ALL
+            .iter()
+            .position(|value| *value == self)
+            .unwrap_or(0);
+        Self::ALL[(index + if forward { 1 } else { Self::ALL.len() - 1 }) % Self::ALL.len()]
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Grey => "Grey",
+            Self::Green => "Original green",
+            Self::Pocket => "Pocket",
+            Self::Light => "Light",
+            Self::Color => "Game Boy Color",
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,6 +131,16 @@ mod tests {
         assert!(!values.color_correction);
         assert_eq!(values.sunlight.level(), 7);
         assert!(serde_json::from_str::<MgbaPreferences>(r#"{"video_filter":"missing"}"#).is_err());
+        // Files from before the Game Boy options keep working.
+        assert_eq!(values.game_boy_palette, GameBoyPalette::Grey);
+        assert!(!values.sgb_border);
+        let mut palette = GameBoyPalette::Grey;
+        for _ in 0..5 {
+            assert_eq!(palette.step(true).step(false), palette);
+            palette = palette.step(true);
+        }
+        assert_eq!(palette, GameBoyPalette::Grey);
+        assert_eq!(GameBoyPalette::Grey.step(false), GameBoyPalette::Color);
         for filter in [
             VideoFilter::None,
             VideoFilter::Lcd,

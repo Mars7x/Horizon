@@ -13,8 +13,9 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 pub const MANUAL_SLOTS: u8 = 4;
-/// Native frame sizes: GBA, then Game Boy and Game Boy Color.
-const PREVIEW_SIZES: [(u32, u32); 2] = [(240, 160), (160, 144)];
+/// Native frame sizes: GBA, Game Boy and Game Boy Color, and a Super Game
+/// Boy game with its border.
+const PREVIEW_SIZES: [(u32, u32); 3] = [(240, 160), (160, 144), (256, 224)];
 
 /// States follow the mGBA release (`mGBA@<version>`), not the exact binary:
 /// rebuilding the same release, such as adding its Game Boy core, keeps
@@ -726,12 +727,19 @@ mod tests {
             (160, 144)
         );
         assert_eq!(snapshot.preview.rgba, frame.rgba);
-        let wrong = Frame {
+        let bordered = Frame {
             width: 256,
             height: 224,
             rgba: vec![0; 256 * 224 * 4],
             smooth: false,
         };
-        assert!(f.store.save(2, b"bordered", &wrong).is_err());
+        f.store.save(2, b"bordered", &bordered).unwrap();
+        let wrong = Frame {
+            width: 320,
+            height: 240,
+            rgba: vec![0; 320 * 240 * 4],
+            smooth: false,
+        };
+        assert!(f.store.save(3, b"other", &wrong).is_err());
     }
 }
