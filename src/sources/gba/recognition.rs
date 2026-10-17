@@ -319,6 +319,16 @@ fn classify(hash: &RomFingerprint, color: bool, catalogs: Option<&RomCatalogs>) 
 }
 
 pub fn scan(folder: &Path, catalogs: Option<&RomCatalogs>) -> Result<RomScan, RomImportError> {
+    scan_skipping(folder, catalogs, &|_, _| false)
+}
+
+/// `skip` leaves a supported file out entirely (not hashed, not counted),
+/// so a refresh only reads the files it has not seen.
+pub fn scan_skipping(
+    folder: &Path,
+    catalogs: Option<&RomCatalogs>,
+    skip: &dyn Fn(&Path, &fs::Metadata) -> bool,
+) -> Result<RomScan, RomImportError> {
     let mut scan = RomScan::default();
     let mut pending = vec![(folder.to_owned(), 0)];
     let mut visited = 0;
@@ -352,6 +362,9 @@ pub fn scan(folder: &Path, catalogs: Option<&RomCatalogs>) -> Result<RomScan, Ro
             };
             if !kind.is_file() {
                 scan.skipped += 1;
+                continue;
+            }
+            if skip(&path, &entry.metadata()?) {
                 continue;
             }
             let title = path

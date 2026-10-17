@@ -1,9 +1,16 @@
 //! Folder import coordination; cartridge formats belong to the source adapter.
 pub use crate::sources::gba::recognition::{
     RomCandidate, RomCatalog, RomCatalogs, RomFingerprint, RomImportError, RomScan, RomSystem,
-    fingerprint, scan,
+    fingerprint, scan, scan_skipping,
 };
-use std::path::PathBuf;
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+    time::{Duration, SystemTime},
+};
+
+/// A file changed this recently may still be copying; a later refresh takes it.
+const SETTLE: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Default)]
 pub struct RomSetup {
@@ -16,15 +23,36 @@ pub struct RomSetup {
 /// available and unverified filename metadata otherwise. Import never asks the
 /// user to classify or approve individual files. A chosen catalog replaces
 /// the bundled one for its system only.
-pub fn scan_folder(
-    folder: &std::path::Path,
+pub fn scan_folder(folder: &Path, catalog: Option<RomCatalog>) -> Result<RomScan, RomImportError> {
+    scan_folder_skipping(folder, catalog, &|_, _| false)
+}
+
+/// The chosen folder again: only files not already imported at their
+/// current size, and not still being written, are read. Nothing is removed.
+pub fn scan_folder_for_new(
+    folder: &Path,
     catalog: Option<RomCatalog>,
+    imported: &HashSet<(PathBuf, u64)>,
+    now: SystemTime,
+) -> Result<RomScan, RomImportError> {
+    scan_folder_skipping(folder, catalog, &|path, metadata| {
+        imported.contains(&(path.to_owned(), metadata.len()))
+            || metadata
+                .modified()
+                .is_ok_and(|modified| now.duration_since(modified).is_ok_and(|age| age < SETTLE))
+    })
+}
+
+fn scan_folder_skipping(
+    folder: &Path,
+    catalog: Option<RomCatalog>,
+    skip: &dyn Fn(&Path, &std::fs::Metadata) -> bool,
 ) -> Result<RomScan, RomImportError> {
     let mut catalogs = RomCatalogs::bundled()?;
     if let Some(catalog) = catalog {
         catalogs = catalogs.with(catalog);
     }
-    let mut result = scan(folder, Some(&catalogs))?;
+    let mut result = scan_skipping(folder, Some(&catalogs), skip)?;
     for candidate in &mut result.candidates {
         candidate.selected = candidate.fingerprint.is_some();
     }
@@ -126,6 +154,47 @@ mod tests {
             .unwrap();
         assert_eq!(ambiguous.title, "Unknown");
         assert!(ambiguous.catalog.is_none());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn refresh_reads_only_new_settled_files_and_keeps_existing_games() {
+        let dir = std::env::temp_dir().join(format!("horizon-refresh-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("First.gba"), [0u8; 192]).unwrap();
+        let mut repository = SqliteLibraryRepository::open(dir.join("library.sqlite3")).unwrap();
+        let first = scan_folder(&dir, None).unwrap();
+        repository
+            .save_rom_import(&RomSetup::default(), &first.candidates)
+            .unwrap();
+        let settled = SystemTime::now() + SETTLE;
+        let imported = repository.imported_rom_files().unwrap();
+        assert!(
+            scan_folder_for_new(&dir, None, &imported, settled)
+                .unwrap()
+                .candidates
+                .is_empty()
+        );
+        fs::write(dir.join("Second.gb"), [1u8; 192]).unwrap();
+        // Still being copied: left for a later refresh.
+        assert!(
+            scan_folder_for_new(&dir, None, &imported, SystemTime::now())
+                .unwrap()
+                .candidates
+                .is_empty()
+        );
+        let settled = SystemTime::now() + SETTLE;
+        let added = scan_folder_for_new(&dir, None, &imported, settled).unwrap();
+        assert_eq!(added.candidates.len(), 1);
+        assert_eq!(added.candidates[0].system, RomSystem::GameBoy);
+        let id = repository.list_games().unwrap()[0].game().id();
+        repository.add_rom_files(&added.candidates).unwrap();
+        let games = repository.list_games().unwrap();
+        assert_eq!(games.len(), 2);
+        assert_eq!(games[0].game().id(), id);
+        // A refresh never changes the saved setup.
+        assert!(!repository.rom_setup().unwrap().completed);
+        drop(repository);
         fs::remove_dir_all(dir).unwrap();
     }
 }

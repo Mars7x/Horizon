@@ -202,11 +202,44 @@ impl SqliteLibraryRepository {
         Ok(recognized)
     }
 
+    /// Imported ROM paths with their sizes, so a refresh can skip them.
+    pub fn imported_rom_files(
+        &self,
+    ) -> Result<std::collections::HashSet<(std::path::PathBuf, u64)>, PersistenceError> {
+        use std::os::unix::ffi::OsStringExt;
+        let mut statement = self
+            .connection
+            .prepare("SELECT path, size FROM rom_files")?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                std::ffi::OsString::from_vec(row.get::<_, Vec<u8>>(0)?).into(),
+                row.get::<_, u64>(1)?,
+            ))
+        })?;
+        rows.map(|row| row.map_err(Into::into)).collect()
+    }
+
     /// Both registration and setup completion commit together. A repeat import
     /// reuses content identity, never title; unavailable folders never prune games.
     pub fn save_rom_import(
         &mut self,
         setup: &crate::services::rom_import::RomSetup,
+        candidates: &[crate::services::rom_import::RomCandidate],
+    ) -> Result<(), PersistenceError> {
+        self.import_roms(Some(setup), candidates)
+    }
+
+    /// New files from the chosen folder; the saved setup is left as it is.
+    pub fn add_rom_files(
+        &mut self,
+        candidates: &[crate::services::rom_import::RomCandidate],
+    ) -> Result<(), PersistenceError> {
+        self.import_roms(None, candidates)
+    }
+
+    fn import_roms(
+        &mut self,
+        setup: Option<&crate::services::rom_import::RomSetup>,
         candidates: &[crate::services::rom_import::RomCandidate],
     ) -> Result<(), PersistenceError> {
         use std::os::unix::ffi::OsStrExt;
@@ -253,17 +286,19 @@ impl SqliteLibraryRepository {
             transaction.execute("INSERT INTO rom_files(path, game_id, sha1, sha256, size, catalog_name, imported_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, unixepoch()) ON CONFLICT(path, sha256) DO UPDATE SET game_id=excluded.game_id, sha1=excluded.sha1, sha256=excluded.sha256, size=excluded.size, catalog_name=excluded.catalog_name, imported_at=excluded.imported_at",
                 params![candidate.path.as_os_str().as_bytes(),game_id,hash.sha1,hash.sha256,hash.size,candidate.catalog])?;
         }
-        transaction.execute(
-            "UPDATE rom_setup SET completed = ?1, folder = ?2, catalog_path = ?3 WHERE id = 1",
-            params![
-                setup.completed,
-                setup.folder.as_ref().map(|p| p.as_os_str().as_bytes()),
-                setup
-                    .catalog_path
-                    .as_ref()
-                    .map(|p| p.as_os_str().as_bytes())
-            ],
-        )?;
+        if let Some(setup) = setup {
+            transaction.execute(
+                "UPDATE rom_setup SET completed = ?1, folder = ?2, catalog_path = ?3 WHERE id = 1",
+                params![
+                    setup.completed,
+                    setup.folder.as_ref().map(|p| p.as_os_str().as_bytes()),
+                    setup
+                        .catalog_path
+                        .as_ref()
+                        .map(|p| p.as_os_str().as_bytes())
+                ],
+            )?;
+        }
         transaction.commit()?;
         Ok(())
     }

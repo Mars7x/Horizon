@@ -5,6 +5,14 @@ system folder picker directly. Library has no Add games action or importer short
 automatically. There is no catalog setup, per-file selection, review screen or
 second confirmation. Cancelling the picker leaves the library/setup unchanged.
 
+The chosen folder stays live. Horizon checks it again at startup and every
+10 seconds while running, on a worker, and adds new supported files silently.
+Files already imported at the same size are not reread, and a file changed in the
+last 5 seconds (still copying) waits for a later check. A refresh never removes
+games, history or saves, never changes the saved setup, and an unavailable folder
+only logs a warning (once until a check succeeds again). See
+[ADR 0210](adr/0210-live-game-folder.md).
+
 The current backend supports raw Game Boy (`.gb`), Game Boy Color (`.gbc`) and
 Game Boy Advance (`.gba`) files, each its own Library source. Scans recurse through regular folders,
 skip symlinks and unsupported extensions, and bound file size (192 bytes–32 MiB),

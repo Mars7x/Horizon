@@ -1,4 +1,6 @@
 //! Choose a folder, then scan and import without a configuration/review menu.
+//! The chosen folder is then checked again at startup and every few seconds,
+//! so games added to it appear without asking.
 use crate::{
     AppWindow,
     domain::LibraryGame,
@@ -18,7 +20,10 @@ use std::{
     path::PathBuf,
     rc::Rc,
     sync::mpsc::Receiver,
+    time::Duration,
 };
+
+const REFRESH_INTERVAL: Duration = Duration::from_secs(10);
 
 #[derive(Clone)]
 enum View {
@@ -47,6 +52,8 @@ enum ResultMessage {
         unreadable: usize,
     },
     Failed(String),
+    /// A folder refresh finished: the library when it added games.
+    Refreshed(Result<Option<Vec<LibraryGame>>, String>),
 }
 
 pub struct RomSetupController {
@@ -60,6 +67,10 @@ pub struct RomSetupController {
     finished: crate::presentation::CallbackSlot<dyn Fn(bool)>,
     sound: crate::presentation::CallbackSlot<dyn Fn(crate::audio::UiSoundCue)>,
     running: Cell<bool>,
+    refreshing: Cell<bool>,
+    /// The last refresh failed; report the next failure only after a success.
+    refresh_failed: Cell<bool>,
+    watch: slint::Timer,
 }
 
 impl RomSetupController {
@@ -82,8 +93,20 @@ impl RomSetupController {
             finished: RefCell::new(None),
             sound: RefCell::new(None),
             running: Cell::new(false),
+            refreshing: Cell::new(false),
+            refresh_failed: Cell::new(false),
+            watch: slint::Timer::default(),
         });
         drain.bind(&controller);
+        let weak = Rc::downgrade(&controller);
+        controller
+            .watch
+            .start(slint::TimerMode::Repeated, REFRESH_INTERVAL, move || {
+                if let Some(controller) = weak.upgrade() {
+                    controller.refresh();
+                }
+            });
+        controller.refresh();
         let weak = Rc::downgrade(&controller);
         ui.on_rom_setup_choose(move |index| {
             if let Some(controller) = weak.upgrade() {
@@ -117,6 +140,50 @@ impl RomSetupController {
         ui.set_rom_setup_open(false);
         if let Some(callback) = self.finished.borrow().as_ref() {
             callback(saved);
+        }
+    }
+
+    /// Add any new games from the chosen folder in the background. Nothing
+    /// is shown, and games whose files are gone are kept.
+    fn refresh(&self) {
+        let setup = self.setup.borrow().clone();
+        let Some(folder) = setup.folder.clone() else {
+            return;
+        };
+        if self.running.get() || self.refreshing.replace(true) {
+            return;
+        }
+        let sender = self.sender.clone();
+        let database = self.database.clone();
+        let started = spawn("rom-folder-refresh", move || {
+            let result = (|| -> Result<Option<Vec<LibraryGame>>, String> {
+                let catalog = setup
+                    .catalog_path
+                    .as_deref()
+                    .and_then(|path| RomCatalog::load(path).ok());
+                let mut repository =
+                    SqliteLibraryRepository::open(database).map_err(|e| e.to_string())?;
+                let imported = repository.imported_rom_files().map_err(|e| e.to_string())?;
+                let scan = rom_import::scan_folder_for_new(
+                    &folder,
+                    catalog,
+                    &imported,
+                    std::time::SystemTime::now(),
+                )
+                .map_err(|e| e.to_string())?;
+                if !scan.candidates.iter().any(|candidate| candidate.selected) {
+                    return Ok(None);
+                }
+                rom_import::revalidate(&scan.candidates).map_err(|e| e.to_string())?;
+                repository
+                    .add_rom_files(&scan.candidates)
+                    .map_err(|e| e.to_string())?;
+                repository.list_games().map(Some).map_err(|e| e.to_string())
+            })();
+            let _ = sender.send(ResultMessage::Refreshed(result));
+        });
+        if !started {
+            self.refreshing.set(false);
         }
     }
 
@@ -280,6 +347,22 @@ impl RomSetupController {
                 ResultMessage::Failed(error) => {
                     self.running.set(false);
                     self.show(View::Error(error));
+                }
+                ResultMessage::Refreshed(result) => {
+                    self.refreshing.set(false);
+                    match result {
+                        Ok(games) => {
+                            self.refresh_failed.set(false);
+                            if let Some(games) = games {
+                                self.reloader.accept_games(games);
+                            }
+                        }
+                        Err(error) => {
+                            if !self.refresh_failed.replace(true) {
+                                tracing::warn!(%error, "game folder refresh failed; keeping the library");
+                            }
+                        }
+                    }
                 }
                 ResultMessage::Saved {
                     games,
