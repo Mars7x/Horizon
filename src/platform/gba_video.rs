@@ -1,62 +1,73 @@
 //! Curated video treatments on the core worker; no shader runtime or I/O.
-use super::gba_core::Frame;
+//! Each writes straight into Slint's pixel buffer, which the UI shows as is.
+use super::gba_core::{Frame, Presented};
 use crate::domain::core_settings::VideoFilter;
+use slint::{Rgba8Pixel, SharedPixelBuffer};
 
-pub(super) fn apply(mut frame: Frame, filter: VideoFilter) -> Frame {
-    frame.smooth = matches!(
+/// The frame to show for `raw` (left untouched: screenshots use it).
+/// `scratch` holds the colour-corrected copy between frames.
+pub(super) fn present(
+    raw: &Frame,
+    color_correction: bool,
+    filter: VideoFilter,
+    scratch: &mut Vec<u8>,
+) -> Presented {
+    let (width, height) = (raw.width, raw.height);
+    let source: &[u8] = if color_correction {
+        scratch.clear();
+        scratch.extend_from_slice(&raw.rgba);
+        correct_color(scratch);
+        scratch
+    } else {
+        &raw.rgba
+    };
+    let smooth = matches!(
         filter,
         VideoFilter::Smooth | VideoFilter::Lcd | VideoFilter::Xbrz
     );
-    if filter == VideoFilter::Xbrz {
+    let whole = source.len() == width as usize * height as usize * 4;
+    if filter == VideoFilter::Xbrz && whole && width <= 512 && height <= 512 {
         // Reconstruct at 6× before the final fit, so a 3× intermediate
         // is not magnified into soft edges on larger windows.
         // Bound output allocation even if a future core reports larger frames.
-        if frame.width <= 512
-            && frame.height <= 512
-            && frame.rgba.len() == frame.width as usize * frame.height as usize * 4
-        {
-            let rgba =
-                xbrz::scale_rgba(&frame.rgba, frame.width as usize, frame.height as usize, 6);
-            return Frame {
-                width: frame.width * 6,
-                height: frame.height * 6,
-                rgba,
-                // Fit the filtered subpixels smoothly at fractional window
-                // scales; nearest-neighbour would enlarge their small steps.
-                smooth: true,
-            };
-        }
-        return frame;
+        let scaled = xbrz::scale_rgba(source, width as usize, height as usize, 6);
+        return Presented {
+            pixels: SharedPixelBuffer::clone_from_slice(&scaled, width * 6, height * 6),
+            // Fit the filtered subpixels smoothly at fractional window
+            // scales; nearest-neighbour would enlarge their small steps.
+            smooth: true,
+        };
     }
-    if filter != VideoFilter::Lcd {
-        return frame;
+    if filter != VideoFilter::Lcd || !whole {
+        return Presented {
+            pixels: SharedPixelBuffer::clone_from_slice(source, width, height),
+            smooth,
+        };
     }
     // Input is validated and bounded by the libretro video callback. Three
     // subpixels per source pixel retain aspect ratio and expose a subtle grid.
-    let width = frame.width as usize * 3;
-    let height = frame.height as usize * 3;
-    let mut rgba = vec![0; width * height * 4];
-    for y in 0..frame.height as usize {
-        for x in 0..frame.width as usize {
-            let source = &frame.rgba[(y * frame.width as usize + x) * 4..][..4];
+    let mut pixels = SharedPixelBuffer::<Rgba8Pixel>::new(width * 3, height * 3);
+    let target = pixels.make_mut_bytes();
+    let stride = width as usize * 3;
+    for y in 0..height as usize {
+        for x in 0..width as usize {
+            let source = &source[(y * width as usize + x) * 4..][..4];
             for sy in 0..3 {
                 for sx in 0..3 {
-                    let target = ((y * 3 + sy) * width + x * 3 + sx) * 4;
+                    let offset = ((y * 3 + sy) * stride + x * 3 + sx) * 4;
                     for channel in 0..3 {
                         let stripe = if channel == sx { 255u32 } else { 232 };
                         let grid = if sy == 2 { 224u32 } else { 255 };
-                        rgba[target + channel] =
+                        target[offset + channel] =
                             (u32::from(source[channel]) * stripe * grid / (255 * 255)) as u8;
                     }
-                    rgba[target + 3] = source[3];
+                    target[offset + 3] = source[3];
                 }
             }
         }
     }
-    Frame {
-        width: width as u32,
-        height: height as u32,
-        rgba,
+    Presented {
+        pixels,
         smooth: true,
     }
 }
@@ -64,7 +75,7 @@ pub(super) fn apply(mut frame: Frame, filter: VideoFilter) -> Frame {
 /// sRGB GBA display profile from Pokefan531/hunterk/crashGG's public-domain
 /// gba-color shader. See THIRD_PARTY_NOTICES.md for exact provenance.
 /// Horizon adapts its default matrix/gamma profile for CPU RGBA frames.
-pub(super) fn correct_color(frame: &mut Frame) {
+pub(super) fn correct_color(rgba: &mut [u8]) {
     use std::sync::OnceLock;
     static LINEAR: OnceLock<[f32; 256]> = OnceLock::new();
     static ENCODE: OnceLock<[u8; 4097]> = OnceLock::new();
@@ -72,7 +83,7 @@ pub(super) fn correct_color(frame: &mut Frame) {
     let encode = ENCODE.get_or_init(|| {
         std::array::from_fn(|i| ((i as f32 / 4096.0).powf(1.0 / 2.2) * 255.0).round() as u8)
     });
-    for pixel in frame.rgba.as_chunks_mut::<4>().0 {
+    for pixel in rgba.as_chunks_mut::<4>().0 {
         let [r, g, b] = [
             linear[pixel[0] as usize],
             linear[pixel[1] as usize],
@@ -94,6 +105,17 @@ pub(super) fn correct_color(frame: &mut Frame) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Test shorthand: the presented frame for `frame`, without correction,
+    /// read back as a plain frame.
+    fn apply(frame: Frame, filter: VideoFilter) -> Frame {
+        let presented = present(&frame, false, filter, &mut Vec::new());
+        Frame {
+            width: presented.pixels.width(),
+            height: presented.pixels.height(),
+            rgba: presented.pixels.as_bytes().to_vec(),
+            smooth: presented.smooth,
+        }
+    }
     fn sample() -> Frame {
         Frame {
             width: 2,
@@ -140,7 +162,7 @@ mod tests {
             ],
             smooth: false,
         };
-        correct_color(&mut frame);
+        correct_color(&mut frame.rgba);
         assert_eq!(&frame.rgba[..4], &[0, 0, 0, 255]);
         assert_eq!(frame.rgba[7], 128);
         assert!((242..=247).contains(&frame.rgba[4]));

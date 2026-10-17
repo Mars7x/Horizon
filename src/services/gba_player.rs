@@ -7,7 +7,7 @@ use crate::{
         gba_core::{AudioBuffer, Core, LatestFrame},
         pipewire::{AudioStream, Role},
     },
-    services::activity::ActivityRepository,
+    services::{activity::ActivityRepository, worker::Notify},
 };
 use std::{
     fs::{self, File, OpenOptions},
@@ -72,7 +72,9 @@ pub struct RunningGame {
     worker: Option<JoinHandle<Result<(), String>>>,
 }
 impl RunningGame {
-    pub fn start(paths: PlayerPaths, sha256: String) -> Result<Self, String> {
+    /// `frame_ready` is called on the worker each time a new frame is ready
+    /// in `frame`, so the UI shows it as soon as it exists.
+    pub fn start(paths: PlayerPaths, sha256: String, frame_ready: Notify) -> Result<Self, String> {
         if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err("Invalid ROM identity".into());
         }
@@ -101,6 +103,7 @@ impl RunningGame {
                     &sender,
                     worker_frame,
                     worker_buttons,
+                    frame_ready,
                 );
                 if let Err(error) = &result {
                     let _ = sender.send(Event::Failed(error.clone()));
@@ -172,6 +175,7 @@ fn play(
     events: &Sender<Event>,
     frame: LatestFrame,
     buttons: Arc<AtomicU16>,
+    frame_ready: Notify,
 ) -> Result<(), String> {
     fs::create_dir_all(&paths.saves)
         .map_err(|_| "Could not prepare the game save directory".to_owned())?;
@@ -253,6 +257,14 @@ fn play(
     let mut pending = None;
     let mut session = None;
     let mut frame_attempts = 0u32;
+    // Filter the newest frame for display and wake the UI to show it.
+    let presented_at = std::cell::Cell::new(None::<Instant>);
+    let present = |core: &Core| {
+        if core.present() {
+            frame_ready();
+            presented_at.set(Some(Instant::now()));
+        }
+    };
     let _ = events.send(Event::Ready {
         title: location.title.clone(),
         freeze_when_unfocused: preferences.freeze_when_unfocused,
@@ -313,6 +325,7 @@ fn play(
                             core.restore_state(&snapshot.bytes)?;
                             core.set_speed(speed);
                             core.run_frame();
+                            present(&core);
                             audio.clear();
                             deadline = Instant::now();
                             let _ = events.send(Event::StateLoaded);
@@ -374,6 +387,15 @@ fn play(
             }
             if !paused {
                 core.run_frame();
+                // Every frame at normal speed. Fast-forward shows only the
+                // newest frame once per display refresh, so the frames it
+                // skips over are never filtered (xBRZ costs ~8 ms each).
+                let due = presented_at
+                    .get()
+                    .is_none_or(|at| at.elapsed() + Duration::from_millis(2) >= interval);
+                if speed == PlaybackSpeed::Normal || due {
+                    present(&core);
+                }
                 frame_attempts = frame_attempts.saturating_add(1);
                 if frame_attempts >= 120 && core.frames.load(Ordering::Acquire) == 0 {
                     return Err("mGBA could not produce a game frame".into());
