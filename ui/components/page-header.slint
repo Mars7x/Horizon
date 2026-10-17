@@ -105,6 +105,10 @@ export component HeaderValue inherits Rectangle {
         x: Metrics.spacing-sm + 2px; y: 24px;
         width: parent.width - 20px; height: 26px;
         text: root.value; horizontal-alignment: left;
+        // The fade at a long value's edge matches the hover background
+        // (surface at 56% over the page) as well as the plain page.
+        edge-color: root.interactive && touch.has-hover
+            ? Theme.surface.mix(Theme.background, 0.56) : Theme.background;
     }
     touch := TouchArea {
         width: parent.width; height: parent.height;

@@ -118,17 +118,31 @@ pub struct AudioReader {
     priming: bool,
     fade: usize,
     last: [f32; 2],
+    /// The queue's smoothed fill level, for following the device's clock.
+    level: f32,
+    /// Callbacks since the last clock correction.
+    since_correction: u32,
 }
+
+/// Callbacks between clock corrections at least: up to 16 a second at 256
+/// frames, which follows about 490 ppm of drift. Measured drift is about
+/// 15 ppm (one correction every two seconds); crystals rarely exceed 200.
+const CORRECTION_SPACING: u32 = 8;
+
 impl AudioReader {
     pub fn new(audio: Arc<GameAudio>, rate: u32) -> Self {
         let epoch = audio.epoch.load(Ordering::Acquire);
         Self {
             audio,
             epoch,
-            target: (rate as usize / 25).max(1),
+            // Start at the steady band's level (see `render`), so the next
+            // frame's burst does not push the queue to its limit.
+            target: ((rate as usize / 20).clamp(1, CAPACITY) * 62 / 100).max(1),
             priming: true,
             fade: 0,
             last: [0.0; 2],
+            level: 0.0,
+            since_correction: 0,
         }
     }
     pub fn render(&mut self, output: &mut [f32]) {
@@ -154,8 +168,43 @@ impl AudioReader {
                 return;
             }
             self.priming = false;
+            // Nothing queued has been heard yet: trim what built up before
+            // the first callback down to the start level, so playback starts
+            // in the steady band instead of at the limit.
+            while self.audio.len() > self.target {
+                if self.audio.pop().is_none() {
+                    break;
+                }
+            }
+            self.level = self.audio.len() as f32;
+        }
+        // The emulator is paced by the system clock and the sound card by
+        // its own, so the queue slowly fills or empties. Keep its average in
+        // a steady band by skipping or repeating one sample now and then
+        // (30 us): never a refill gap, never samples dropped at the limit.
+        // The band sits at 62% of the limit because the queue swings around
+        // its average: a frame's burst (a third of the limit) lands on top,
+        // and callbacks take 256 frames at a time.
+        let fill = self.audio.len();
+        self.level += (fill as f32 - self.level) / 64.0;
+        self.since_correction = self.since_correction.saturating_add(1);
+        let limit = self.audio.limit.load(Ordering::Acquire) as f32;
+        let (setpoint, band) = (limit * 0.62, limit * 0.05);
+        let mut repeat = false;
+        if self.since_correction >= CORRECTION_SPACING {
+            if self.level > setpoint + band && self.audio.pop().is_some() {
+                self.level -= 1.0;
+                self.since_correction = 0;
+            } else if self.level < setpoint - band && fill > 0 {
+                repeat = true;
+                self.since_correction = 0;
+            }
         }
         for stereo in output.as_chunks_mut::<2>().0 {
+            if std::mem::take(&mut repeat) {
+                stereo.copy_from_slice(&self.last);
+                continue;
+            }
             if let Some(frame) = if self.priming { None } else { self.audio.pop() } {
                 self.fade = (self.fade + 1).min(64);
                 for channel in 0..2 {
@@ -303,6 +352,163 @@ mod tests {
 #[cfg(test)]
 mod queue_tests {
     use super::*;
+
+    /// Simulates a long session in virtual time: the core pushes a frame's
+    /// samples every 1/59.7275 s; the sound card takes 256 frames per
+    /// callback at its own clock, `drift_ppm` away. Returns (times the
+    /// queue reached the limit, refill gaps).
+    fn simulate(drift_ppm: f64, minutes: f64) -> (usize, usize) {
+        let rate = 32_768u32;
+        let audio = Arc::new(GameAudio::default());
+        audio.configure(rate);
+        let limit = audio.limit.load(Ordering::Acquire);
+        let mut reader = AudioReader::new(audio.clone(), rate);
+        let frame_time = 1.0 / 59.7275;
+        let samples_per_frame = f64::from(rate) * frame_time;
+        let callback_time = 256.0 / (f64::from(rate) * (1.0 + drift_ppm * 1e-6));
+        let (mut next_frame, mut next_callback) = (0.0, frame_time * 2.0);
+        let (mut owed, mut at_limit, mut gaps) = (0.0, 0, 0);
+        let mut output = [0.0f32; 512];
+        let mut started = false;
+        while next_frame < minutes * 60.0 {
+            if next_frame <= next_callback {
+                owed += samples_per_frame;
+                while owed >= 1.0 {
+                    audio.push([0.25, -0.25]);
+                    owed -= 1.0;
+                }
+                if started && audio.len() >= limit {
+                    at_limit += 1;
+                }
+                next_frame += frame_time;
+            } else {
+                let was_priming = reader.priming;
+                reader.render(&mut output);
+                if !was_priming {
+                    started = true;
+                }
+                if started && reader.priming && !was_priming {
+                    gaps += 1;
+                }
+                next_callback += callback_time;
+            }
+        }
+        (at_limit, gaps)
+    }
+
+    #[test]
+    fn steady_queue_follows_a_slow_or_fast_sound_card() {
+        // 300 ppm is 20x the drift measured on real hardware (~15 ppm).
+        for drift in [-300.0, 0.0, 300.0] {
+            let (at_limit, gaps) = simulate(drift, 30.0);
+            assert_eq!(
+                at_limit, 0,
+                "{drift} ppm: queue reached its limit {at_limit} times"
+            );
+            assert_eq!(gaps, 0, "{drift} ppm: queue ran dry");
+        }
+    }
+
+    /// Measures whether the emulator (paced by the system clock) and the
+    /// sound card (its own clock) drift apart over a long 1x session: the
+    /// queue's fill level creeping one way, ending in refill gaps (empty) or
+    /// dropped samples (pinned at the limit). Writes silence.
+    #[test]
+    #[ignore = "real mGBA/PipeWire drift measurement; requires HORIZON_GBA_CORE"]
+    fn real_core_audio_drift_at_normal_speed() {
+        use crate::platform::{
+            gba_core,
+            pipewire::{AudioStream, Role},
+        };
+        use std::{
+            sync::Mutex,
+            time::{Duration, Instant},
+        };
+        let path = std::env::var_os("HORIZON_GBA_CORE").expect("set HORIZON_GBA_CORE");
+        let seconds = std::env::var("HORIZON_AUDIO_DRIFT_SECONDS")
+            .map(|value| value.parse::<u64>().unwrap())
+            .unwrap_or(600)
+            .clamp(20, 7200);
+        let audio = Arc::new(GameAudio::default());
+        let mut core = gba_core::Core::load(
+            std::path::Path::new(&path),
+            &gba_core::test_rom(),
+            Default::default(),
+            Arc::new(Mutex::new(None)),
+            audio.clone(),
+            Default::default(),
+        )
+        .unwrap();
+        let rate = core.av.sample_rate.round() as u32;
+        let limit = audio.limit.load(Ordering::Acquire);
+        let interval = Duration::from_secs_f64(1.0 / core.av.fps);
+        let refills = Arc::new(AtomicU64::new(0));
+        let consumed = Arc::new(AtomicU64::new(0));
+        let mut reader = AudioReader::new(audio.clone(), rate);
+        let (counted, frames_out) = (refills.clone(), consumed.clone());
+        let mut was_priming = true;
+        let stream = AudioStream::open(
+            "Horizon audio drift",
+            Role::Game,
+            rate,
+            2,
+            256,
+            Box::new(move |output, _| {
+                reader.render(output);
+                if reader.priming && !was_priming {
+                    counted.fetch_add(1, Ordering::Relaxed);
+                }
+                was_priming = reader.priming;
+                frames_out.fetch_add(output.len() as u64 / 2, Ordering::Relaxed);
+                output.fill(0.0);
+            }),
+        )
+        .unwrap();
+        let start = Instant::now();
+        let mut deadline = Instant::now();
+        let (mut produced, mut pinned_checks, mut checks) = (0u64, 0u64, 0u64);
+        let (mut low, mut high) = (usize::MAX, 0usize);
+        let mut report_at = Duration::from_secs(10);
+        println!("drift: rate={rate} fps={:.4} limit={limit}", core.av.fps);
+        while start.elapsed() < Duration::from_secs(seconds) {
+            let before = audio.write.load(Ordering::Acquire);
+            core.run_frame();
+            produced += audio.write.load(Ordering::Acquire).wrapping_sub(before) as u64;
+            let fill = audio.len();
+            checks += 1;
+            if fill + 8 >= limit {
+                pinned_checks += 1;
+            }
+            if start.elapsed() > Duration::from_secs(2) {
+                low = low.min(fill);
+                high = high.max(fill);
+            }
+            deadline += interval;
+            if Instant::now().saturating_duration_since(deadline) > Duration::from_millis(100) {
+                deadline = Instant::now();
+            }
+            std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
+            if start.elapsed() >= report_at {
+                println!(
+                    "drift {:>4}s: fill={fill:>5} (min {low}, max {high}) refills={} at_limit={:.1}% produced={produced} played={}",
+                    report_at.as_secs(),
+                    refills.load(Ordering::Relaxed),
+                    pinned_checks as f64 * 100.0 / checks as f64,
+                    consumed.load(Ordering::Relaxed)
+                );
+                report_at += Duration::from_secs(10);
+            }
+        }
+        drop(stream);
+        let wall = start.elapsed().as_secs_f64();
+        let played = consumed.load(Ordering::Relaxed) as f64;
+        println!(
+            "drift complete: {wall:.0}s produced {:.2} frames/s, played {:.2} frames/s, refills={}",
+            produced as f64 / wall,
+            played / wall,
+            refills.load(Ordering::Relaxed)
+        );
+    }
     #[test]
     #[ignore = "10-minute real mGBA/PipeWire audio soak; requires HORIZON_GBA_CORE"]
     fn real_core_pipewire_audio_soak() {
@@ -497,7 +703,7 @@ mod queue_tests {
             let mut reader = AudioReader::new(audio.clone(), 32768);
             let mut speed = SpeedAudio::default();
             speed.set_speed(selected);
-            for _ in 0..1400 * usize::from(selected.factor()) {
+            for _ in 0..1100 * usize::from(selected.factor()) {
                 if let Some(frame) = speed.process([0.5, -0.25]) {
                     audio.push(frame);
                 }
