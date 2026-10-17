@@ -14,7 +14,7 @@ export component Surface inherits Rectangle {
 // Motion.focus-duration; only the reveal animates so the idle pulse of
 // Motion.menu-focus-color keeps running. The focused row's title and subtitle
 // marquee; others clip with a soft edge. Page-specific trailing content
-// (progress, "Open ›", a switch) is passed as children, drawn on the right.
+// (progress, "Open", a switch) is passed as children, drawn on the right.
 export component ListRow inherits Rectangle {
     in property <string> title;
     in property <string> subtitle;
@@ -30,7 +30,7 @@ export component ListRow inherits Rectangle {
     callback wheel(length);
 
     height: root.compact ? Metrics.compact-row-height : Metrics.list-row-height;
-    private property <color> surface-color: root.enabled && (touch.pressed || touch.has-hover)
+    out property <color> surface-color: root.enabled && (touch.pressed || touch.has-hover)
         ? Theme.surface-raised : Theme.surface;
     background: root.surface-color;
     border-radius: Metrics.radius-lg;

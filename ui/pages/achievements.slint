@@ -208,12 +208,6 @@ export component AchievementsPage inherits Rectangle {
                             animate width { duration: Motion.value-swap-duration; easing: ease-out; }
                         }
                     }
-                    Text {
-                        x: parent.width - 28px; y: 0px; height: parent.height;
-                        text: "›"; color: Theme.secondary-foreground;
-                        font-size: Typography.heading-size;
-                        vertical-alignment: center;
-                    }
                 }
                 if root.games.length == 0 : Text {
                     x: 0px; y: Metrics.spacing-lg; width: parent.width;

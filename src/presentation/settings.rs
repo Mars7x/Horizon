@@ -211,6 +211,7 @@ impl SettingsController {
         if next == self.core_values.get() {
             return;
         }
+        ui.set_settings_core_value_forward(direction != Some(false));
         match self.cores.requests.send(next) {
             Ok(()) => {
                 self.core_busy.set(true);
@@ -2146,5 +2147,172 @@ mod mapping_runtime_tests {
         );
         slint::run_event_loop().unwrap();
         assert_eq!(stage.get(), 6);
+    }
+}
+
+#[cfg(test)]
+mod value_motion_runtime_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    #[ignore = "requires Wayland and a fresh HORIZON_VALUE_MOTION_TEST_DIR"]
+    fn menu_values_animate_and_settle_without_moving_rows() {
+        let output = PathBuf::from(std::env::var_os("HORIZON_VALUE_MOTION_TEST_DIR").unwrap());
+        std::fs::create_dir_all(&output).unwrap();
+        let ui = AppWindow::new().unwrap();
+        ui.window().set_size(slint::PhysicalSize::new(1280, 720));
+        let appearance = AppearanceController::new(
+            &ui,
+            crate::appearance::store::AppearanceStore::new(output.join("appearance.json")),
+        )
+        .unwrap();
+        appearance
+            .set_theme_preference(
+                &ui,
+                if std::env::var_os("HORIZON_VALUE_MOTION_LIGHT").is_some() {
+                    ThemePreference::Light
+                } else {
+                    ThemePreference::Black
+                },
+            )
+            .unwrap();
+        let reduced = std::env::var_os("HORIZON_VALUE_MOTION_REDUCED").is_some();
+        ui.global::<crate::Motion>().set_reduced_motion(reduced);
+        ui.set_current_route(crate::AppRouteView::Settings);
+        ui.set_settings_view(7);
+        ui.set_settings_core_ready(true);
+        ui.set_settings_selection(1);
+        ui.show().unwrap();
+        let step = Rc::new(Cell::new(0));
+        let progress = step.clone();
+        let middle = RefCell::new(Vec::new());
+        let before = RefCell::new(Vec::new());
+        let captures = Rc::new(RefCell::new(Vec::new()));
+        let frames = captures.clone();
+        let weak = ui.as_weak();
+        let timer = slint::Timer::default();
+        timer.start(
+            slint::TimerMode::Repeated,
+            Duration::from_millis(60),
+            move || {
+                let ui = weak.upgrade().unwrap();
+                progress.set(progress.get() + 1);
+                let tick = progress.get();
+                let capture = |name: &str| {
+                    let pixels = ui.window().take_snapshot().unwrap();
+                    let image = image::RgbaImage::from_raw(
+                        pixels.width(),
+                        pixels.height(),
+                        pixels.as_bytes().to_vec(),
+                    )
+                    .unwrap();
+                    frames.borrow_mut().push((name.to_owned(), image.clone()));
+                    image
+                };
+                // Compare text ink rather than hover-dependent row colours.
+                let value = |image: &image::RgbaImage| {
+                    image::imageops::crop_imm(image, 1016, 222, 196, 30)
+                        .to_image()
+                        .pixels()
+                        .map(|pixel| {
+                            i16::from(pixel[2]) - i16::from(pixel[0]) > 30
+                                && i16::from(pixel[2]) - i16::from(pixel[1]) > 20
+                        })
+                        .collect::<Vec<_>>()
+                };
+                let label = |image: &image::RgbaImage| {
+                    let light = std::env::var_os("HORIZON_VALUE_MOTION_LIGHT").is_some();
+                    image::imageops::crop_imm(image, 64, 218, 300, 54)
+                        .to_image()
+                        .enumerate_pixels()
+                        .filter(
+                            |(_, _, pixel)| {
+                                if light { pixel[0] < 70 } else { pixel[0] > 200 }
+                            },
+                        )
+                        .fold(vec![300, 54, 0, 0], |bounds, (x, y, _)| {
+                            vec![
+                                bounds[0].min(x),
+                                bounds[1].min(y),
+                                bounds[2].max(x),
+                                bounds[3].max(y),
+                            ]
+                        })
+                };
+                match tick {
+                    14 => *before.borrow_mut() = label(&capture("core-before")),
+                    15 => {
+                        ui.set_settings_core_value_forward(true);
+                        ui.set_settings_core_filter("LCD".into());
+                    }
+                    16 => *middle.borrow_mut() = value(&capture("core-forward-middle")),
+                    21 => {
+                        let settled = capture("core-forward-settled");
+                        assert_eq!(
+                            *before.borrow(),
+                            label(&settled),
+                            "row label moved during value change"
+                        );
+                        assert_eq!(
+                            *middle.borrow() == value(&settled),
+                            reduced,
+                            "value must animate only when motion is enabled"
+                        );
+                    }
+                    22 => {
+                        ui.set_settings_core_value_forward(false);
+                        ui.set_settings_core_filter("None".into());
+                    }
+                    23 => *middle.borrow_mut() = value(&capture("core-backward-middle")),
+                    27 => {
+                        let settled = capture("core-backward-settled");
+                        assert_eq!(*middle.borrow() == value(&settled), reduced);
+                        ui.set_settings_core_filter("LCD".into());
+                    }
+                    28 => ui.set_settings_core_filter("Smooth".into()),
+                    29 => ui.set_settings_core_filter("Smooth pixel art".into()),
+                    35 => {
+                        *middle.borrow_mut() = value(&capture("core-rapid-settled"));
+                    }
+                    39 => {
+                        assert!(
+                            *middle.borrow() == value(&capture("core-idle")),
+                            "value must settle after rapid changes"
+                        );
+                        ui.set_current_route(crate::AppRouteView::Library);
+                    }
+                    50 => ui.set_library_sort_text("Recently played".into()),
+                    51 => {
+                        capture("header-middle");
+                    }
+                    56 => {
+                        capture("header-settled");
+                        ui.set_player_open(true);
+                        ui.set_player_phase(2);
+                        ui.set_player_title("Menu motion preview".into());
+                        ui.set_player_has_frame(true);
+                        ui.set_player_paused(true);
+                        ui.set_player_focus(1);
+                    }
+                    67 => ui.set_player_speed(2),
+                    68 => {
+                        capture("pause-middle");
+                    }
+                    73 => {
+                        capture("pause-settled");
+                        slint::quit_event_loop().unwrap();
+                    }
+                    _ => {}
+                }
+            },
+        );
+        slint::run_event_loop().unwrap();
+        assert_eq!(step.get(), 73);
+        // PNG encoding stays outside animation sampling so capture I/O cannot
+        // consume the transition we are trying to inspect.
+        for (name, image) in captures.borrow().iter() {
+            image.save(output.join(format!("{name}.png"))).unwrap();
+        }
     }
 }

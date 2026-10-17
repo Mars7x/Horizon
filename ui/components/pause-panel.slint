@@ -1,3 +1,4 @@
+import { ValueText } from "value-text.slint";
 import { SaveStateRow } from "../models/save-state.slint";
 import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { MarqueeText } from "marquee-text.slint";
@@ -15,39 +16,14 @@ component PauseAction inherits ListRow {
     accessible-description: root.available ? root.value : "Not available yet";
     opacity: root.available ? 1.0 : 0.48;
     in property <bool> forward: true;
-    private property <string> shown-value: root.value;
-    private property <string> old-value: "";
-    private property <int> swaps: 0;
-    private property <float> phase: 0;
-    animate phase { duration: Motion.value-swap-duration; easing: ease-out; }
-    private property <float> progress: Motion.reduced-motion ? 1.0 : 1.0 - min(1.0, root.swaps - root.phase);
-    changed value => {
-        root.old-value = root.shown-value;
-        root.shown-value = root.value;
-        root.swaps += 1;
-        root.phase = root.swaps;
-    }
-    Rectangle {
+    ValueText {
         x: parent.width - Metrics.spacing-xxl * 2;
         width: Metrics.spacing-xxl * 2 - Metrics.spacing-lg;
         height: parent.height;
-        background: transparent; clip: true;
-        if root.progress < 1.0 : Text {
-            x: (root.forward ? -1 : 1) * Metrics.spacing-lg * root.progress;
-            width: parent.width; height: parent.height;
-            text: root.old-value; opacity: 1.0 - root.progress;
-            color: root.focused ? Theme.accent : Theme.secondary-foreground;
-            font-size: Typography.body-size;
-            horizontal-alignment: right; vertical-alignment: center;
-        }
-        Text {
-            x: (root.forward ? 1 : -1) * Metrics.spacing-lg * (1.0 - root.progress);
-            width: parent.width; height: parent.height;
-            text: root.shown-value; opacity: root.progress;
-            color: root.focused ? Theme.accent : Theme.secondary-foreground;
-            font-size: Typography.body-size;
-            horizontal-alignment: right; vertical-alignment: center;
-        }
+        text: root.value; forward: root.forward;
+        text-color: root.focused ? Theme.accent : Theme.secondary-foreground;
+        edge-color: root.surface-color;
+        font-weight: Typography.body-weight;
     }
 }
 

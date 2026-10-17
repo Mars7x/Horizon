@@ -1,5 +1,6 @@
 import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { MarqueeText } from "marquee-text.slint";
+import { ValueText } from "value-text.slint";
 import { ButtonGlyph } from "hint-bar.slint";
 
 // The one header used by every full-screen page: a title only, always at the
@@ -64,7 +65,7 @@ export component ScrollEdgeShadow inherits Rectangle {
 // "Last 7 days / 6 h 12 min". Interactive values are pointer-clickable
 // (controller users get LB/RB, shown as small glyphs before the label, not in
 // the hint bar: the button sits next to what it changes). Value changes slide
-// and crossfade; this is driven by an animated counter, not animation-tick(),
+// and fade; this is driven by an animated counter, not animation-tick(),
 // so an idle page never redraws continuously.
 export component HeaderValue inherits Rectangle {
     in property <string> label;
@@ -81,19 +82,6 @@ export component HeaderValue inherits Rectangle {
     border-radius: Metrics.radius-sm;
     background: root.interactive && touch.has-hover ? Theme.surface.with-alpha(0.56) : transparent;
     animate background { duration: Motion.hover-duration; easing: ease-in-out; }
-
-    private property <string> shown-value: root.value;
-    private property <string> old-value: "";
-    private property <int> swaps: 0;
-    private property <float> phase: 0;
-    animate phase { duration: Motion.value-swap-duration; easing: ease-out; }
-    private property <float> progress: 1.0 - min(1.0, root.swaps - root.phase);
-    changed value => {
-        root.old-value = root.shown-value;
-        root.shown-value = root.value;
-        root.swaps += 1;
-        root.phase = root.swaps;
-    }
 
     if root.button != "" : ButtonGlyph {
         x: Metrics.spacing-sm + 2px; y: 6px;
@@ -113,27 +101,10 @@ export component HeaderValue inherits Rectangle {
         font-size: Typography.label-size;
         vertical-alignment: center;
     }
-    Rectangle {
+    ValueText {
         x: Metrics.spacing-sm + 2px; y: 24px;
         width: parent.width - 20px; height: 26px;
-        background: transparent;
-        clip: true;
-        if root.progress < 1.0 : MarqueeText {
-            y: -4px * root.progress;
-            width: parent.width; height: parent.height;
-            text: root.old-value;
-            font-size: Typography.body-size;
-            font-weight: Typography.emphasis-weight;
-            opacity: 1.0 - root.progress;
-        }
-        MarqueeText {
-            y: 4px * (1.0 - root.progress);
-            width: parent.width; height: parent.height;
-            text: root.shown-value;
-            font-size: Typography.body-size;
-            font-weight: Typography.emphasis-weight;
-            opacity: root.progress;
-        }
+        text: root.value; horizontal-alignment: left;
     }
     touch := TouchArea {
         width: parent.width; height: parent.height;

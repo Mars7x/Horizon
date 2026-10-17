@@ -1,4 +1,5 @@
 import { InputGlyphs, GlyphFamily } from "../components/hint-bar.slint";
+import { ValueText } from "../components/value-text.slint";
 import { ControllerBindingRow } from "../models/controller.slint";
 import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { SelectionFocusSurface } from "../components/selection-focus-surface.slint";
@@ -110,6 +111,7 @@ export component SettingsPage inherits Rectangle {
     in property <bool> core-freeze;
     in property <bool> core-resume: true;
     in property <bool> core-color;
+    in property <bool> core-value-forward: true;
     in property <string> core-filter: "None";
     in property <int> core-sunlight;
     in property <string> core-feedback;
@@ -231,7 +233,7 @@ export component SettingsPage inherits Rectangle {
                
                 title: "Appearance";
                 subtitle: "Theme, accent colour and UI sounds";
-                trailing: "Open  ›";
+                trailing: "Open";
                 focused: root.view == 0 && root.selection == 0;
                 activated => { if (root.view == 0 && !root.editing-key && !root.refresh-open) { root.activate(0); } }
             }
@@ -239,7 +241,7 @@ export component SettingsPage inherits Rectangle {
                 width: parent.width;
                 title: "Controller";
                 subtitle: "Select and back buttons";
-                trailing: "Open  ›";
+                trailing: "Open";
                 focused: root.view == 0 && root.selection == 1;
                 activated => { if (root.view == 0 && !root.editing-key && !root.refresh-open) { root.activate(1); } }
             }
@@ -248,7 +250,7 @@ export component SettingsPage inherits Rectangle {
                
                 title: "Third-Party";
                 subtitle: "Steam and SteamGridDB";
-                trailing: "Open  ›";
+                trailing: "Open";
                 focused: root.view == 0 && root.selection == 2;
                 activated => { if (root.view == 0 && !root.editing-key && !root.refresh-open) { root.activate(2); } }
             }
@@ -256,7 +258,7 @@ export component SettingsPage inherits Rectangle {
                 width: parent.width;
                 title: "Cores";
                 subtitle: "Game playback preferences";
-                trailing: "Open  ›";
+                trailing: "Open";
                 focused: root.view == 0 && root.selection == 3;
                 activated => { if (root.view == 0) { root.activate(3); } }
             }
@@ -475,7 +477,7 @@ export component SettingsPage inherits Rectangle {
             width: parent.width;
             title: "mGBA";
             subtitle: "Game Boy Advance";
-            trailing: "Open  ›";
+            trailing: "Open";
             focused: root.view == 6 && root.selection == 0;
             activated => { if (root.view == 6) { root.activate(0); } }
         }
@@ -528,7 +530,7 @@ export component SettingsPage inherits Rectangle {
             width: parent.width;
             title: "Sunlight level";
             subtitle: "For games that use a solar sensor";
-            trailing: "+   " + root.core-sunlight + " / 10";
+            trailing: "+   " + root.core-sunlight + " / 10"; value-forward: root.core-value-forward;
             secondary: "−";
             enabled: root.view == 7 && root.core-ready;
             focused: root.view == 7 && root.selection == 0;
@@ -540,7 +542,7 @@ export component SettingsPage inherits Rectangle {
             width: parent.width;
             title: "Video filter";
             subtitle: "Sharp, LCD, smooth scaling or smooth pixel art";
-            trailing: root.core-filter + "  ›";
+            trailing: root.core-filter; value-forward: root.core-value-forward;
             enabled: root.view == 7 && root.core-ready;
             focused: root.view == 7 && root.selection == 1;
             activated => { if (root.view == 7) { root.activate(1); } }
@@ -634,7 +636,7 @@ export component SettingsPage inherits Rectangle {
             vertical-alignment: center;
         }
         Text {
-            x: parent.width - Metrics.spacing-xxl * 5 - Metrics.spacing-lg;
+            x: parent.width - Metrics.spacing-xxl * 4 - Metrics.spacing-lg;
             y: Metrics.breadcrumb-height + Metrics.spacing-md;
             width: Metrics.spacing-xxl * 4; height: Metrics.spacing-lg;
             text: "Controller input"; color: Theme.secondary-foreground; font-size: Typography.caption-size;
@@ -651,22 +653,16 @@ export component SettingsPage inherits Rectangle {
             enabled: root.view == 8 && root.controller-ready && !root.binding-open;
             activated => {if (root.view == 8 && !root.binding-open) {root.activate(index);}}
             Rectangle {
-                x: parent.width - Metrics.spacing-xxl * 5 - Metrics.spacing-lg;
+                x: parent.width - Metrics.spacing-xxl * 4 - Metrics.spacing-lg;
                 y: Metrics.spacing-sm; width: Metrics.spacing-xxl * 4;
                 height: parent.height - Metrics.spacing-sm * 2;
                 background: Theme.surface-raised; border-radius: Metrics.radius-sm;
-                Text {
+                ValueText {
                     width: parent.width; height: parent.height;
-                    text: row.value; color: Theme.foreground;
+                    text: row.value; text-color: Theme.foreground; edge-color: Theme.surface-raised;
                     font-size: Typography.body-size; font-weight: Typography.emphasis-weight;
-                    horizontal-alignment: center; vertical-alignment: center;
+                    horizontal-alignment: center;
                 }
-            }
-            Text {
-                x: parent.width - Metrics.spacing-xxl; y: 0px;
-                width: Metrics.spacing-lg; height: parent.height;
-                text: "›"; color: Theme.secondary-foreground; font-size: Typography.heading-size;
-                horizontal-alignment: center; vertical-alignment: center;
             }
         }
         SettingsRow {
@@ -705,7 +701,7 @@ export component SettingsPage inherits Rectangle {
             width: parent.width;
             title: "SteamGridDB";
             subtitle: root.key-present ? "Cover art · Connected" : "Cover art · Not set up";
-            trailing: "Open  ›";
+            trailing: "Open";
             focused: root.view == 2 && root.selection == 0;
             activated => { if (root.view == 2 && !root.editing-key && !root.refresh-open) { root.activate(0); } }
         }
@@ -714,7 +710,7 @@ export component SettingsPage inherits Rectangle {
             width: parent.width;
             title: "Steam Account";
             subtitle: root.steam-connected ? "Connected" : "Not set up";
-            trailing: "Open  ›";
+            trailing: "Open";
             focused: root.view == 2 && root.selection == 1;
             activated => { if (root.view == 2 && !root.editing-key && !root.refresh-open) { root.activate(1); } }
         }
@@ -749,7 +745,7 @@ export component SettingsPage inherits Rectangle {
             width: parent.width;
             title: "API key";
             subtitle: root.key-present ? "Saved" : "Not set";
-            trailing: root.key-present ? "Replace  ›" : "Add key  ›";
+            trailing: root.key-present ? "Replace" : "Add key";
             secondary: root.key-present ? "Remove" : "";
             focused: root.view == 4 && root.selection == 0;
             activated => { if (root.view == 4 && !root.editing-key && !root.refresh-open) { root.activate(0); } }
@@ -771,7 +767,7 @@ export component SettingsPage inherits Rectangle {
             width: parent.width;
             title: "Refresh artwork";
             subtitle: "Check for new covers";
-            trailing: root.key-present ? "Refresh  ›" : "Unavailable";
+            trailing: root.key-present ? "Refresh" : "Unavailable";
             enabled: root.key-present;
             focused: root.view == 4 && root.selection == 2;
             activated => { if (root.view == 4 && !root.editing-key && !root.refresh-open) { root.activate(2); } }
@@ -813,7 +809,7 @@ export component SettingsPage inherits Rectangle {
             x: 0px; y: 76px; width: parent.width;
             title: "Steam ID";
             subtitle: root.steam-identity;
-            trailing: root.steam-identity == "Not set" ? "Set  ›" : "Change  ›";
+            trailing: root.steam-identity == "Not set" ? "Set" : "Change";
             secondary: root.steam-saved ? "Disconnect" : "";
             focused: root.view == 3 && root.selection == 0;
             activated => { if (root.view == 3 && !root.editing-key) { root.activate(0); } }
@@ -823,7 +819,7 @@ export component SettingsPage inherits Rectangle {
             x: 0px; y: 164px; width: parent.width;
             title: "Steam Web API key";
             subtitle: root.steam-connected ? "Saved" : "Not set";
-            trailing: root.steam-connected ? "Replace  ›" : "Add key  ›";
+            trailing: root.steam-connected ? "Replace" : "Add key";
             focused: root.view == 3 && root.selection == 1;
             activated => { if (root.view == 3 && !root.editing-key) { root.activate(1); } }
         }

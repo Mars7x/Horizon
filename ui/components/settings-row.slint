@@ -1,4 +1,5 @@
 import { Theme, Typography, Motion } from "../theme/theme.slint";
+import { ValueText } from "value-text.slint";
 import { ListRow } from "list-row.slint";
 
 // An option row (Settings, Profile): the shared ListRow plus a trailing
@@ -11,6 +12,7 @@ import { ListRow } from "list-row.slint";
 // `secondary-activated`.
 export component SettingsRow inherits ListRow {
     in property <string> trailing: "";
+    in property <bool> value-forward: true;
     in property <bool> toggle: false;
     in property <bool> checked: false;
     in property <string> secondary: "";
@@ -19,17 +21,17 @@ export component SettingsRow inherits ListRow {
     accessible-checkable: root.toggle;
     accessible-checked: root.checked;
 
-    trailing-text := Text {
+    trailing-text := ValueText {
         visible: !root.toggle;
-        x: parent.width - 224px; y: 12px;
+        x: parent.width - 224px; y: root.compact ? (parent.height - self.height) / 2 : 12px;
         width: 196px; height: 30px;
         text: root.trailing;
-        color: root.enabled ? (root.focused ? Theme.accent : Theme.secondary-foreground)
+        forward: root.value-forward; active: root.focused; edge-color: root.surface-color;
+        text-color: root.enabled ? (root.focused ? Theme.accent : Theme.secondary-foreground)
             : Theme.secondary-foreground;
         font-size: Typography.body-size;
         font-weight: Typography.emphasis-weight;
         horizontal-alignment: right;
-        vertical-alignment: center;
     }
     // The track's colour and the knob's travel change together, over the
     // value-swap duration. No native-widget styling leaks into Horizon, and
@@ -54,7 +56,7 @@ export component SettingsRow inherits ListRow {
     if root.secondary != "" && !root.toggle : Rectangle {
         width: secondary-label.preferred-width + 28px;
         height: 32px;
-        x: trailing-text.x + trailing-text.width - trailing-text.preferred-width - self.width - 16px;
+        x: trailing-text.x + trailing-text.width - trailing-text.text-width - self.width - 16px;
         y: trailing-text.y + (trailing-text.height - self.height) / 2;
         border-radius: self.height / 2;
         border-width: 1px;
