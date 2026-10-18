@@ -36,10 +36,10 @@ const LAUNCH_WAV: &[u8] = include_bytes!("../ui/assets/horizon-launch.wav");
 const CUE_COUNT: usize = 7;
 
 /// Every cue plays at one standard loudness, whatever level its file has:
-/// its loudest 30 ms is brought to about -26 dBFS, and its peak never above
-/// -10 dBFS, so cues stay clearly below game audio.
-const LOUDNESS_TARGET: f32 = 0.05;
-const PEAK_CEILING: f32 = 0.316;
+/// its loudest 30 ms is brought to about -32 dBFS, and its peak never above
+/// -16 dBFS, so cues stay quiet and clearly below game audio.
+const LOUDNESS_TARGET: f32 = 0.025;
+const PEAK_CEILING: f32 = 0.158;
 /// Per-cue adjustment after levelling, in `UiSoundCue::index` order.
 /// Navigation plays on every focus move, many times a second when a
 /// direction is held, so it sits about 7 dB below the decisions.

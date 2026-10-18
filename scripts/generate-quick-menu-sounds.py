@@ -103,38 +103,45 @@ def navigation() -> bytes:
     return encode_level(samples)
 
 
+def warm_snap(time: float, texture: float) -> float:
+    """The navigation snap: a 2.6 kHz ring (below the 3-5 kHz band ears are
+    most sensitive to), smoothed noise and a softened first half millisecond."""
+    edge = min(1.0, time / 0.0005)
+    snap = 0.35 * texture * math.exp(-time / 0.0008) + math.sin(2 * math.pi * 2600 * time) * math.exp(-time / 0.0022)
+    body = 0.45 * math.sin(2 * math.pi * 850 * time) * math.exp(-time / 0.006) * min(1.0, time / 0.001)
+    return edge * (snap + body)
+
+
+def note(since: float, tone: float, gain: float, decay: float) -> float:
+    if since < 0:
+        return 0.0
+    rounded = math.sin(min(1.0, since / 0.001) * math.pi / 2) ** 2
+    return gain * math.sin(2 * math.pi * tone * since) * rounded * math.exp(-since / decay)
+
+
 def confirm() -> bytes:
-    """OK: a crisp snap blended with a clear A6 note."""
-    noise = Noise(121, 0.75)
-    tone = 1760.0
+    """OK: the warm snap with a clear A6 note."""
+    noise = Noise(121, 0.4)
     samples = []
     for frame in range(round(0.05 * RATE)):
         time = frame / RATE
-        texture = noise.next()
-        snap = 0.5 * texture * math.exp(-time / 0.0008) + math.sin(2 * math.pi * 4200 * time) * math.exp(-time / 0.0025)
-        note = 0.9 * math.sin(2 * math.pi * tone * time) * min(1.0, time / 0.001) * math.exp(-time / 0.012)
-        samples.append(snap + note)
-    fade = int(0.004 * RATE)
+        samples.append(warm_snap(time, noise.next()) + note(time, 1760.0, 0.9, 0.012))
+    fade = int(0.006 * RATE)
     for index in range(fade):
         samples[-1 - index] *= index / fade
     return encode_level(samples)
 
 
 def back() -> bytes:
-    """Back: OK's crisp snap with two quick notes stepping down (E6 to A5), so it
+    """Back: the warm snap with two quick notes stepping down (E6 to A5), so it
     shares OK's family but moves the other way."""
-    noise = Noise(203, 0.75)
+    noise = Noise(203, 0.4)
     samples = []
     for frame in range(round(0.07 * RATE)):
         time = frame / RATE
-        texture = noise.next()
-        snap = 0.5 * texture * math.exp(-time / 0.0008) + math.sin(2 * math.pi * 4200 * time) * math.exp(-time / 0.0025)
-        first = 0.7 * math.sin(2 * math.pi * 1318.5 * time) * min(1.0, time / 0.001) * math.exp(-time / 0.008)
-        since = time - 0.022
-        second = (0.9 * math.sin(2 * math.pi * 880.0 * since) * min(1.0, since / 0.001) * math.exp(-since / 0.014)
-                  if since >= 0 else 0.0)
-        samples.append(snap + first + second)
-    fade = int(0.004 * RATE)
+        samples.append(warm_snap(time, noise.next()) + note(time, 1318.5, 0.7, 0.008)
+                       + note(time - 0.022, 880.0, 0.9, 0.014))
+    fade = int(0.006 * RATE)
     for index in range(fade):
         samples[-1 - index] *= index / fade
     return encode_level(samples)

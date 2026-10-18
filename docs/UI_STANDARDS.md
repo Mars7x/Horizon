@@ -113,11 +113,11 @@ Repeat/ignored input and background freezing stay silent. The UI sound stream
 stays warm during embedded gameplay in the active Horizon window, allowing the
 close sound to finish instead of replaying when the panel next opens. Focus
 movement plays a warm, soft-edged snap (its ring kept below the 3-5 kHz band
-ears are most sensitive to); OK plays a crisp snap with a short A6 note, and
-Back the same snap with two quick notes stepping down; a game starting plays a crisp onset over a low
+ears are most sensitive to); OK plays the same warm snap with a short A6 note,
+and Back the snap with two quick notes stepping down; a game starting plays a crisp onset over a low
 swelling tone as its card zooms in (not for a failed load). Every cue plays at
 one standard loudness, applied when it loads: its loudest 30 ms at about
--26 dBFS, its peak at most -10 dBFS. Navigation, heard on every focus move,
+-32 dBFS, its peak at most -16 dBFS. Navigation, heard on every focus move,
 then sits about 7 dB below the rest. All cues are original and reproducible with
 [the generator](../scripts/generate-quick-menu-sounds.py).
 
