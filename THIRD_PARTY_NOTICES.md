@@ -348,7 +348,7 @@ only on explicit Save; key content and clipboard data must not be logged.
   latch pair (two soft clicks each: a decaying sine tone plus a burst of seeded,
   low-passed noise), the navigation snap (a warm, soft-edged transient with a
   short body), OK (the same warm snap with a short A6 note), Back (the warm
-  snap with two quick notes stepping down, E6 to A5), the launch (a crisp onset over a low swelling tone) and the shutter
+  snap with two quick notes stepping down, E6 to A5), the launch (a low swelling tone) and the shutter
   (one tight click and a short second click), using Python's standard library,
   with no recordings, external samples or third-party synthesis. PCM16 mono,
   48 kHz; navigation and OK 50 ms, Back 70 ms, menu 90 ms each, launch 150 ms,

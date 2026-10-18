@@ -148,17 +148,14 @@ def back() -> bytes:
 
 
 def launch() -> bytes:
-    """A crisp onset over a smooth, low "whoom" that swells and settles with
-    the card's zoom into the game."""
-    noise = Noise(74, 0.75)
+    """A smooth, low "whoom" that swells and settles with the card's zoom into
+    the game. (Its opening tick was removed at the owner's request.)"""
     samples = []
     for frame in range(round(0.15 * RATE)):
         time = frame / RATE
-        texture = noise.next()
-        crisp = 0.8 * (0.35 * texture * math.exp(-time / 0.0008) + math.sin(2 * math.pi * 3600 * time) * math.exp(-time / 0.0025))
         pitch = 220 * (1 + 0.8 * min(1.0, time / 0.09))
         whoom = math.sin(2 * math.pi * pitch * time) * math.sin(math.pi * min(1.0, time / 0.14)) ** 2
-        samples.append(crisp + whoom)
+        samples.append(whoom)
     fade = int(0.012 * RATE)
     for index in range(fade):
         samples[-1 - index] *= (index / fade) ** 2

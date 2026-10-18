@@ -114,7 +114,7 @@ stays warm during embedded gameplay in the active Horizon window, allowing the
 close sound to finish instead of replaying when the panel next opens. Focus
 movement plays a warm, soft-edged snap (its ring kept below the 3-5 kHz band
 ears are most sensitive to); OK plays the same warm snap with a short A6 note,
-and Back the snap with two quick notes stepping down; a game starting plays a crisp onset over a low
+and Back the snap with two quick notes stepping down; a game starting plays a low
 swelling tone as its card zooms in (not for a failed load). Every cue plays at
 one standard loudness, applied when it loads: its loudest 30 ms at about
 -32 dBFS, its peak at most -16 dBFS. Navigation, heard on every focus move,
