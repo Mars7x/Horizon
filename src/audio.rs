@@ -374,7 +374,7 @@ mod tests {
     fn all_cues_are_valid_pcm() {
         for (cue, wav, frames) in [
             (UiSoundCue::Navigation, NAVIGATION_WAV, 2400),
-            (UiSoundCue::Ok, OK_WAV, 2880),
+            (UiSoundCue::Ok, OK_WAV, 3264),
             (UiSoundCue::Back, BACK_WAV, 3360),
             (UiSoundCue::QuickMenuOpen, MENU_OPEN_WAV, 4320),
             (UiSoundCue::QuickMenuClose, MENU_CLOSE_WAV, 4320),
