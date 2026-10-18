@@ -111,9 +111,13 @@ over the shared 180 ms dialog duration. Continue/Back, successful restart and su
 the closing cue; nested confirmation cancellation keeps the normal Back cue.
 Repeat/ignored input and background freezing stay silent. The UI sound stream
 stays warm during embedded gameplay in the active Horizon window, allowing the
-close sound to finish instead of replaying when the panel next opens. Existing
-owner-supplied navigation/OK/Back WAVs remain unmodified. The original pair is
-reproducible with [the generator](../scripts/generate-quick-menu-sounds.py).
+close sound to finish instead of replaying when the panel next opens. Focus
+movement plays a tight snap; a game starting plays a crisp onset over a low
+swelling tone as its card zooms in (not for a failed load). Every cue plays at
+one standard loudness, applied when it loads: its loudest 30 ms at about
+-20 dBFS, its peak at most -4 dBFS. The owner-supplied OK/Back WAVs stay
+byte-for-byte unmodified; the other cues are reproducible with
+[the generator](../scripts/generate-quick-menu-sounds.py).
 
 ## Text and dialogs
 

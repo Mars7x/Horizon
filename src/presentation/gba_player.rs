@@ -1001,6 +1001,10 @@ impl GbaPlayer {
                 // Capture the live camera position at the rebound, not at Accept.
                 ui.set_player_origin(ui.invoke_player_capture_origin());
                 Self::release_card(&ui);
+                // Not for a failed load: it shows its error instead.
+                if !ui.get_player_failed() {
+                    self.cue(UiSoundCue::Launch);
+                }
                 self.set_stage(&ui, PlayerStage::Entering);
             }
         }
@@ -2199,6 +2203,17 @@ mod runtime_tests {
             ui.get_player_frozen(),
             player.worker_paused.get(),
             player.keyboard.get()
+        );
+        // Each successful launch (the first and the relaunches) plays it.
+        assert!(
+            final_sounds
+                .borrow()
+                .iter()
+                .filter(|cue| **cue == UiSoundCue::Launch)
+                .count()
+                >= 2,
+            "{:?}",
+            final_sounds.borrow()
         );
         let transitions: Vec<_> = final_sounds
             .borrow()

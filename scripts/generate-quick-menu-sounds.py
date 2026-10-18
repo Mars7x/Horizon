@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Generate Horizon's original quick-menu and screenshot cues (stdlib only).
+"""Generate Horizon's original navigation, quick-menu, launch and screenshot cues
+(stdlib only).
 
 SPDX-FileCopyrightText: Horizon contributors
 SPDX-License-Identifier: GPL-3.0-or-later
@@ -44,23 +45,77 @@ def cue(opening: bool) -> bytes:
 
 
 def shutter() -> bytes:
-    """A quiet two-part shutter brush, softened rather than a sharp click."""
-    noise = random.Random(0x485A03)
+    """A quick, clean shutter: one tight click and a tiny second-curtain echo."""
+    noise = random.Random(44)
+    body = [0.0, 0.0]
+    clicks = [(0.0, 1.0, 3800), (0.022, 0.45, 3500)]
     samples = []
-    body = softened = low = 0.0
-    duration = 0.120
-    for frame in range(round(duration * RATE)):
+    for frame in range(round(0.06 * RATE)):
         time = frame / RATE
         raw = noise.random() * 2 - 1
-        body += 0.19 * (raw - body)
-        softened += 0.19 * (body - softened)
-        low += 0.025 * (softened - low)
-        envelope = math.exp(-0.5 * ((time - 0.025) / 0.009) ** 2)
-        envelope += 0.55 * math.exp(-0.5 * ((time - 0.066) / 0.013) ** 2)
-        attack = math.sin(min(1.0, time / 0.008) * math.pi / 2) ** 2
-        release = math.sin(min(1.0, (duration - time) / 0.025) * math.pi / 2) ** 2
-        samples.append((softened - low) * envelope * attack * release)
-    return encode(samples)
+        body[0] += 0.65 * (raw - body[0])
+        body[1] += 0.65 * (body[0] - body[1])
+        value = 0.0
+        for start, gain, tone in clicks:
+            since = time - start
+            if since >= 0:
+                value += gain * (0.5 * body[1] * math.exp(-since / 0.001)
+                                 + math.sin(2 * math.pi * tone * since) * math.exp(-since / 0.003))
+        samples.append(value)
+    # Fade the last 6 ms so the cue ends at silence.
+    fade = int(0.006 * RATE)
+    for index in range(fade):
+        samples[-1 - index] *= index / fade
+    return encode_level(samples)
+
+
+class Noise:
+    """Seeded noise through two smoothing stages."""
+
+    def __init__(self, seed: int, smoothing: float) -> None:
+        self.random = random.Random(seed)
+        self.smoothing = smoothing
+        self.first = self.second = 0.0
+
+    def next(self) -> float:
+        raw = self.random.random() * 2 - 1
+        self.first += self.smoothing * (raw - self.first)
+        self.second += self.smoothing * (self.first - self.second)
+        return self.second
+
+
+def navigation() -> bytes:
+    """A tight, dry snap: a sharp transient with a very short body."""
+    noise = Noise(65, 0.75)
+    samples = []
+    for frame in range(round(0.05 * RATE)):
+        time = frame / RATE
+        texture = noise.next()
+        snap = 0.5 * texture * math.exp(-time / 0.0008) + math.sin(2 * math.pi * 4200 * time) * math.exp(-time / 0.0025)
+        body = 0.35 * math.sin(2 * math.pi * 900 * time) * math.exp(-time / 0.006) * min(1.0, time / 0.001)
+        samples.append(snap + body)
+    fade = int(0.006 * RATE)
+    for index in range(fade):
+        samples[-1 - index] *= index / fade
+    return encode_level(samples)
+
+
+def launch() -> bytes:
+    """A crisp onset over a smooth, low "whoom" that swells and settles with
+    the card's zoom into the game."""
+    noise = Noise(74, 0.75)
+    samples = []
+    for frame in range(round(0.15 * RATE)):
+        time = frame / RATE
+        texture = noise.next()
+        crisp = 0.8 * (0.35 * texture * math.exp(-time / 0.0008) + math.sin(2 * math.pi * 3600 * time) * math.exp(-time / 0.0025))
+        pitch = 220 * (1 + 0.8 * min(1.0, time / 0.09))
+        whoom = math.sin(2 * math.pi * pitch * time) * math.sin(math.pi * min(1.0, time / 0.14)) ** 2
+        samples.append(crisp + whoom)
+    fade = int(0.012 * RATE)
+    for index in range(fade):
+        samples[-1 - index] *= (index / fade) ** 2
+    return encode_level(samples)
 
 
 def encode_level(samples: list[float]) -> bytes:
@@ -81,24 +136,13 @@ def pcm16(scaled: list[float]) -> bytes:
     return output.getvalue()
 
 
-def encode(samples: list[float]) -> bytes:
-    # Keep the cues quiet alongside the existing owner-supplied menu cues. Their
-    # original bytes stay untouched. Every cue begins/ends at digital silence.
-    scale = 0.048 * 32767 / max(map(abs, samples))
-    pcm = [round(sample * scale) for sample in samples]
-    pcm[0] = pcm[-1] = 0
-    output = io.BytesIO()
-    with wave.open(output, "wb") as wav:
-        wav.setparams((1, 2, RATE, 0, "NONE", "not compressed"))
-        wav.writeframes(struct.pack(f"<{len(pcm)}h", *pcm))
-    return output.getvalue()
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="verify bundled bytes without writing")
     args = parser.parse_args()
-    for name, data in [("horizon-quick-menu-open", cue(True)),
+    for name, data in [("horizon-navigation", navigation()),
+                       ("horizon-launch", launch()),
+                       ("horizon-quick-menu-open", cue(True)),
                        ("horizon-quick-menu-close", cue(False)),
                        ("horizon-screenshot", shutter())]:
         path = ROOT / f"ui/assets/{name}.wav"

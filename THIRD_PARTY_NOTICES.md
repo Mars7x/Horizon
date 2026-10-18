@@ -339,16 +339,6 @@ The existing MIT and Apache-2.0 license texts apply. Horizon stores the key
 only on explicit Save; key content and clipboard data must not be logged.
 
 
-## User-provided navigation sound (Phase 9.5.44.56, updated 9.5.44.58)
-
-- **Asset:** `ui/assets/horizon-navigation.wav`
-- **Origin:** Replacement WAV supplied by the Horizon project owner in the development conversation (October 8, 2026). The earlier `horizon-navigation-soft.wav` was retired in Phase 9.5.44.58.
-- **Modification:** None; replacement PCM WAV bytes are bundled unmodified. No gain adjustment, normalizing, or transcode.
-- **Ownership/license:** Not independently established. This is not presented as an
-  externally licensed or public-domain asset. Confirm redistribution rights
-  with the project owner before any public/Flathub release.
-
-
 ## User-supplied menu confirmation audio (Phase 9.5.44.61)
 
 - **Assets:** `ui/assets/horizon-ok.wav`, `ui/assets/horizon-back.wav`
@@ -356,21 +346,27 @@ only on explicit Save; key content and clipboard data must not be logged.
 - **Modification:** None. Original 48 kHz mono 16-bit PCM bytes are preserved.
 - **Rights:** Redistribution rights have not been independently established.
   Confirm permission with the asset owner before a public release.
-- **Use:** Successful menu confirmation and actual back/dismissal only. The
-  existing navigation sound is unchanged. The UI Sounds setting mutes all cues.
+- **Use:** Successful menu confirmation and actual back/dismissal only. Played
+  at Horizon's standard UI loudness by a gain applied at load; the file bytes
+  are unchanged. The UI Sounds setting mutes all cues.
 
-## Original quick-menu and screenshot audio
+## Original navigation, quick-menu, launch and screenshot audio
 
-- **Assets:** `ui/assets/horizon-quick-menu-open.wav`, `ui/assets/horizon-quick-menu-close.wav`, `ui/assets/horizon-screenshot.wav`
+- **Assets:** `ui/assets/horizon-navigation.wav`, `ui/assets/horizon-quick-menu-open.wav`, `ui/assets/horizon-quick-menu-close.wav`, `ui/assets/horizon-launch.wav`, `ui/assets/horizon-screenshot.wav`
 - **Author/license:** Horizon contributors, GPL-3.0-or-later; see `LICENSE` and
   `LICENSES/GPL-3.0-or-later.txt`. Asset annotations are in `REUSE.toml`.
 - **Source:** `scripts/generate-quick-menu-sounds.py` synthesizes the original
   latch pair (two soft clicks each: a decaying sine tone plus a burst of seeded,
-  low-passed noise) using Python's standard library, with no recordings,
-  external samples or third-party synthesis. The soft shutter uses two
-  filtered-noise envelopes. PCM16 mono, 48 kHz; menu 90 ms each, shutter 120 ms.
-- **Use:** Actual quick-menu opening and successful closing. The UI Sounds
-  preference mutes all three; the shutter plays only after screenshot publication. Existing owner-supplied WAVs are preserved unmodified.
+  low-passed noise), the navigation snap (one sharp transient with a short
+  body), the launch (a crisp onset over a low swelling tone) and the shutter
+  (one tight click and a short second click), using Python's standard library,
+  with no recordings, external samples or third-party synthesis. PCM16 mono,
+  48 kHz; navigation 50 ms, menu 90 ms each, launch 150 ms, shutter 60 ms. The
+  owner-supplied navigation WAV this replaces was retired at the owner's request
+  on 2026-10-17.
+- **Use:** Focus movement, actual quick-menu opening and successful closing,
+  a game starting, and a published screenshot. All play at the standard UI
+  loudness. The UI Sounds preference mutes all of them. Existing owner-supplied WAVs are preserved unmodified.
 
 ## Local ROM recognition
 

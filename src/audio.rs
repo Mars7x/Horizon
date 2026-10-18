@@ -32,7 +32,15 @@ const BACK_WAV: &[u8] = include_bytes!("../ui/assets/horizon-back.wav");
 const MENU_OPEN_WAV: &[u8] = include_bytes!("../ui/assets/horizon-quick-menu-open.wav");
 const MENU_CLOSE_WAV: &[u8] = include_bytes!("../ui/assets/horizon-quick-menu-close.wav");
 const SCREENSHOT_WAV: &[u8] = include_bytes!("../ui/assets/horizon-screenshot.wav");
-const CUE_COUNT: usize = 6;
+const LAUNCH_WAV: &[u8] = include_bytes!("../ui/assets/horizon-launch.wav");
+const CUE_COUNT: usize = 7;
+
+/// Every cue plays at one standard loudness, whatever level its file has:
+/// its loudest 30 ms is brought to about -20 dBFS (typical for short UI
+/// sounds), and its peak never above -4 dBFS. Files stay as supplied.
+const LOUDNESS_TARGET: f32 = 0.1;
+const PEAK_CEILING: f32 = 0.63;
+const LOUDNESS_WINDOW: usize = 1440;
 const CANCEL_CUE: u8 = u8::MAX;
 
 const SAMPLE_RATE: u32 = 48_000;
@@ -54,6 +62,8 @@ pub enum UiSoundCue {
     QuickMenuOpen,
     QuickMenuClose,
     Screenshot,
+    /// A game starting, as its card zooms into the player.
+    Launch,
 }
 
 impl UiSoundCue {
@@ -65,6 +75,7 @@ impl UiSoundCue {
             Self::QuickMenuOpen => 3,
             Self::QuickMenuClose => 4,
             Self::Screenshot => 5,
+            Self::Launch => 6,
         }
     }
 }
@@ -114,13 +125,16 @@ impl UiSounds {
             MENU_OPEN_WAV,
             MENU_CLOSE_WAV,
             SCREENSHOT_WAV,
+            LAUNCH_WAV,
         ]
         .map(|wav| {
-            decode_pcm16_mono_48k(wav)
-                .expect("bundled Horizon UI WAV must be PCM16 mono 48 kHz")
-                .into_iter()
-                .map(|sample| f32::from(sample) / 32_768.0)
-                .collect()
+            level(
+                decode_pcm16_mono_48k(wav)
+                    .expect("bundled Horizon UI WAV must be PCM16 mono 48 kHz")
+                    .into_iter()
+                    .map(|sample| f32::from(sample) / 32_768.0)
+                    .collect(),
+            )
         });
         Self {
             enabled,
@@ -281,6 +295,24 @@ fn control(
     }
 }
 
+/// Scale a cue to the standard loudness (see `LOUDNESS_TARGET`).
+fn level(mut samples: Vec<f32>) -> Vec<f32> {
+    let window = LOUDNESS_WINDOW.min(samples.len()).max(1);
+    let loudest = samples
+        .windows(window)
+        .step_by(48)
+        .map(|part| (part.iter().map(|s| s * s).sum::<f32>() / window as f32).sqrt())
+        .fold(0.0f32, f32::max);
+    let peak = samples.iter().fold(0.0f32, |peak, s| peak.max(s.abs()));
+    if loudest > 0.0 && peak > 0.0 {
+        let gain = (LOUDNESS_TARGET / loudest).min(PEAK_CEILING / peak);
+        for sample in &mut samples {
+            *sample *= gain;
+        }
+    }
+    samples
+}
+
 fn decode_pcm16_mono_48k(wav: &[u8]) -> Option<Vec<i16>> {
     if wav.get(0..4)? != b"RIFF" || wav.get(8..12)? != b"WAVE" {
         return None;
@@ -326,19 +358,20 @@ mod tests {
     #[test]
     fn bundled_sound_is_valid_short_pcm() {
         let samples = decode_pcm16_mono_48k(NAVIGATION_WAV).unwrap();
-        assert_eq!(samples.len(), 4080);
+        assert_eq!(samples.len(), 2400);
         assert!(samples.iter().any(|sample| *sample != 0));
     }
 
     #[test]
     fn all_cues_are_valid_pcm() {
         for (cue, wav, frames) in [
-            (UiSoundCue::Navigation, NAVIGATION_WAV, 4080),
+            (UiSoundCue::Navigation, NAVIGATION_WAV, 2400),
             (UiSoundCue::Ok, OK_WAV, 9120),
             (UiSoundCue::Back, BACK_WAV, 6306),
             (UiSoundCue::QuickMenuOpen, MENU_OPEN_WAV, 4320),
             (UiSoundCue::QuickMenuClose, MENU_CLOSE_WAV, 4320),
-            (UiSoundCue::Screenshot, SCREENSHOT_WAV, 5760),
+            (UiSoundCue::Screenshot, SCREENSHOT_WAV, 2880),
+            (UiSoundCue::Launch, LAUNCH_WAV, 7200),
         ] {
             assert_eq!(decode_pcm16_mono_48k(wav).unwrap().len(), frames);
             assert!(cue.index() < CUE_COUNT);
@@ -360,6 +393,26 @@ mod tests {
                 .max()
                 .unwrap();
             assert!((1500..=2000).contains(&peak));
+        }
+    }
+
+    #[test]
+    fn every_cue_plays_at_the_same_loudness_without_clipping() {
+        let sounds = UiSounds::new(true);
+        for samples in sounds.samples.iter() {
+            let window = LOUDNESS_WINDOW.min(samples.len());
+            let loudest = samples
+                .windows(window)
+                .step_by(48)
+                .map(|part| (part.iter().map(|s| s * s).sum::<f32>() / window as f32).sqrt())
+                .fold(0.0f32, f32::max);
+            let peak = samples.iter().fold(0.0f32, |peak, s| peak.max(s.abs()));
+            // At the target, unless the peak ceiling holds a very spiky cue back.
+            assert!(peak <= PEAK_CEILING + 1e-4, "peak {peak}");
+            assert!(
+                (loudest - LOUDNESS_TARGET).abs() < 1e-3 || (peak - PEAK_CEILING).abs() < 1e-4,
+                "loudest {loudest}, peak {peak}"
+            );
         }
     }
 
