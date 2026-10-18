@@ -78,6 +78,79 @@ modules:
         url: https://github.com/mgba-emu/mgba/archive/refs/tags/0.10.5.tar.gz
         sha256: 91d6fbd32abcbdf030d58d3f562de25ebbc9d56040d513ff8e5c19bee9dacf14
 
+  - name: melonds-ds-core
+    buildsystem: simple
+    build-commands:
+      - >-
+        cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+        -DENABLE_OPENGL=OFF -DENABLE_COMPUTE_RENDERER=OFF -DBUILD_TESTING=OFF
+        -DFETCHCONTENT_SOURCE_DIR_MELONDS="$PWD/dependencies/melonds" -DFETCHCONTENT_SOURCE_DIR_LIBRETRO_COMMON="$PWD/dependencies/libretro-common" -DFETCHCONTENT_SOURCE_DIR_EMBED_BINARIES="$PWD/dependencies/embed-binaries" -DFETCHCONTENT_SOURCE_DIR_GLM="$PWD/dependencies/glm" -DFETCHCONTENT_SOURCE_DIR_LIBSLIRP="$PWD/dependencies/libslirp" -DFETCHCONTENT_SOURCE_DIR_PNTR="$PWD/dependencies/pntr" -DFETCHCONTENT_SOURCE_DIR_FMT="$PWD/dependencies/fmt" -DFETCHCONTENT_SOURCE_DIR_YAMC="$PWD/dependencies/yamc" -DFETCHCONTENT_SOURCE_DIR_SPAN_LITE="$PWD/dependencies/span-lite" -DFETCHCONTENT_SOURCE_DIR_DATE="$PWD/dependencies/date" -DFETCHCONTENT_SOURCE_DIR_ZLIB="$PWD/dependencies/zlib" -DFETCHCONTENT_SOURCE_DIR_EMBED-BINARIES="$PWD/dependencies/embed-binaries" -DFETCHCONTENT_SOURCE_DIR_SPAN-LITE="$PWD/dependencies/span-lite" -DFETCHCONTENT_SOURCE_DIR_LIBRETRO-COMMON="$PWD/dependencies/libretro-common" -DCMAKE_MODULE_PATH="$PWD/dependencies/melonds/cmake;$PWD/dependencies/embed-binaries/cmake"
+      - cmake --build build
+      - install -Dm0755 build/src/libretro/melondsds_libretro.so /app/lib/horizon/melondsds_libretro.so
+      - install -Dm0644 build/melondsds-LICENSE.txt /app/share/licenses/melonds-ds/THIRD_PARTY_LICENSES.txt
+      - install -Dm0644 LICENSE /app/share/licenses/melonds-ds/GPL-3.0-or-later.txt
+    sources:
+      - type: archive
+        url: https://codeload.github.com/JesseTG/melonds-ds/tar.gz/f394adbacb5722ee97c1b37c8064da9a25818310
+        archive-type: tar-gzip
+        sha256: 1b377c6d84355b2449e8f31893839fa0b138b51a98bf72edb8bc3ca9169186a6
+      - type: archive
+        dest: dependencies/melonds
+        url: https://codeload.github.com/JesseTG/melonDS/tar.gz/16f127dbb587a73371827ce79689c5d237c4b59b
+        archive-type: tar-gzip
+        sha256: 618354a6853be72f7777c36914139405fb17e1058454f4af8eea3ac04871676e
+      - type: archive
+        dest: dependencies/libretro-common
+        url: https://codeload.github.com/libretro/libretro-common/tar.gz/fa8a1b572a444fcb552007019f8caf68281108aa
+        archive-type: tar-gzip
+        sha256: 6803ff96bada0ba968cd5d9f417a217ebeca527a0e8b849145a2183ad779faff
+      - type: archive
+        dest: dependencies/embed-binaries
+        url: https://codeload.github.com/andoalon/embed-binaries/tar.gz/078b62beba97e8192c99bfb16d5e17220cfc7598
+        archive-type: tar-gzip
+        sha256: 3b1017d10077de692e19c3772d824010705533ec441583587fac4a959ae77bd5
+      - type: archive
+        dest: dependencies/glm
+        url: https://codeload.github.com/g-truc/glm/tar.gz/6f14f4792a0cde5d0cf2c910506724d61cb95834
+        archive-type: tar-gzip
+        sha256: 9d96623ff3fb4ffd8cacd0e3aab39c14bb173f0bdf62518b04087000a251349f
+      - type: archive
+        dest: dependencies/libslirp
+        url: https://codeload.github.com/JesseTG/libslirp-mirror/tar.gz/e61dbd459c8c06607b3a84694489427e8ec60f17
+        archive-type: tar-gzip
+        sha256: 2269005f612868c31027ea992bd88f0f7c89c69e7f2eef495479cb2a2f9e2ed3
+      - type: archive
+        dest: dependencies/pntr
+        url: https://codeload.github.com/robloach/pntr/tar.gz/a47fe167703b0ac3bfad00785b20b0dce6712509
+        archive-type: tar-gzip
+        sha256: 628ee25a6eae708b1ae143ad52337bd69745f34d1e7000cd8d96d7628b5b24c6
+      - type: archive
+        dest: dependencies/fmt
+        url: https://codeload.github.com/fmtlib/fmt/tar.gz/1be298e1bd68957e4cd352e1f676f00e07dcfb57
+        archive-type: tar-gzip
+        sha256: d041f836d9b2a3c1c0fe3cce81ffe6a4a257028faa2f4af0dd20d7e58b493766
+      - type: archive
+        dest: dependencies/yamc
+        url: https://codeload.github.com/yohhoy/yamc/tar.gz/4e015a7e8eb0d61c34e6928676c8c78881a72d73
+        archive-type: tar-gzip
+        sha256: f322d79bfd7dda607c69c867a1cc57192173f02d973e6c9bae02c3ad984c114e
+      - type: archive
+        dest: dependencies/span-lite
+        url: https://codeload.github.com/martinmoene/span-lite/tar.gz/f63fe2974943b5f555b928b10d910e457fbb93d4
+        archive-type: tar-gzip
+        sha256: ec8a2538f8bdba08476194f79d40fbbed0f1aaac51954e797b4066d5f8822a9a
+      - type: archive
+        dest: dependencies/date
+        url: https://codeload.github.com/HowardHinnant/date/tar.gz/179a6b921ccd6179b5b04dce812a89f71a51b4df
+        archive-type: tar-gzip
+        sha256: 4d162515b38cd522cd7b9bbf8b04ece43574ee39107f6a054adc2706d5ea86f7
+      - type: archive
+        dest: dependencies/zlib
+        url: https://codeload.github.com/madler/zlib/tar.gz/da607da739fa6047df13e66a2af6b8bec7c2a498
+        archive-type: tar-gzip
+        sha256: b9258cf6254e7f7c37f1cd61dba943a1c5ea3cff5718c789834dac359094f5f7
+
   - name: horizon
     buildsystem: simple
     build-options:

@@ -71,3 +71,8 @@ text, preserve Unicode caret offsets and obey the editor's validation. The
 profile name, including [first-run creation](ONBOARDING.md), is normalized and
 capped at 32 characters. Dialog lift keeps fields
 above the keyboard. Sound and reduced-motion preferences still apply.
+
+Nintendo DS adds keyboard C/V for X/Y and fixed four-face-button controller
+bindings, still following the shared A/B swap. Its touchscreen accepts mouse
+press/drag, or right-stick cursor movement with R2 to touch. The mGBA remapping
+screen does not alter these DS bindings. See [playback](GBA_PLAYBACK.md).

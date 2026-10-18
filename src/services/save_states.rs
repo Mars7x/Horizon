@@ -15,7 +15,7 @@ use std::{
 pub const MANUAL_SLOTS: u8 = 4;
 /// Native frame sizes: GBA, Game Boy and Game Boy Color, and a Super Game
 /// Boy game with its border.
-const PREVIEW_SIZES: [(u32, u32); 3] = [(240, 160), (160, 144), (256, 224)];
+const PREVIEW_SIZES: [(u32, u32); 4] = [(240, 160), (160, 144), (256, 224), (256, 384)];
 
 /// States follow the mGBA release (`mGBA@<version>`), not the exact binary:
 /// rebuilding the same release, such as adding its Game Boy core, keeps
@@ -67,8 +67,26 @@ impl Store {
             preview_decodes: std::cell::Cell::new(0),
         }
     }
+    fn core_name(&self) -> &'static str {
+        if self.folder.manifest.system == "nds" {
+            "melonds-ds"
+        } else {
+            "mgba"
+        }
+    }
+    fn max_state_size(&self) -> usize {
+        if self.folder.manifest.system == "nds" {
+            64 * 1024 * 1024
+        } else {
+            16 * 1024 * 1024
+        }
+    }
     fn core(&self) -> PathBuf {
-        data_paths::state_core_directory(&self.folder.directory)
+        if self.folder.manifest.system == "nds" {
+            data_paths::ds_state_core_directory(&self.folder.directory)
+        } else {
+            data_paths::state_core_directory(&self.folder.directory)
+        }
     }
     fn files(&self, directory: &Path, slot: u8) -> data_paths::SaveStatePaths {
         data_paths::state_bundle_paths(directory, &self.folder.manifest.file_stem, slot)
@@ -84,7 +102,7 @@ impl Store {
         if !matches!(metadata.format_version, 1 | 2)
             || metadata.saved_at < 0
             || metadata.slot != slot
-            || metadata.core != "mgba"
+            || metadata.core != self.core_name()
             || !same_release(&metadata.core_build, &self.core_build)
             || metadata.rom_identity != self.folder.manifest.game_id
         {
@@ -97,7 +115,7 @@ impl Store {
     fn read_bundle(&self, directory: &Path, slot: u8) -> io::Result<Snapshot> {
         let metadata = self.read_metadata(directory, slot)?;
         let files = self.files(directory, slot);
-        let bytes = read(&files.state, 16 * 1024 * 1024).map_err(incomplete)?;
+        let bytes = read(&files.state, self.max_state_size() as u64).map_err(incomplete)?;
         let files = if metadata.format_version == 1 {
             data_paths::legacy_state_bundle_paths(directory, &self.folder.manifest.file_stem, slot)
         } else {
@@ -296,7 +314,7 @@ impl Store {
     pub fn save(&self, slot: u8, bytes: &[u8], frame: &Frame) -> io::Result<()> {
         if slot > MANUAL_SLOTS
             || bytes.is_empty()
-            || bytes.len() > 16 * 1024 * 1024
+            || bytes.len() > self.max_state_size()
             || !PREVIEW_SIZES.contains(&(frame.width, frame.height))
             || frame.rgba.len() != (frame.width * frame.height * 4) as usize
         {
@@ -329,7 +347,7 @@ impl Store {
             format_version: 2,
             slot,
             rom_identity: self.folder.manifest.game_id.clone(),
-            core: "mgba".into(),
+            core: self.core_name().into(),
             core_build: self.core_build.clone(),
             saved_at: chrono::Utc::now().timestamp_millis(),
             state_size: bytes.len(),
@@ -507,6 +525,27 @@ mod tests {
             fs::remove_dir_all(&self.root).unwrap();
         }
     }
+    #[test]
+    fn ds_slots_are_separate_and_preserve_both_screens() {
+        let mut fixture = Fixture::new();
+        fixture.store.folder.manifest.system = "nds".into();
+        fixture.store.core_build = "melonDS DS@1.4.0:build".into();
+        fixture.frame = Frame {
+            width: 256,
+            height: 384,
+            rgba: [4, 8, 16, 255].repeat(256 * 384),
+            smooth: false,
+        };
+        fixture.store.save(1, &[1, 2, 3], &fixture.frame).unwrap();
+        assert!(fixture.store.core().ends_with("states/melonds-ds"));
+        let state = fixture.store.load(1).unwrap().unwrap();
+        assert_eq!(state.metadata.core, "melonds-ds");
+        assert_eq!((state.preview.width, state.preview.height), (256, 384));
+        assert_eq!(state.preview.rgba, fixture.frame.rgba);
+        fixture.store.folder.manifest.system = "gba".into();
+        assert!(fixture.store.load(1).unwrap().is_none());
+    }
+
     #[test]
     fn slots_preview_newest_manual_and_auto_leave_battery_untouched() {
         let f = Fixture::new();

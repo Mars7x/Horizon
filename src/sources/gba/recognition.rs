@@ -21,7 +21,7 @@ pub enum RomImportError {
     #[error("Could not read the selected file or folder: {0}")]
     Io(#[from] std::io::Error),
     #[error(
-        "Choose a Game Boy, Game Boy Color or Game Boy Advance Logiqx XML DAT with SHA-1 hashes"
+        "Choose a Game Boy, Game Boy Color, Game Boy Advance or Nintendo DS Logiqx XML DAT with SHA-1 hashes"
     )]
     Catalog,
     #[error("The folder is too large or nested too deeply; choose a smaller folder")]
@@ -30,22 +30,46 @@ pub enum RomImportError {
     Changed,
 }
 
-/// The cartridge systems mGBA plays. Each is its own Library source.
+/// The supported cartridge systems. Each is its own Library source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RomSystem {
     GameBoy,
     GameBoyColor,
     GameBoyAdvance,
+    NintendoDs,
 }
 
 impl RomSystem {
-    pub const ALL: [Self; 3] = [Self::GameBoy, Self::GameBoyColor, Self::GameBoyAdvance];
+    pub const ALL: [Self; 4] = [
+        Self::GameBoy,
+        Self::GameBoyColor,
+        Self::GameBoyAdvance,
+        Self::NintendoDs,
+    ];
 
     pub fn source_id(self) -> &'static str {
         match self {
             Self::GameBoy => "gb",
             Self::GameBoyColor => "gbc",
             Self::GameBoyAdvance => "gba",
+            Self::NintendoDs => "nds",
+        }
+    }
+
+    pub fn max_rom_size(self) -> u64 {
+        if self == Self::NintendoDs {
+            512 * 1024 * 1024
+        } else {
+            MAX_ROM
+        }
+    }
+
+    pub fn from_extension(path: &Path) -> Option<Self> {
+        match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
+            "nds" => Some(Self::NintendoDs),
+            "gba" => Some(Self::GameBoyAdvance),
+            "gb" | "gbc" => Some(Self::GameBoy),
+            _ => None,
         }
     }
 
@@ -54,6 +78,7 @@ impl RomSystem {
             Self::GameBoy => "Game Boy",
             Self::GameBoyColor => "Game Boy Color",
             Self::GameBoyAdvance => "Game Boy Advance",
+            Self::NintendoDs => "Nintendo DS",
         }
     }
 
@@ -66,7 +91,9 @@ impl RomSystem {
     /// No-Intro names every system "… Game Boy …", so test the longer names first.
     fn from_catalog_name(name: &str) -> Option<Self> {
         let name = name.to_ascii_lowercase();
-        if name.contains("game boy advance") {
+        if name.contains("nintendo ds") && !name.contains("nintendo dsi") {
+            Some(Self::NintendoDs)
+        } else if name.contains("game boy advance") {
             Some(Self::GameBoyAdvance)
         } else if name.contains("game boy color") {
             Some(Self::GameBoyColor)
@@ -114,7 +141,7 @@ pub struct RomCatalog {
 
 /// One catalog per system. A user-chosen DAT replaces its system's catalog.
 #[derive(Debug)]
-pub struct RomCatalogs([RomCatalog; 3]);
+pub struct RomCatalogs([RomCatalog; 4]);
 
 impl RomCatalogs {
     /// Pinned, attributed metadata only. No ROM bytes or runtime download.
@@ -123,6 +150,7 @@ impl RomCatalogs {
             RomCatalog::parse(include_bytes!("../../../data/catalogs/gb.xml").as_slice())?,
             RomCatalog::parse(include_bytes!("../../../data/catalogs/gbc.xml").as_slice())?,
             RomCatalog::parse(include_bytes!("../../../data/catalogs/gba.xml").as_slice())?,
+            RomCatalog::parse(include_bytes!("../../../data/catalogs/nds.xml").as_slice())?,
         ]))
     }
 
@@ -263,7 +291,9 @@ fn read_fingerprint(path: &Path) -> Result<(RomFingerprint, bool), RomImportErro
     }
     let mut file = File::open(path)?;
     let size = file.metadata()?.len();
-    if !(192..=MAX_ROM).contains(&size) {
+    let system = RomSystem::from_extension(path).unwrap_or(RomSystem::GameBoyAdvance);
+    let maximum = system.max_rom_size();
+    if !(192..=maximum).contains(&size) {
         return Err(RomImportError::Changed);
     }
     let mut sha1 = Context::new(&SHA1_FOR_LEGACY_USE_ONLY);
@@ -276,13 +306,16 @@ fn read_fingerprint(path: &Path) -> Result<(RomFingerprint, bool), RomImportErro
         if count == 0 {
             break;
         }
+        if read == 0 && system == RomSystem::NintendoDs {
+            validate_ds_header(&buffer[..count], size)?;
+        }
         if let Some(offset) = COLOR_FLAG.checked_sub(read as usize)
             && offset < count
         {
             color = buffer[offset] & 0x80 != 0;
         }
         read += count as u64;
-        if read > MAX_ROM {
+        if read > maximum {
             return Err(RomImportError::Changed);
         }
         sha1.update(&buffer[..count]);
@@ -300,6 +333,30 @@ fn read_fingerprint(path: &Path) -> Result<(RomFingerprint, bool), RomImportErro
         },
         color,
     ))
+}
+
+/// Validate the DS header without relying on its title or copyrighted logo.
+/// DSi-exclusive software and truncated executable sections are not DS games.
+pub fn validate_ds_header(header: &[u8], size: u64) -> Result<(), RomImportError> {
+    if header.len() < 0x200 || size < 0x1000 || !matches!(header[0x12], 0 | 2) {
+        return Err(RomImportError::Changed);
+    }
+    for base in [0x20, 0x30] {
+        let word = |offset: usize| {
+            u32::from_le_bytes([
+                header[offset],
+                header[offset + 1],
+                header[offset + 2],
+                header[offset + 3],
+            ]) as u64
+        };
+        let offset = word(base);
+        let length = word(base + 12);
+        if offset < 0x200 || length == 0 || offset + length > size {
+            return Err(RomImportError::Changed);
+        }
+    }
+    Ok(())
 }
 
 /// Game Boy and Game Boy Color share file formats. An exact hash in exactly
@@ -351,17 +408,9 @@ pub fn scan_skipping(
                 pending.push((path, depth + 1));
                 continue;
             }
-            let extension = path
-                .extension()
-                .and_then(|s| s.to_str())
-                .map(str::to_ascii_lowercase);
-            let advance = match extension.as_deref() {
-                Some("gba") => true,
-                Some("gb" | "gbc") => false,
-                _ => {
-                    scan.skipped += 1;
-                    continue;
-                }
+            let Some(system) = RomSystem::from_extension(&path) else {
+                scan.skipped += 1;
+                continue;
             };
             if !kind.is_file() {
                 scan.skipped += 1;
@@ -378,11 +427,7 @@ pub fn scan_skipping(
                 .into_owned();
             let mut candidate = RomCandidate {
                 path,
-                system: if advance {
-                    RomSystem::GameBoyAdvance
-                } else {
-                    RomSystem::GameBoy
-                },
+                system,
                 title,
                 fingerprint: None,
                 catalog: None,
@@ -391,7 +436,7 @@ pub fn scan_skipping(
             };
             match read_fingerprint(&candidate.path) {
                 Ok((hash, color)) => {
-                    if !advance {
+                    if system == RomSystem::GameBoy {
                         candidate.system = classify(&hash, color, catalogs);
                     }
                     let catalog = catalogs.map(|c| c.get(candidate.system));
@@ -430,6 +475,32 @@ pub fn scan_skipping(
 mod tests {
     use super::*;
     use crate::services::rom_import::revalidate;
+    #[test]
+    fn ds_import_validates_executables_and_keeps_full_hash_identity() {
+        let directory =
+            std::env::temp_dir().join(format!("horizon-ds-import-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("Misleading title.NDS");
+        let rom = crate::platform::gba_core::test_ds_rom();
+        fs::write(&path, &rom).unwrap();
+        let catalogs = RomCatalogs::bundled().unwrap();
+        let scan = scan(&directory, Some(&catalogs)).unwrap();
+        assert_eq!(scan.candidates.len(), 1);
+        assert_eq!(scan.candidates[0].system, RomSystem::NintendoDs);
+        assert_eq!(
+            scan.candidates[0].fingerprint.as_ref().unwrap().size,
+            rom.len() as u64
+        );
+        fs::remove_dir_all(&directory).unwrap();
+        let mut bad = rom.clone();
+        bad[0x12] = 3; // DSi exclusive
+        assert!(validate_ds_header(&bad, bad.len() as u64).is_err());
+        assert!(validate_ds_header(&rom, 0x300).is_err());
+        assert!(validate_ds_header(&rom[..100], rom.len() as u64).is_err());
+        assert_eq!(RomSystem::GameBoyAdvance.max_rom_size(), 32 * 1024 * 1024);
+        assert_eq!(RomSystem::NintendoDs.max_rom_size(), 512 * 1024 * 1024);
+    }
+
     #[test]
     fn catalog_matches_size_and_hash_and_retains_ambiguity() {
         let xml = br#"<datafile><header><name>Nintendo - Game Boy Advance</name></header><game name="One (USA)"><rom size="192" sha1="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"/></game><game name="Two (Europe)"><rom size="192" sha1="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"/></game></datafile>"#;

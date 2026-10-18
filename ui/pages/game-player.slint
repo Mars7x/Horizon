@@ -54,6 +54,7 @@ export component GamePlayer inherits Rectangle {
     in property <string> message;
     in property <int> focused;
     callback choose(int);
+    callback touch(float, float, bool);
     visible: root.open;
     background: transparent;
     TouchArea {width:parent.width;height:parent.height;}
@@ -91,6 +92,23 @@ export component GamePlayer inherits Rectangle {
             image-rendering: self.exact
                 ? (root.progress >= 1.0 ? ImageRendering.pixelated : ImageRendering.smooth)
                 : (root.smooth ? ImageRendering.smooth : ImageRendering.pixelated);
+        }
+    }
+    // Pointer coordinates refer to the fitted composite frame, excluding bars.
+    TouchArea {
+        private property <float> ratio: root.frame.height > 0 ? root.frame.width / root.frame.height : 1.0;
+        width: min(parent.width, parent.height * self.ratio);
+        height: self.width / self.ratio;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        enabled: root.phase == 2 && !root.paused && !root.busy && !root.failed;
+        moved => { root.touch(self.mouse-x / self.width, self.mouse-y / self.height, self.pressed); }
+        pointer-event(event) => {
+            if event.button == PointerEventButton.left {
+                root.touch(self.mouse-x / self.width, self.mouse-y / self.height, event.kind == PointerEventKind.down);
+            } else if event.kind == PointerEventKind.cancel {
+                root.touch(0, 0, false);
+            }
         }
     }
     Rectangle {

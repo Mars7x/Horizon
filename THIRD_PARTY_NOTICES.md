@@ -388,3 +388,18 @@ resolved dependency-license inventory remains a release gate.
 APNG (solid colours, partial alpha and unequal delays), used to verify conversion
 to animated JXL. No external image or code is included. Copyright Horizon
 contributors; `GPL-3.0-or-later`, covered by the tests annotation in REUSE.toml.
+
+## melonDS DS
+
+Nintendo DS playback bundles [melonDS DS v1.4.0](https://github.com/JesseTG/melonds-ds/tree/f394adbacb5722ee97c1b37c8064da9a25818310)
+(GPL-3.0-or-later), using its software renderer and built-in FreeBIOS replacements.
+The Flatpak manifest pins every fetched source by commit and archive SHA-256,
+including melonDS revision `16f127dbb587a73371827ce79689c5d237c4b59b`.
+[Combined upstream notices](LICENSES/melonDS-DS-third-party.txt) retain the core
+and embedded dependency licenses; packaging also installs that generated file.
+Distributing binaries requires providing the corresponding pinned source under
+its applicable licenses. No Nintendo firmware, BIOS dumps or games are included.
+
+The Nintendo DS metadata catalog (`data/catalogs/nds.xml`) uses the same No-Intro/libretro snapshot and
+CC-BY-SA-4.0 terms as the other offline catalogs. Its exact input digest and
+reproduction command are maintained in `scripts/generate-hash-catalog.py`.

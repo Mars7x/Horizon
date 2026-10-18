@@ -233,3 +233,31 @@ It cycles through 1×/2×/3×/4× each minute and pauses/resumes every fifteen s
 It reports queue size, callback gaps, unexpected silence/underruns, invalid
 samples and pause/resume failures. Its quiet test tone and callback measurements
 do not verify physical speaker/headphone quality or game-specific music.
+
+## Nintendo DS playback
+
+Imported DS cartridges use bundled melonDS DS 1.4.0 on the same in-process
+worker; mGBA continues to own GB/GBC/GBA. Both screens are stacked vertically,
+with the touchscreen below, rendered at 256×384 with sharp pixel scaling.
+Built-in BIOS/firmware replacements and direct boot avoid a firmware setup step.
+No DSi, network play, virtual SD cards or slot-2 content is exposed.
+
+Mouse press/drag touches the lower screen, excluding the player's black bars.
+The right stick moves the touch cursor; R2 presses it. Controllers retain all
+four face buttons and follow the global A/B swap. DS currently uses fixed
+bindings, independent of the mGBA mapping screen. Keyboard Z/X are A/B, C/V are
+X/Y, A/S are shoulders, arrows are directions, Enter is Start and Backspace is
+Select. Escape opens the existing quick menu. Screenshots include both screens.
+
+DS uses the shared audio, speed, pause, focus-freeze and exit animation paths.
+Its cartridge saves allow up to 8 MiB; state buffers allow up to 64 MiB.
+Four manual slots and automatic resume use `states/melonds-ds` and JXL previews;
+existing mGBA states stay in `states/mgba`. A core reporting no serializable
+state can still exit after saving available cartridge memory.
+The host accepts only software video. Generated core support files are contained
+in the game folder’s `core-data/melonDS DS` directory; no BIOS manager is exposed.
+
+The ignored `real_ds_core_frames_states_and_restart` test uses an original,
+logo-free test cartridge and `HORIZON_DS_CORE` pointing to the packaged library.
+It verifies both screens, save/restore and restart without downloading a game.
+See [ADR 0216](adr/0216-nintendo-ds-playback.md).

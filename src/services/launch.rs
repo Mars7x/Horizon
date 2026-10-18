@@ -155,7 +155,7 @@ impl GameLaunchService {
                     source,
                 })?;
 
-            if matches!(target, SourceLaunchTarget::EmbeddedMgba { .. }) {
+            if matches!(target, SourceLaunchTarget::EmbeddedCartridge { .. }) {
                 return Ok(GameLaunchReceipt::new(source_id, GameLaunchMode::Embedded));
             }
 
@@ -458,7 +458,7 @@ mod tests {
             );
             assert_eq!(
                 executor.targets.borrow().last(),
-                Some(&SourceLaunchTarget::EmbeddedMgba {
+                Some(&SourceLaunchTarget::EmbeddedCartridge {
                     system,
                     sha256: sha256.clone()
                 })

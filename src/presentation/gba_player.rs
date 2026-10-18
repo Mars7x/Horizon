@@ -63,6 +63,7 @@ pub struct GbaPlayer {
     keyboard: Cell<u16>,
     pad_ready: Cell<bool>,
     gamepads: CallbackSlot<dyn Fn() -> u16>,
+    ds_gamepad: CallbackSlot<dyn Fn() -> (u16, i16, i16)>,
     selected_game: CallbackSlot<dyn Fn() -> Option<i64>>,
     /// The game whose card launched this session.
     launched_game: Cell<Option<i64>>,
@@ -102,6 +103,7 @@ impl GbaPlayer {
             keyboard: Cell::new(0),
             pad_ready: Cell::new(false),
             gamepads: RefCell::new(None),
+            ds_gamepad: RefCell::new(None),
             selected_game: RefCell::new(None),
             launched_game: Cell::new(None),
             sound: RefCell::new(None),
@@ -131,6 +133,28 @@ impl GbaPlayer {
         }));
         let weak = Rc::downgrade(&player);
         *player.this.borrow_mut() = weak;
+        let weak = Rc::downgrade(&player);
+        ui.on_player_touch(move |x, y, pressed| {
+            if let Some(player) = weak.upgrade()
+                && player.foreground.get()
+                && player.stage.get() == PlayerStage::Playing
+                && let Some(ui) = player.ui.upgrade()
+                && !ui.get_player_paused()
+                && !ui.get_player_busy()
+                && !ui.get_player_failed()
+                && let Some(game) = player.running.borrow().as_ref()
+                && let Some(extra) = &game.ds_input
+            {
+                let coordinate =
+                    |v: f32| ((v.clamp(0.0, 1.0) * 65534.0 - 32767.0).round() as i16) as u16;
+                extra.pointer.store(
+                    u64::from(coordinate(x))
+                        | (u64::from(coordinate(y)) << 16)
+                        | (u64::from(pressed) << 32),
+                    Ordering::Release,
+                );
+            }
+        });
         let weak = Rc::downgrade(&player);
         ui.on_player_choose(move |index| {
             if let Some(player) = weak.upgrade() {
@@ -167,6 +191,9 @@ impl GbaPlayer {
         if let Some(sound) = self.sound.borrow().as_ref() {
             sound(cue);
         }
+    }
+    pub fn set_ds_gamepad(&self, source: Rc<dyn Fn() -> (u16, i16, i16)>) {
+        *self.ds_gamepad.borrow_mut() = Some(source);
     }
     pub fn set_gamepads(&self, source: Rc<dyn Fn() -> u16>) {
         *self.gamepads.borrow_mut() = Some(source);
@@ -966,7 +993,32 @@ impl GbaPlayer {
                 ui.set_player_message("The game stopped unexpectedly".into());
             }
             self.show_frame(&ui);
-            let pad = self.gamepads.borrow().as_ref().map_or(0, |source| source());
+            let active = self.foreground.get()
+                && self.stage.get() == PlayerStage::Playing
+                && !ui.get_player_paused()
+                && !ui.get_player_busy()
+                && !ui.get_player_failed();
+            let pad = if let Some(extra) = &game.ds_input {
+                let (buttons, x, y) = self
+                    .ds_gamepad
+                    .borrow()
+                    .as_ref()
+                    .map_or((0, 0, 0), |source| source());
+                extra.stick.store(
+                    if active && self.pad_ready.get() {
+                        u64::from(x as u16) | (u64::from(y as u16) << 16)
+                    } else {
+                        0
+                    },
+                    Ordering::Release,
+                );
+                if !active {
+                    extra.pointer.store(0, Ordering::Release);
+                }
+                buttons
+            } else {
+                self.gamepads.borrow().as_ref().map_or(0, |source| source())
+            };
             if self.foreground.get() && pad == 0 {
                 self.pad_ready.set(true);
             }
@@ -1077,7 +1129,7 @@ fn publish_display(ui: &AppWindow, running: Option<&RunningGame>) {
 
 impl LaunchExecutor for GbaPlayer {
     fn execute(&self, target: &SourceLaunchTarget) -> Result<(), LaunchExecutionError> {
-        let SourceLaunchTarget::EmbeddedMgba { system, sha256 } = target else {
+        let SourceLaunchTarget::EmbeddedCartridge { system, sha256 } = target else {
             return crate::platform::launcher::PortalLaunchExecutor.execute(target);
         };
         let result = (|| -> Result<(), String> {
@@ -1153,6 +1205,8 @@ fn keyboard_button(text: &str) -> Option<u32> {
     match text.to_ascii_lowercase().as_str() {
         "z" => Some(8),
         "x" => Some(0),
+        "c" => Some(9),
+        "v" => Some(1),
         "a" => Some(10),
         "s" => Some(11),
         _ => None,
@@ -1162,6 +1216,139 @@ fn keyboard_button(text: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "requires Wayland, PipeWire, HORIZON_DS_CORE and fresh HORIZON_DS_TEST_DIR"]
+    fn real_ds_player_import_pause_resume_and_exit() {
+        use crate::{
+            persistence::SqliteLibraryRepository,
+            services::rom_import::{self, RomSetup},
+        };
+        use std::path::PathBuf;
+        let directory = PathBuf::from(std::env::var_os("HORIZON_DS_TEST_DIR").unwrap());
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(
+            directory.join("Horizon DS.nds"),
+            crate::platform::gba_core::test_ds_rom(),
+        )
+        .unwrap();
+        let database = directory.join("library.sqlite3");
+        let mut repository = SqliteLibraryRepository::open(&database).unwrap();
+        let scan = rom_import::scan_folder(&directory, None).unwrap();
+        assert_eq!(scan.candidates.len(), 1);
+        repository
+            .save_rom_import(&RomSetup::default(), &scan.candidates)
+            .unwrap();
+        let target = SourceLaunchTarget::EmbeddedCartridge {
+            system: crate::services::rom_import::RomSystem::NintendoDs,
+            sha256: scan.candidates[0]
+                .fingerprint
+                .as_ref()
+                .unwrap()
+                .sha256
+                .clone(),
+        };
+        let ui = AppWindow::new().unwrap();
+        ui.window().set_size(slint::PhysicalSize::new(1280, 720));
+        let player = GbaPlayer::new(
+            &ui,
+            PlayerPaths {
+                database,
+                core: PathBuf::new(),
+                ds_core: std::env::var_os("HORIZON_DS_CORE").unwrap().into(),
+                saves: directory.join("saves"),
+                album: directory.join("album"),
+                settings: crate::platform::data_paths::CoreSettingsPaths {
+                    playback: directory.join("playback.json"),
+                    mgba: directory.join("mgba.json"),
+                },
+            },
+        );
+        ui.show().unwrap();
+        player.execute(&target).unwrap();
+        let weak = ui.as_weak();
+        let live = Rc::clone(&player);
+        let phase = Rc::new(Cell::new(0));
+        let step = Rc::clone(&phase);
+        let started = Instant::now();
+        let pictures = Rc::new(RefCell::new(Vec::new()));
+        let shots = Rc::clone(&pictures);
+        let timer = Timer::default();
+        timer.start(TimerMode::Repeated, Duration::from_millis(100), move || {
+            let ui = weak.upgrade().unwrap();
+            assert!(!ui.get_player_failed(), "{}", ui.get_player_message());
+            assert!(
+                started.elapsed() < Duration::from_secs(25),
+                "DS player timed out: {}",
+                ui.get_player_message()
+            );
+            match step.get() {
+                0 if live.stage.get() == PlayerStage::Playing
+                    && started.elapsed() > Duration::from_secs(2) =>
+                {
+                    assert!(ui.get_player_has_frame());
+                    shots
+                        .borrow_mut()
+                        .push(ui.window().take_snapshot().unwrap());
+                    ui.invoke_player_touch(0.5, 0.75, true);
+                    assert_ne!(
+                        live.running
+                            .borrow()
+                            .as_ref()
+                            .unwrap()
+                            .ds_input
+                            .as_ref()
+                            .unwrap()
+                            .pointer
+                            .load(Ordering::Acquire)
+                            >> 32,
+                        0
+                    );
+                    ui.invoke_player_touch(0.5, 0.75, false);
+                    live.running
+                        .borrow()
+                        .as_ref()
+                        .unwrap()
+                        .commands
+                        .send(Command::Stop)
+                        .unwrap();
+                    step.set(1);
+                }
+                1 if !live.is_open() => {
+                    live.execute(&target).unwrap();
+                    step.set(2);
+                }
+                2 if live.stage.get() == PlayerStage::Playing => {
+                    assert!(ui.get_player_has_frame());
+                    live.running
+                        .borrow()
+                        .as_ref()
+                        .unwrap()
+                        .commands
+                        .send(Command::Stop)
+                        .unwrap();
+                    step.set(3);
+                }
+                3 if !live.is_open() => {
+                    step.set(4);
+                    slint::quit_event_loop().unwrap();
+                }
+                _ => {}
+            }
+        });
+        slint::run_event_loop().unwrap();
+        assert_eq!(phase.get(), 4);
+        for (i, pixels) in pictures.borrow().iter().enumerate() {
+            image::save_buffer(
+                directory.join(format!("ds-{i}.png")),
+                pixels.as_bytes(),
+                pixels.width(),
+                pixels.height(),
+                image::ColorType::Rgba8,
+            )
+            .unwrap();
+        }
+    }
+
     #[test]
     fn pause_navigation_includes_states_and_does_not_wrap_on_repeat() {
         assert_eq!(pause_step(1, true, false), 2);
@@ -1239,6 +1426,7 @@ mod runtime_tests {
             PlayerPaths {
                 database: database.clone(),
                 core: std::env::var_os("HORIZON_GBA_CORE").unwrap().into(),
+                ds_core: crate::platform::data_paths::ds_core_path(),
                 saves: directory.join("saves"),
                 settings: core_paths,
                 album: directory.join("album"),
@@ -1396,6 +1584,7 @@ mod runtime_tests {
             PlayerPaths {
                 database,
                 core: std::env::var_os("HORIZON_GBA_CORE").unwrap().into(),
+                ds_core: crate::platform::data_paths::ds_core_path(),
                 saves: directory.join("saves"),
                 settings: core_paths,
                 album: directory.join("album"),
@@ -1403,7 +1592,7 @@ mod runtime_tests {
         );
         ui.show().unwrap();
         player
-            .execute(&SourceLaunchTarget::EmbeddedMgba {
+            .execute(&SourceLaunchTarget::EmbeddedCartridge {
                 system: crate::services::rom_import::RomSystem::GameBoyAdvance,
                 sha256,
             })
@@ -1539,6 +1728,7 @@ mod runtime_tests {
             PlayerPaths {
                 database: database.clone(),
                 core: std::env::var_os("HORIZON_GBA_CORE").unwrap().into(),
+                ds_core: crate::platform::data_paths::ds_core_path(),
                 saves: saves.clone(),
                 settings: core_paths,
                 album: directory.join("album"),

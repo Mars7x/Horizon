@@ -23,8 +23,8 @@ logs a warning (once until a check succeeds again). See
 [ADR 0215](adr/0215-deleted-games-leave-the-library.md).
 
 The current backend supports raw Game Boy (`.gb`), Game Boy Color (`.gbc`) and
-Game Boy Advance (`.gba`) files, each its own Library source. Scans recurse through regular folders,
-skip symlinks and unsupported extensions, and bound file size (192 bytes–32 MiB),
+Game Boy Advance (`.gba`) and Nintendo DS (`.nds`) files, each its own Library source. Scans recurse through regular folders,
+skip symlinks and unsupported extensions, and bound file size (192 bytes–32 MiB for GB/GBC/GBA; 4 KiB–512 MiB for DS),
 depth (16) and directory entries (20,000). Readable files are included automatically.
 Empty/unsupported folders and directory errors offer only retry or Back. If some
 files cannot be read, readable games are imported and one brief warning reports
@@ -74,3 +74,12 @@ the pinned DAT that `scripts/generate-hash-catalog.py` names for it and run
 (or `gbc`/`gba` with `gbc.xml`/`gba.xml`).
 The generator verifies the source checksum. Catalog updates require reviewing
 the new revision, checksum, attribution and recognition fixtures together.
+
+## Nintendo DS
+
+`.nds` files use a separately pinned offline No-Intro catalog with the same full
+hash and size matching. Filenames do not determine recognized titles. DS files
+can be up to 512 MiB; both ARM executable sections must fit within the file.
+DSi-exclusive headers are rejected. DS-enhanced games run in DS mode.
+GB/GBC/GBA keep their 32 MiB limit. Launch verifies the complete snapshot again.
+See [ADR 0216](adr/0216-nintendo-ds-playback.md).

@@ -48,7 +48,7 @@ for asset in "${required_assets[@]}"; do
   grep -Fq "$asset" "$notice" || { echo "asset missing from THIRD_PARTY_NOTICES.md: $asset" >&2; exit 1; }
 done
 
-for catalog in gb gbc gba; do
+for catalog in gb gbc gba nds; do
   test -s "$root/data/catalogs/$catalog.xml" || { echo "missing $catalog hash catalog" >&2; exit 1; }
   grep -Fq "data/catalogs/$catalog.xml" "$notice" || { echo "$catalog catalog attribution missing" >&2; exit 1; }
 done

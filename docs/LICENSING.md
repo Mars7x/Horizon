@@ -48,3 +48,9 @@ Cargo.lock, check compatibility, include required native-module notices, and use
 checksum-pinned source artifacts. Never package user artwork, cached credentials
 or media from the development machine. Current development packaging is not a
 claim of completed release hardening.
+
+melonDS DS and its fetched dependencies are pinned in the Flatpak manifest.
+Its upstream combined notices are retained in
+[melonDS DS licenses](../LICENSES/melonDS-DS-third-party.txt) and installed with
+the core. Distribute corresponding source for the exact pins with releases.
+The DS hash catalog follows the existing CC-BY-SA-4.0 metadata attribution.

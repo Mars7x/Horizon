@@ -430,6 +430,7 @@ export component AppWindow inherits Window {
     in property <int> player-state-focus: -1;
     in property <[SaveStateRow]> player-state-rows;
     callback player-state-choose(int);
+    callback player-touch(float, float, bool);
     in property <bool> player-restart-confirm: false;
     in property <int> player-restart-focus: 0;
     callback player-restart-answer(int);
@@ -1143,6 +1144,7 @@ export component AppWindow inherits Window {
                 state-mode: root.player-state-mode; state-focus: root.player-state-focus;
                 state-rows: root.player-state-rows;
                 state-choose(slot) => { root.player-state-choose(slot); }
+                touch(x, y, pressed) => { root.player-touch(x, y, pressed); }
                 restart-confirm: root.player-restart-confirm; restart-focus: root.player-restart-focus;
                 restart-answer(choice) => { root.player-restart-answer(choice); }
                 open: root.player-open; paused: root.player-paused; frozen: root.player-frozen; busy: root.player-busy;

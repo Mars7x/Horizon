@@ -34,6 +34,7 @@ pub struct RomLocation {
 pub struct PlayerPaths {
     pub database: PathBuf,
     pub core: PathBuf,
+    pub ds_core: PathBuf,
     pub saves: PathBuf,
     pub settings: crate::platform::data_paths::CoreSettingsPaths,
     pub album: PathBuf,
@@ -71,6 +72,7 @@ pub struct RunningGame {
     pub events: Receiver<Event>,
     pub frame: LatestFrame,
     pub buttons: Arc<AtomicU16>,
+    pub ds_input: Option<Arc<crate::platform::gba_core::DsInput>>,
     /// The player's size in physical pixels, for xBRZ's screen-size output.
     pub display: DisplaySize,
     /// Tell it when the screen has drawn a frame, so the next is filtered.
@@ -96,12 +98,15 @@ impl RunningGame {
         let (sender, events) = mpsc::channel();
         let frame = Arc::new(Mutex::new(None));
         let buttons = Arc::new(AtomicU16::new(0));
+        let ds_input = (system == RomSystem::NintendoDs)
+            .then(|| Arc::new(crate::platform::gba_core::DsInput::default()));
+        let worker_ds_input = ds_input.clone();
         let display = DisplaySize::default();
         let stage = Arc::new(FrameStage::new());
         let (worker_frame, worker_buttons) = (Arc::clone(&frame), Arc::clone(&buttons));
         let (worker_display, worker_stage) = (Arc::clone(&display), Arc::clone(&stage));
         let worker = thread::Builder::new()
-            .name("horizon-mgba".into())
+            .name("horizon-emulator".into())
             .spawn(move || {
                 struct CoreLease;
                 impl Drop for CoreLease {
@@ -116,7 +121,7 @@ impl RunningGame {
                     receiver,
                     &sender,
                     (worker_frame, worker_display, worker_stage),
-                    worker_buttons,
+                    (worker_buttons, worker_ds_input),
                     frame_ready,
                 );
                 if let Err(error) = &result {
@@ -130,6 +135,7 @@ impl RunningGame {
                 events,
                 frame,
                 buttons,
+                ds_input,
                 display,
                 stage,
                 worker: Some(worker),
@@ -160,19 +166,25 @@ impl Drop for RunningGame {
 }
 
 pub fn read_rom_snapshot(path: &Path, sha256: &str) -> Result<Vec<u8>, String> {
+    let system = RomSystem::from_extension(path).unwrap_or(RomSystem::GameBoyAdvance);
+    let maximum = system.max_rom_size();
     let mut file = File::open(path)
         .map_err(|_| "Game folder access is unavailable. Choose its folder again.".to_owned())?;
     let metadata = file
         .metadata()
         .map_err(|_| "Could not read the game file".to_owned())?;
-    if !metadata.is_file() || !(192..=32 * 1024 * 1024).contains(&metadata.len()) {
+    if !metadata.is_file() || !(192..=maximum).contains(&metadata.len()) {
         return Err("This game file is not a supported cartridge file".into());
     }
     let mut bytes = Vec::with_capacity(metadata.len() as usize);
     (&mut file)
-        .take(32 * 1024 * 1024 + 1)
+        .take(maximum + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| "Could not read the game file".to_owned())?;
+    if system == RomSystem::NintendoDs {
+        crate::sources::gba::recognition::validate_ds_header(&bytes, bytes.len() as u64)
+            .map_err(|_| "This is not a supported Nintendo DS cartridge".to_owned())?;
+    }
     let actual = ring::digest::digest(&ring::digest::SHA256, &bytes)
         .as_ref()
         .iter()
@@ -190,7 +202,10 @@ fn play(
     commands: Receiver<Command>,
     events: &Sender<Event>,
     (frame, display, stage): (LatestFrame, DisplaySize, Arc<FrameStage>),
-    buttons: Arc<AtomicU16>,
+    (buttons, ds_input): (
+        Arc<AtomicU16>,
+        Option<Arc<crate::platform::gba_core::DsInput>>,
+    ),
     frame_ready: Notify,
 ) -> Result<(), String> {
     fs::create_dir_all(&paths.saves)
@@ -219,7 +234,12 @@ fn play(
     let preferences = crate::persistence::core_settings::CoreSettingsStore::new(paths.settings)
         .load()
         .map_err(|_| "Could not read playback or core settings".to_owned())?;
-    let mut mgba = preferences.mgba;
+    let ds = system == RomSystem::NintendoDs;
+    let mut mgba = if ds {
+        Default::default()
+    } else {
+        preferences.mgba
+    };
     // The correction models the GBA and GBC screens (one shared profile);
     // original Game Boy games keep their chosen palette.
     mgba.color_correction &= system != RomSystem::GameBoy;
@@ -235,12 +255,18 @@ fn play(
                 "Could not prepare the game's save folder. Existing files have been preserved."
                     .to_owned()
             })?;
-    let mut core = Core::load(
-        &paths.core,
+    let ds_directory = crate::platform::data_paths::ds_support_directory(&game_folder.directory);
+    if ds {
+        crate::services::game_storage::ensure_directory(&game_folder.directory, &ds_directory)
+            .map_err(|_| "Could not prepare DS core data")?;
+    }
+    let mut core = Core::load_system(
+        if ds { &paths.ds_core } else { &paths.core },
         &rom,
         mgba,
         Arc::clone(&audio),
         Arc::clone(&buttons),
+        ds_input.map(|input| (input, ds_directory.as_path())),
     )?;
     // Filtering runs beside the core, so it never slows the game down.
     struct Filter {
@@ -270,13 +296,20 @@ fn play(
         ),
     };
     let save_path = game_folder.save_path();
-    let mut last_save = read_save(&save_path)?.unwrap_or_default();
+    let mut last_save = read_save_bounded(&save_path, core.max_save_size())?.unwrap_or_default();
     if !last_save.is_empty() {
         core.restore_save(&last_save)?;
     }
+    // melonDS installs the frontend SRAM buffer on its first run. Complete
+    // that initialization before restoring a state, or it can overwrite the
+    // state's cartridge memory on the next frame.
+    if ds {
+        core.run_frame();
+        audio.clear();
+    }
     let states =
         crate::services::save_states::Store::new(game_folder.clone(), core.state_identity.clone());
-    if preferences.resume_last_state
+    if preferences.resume_last_state && core.supports_states()
         && let Some(snapshot) = states.latest().map_err(|_| "Saved states are unavailable or incompatible. Disable Resume last state in Settings to start normally. Existing states have been preserved.".to_owned())? {
             core.restore_state(&snapshot.bytes)?;
     }
@@ -413,6 +446,7 @@ fn play(
                         let stopping = matches!(command, Command::Stop);
                         if let Err(error) = if session.is_some() {
                             save_current(&core, &save_path, &mut last_save).and_then(|()| {
+                                if !core.supports_states() { return Ok(()); }
                                 let bytes=core.serialize_state()?;
                                 let frame=core.capture_frame()?;
                                 states.save(0,&bytes,&frame).map_err(|_| "Could not save the automatic resume point. Free storage or restore folder access, then retry.".to_owned())
@@ -550,7 +584,11 @@ fn write_screenshot(
     result
 }
 
+#[cfg(test)]
 fn read_save(path: &Path) -> Result<Option<Vec<u8>>, String> {
+    read_save_bounded(path, 128 * 1024)
+}
+fn read_save_bounded(path: &Path, maximum: usize) -> Result<Option<Vec<u8>>, String> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if !metadata.is_file() => {
             return Err("The existing save is not a regular file. It has been preserved.".into());
@@ -565,11 +603,11 @@ fn read_save(path: &Path) -> Result<Option<Vec<u8>>, String> {
                 .metadata()
                 .map_err(|_| "Could not inspect the existing save".to_owned())?
                 .len();
-            if size == 0 || size > 128 * 1024 {
+            if size == 0 || size > maximum as u64 {
                 return Err("The existing save is invalid. It has been preserved.".into());
             }
             let mut bytes = Vec::with_capacity(size as usize);
-            file.take(128 * 1024 + 1)
+            file.take(maximum as u64 + 1)
                 .read_to_end(&mut bytes)
                 .map_err(|_| "Could not read the existing save".to_owned())?;
             if bytes.len() as u64 != size {
@@ -586,12 +624,16 @@ fn save_current(core: &Core, path: &Path, last: &mut Vec<u8>) -> Result<(), Stri
     if bytes.is_empty() || bytes == *last {
         return Ok(());
     }
-    write_save(path, &bytes)?;
+    write_save_bounded(path, &bytes, core.max_save_size())?;
     *last = bytes;
     Ok(())
 }
+#[cfg(test)]
 pub fn write_save(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    if bytes.is_empty() || bytes.len() > 128 * 1024 {
+    write_save_bounded(path, bytes, 128 * 1024)
+}
+fn write_save_bounded(path: &Path, bytes: &[u8], maximum: usize) -> Result<(), String> {
+    if bytes.is_empty() || bytes.len() > maximum {
         return Err("Invalid game save size".into());
     }
     fn replace(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
@@ -615,7 +657,7 @@ pub fn write_save(path: &Path, bytes: &[u8]) -> Result<(), String> {
         }
         result
     }
-    if let Some(previous) = read_save(path)? {
+    if let Some(previous) = read_save_bounded(path, maximum)? {
         let backup =
             crate::platform::data_paths::save_backup_path(path).map_err(|e| e.to_string())?;
         let parent = path.parent().ok_or("The save has no directory")?;

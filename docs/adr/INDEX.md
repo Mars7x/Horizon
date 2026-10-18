@@ -28,6 +28,7 @@
 | [0213](0213-game-boy-display-options.md) | Game Boy palette, Super Game Boy border and GBC colour correction |
 | [0214](0214-screen-size-xbrz-and-display-paced-frames.md) | xBRZ resized to the screen, filtering on its own thread, frames paced to the display |
 | [0215](0215-deleted-games-leave-the-library.md) | Games deleted from the folder are retired, and return if their file does |
+| [0216](0216-nintendo-ds-playback.md) | Nintendo DS through the bundled melonDS DS core, in-process |
 
 Earlier decisions and their supporting phase notes are in
 [history](../history/INDEX.md). Their numbered identifiers remain reserved.

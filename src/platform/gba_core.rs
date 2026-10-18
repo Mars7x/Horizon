@@ -36,11 +36,22 @@ pub type DisplaySize = Arc<AtomicU64>;
 pub type LatestFrame = Arc<Mutex<Option<Presented>>>;
 pub type AudioBuffer = Arc<super::gba_audio::GameAudio>;
 
+/// Packed snapshots keep pointer and right-stick coordinates coherent across threads.
+#[derive(Default)]
+pub struct DsInput {
+    pub pointer: AtomicU64,
+    pub stick: AtomicU64,
+}
+
 struct Callbacks {
     audio: AudioBuffer,
     buttons: Arc<AtomicU16>,
     pixel_format: u32,
     preferences: MgbaPreferences,
+    ds: bool,
+    extra: Arc<DsInput>,
+    directory: Option<std::ffi::CString>,
+    options: std::collections::BTreeMap<Vec<u8>, std::ffi::CString>,
     /// The core's newest frame, unfiltered (screenshots and states use it).
     raw_frame: Option<Frame>,
     /// `raw_frame` has not been handed to the filter stage yet.
@@ -82,6 +93,7 @@ pub struct Core {
     serialize: unsafe extern "C" fn(*mut c_void, usize) -> bool,
     unserialize: unsafe extern "C" fn(*const c_void, usize) -> bool,
     pub state_identity: String,
+    ds: bool,
     run: unsafe extern "C" fn(),
     reset: unsafe extern "C" fn(),
     unload: unsafe extern "C" fn(),
@@ -93,6 +105,7 @@ pub struct Core {
 }
 
 impl Core {
+    #[cfg(test)]
     pub fn load(
         path: &Path,
         rom: &[u8],
@@ -100,10 +113,34 @@ impl Core {
         audio: AudioBuffer,
         buttons: Arc<AtomicU16>,
     ) -> Result<Self, String> {
+        Self::load_system(path, rom, preferences, audio, buttons, None)
+    }
+
+    pub fn load_system(
+        path: &Path,
+        rom: &[u8],
+        preferences: MgbaPreferences,
+        audio: AudioBuffer,
+        buttons: Arc<AtomicU16>,
+        extra: Option<(Arc<DsInput>, &Path)>,
+    ) -> Result<Self, String> {
+        let ds = extra.is_some();
+        let (extra, directory) = if let Some((input, path)) = extra {
+            use std::os::unix::ffi::OsStrExt;
+            (
+                input,
+                Some(
+                    std::ffi::CString::new(path.as_os_str().as_bytes())
+                        .map_err(|_| "Invalid core data directory")?,
+                ),
+            )
+        } else {
+            (Arc::default(), None)
+        };
         // SAFETY: only the application-packaged, pinned mGBA core is loaded;
         // the explicit development override is selected by data_paths.
         let library = unsafe { Library::new(path) }.map_err(|_| {
-            "The bundled mGBA core is unavailable. Rebuild Horizon with its core.".to_owned()
+            "The bundled emulator core is unavailable. Rebuild Horizon with its core.".to_owned()
         })?;
         // SAFETY: symbols use the libretro v1 C ABI. The library is retained.
         unsafe {
@@ -188,6 +225,7 @@ impl Core {
                 deinit: symbol(&library, b"retro_deinit\0")?,
                 memory: symbol(&library, b"retro_get_memory_data\0")?,
                 memory_size: symbol(&library, b"retro_get_memory_size\0")?,
+                ds,
                 _library: library,
                 av: AvInfo::default(),
                 frames: Arc::new(AtomicU64::new(0)),
@@ -198,6 +236,10 @@ impl Core {
                     buttons,
                     pixel_format: 0,
                     preferences,
+                    ds,
+                    extra,
+                    directory,
+                    options: Default::default(),
                     raw_frame: None,
                     fresh: false,
                     audio_speed: super::gba_audio::SpeedAudio::default(),
@@ -212,13 +254,17 @@ impl Core {
             set_input(input_state);
             init();
             let info = GameInfo {
-                path: ptr::null(),
+                path: if ds {
+                    c"game.nds".as_ptr()
+                } else {
+                    ptr::null()
+                },
                 data: rom.as_ptr().cast(),
                 size: rom.len(),
                 meta: ptr::null(),
             };
             if !load(&info) {
-                return Err("mGBA could not load this game".into());
+                return Err("The core could not load this game".into());
             }
             get_av(&mut core.av);
             if !core.av.fps.is_finite()
@@ -226,7 +272,7 @@ impl Core {
                 || !core.av.sample_rate.is_finite()
                 || !(8000.0..=96000.0).contains(&core.av.sample_rate)
             {
-                return Err("mGBA returned invalid playback timing".into());
+                return Err("The core returned invalid playback timing".into());
             }
             CALLBACKS.with(|state| {
                 if let Some(state) = state.borrow_mut().as_mut() {
@@ -236,10 +282,25 @@ impl Core {
             Ok(core)
         }
     }
+    pub fn supports_states(&self) -> bool {
+        // SAFETY: retained core on its worker.
+        let size = unsafe { (self.serialize_size)() };
+        size > 0 && size <= self.max_state_size()
+    }
+    fn max_state_size(&self) -> usize {
+        if self.ds {
+            64 * 1024 * 1024
+        } else {
+            16 * 1024 * 1024
+        }
+    }
+    pub fn max_save_size(&self) -> usize {
+        if self.ds { 8 * 1024 * 1024 } else { MAX_SAVE }
+    }
     pub fn serialize_state(&self) -> Result<Vec<u8>, String> {
         // SAFETY: libretro v1 symbols from the retained core, on its worker.
         let size = unsafe { (self.serialize_size)() };
-        if size == 0 || size > 16 * 1024 * 1024 {
+        if size == 0 || size > self.max_state_size() {
             return Err("The core returned an invalid state size".into());
         }
         let mut bytes = vec![0; size];
@@ -249,7 +310,7 @@ impl Core {
         Ok(bytes)
     }
     pub fn restore_state(&mut self, bytes: &[u8]) -> Result<(), String> {
-        if bytes.is_empty() || bytes.len() > 16 * 1024 * 1024 {
+        if bytes.is_empty() || bytes.len() > self.max_state_size() {
             return Err("Invalid saved state size".into());
         }
         let rollback = self.serialize_state()?;
@@ -316,7 +377,7 @@ impl Core {
         if regions
             .iter()
             .any(|&(data, size)| size > 0 && data.is_null())
-            || regions[0].1 + regions[1].1 > MAX_SAVE
+            || regions[0].1 + regions[1].1 > self.max_save_size()
         {
             return Err("mGBA returned invalid save memory".into());
         }
@@ -336,7 +397,7 @@ impl Core {
         let [(save, capacity), (clock, clock_size)] = self
             .save_regions()
             .ok()
-            .filter(|_| bytes.len() <= MAX_SAVE)
+            .filter(|_| bytes.len() <= self.max_save_size())
             .ok_or("The existing save does not fit this game. It has been preserved.")?;
         let (battery, rest) = bytes.split_at(bytes.len().min(capacity));
         if rest.len() > clock_size {
@@ -369,6 +430,48 @@ extern "C" fn environment(command: u32, data: *mut c_void) -> bool {
         return false;
     }
     match command {
+        9 | 31 => CALLBACKS.with(|state| {
+            let state = state.borrow();
+            let Some(directory) = state.as_ref().and_then(|s| s.directory.as_ref()) else {
+                return false;
+            };
+            // SAFETY: GET_SYSTEM_DIRECTORY / GET_SAVE_DIRECTORY provide a char**.
+            unsafe {
+                *data.cast::<*const c_char>() = directory.as_ptr();
+            }
+            true
+        }),
+        16 => CALLBACKS.with(|state| {
+            #[repr(C)]
+            struct Variable {
+                key: *const c_char,
+                value: *const c_char,
+            }
+            let mut state = state.borrow_mut();
+            let Some(state) = state.as_mut() else {
+                return false;
+            };
+            // SAFETY: the pinned core supplies a null-terminated variable array.
+            // Bound traversal, and copy values before returning to the core.
+            for index in 0..256 {
+                let entry = unsafe { &*data.cast::<Variable>().add(index) };
+                if entry.key.is_null() {
+                    return true;
+                }
+                if entry.value.is_null() {
+                    return false;
+                }
+                let key = unsafe { CStr::from_ptr(entry.key) }.to_bytes().to_vec();
+                let value = unsafe { CStr::from_ptr(entry.value) }.to_string_lossy();
+                if let Some((_, choices)) = value.split_once("; ")
+                    && let Some(first) = choices.split('|').next()
+                    && let Ok(value) = std::ffi::CString::new(first)
+                {
+                    state.options.insert(key, value);
+                }
+            }
+            false
+        }),
         // SET_PIXEL_FORMAT: accept software 0RGB1555, XRGB8888 and RGB565.
         10 => CALLBACKS.with(|state| {
             let Ok(mut state) = state.try_borrow_mut() else {
@@ -395,6 +498,14 @@ extern "C" fn environment(command: u32, data: *mut c_void) -> bool {
             if variable.key.is_null() {
                 return false;
             }
+            let key = CStr::from_ptr(variable.key).to_bytes();
+            let registered = CALLBACKS.with(|state| {
+                state
+                    .borrow()
+                    .as_ref()
+                    .and_then(|s| s.options.get(key))
+                    .map(|v| v.as_ptr())
+            });
             if CStr::from_ptr(variable.key).to_bytes() == b"mgba_use_bios" {
                 variable.value = c"OFF".as_ptr();
                 true
@@ -405,7 +516,24 @@ extern "C" fn environment(command: u32, data: *mut c_void) -> bool {
                 let value = CALLBACKS.with(|state| {
                     let state = state.borrow();
                     let preferences = state.as_ref()?.preferences;
-                    match CStr::from_ptr(variable.key).to_bytes() {
+                    let key = CStr::from_ptr(variable.key).to_bytes();
+                    if state.as_ref()?.ds {
+                        return match key {
+                            b"melonds_console_mode" => Some(c"ds"),
+                            b"melonds_sysfile_mode" => Some(c"builtin"),
+                            b"melonds_boot_mode" => Some(c"direct"),
+                            b"melonds_render_mode" => Some(c"software"),
+                            b"melonds_screen_layout1" => Some(c"top-bottom"),
+                            b"melonds_screen_gap" => Some(c"0"),
+                            b"melonds_number_of_screen_layouts" => Some(c"1"),
+                            b"melonds_touch_mode" => Some(c"auto"),
+                            b"melonds_network_mode"
+                            | b"melonds_homebrew_sdcard"
+                            | b"melonds_dsi_sdcard" => Some(c"disabled"),
+                            _ => None,
+                        };
+                    }
+                    match key {
                         b"mgba_audio_low_pass_filter" => Some(c"disabled"),
                         // The border turns the 160x144 picture into 256x224,
                         // for Super Game Boy games only; off unless chosen.
@@ -437,8 +565,11 @@ extern "C" fn environment(command: u32, data: *mut c_void) -> bool {
                         _ => None,
                     }
                 });
-                variable.value = value.map_or(ptr::null(), CStr::as_ptr);
-                value.is_some()
+                variable.value = value
+                    .map(CStr::as_ptr)
+                    .or(registered)
+                    .unwrap_or(ptr::null());
+                !variable.value.is_null()
             }
         },
         17 => {
@@ -453,13 +584,34 @@ extern "C" fn environment(command: u32, data: *mut c_void) -> bool {
             }
             true
         } // GET_CAN_DUPE
-        8 => true,                 // SET_PERFORMANCE_LEVEL (advisory)
-        16 | 18 | 11 | 35 => true, // options, input descriptors, no-game, controllers
-        _ => false,                // No disk/network/VFS/graphics/BIOS permissions supplied.
+        37 => true, // SET_GEOMETRY: software frames carry their actual dimensions.
+        8 => true,  // SET_PERFORMANCE_LEVEL (advisory)
+        18 | 11 | 35 => true, // options, input descriptors, no-game, controllers
+        _ => false, // No disk/network/VFS/graphics/BIOS permissions supplied.
     }
 }
 extern "C" fn input_poll() {}
 extern "C" fn input_state(port: u32, device: u32, index: u32, id: u32) -> i16 {
+    if port == 0 && ((device == 5 && index == 1 && id < 2) || (device == 6 && index == 0 && id < 3))
+    {
+        return CALLBACKS.with(|state| {
+            let state = state.borrow();
+            let Some(s) = state.as_ref().filter(|s| s.ds) else {
+                return 0;
+            };
+            let packed = if device == 5 {
+                &s.extra.stick
+            } else {
+                &s.extra.pointer
+            }
+            .load(Ordering::Acquire);
+            if id == 2 {
+                ((packed >> 32) & 1) as i16
+            } else {
+                (packed >> (id * 16)) as u16 as i16
+            }
+        });
+    }
     if port != 0 || device != 1 || index != 0 || id >= 16 {
         return 0;
     }
@@ -676,9 +828,97 @@ pub(crate) fn test_gb_toggling_rom() -> Vec<u8> {
     rom
 }
 
+/// Original, logo-free DS test program: two colored backdrops and idle ARM7.
+#[cfg(test)]
+pub(crate) fn test_ds_rom() -> Vec<u8> {
+    let mut rom = vec![0; 0x10000];
+    rom[..12].copy_from_slice(b"HORIZON TEST");
+    rom[12..16].copy_from_slice(b"####");
+    let header = [
+        (0x20, 0x200u32),
+        (0x24, 0x02000000),
+        (0x28, 0x02000000),
+        (0x2c, 0x100),
+        (0x30, 0x400),
+        (0x34, 0x03800000),
+        (0x38, 0x03800000),
+        (0x3c, 4),
+        (0x80, 0x10000),
+        (0x84, 0x200),
+    ];
+    for (offset, value) in header {
+        rom[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    // Write power control, both display controls, then distinct palette colors.
+    let writes = [
+        (0x04000304u32, 0x820fu32),
+        (0x04000000, 0x10000),
+        (0x04001000, 0x10000),
+        (0x05000000, 0x001f),
+        (0x05000400, 0x7c00),
+    ];
+    let mut words = Vec::new();
+    for (i, _) in writes.iter().enumerate() {
+        let pc = i * 12;
+        let literal = 64 + i * 8;
+        words.push(0xE59F0000u32 | (literal - pc - 8) as u32);
+        words.push(0xE59F1000u32 | (literal - pc - 8) as u32);
+        words.push(0xE5801000); // str r1,[r0]
+    }
+    words.push(0xEAFFFFFE); // b .
+    for (address, value) in writes {
+        words.extend([address, value]);
+    }
+    for (i, word) in words.into_iter().enumerate() {
+        rom[0x200 + i * 4..0x204 + i * 4].copy_from_slice(&word.to_le_bytes());
+    }
+    rom[0x400..0x404].copy_from_slice(&0xEAFFFFFEu32.to_le_bytes());
+    rom
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires the pinned melonDS DS shared library"]
+    fn real_ds_core_frames_states_and_restart() {
+        let path = std::env::var_os("HORIZON_DS_CORE").unwrap();
+        let rom = test_ds_rom();
+        let directory =
+            std::env::temp_dir().join(format!("horizon-ds-core-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let audio = Arc::new(super::super::gba_audio::GameAudio::default());
+        let mut core = Core::load_system(
+            Path::new(&path),
+            &rom,
+            MgbaPreferences::default(),
+            Arc::clone(&audio),
+            Arc::new(AtomicU16::new(0)),
+            Some((Arc::new(DsInput::default()), &directory)),
+        )
+        .unwrap();
+        for _ in 0..120 {
+            core.run_frame();
+            audio.clear();
+        }
+        let frame = core.capture_frame().unwrap();
+        assert_eq!((frame.width, frame.height), (256, 384));
+        assert!(frame.rgba[0] >= 248 && frame.rgba[1] == 0 && frame.rgba[2] == 0);
+        assert_eq!(&frame.rgba[256 * 192 * 4..256 * 192 * 4 + 2], &[0, 0]);
+        assert!(frame.rgba[256 * 192 * 4 + 2] >= 248);
+        assert!(core.frames.load(Ordering::Acquire) >= 120);
+        let state = core.serialize_state().unwrap();
+        core.run_frame();
+        core.restore_state(&state).unwrap();
+        core.restart();
+        for _ in 0..5 {
+            core.run_frame();
+        }
+        assert_eq!(core.capture_frame().unwrap().height, 384);
+        drop(core);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     #[ignore = "measurement; requires the built pinned mGBA core with Game Boy support"]

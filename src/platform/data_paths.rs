@@ -47,6 +47,25 @@ pub fn gba_core_path() -> PathBuf {
     }
 }
 
+pub fn ds_core_path() -> PathBuf {
+    if std::env::var("FLATPAK_ID").is_ok_and(|id| id == "io.github.Mars7x.Horizon") {
+        PathBuf::from("/app/lib/horizon/melondsds_libretro.so")
+    } else {
+        std::env::var_os("HORIZON_DS_CORE")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/usr/lib/horizon/melondsds_libretro.so"))
+    }
+}
+
+/// melonDS DS recognizes this final component and does not add another subfolder.
+pub fn ds_support_directory(game: &Path) -> PathBuf {
+    game.join("core-data/melonDS DS")
+}
+
+pub fn ds_state_core_directory(game: &Path) -> PathBuf {
+    game.join("states/melonds-ds")
+}
+
 pub fn gba_save_directory() -> Result<PathBuf, DataPathError> {
     Ok(app_dir(BaseDir::Data)?.join("saves"))
 }

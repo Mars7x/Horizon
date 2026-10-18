@@ -35,7 +35,7 @@ impl GameSource for CartridgeSource {
             .as_str()
             .strip_prefix("sha256:")
             .filter(|hash| hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
-            .map(|hash| SourceLaunchTarget::EmbeddedMgba {
+            .map(|hash| SourceLaunchTarget::EmbeddedCartridge {
                 system: self.system,
                 sha256: hash.to_owned(),
             }))

@@ -10,6 +10,10 @@ REVISION = "9a899f5b13ed1c355491e342203be29bc573323b"
 # Each input is verified before parsing; updates require reviewing a new
 # upstream snapshot. Keys are the catalog names in data/catalogs.
 SYSTEMS = {
+    "nds": (
+        "Nintendo - Nintendo DS",
+        "0b3d7f233cdc14e13552fbf721edde3b57b8e9b54a68e3baf8689672a3c8f6e1",
+    ),
     "gba": (
         "Nintendo - Game Boy Advance",
         "0b8bd3a414276e9c31137b0a245fcdaf917d34fd035e02499c965a290ac8fce4",

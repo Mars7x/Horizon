@@ -64,8 +64,8 @@ impl SourceArtworkCandidate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceLaunchTarget {
     Uri(String),
-    /// A verified cartridge, played in-process by the bundled mGBA core.
-    EmbeddedMgba {
+    /// A verified cartridge, played in-process by its approved bundled core.
+    EmbeddedCartridge {
         system: gba::recognition::RomSystem,
         sha256: String,
     },
@@ -531,8 +531,8 @@ mod tests {
     fn production_registry_has_no_external_game_sources() {
         let registry = production_source_registry().expect("production registry");
 
-        assert_eq!(registry.len(), 3);
-        for id in ["gb", "gbc", "gba"] {
+        assert_eq!(registry.len(), 4);
+        for id in ["gb", "gbc", "gba", "nds"] {
             assert!(registry.get(&source_id(id)).is_some());
         }
         assert!(registry.get(&source_id("flatpak")).is_none());

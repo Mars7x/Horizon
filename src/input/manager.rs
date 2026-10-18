@@ -130,6 +130,20 @@ impl InputManager {
         self.gamepad_input.as_ref()?.gameplay_snapshot()
     }
 
+    pub fn ds_input(&self) -> (u16, i16, i16) {
+        let Some(input) = self.gamepad_input.as_ref() else {
+            return (0, 0, 0);
+        };
+        let (x, y) = input.ds_stick();
+        // DS has four face buttons. Keep their fixed assignments independent
+        // of the six-action mGBA mapping; global confirm/back swap still applies.
+        (
+            gameplay_mapping(input.gameplay_buttons(), self.swap_confirm.get()),
+            x,
+            y,
+        )
+    }
+
     pub fn gameplay_buttons(&self) -> u16 {
         let buttons = self
             .gamepad_input

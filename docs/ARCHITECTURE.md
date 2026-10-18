@@ -2,7 +2,9 @@
 
 Horizon keeps behavior in Rust and rendering in Slint. The first approved host is
 an in-process mGBA libretro worker, scoped to mGBA's systems (Game Boy, Game Boy
-Color and GBA) rather than a permanent multi-core framework.
+Color and GBA). Nintendo DS uses the separately approved melonDS DS core on
+the same worker; this remains a narrow two-core host rather than a plugin framework.
+[ADR 0216](adr/0216-nintendo-ds-playback.md) records the DS hosting review.
 [ADR 0198](adr/0198-first-gba-playback.md) and
 [ADR 0209](adr/0209-game-boy-and-game-boy-color.md) record the decision.
 

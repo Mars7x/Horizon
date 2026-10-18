@@ -134,3 +134,10 @@ continue to be used. Existing files remain untouched; the new database starts
 an independent library/setup.
 SQL schema remains 12 and deployed migrations remain immutable. This is not
 permission to delete old data. See [ADR 0205](adr/0205-human-readable-storage.md).
+
+Nintendo DS uses the same game-named cartridge save layout, with states under
+`states/melonds-ds` instead of `states/mgba`. State metadata identifies the core
+and release, preventing cross-core loads. Both DS screens are retained in the
+256×384 JXL preview. No migration or deletion of existing game data is performed.
+
+Generated DS support files stay under each game’s `core-data/melonDS DS` folder.

@@ -2,11 +2,12 @@
 
 Horizon is an early-development Rust/Slint Linux desktop Flatpak. Its approved
 direction is embedded emulator cores. Game folder selection automatically scans and imports
-supported files: Game Boy, Game Boy Color and Game Boy Advance. Bundled offline
+supported files: Game Boy, Game Boy Color, Game Boy Advance and Nintendo DS. Bundled offline
 hash catalogs provide exact title recognition, with unverified filename fallbacks
 for unknown files. Existing local XML catalogs remain supported. Imported games
-launch in Horizon using a bundled mGBA libretro core on an in-process worker. See
-[playback](GBA_PLAYBACK.md). BIOS management, other cores and a permanent
+launch in Horizon using bundled mGBA (GB/GBC/GBA) and melonDS DS (DS) libretro
+cores on an in-process worker. See
+[playback](GBA_PLAYBACK.md). BIOS management, DSi, further cores and a permanent
 multi-system hosting API remain unimplemented.
 
 First launch presents [Welcome/Profile setup](ONBOARDING.md), then optional game

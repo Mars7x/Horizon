@@ -226,6 +226,7 @@ pub fn run() -> Result<(), AppError> {
         crate::services::gba_player::PlayerPaths {
             database: database_path.clone(),
             core: data_paths::gba_core_path(),
+            ds_core: crate::platform::data_paths::ds_core_path(),
             saves: data_paths::gba_save_directory()?,
             settings: data_paths::core_settings_paths()?,
             album: data_paths::album_dir()?,
@@ -644,6 +645,8 @@ pub fn run() -> Result<(), AppError> {
     );
     let gameplay_input = Rc::clone(&input);
     player.set_gamepads(Rc::new(move || gameplay_input.gameplay_buttons()));
+    let ds_input = Rc::clone(&input);
+    player.set_ds_gamepad(Rc::new(move || ds_input.ds_input()));
     {
         let (home, library, weak) = (
             Rc::clone(&home),
