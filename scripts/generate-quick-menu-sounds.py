@@ -120,12 +120,17 @@ def note(since: float, tone: float, gain: float, decay: float) -> float:
 
 
 def confirm() -> bytes:
-    """OK: the warm snap with a clear A6 note."""
-    noise = Noise(121, 0.4)
+    """OK: two quick warm snaps ("tk-tk"), the second carrying a short A6 note."""
+    noise = Noise(307, 0.4)
     samples = []
-    for frame in range(round(0.05 * RATE)):
+    for frame in range(round(0.06 * RATE)):
         time = frame / RATE
-        samples.append(warm_snap(time, noise.next()) + note(time, 1760.0, 0.9, 0.012))
+        texture = noise.next()
+        second = time - 0.016
+        value = 0.8 * warm_snap(time, texture)
+        if second >= 0:
+            value += warm_snap(second, texture) + note(second, 1760.0, 0.7, 0.012)
+        samples.append(value)
     fade = int(0.006 * RATE)
     for index in range(fade):
         samples[-1 - index] *= index / fade

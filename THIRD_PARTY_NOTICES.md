@@ -347,11 +347,11 @@ only on explicit Save; key content and clipboard data must not be logged.
 - **Source:** `scripts/generate-quick-menu-sounds.py` synthesizes the original
   latch pair (two soft clicks each: a decaying sine tone plus a burst of seeded,
   low-passed noise), the navigation snap (a warm, soft-edged transient with a
-  short body), OK (the same warm snap with a short A6 note), Back (the warm
+  short body), OK (two quick warm snaps, the second with a short A6 note), Back (the warm
   snap with two quick notes stepping down, E6 to A5), the launch (a low swelling tone) and the shutter
   (one tight click and a short second click), using Python's standard library,
   with no recordings, external samples or third-party synthesis. PCM16 mono,
-  48 kHz; navigation and OK 50 ms, Back 70 ms, menu 90 ms each, launch 150 ms,
+  48 kHz; navigation 50 ms, OK 60 ms, Back 70 ms, menu 90 ms each, launch 150 ms,
   shutter 60 ms. The owner-supplied navigation, OK and Back WAVs these replace
   were retired at the owner's request on 2026-10-17.
 - **Use:** Focus movement, confirmation and back/dismissal, actual quick-menu
