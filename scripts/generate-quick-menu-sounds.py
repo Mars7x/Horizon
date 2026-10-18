@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Generate Horizon's original UI cues: navigation, quick menu, launch and
-screenshot (stdlib only). OK and Back are owner-supplied recordings.
+screenshot, OK and Back (stdlib only).
 
 SPDX-FileCopyrightText: Horizon contributors
 SPDX-License-Identifier: GPL-3.0-or-later
@@ -103,6 +103,43 @@ def navigation() -> bytes:
     return encode_level(samples)
 
 
+def confirm() -> bytes:
+    """OK: a crisp snap blended with a clear A6 note."""
+    noise = Noise(121, 0.75)
+    tone = 1760.0
+    samples = []
+    for frame in range(round(0.05 * RATE)):
+        time = frame / RATE
+        texture = noise.next()
+        snap = 0.5 * texture * math.exp(-time / 0.0008) + math.sin(2 * math.pi * 4200 * time) * math.exp(-time / 0.0025)
+        note = 0.9 * math.sin(2 * math.pi * tone * time) * min(1.0, time / 0.001) * math.exp(-time / 0.012)
+        samples.append(snap + note)
+    fade = int(0.004 * RATE)
+    for index in range(fade):
+        samples[-1 - index] *= index / fade
+    return encode_level(samples)
+
+
+def back() -> bytes:
+    """Back: OK's crisp snap with two quick notes stepping down (E6 to A5), so it
+    shares OK's family but moves the other way."""
+    noise = Noise(203, 0.75)
+    samples = []
+    for frame in range(round(0.07 * RATE)):
+        time = frame / RATE
+        texture = noise.next()
+        snap = 0.5 * texture * math.exp(-time / 0.0008) + math.sin(2 * math.pi * 4200 * time) * math.exp(-time / 0.0025)
+        first = 0.7 * math.sin(2 * math.pi * 1318.5 * time) * min(1.0, time / 0.001) * math.exp(-time / 0.008)
+        since = time - 0.022
+        second = (0.9 * math.sin(2 * math.pi * 880.0 * since) * min(1.0, since / 0.001) * math.exp(-since / 0.014)
+                  if since >= 0 else 0.0)
+        samples.append(snap + first + second)
+    fade = int(0.004 * RATE)
+    for index in range(fade):
+        samples[-1 - index] *= index / fade
+    return encode_level(samples)
+
+
 def launch() -> bytes:
     """A crisp onset over a smooth, low "whoom" that swells and settles with
     the card's zoom into the game."""
@@ -144,6 +181,8 @@ def main() -> None:
     parser.add_argument("--check", action="store_true", help="verify bundled bytes without writing")
     args = parser.parse_args()
     for name, data in [("horizon-navigation", navigation()),
+                       ("horizon-ok", confirm()),
+                       ("horizon-back", back()),
                        ("horizon-launch", launch()),
                        ("horizon-quick-menu-open", cue(True)),
                        ("horizon-quick-menu-close", cue(False)),
