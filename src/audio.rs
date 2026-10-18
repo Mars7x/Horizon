@@ -36,10 +36,14 @@ const LAUNCH_WAV: &[u8] = include_bytes!("../ui/assets/horizon-launch.wav");
 const CUE_COUNT: usize = 7;
 
 /// Every cue plays at one standard loudness, whatever level its file has:
-/// its loudest 30 ms is brought to about -20 dBFS (typical for short UI
-/// sounds), and its peak never above -4 dBFS. Files stay as supplied.
-const LOUDNESS_TARGET: f32 = 0.1;
-const PEAK_CEILING: f32 = 0.63;
+/// its loudest 30 ms is brought to about -26 dBFS, and its peak never above
+/// -10 dBFS, so cues stay clearly below game audio.
+const LOUDNESS_TARGET: f32 = 0.05;
+const PEAK_CEILING: f32 = 0.316;
+/// Per-cue adjustment after levelling, in `UiSoundCue::index` order.
+/// Navigation plays on every focus move, many times a second when a
+/// direction is held, so it sits about 7 dB below the decisions.
+const CUE_TRIM: [f32; CUE_COUNT] = [0.45, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
 const LOUDNESS_WINDOW: usize = 1440;
 const CANCEL_CUE: u8 = u8::MAX;
 
@@ -118,7 +122,7 @@ pub struct UiSounds {
 impl UiSounds {
     pub fn new(enabled: bool) -> Self {
         // A malformed bundled asset is a packaging error, not a user's runtime error.
-        let samples = [
+        let files = [
             NAVIGATION_WAV,
             OK_WAV,
             BACK_WAV,
@@ -126,15 +130,19 @@ impl UiSounds {
             MENU_CLOSE_WAV,
             SCREENSHOT_WAV,
             LAUNCH_WAV,
-        ]
-        .map(|wav| {
-            level(
-                decode_pcm16_mono_48k(wav)
+        ];
+        let samples = std::array::from_fn(|index| {
+            let mut samples = level(
+                decode_pcm16_mono_48k(files[index])
                     .expect("bundled Horizon UI WAV must be PCM16 mono 48 kHz")
                     .into_iter()
                     .map(|sample| f32::from(sample) / 32_768.0)
                     .collect(),
-            )
+            );
+            for sample in &mut samples {
+                *sample *= CUE_TRIM[index];
+            }
+            samples
         });
         Self {
             enabled,
@@ -366,8 +374,8 @@ mod tests {
     fn all_cues_are_valid_pcm() {
         for (cue, wav, frames) in [
             (UiSoundCue::Navigation, NAVIGATION_WAV, 2400),
-            (UiSoundCue::Ok, OK_WAV, 9120),
-            (UiSoundCue::Back, BACK_WAV, 6306),
+            (UiSoundCue::Ok, OK_WAV, 2400),
+            (UiSoundCue::Back, BACK_WAV, 2400),
             (UiSoundCue::QuickMenuOpen, MENU_OPEN_WAV, 4320),
             (UiSoundCue::QuickMenuClose, MENU_CLOSE_WAV, 4320),
             (UiSoundCue::Screenshot, SCREENSHOT_WAV, 2880),
@@ -399,7 +407,8 @@ mod tests {
     #[test]
     fn every_cue_plays_at_the_same_loudness_without_clipping() {
         let sounds = UiSounds::new(true);
-        for samples in sounds.samples.iter() {
+        assert!(CUE_TRIM[UiSoundCue::Navigation.index()] < 1.0);
+        for (samples, trim) in sounds.samples.iter().zip(CUE_TRIM) {
             let window = LOUDNESS_WINDOW.min(samples.len());
             let loudest = samples
                 .windows(window)
@@ -407,10 +416,12 @@ mod tests {
                 .map(|part| (part.iter().map(|s| s * s).sum::<f32>() / window as f32).sqrt())
                 .fold(0.0f32, f32::max);
             let peak = samples.iter().fold(0.0f32, |peak, s| peak.max(s.abs()));
-            // At the target, unless the peak ceiling holds a very spiky cue back.
-            assert!(peak <= PEAK_CEILING + 1e-4, "peak {peak}");
+            // At the target (with its trim), unless the peak ceiling holds a
+            // very spiky cue back.
+            let (target, ceiling) = (LOUDNESS_TARGET * trim, PEAK_CEILING * trim);
+            assert!(peak <= ceiling + 1e-4, "peak {peak}");
             assert!(
-                (loudest - LOUDNESS_TARGET).abs() < 1e-3 || (peak - PEAK_CEILING).abs() < 1e-4,
+                (loudest - target).abs() < 1e-3 || (peak - ceiling).abs() < 1e-4,
                 "loudest {loudest}, peak {peak}"
             );
         }
