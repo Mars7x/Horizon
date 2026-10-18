@@ -644,6 +644,21 @@ pub fn run() -> Result<(), AppError> {
     );
     let gameplay_input = Rc::clone(&input);
     player.set_gamepads(Rc::new(move || gameplay_input.gameplay_buttons()));
+    {
+        let (home, library, weak) = (
+            Rc::clone(&home),
+            Rc::clone(&library_controller),
+            ui.as_weak(),
+        );
+        player.set_selected_game(Rc::new(move || {
+            let ui = weak.upgrade()?;
+            if ui.get_current_route() == crate::AppRouteView::Library {
+                library.selected_game_id()
+            } else {
+                home.selected_game_id()
+            }
+        }));
+    }
     let window_active = Rc::new(Cell::new(true));
     let player_sound = Rc::clone(&navigation_sound);
     let player_active = Rc::clone(&window_active);

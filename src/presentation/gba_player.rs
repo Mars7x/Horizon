@@ -63,6 +63,9 @@ pub struct GbaPlayer {
     keyboard: Cell<u16>,
     pad_ready: Cell<bool>,
     gamepads: CallbackSlot<dyn Fn() -> u16>,
+    selected_game: CallbackSlot<dyn Fn() -> Option<i64>>,
+    /// The game whose card launched this session.
+    launched_game: Cell<Option<i64>>,
     sound: CallbackSlot<dyn Fn(UiSoundCue)>,
     timer: Timer,
     closing: Cell<bool>,
@@ -99,6 +102,8 @@ impl GbaPlayer {
             keyboard: Cell::new(0),
             pad_ready: Cell::new(false),
             gamepads: RefCell::new(None),
+            selected_game: RefCell::new(None),
+            launched_game: Cell::new(None),
             sound: RefCell::new(None),
             timer: Timer::default(),
             closing: Cell::new(false),
@@ -165,6 +170,17 @@ impl GbaPlayer {
     }
     pub fn set_gamepads(&self, source: Rc<dyn Fn() -> u16>) {
         *self.gamepads.borrow_mut() = Some(source);
+    }
+    /// The game whose card is selected on the current page, so a return can
+    /// tell whether the card it launched from is still there.
+    pub fn set_selected_game(&self, source: Rc<dyn Fn() -> Option<i64>>) {
+        *self.selected_game.borrow_mut() = Some(source);
+    }
+    fn selected_game(&self) -> Option<i64> {
+        self.selected_game
+            .borrow()
+            .as_ref()
+            .and_then(|source| source())
     }
     pub fn is_open(&self) -> bool {
         self.ui.upgrade().is_some_and(|ui| ui.get_player_open())
@@ -698,12 +714,25 @@ impl GbaPlayer {
             self.finish_close(ui);
             return;
         }
-        if ui.get_current_route() == crate::AppRouteView::Library {
-            ui.set_library_launching_index(ui.get_library_selected_index());
+        // The game can leave the library while it runs (its file deleted):
+        // then fade out in place rather than shrink into another game's card.
+        let card_remains =
+            self.launched_game.get().is_some() && self.selected_game() == self.launched_game.get();
+        if !card_remains {
+            ui.set_player_origin(crate::CardRect {
+                x: 0.0,
+                y: 0.0,
+                width: 1.0,
+                height: 1.0,
+            });
         } else {
-            ui.set_launching_game_index(ui.get_selected_index());
+            if ui.get_current_route() == crate::AppRouteView::Library {
+                ui.set_library_launching_index(ui.get_library_selected_index());
+            } else {
+                ui.set_launching_game_index(ui.get_selected_index());
+            }
+            ui.set_player_origin(ui.invoke_player_capture_origin());
         }
-        ui.set_player_origin(ui.invoke_player_capture_origin());
         self.close_pause(ui);
         self.set_stage(ui, PlayerStage::Exiting);
         self.timer.restart();
@@ -1062,6 +1091,7 @@ impl LaunchExecutor for GbaPlayer {
                 RunningGame::start(self.paths.clone(), *system, sha256.clone(), frame_ready)?;
             publish_display(&ui, Some(&running));
             *self.running.borrow_mut() = Some(running);
+            self.launched_game.set(self.selected_game());
             ui.set_player_origin(ui.invoke_player_capture_origin());
             self.set_stage(&ui, PlayerStage::Waiting);
             self.closing.set(false);
@@ -1163,6 +1193,152 @@ mod runtime_tests {
         },
     };
     use std::path::PathBuf;
+    /// The playing game's file is deleted and the library retires it: Return
+    /// to Horizon fades out in place instead of shrinking into another card.
+    #[test]
+    #[ignore = "requires Wayland, PipeWire, built mGBA core and HORIZON_GBA_TEST_DIR"]
+    fn real_player_returns_in_place_when_its_game_left_the_library() {
+        let directory = PathBuf::from(std::env::var_os("HORIZON_GBA_TEST_DIR").unwrap());
+        std::fs::create_dir_all(&directory).unwrap();
+        let playing = directory.join("Playing.gba");
+        std::fs::write(&playing, crate::platform::gba_core::test_rom()).unwrap();
+        let mut other = crate::platform::gba_core::test_rom();
+        other[1023] = 1;
+        std::fs::write(directory.join("Other.gba"), other).unwrap();
+        let database = directory.join("library.sqlite3");
+        let mut repository = SqliteLibraryRepository::open(&database).unwrap();
+        let scan = rom_import::scan_folder(&directory, None).unwrap();
+        repository
+            .save_rom_import(&RomSetup::default(), &scan.candidates)
+            .unwrap();
+        let games = repository.list_games().unwrap();
+        let launched = games
+            .iter()
+            .find(|g| g.game().title().as_str() == "Playing")
+            .unwrap()
+            .game()
+            .id();
+        let core_paths = crate::platform::data_paths::CoreSettingsPaths {
+            playback: directory.join("playback.json"),
+            mgba: directory.join("cores/mgba.json"),
+        };
+        let preferences = crate::domain::core_settings::CorePreferences {
+            resume_last_state: false,
+            ..Default::default()
+        };
+        crate::persistence::core_settings::CoreSettingsStore::new(core_paths.clone())
+            .write_fixture(preferences);
+        let ui = AppWindow::new().unwrap();
+        let player = GbaPlayer::new(
+            &ui,
+            PlayerPaths {
+                database: database.clone(),
+                core: std::env::var_os("HORIZON_GBA_CORE").unwrap().into(),
+                saves: directory.join("saves"),
+                settings: core_paths,
+                album: directory.join("album"),
+            },
+        );
+        let catalog = crate::presentation::catalog::Catalog::shared(games);
+        let registry = Rc::new(crate::sources::production_source_registry().unwrap());
+        let artwork =
+            crate::services::artwork::ArtworkService::new(Rc::clone(&registry), None, None);
+        let activity = Rc::new(crate::services::activity::ActivityService::new(Rc::new(
+            RefCell::new(repository),
+        )));
+        let launch = Rc::new(crate::services::launch::GameLaunchService::new(
+            Rc::clone(&registry),
+            player.clone(),
+        ));
+        let home = crate::presentation::home::HomeController::new(
+            &ui,
+            Rc::clone(&catalog),
+            &[launched],
+            &artwork,
+            &registry,
+            launch,
+            activity,
+        );
+        let selected = Rc::clone(&home);
+        player.set_selected_game(Rc::new(move || selected.selected_game_id()));
+        ui.show().unwrap();
+        assert_eq!(home.selected_game_id(), Some(launched.get()));
+        home.handle_action(&ui, UiActionEvent::fresh(UiAction::Accept));
+        assert!(ui.get_player_open());
+        let step = Rc::new(Cell::new(0));
+        let started = Instant::now();
+        let shot = Rc::new(RefCell::new(None));
+        let (live, progress, capture) = (Rc::clone(&player), Rc::clone(&step), Rc::clone(&shot));
+        let folder = directory.clone();
+        let weak = ui.as_weak();
+        let timer = Timer::default();
+        timer.start(TimerMode::Repeated, Duration::from_millis(20), move || {
+            let ui = weak.upgrade().unwrap();
+            assert!(
+                started.elapsed() < Duration::from_secs(20),
+                "stuck at {}",
+                progress.get()
+            );
+            match progress.get() {
+                0 if ui.get_player_phase() == 2 && ui.get_player_has_frame() => {
+                    // Deleted while playing; the next folder check retires it.
+                    std::fs::remove_file(&playing).unwrap();
+                    let mut repository = SqliteLibraryRepository::open(&database).unwrap();
+                    let seen = [folder.join("Other.gba")].into_iter().collect();
+                    assert_eq!(
+                        repository.retire_missing_rom_files(&folder, &seen).unwrap(),
+                        1
+                    );
+                    let changes = catalog.borrow_mut().merge(repository.list_games().unwrap());
+                    assert_eq!(changes.removed.len(), 1);
+                    home.catalog_changed(
+                        &ui,
+                        &changes,
+                        &artwork,
+                        &registry,
+                        crate::services::settings::ArtworkPreferences {
+                            api_key: None,
+                            prefer_steamgriddb: false,
+                        },
+                        &[],
+                    );
+                    assert_ne!(home.selected_game_id(), Some(launched.get()));
+                    live.choose(RETURN_TO_HORIZON);
+                    progress.set(1);
+                }
+                1 if ui.get_player_phase() == 3 => {
+                    let origin = ui.get_player_origin();
+                    assert_eq!(
+                        (origin.x, origin.y, origin.width, origin.height),
+                        (0.0, 0.0, 1.0, 1.0)
+                    );
+                    assert_eq!(ui.get_launching_game_index(), -1);
+                    progress.set(2);
+                }
+                2 if ui.get_player_visual_progress() < 0.6 && capture.borrow().is_none() => {
+                    *capture.borrow_mut() = Some(ui.window().take_snapshot().unwrap());
+                }
+                2 if !ui.get_player_open() => {
+                    progress.set(3);
+                    slint::quit_event_loop().unwrap();
+                }
+                _ => {}
+            }
+        });
+        slint::run_event_loop().unwrap();
+        assert_eq!(step.get(), 3);
+        if let Some(pixels) = shot.borrow().as_ref() {
+            image::save_buffer(
+                directory.join("fading-out.png"),
+                pixels.as_bytes(),
+                pixels.width(),
+                pixels.height(),
+                image::ColorType::Rgba8,
+            )
+            .unwrap();
+        }
+    }
+
     /// Frames shown per second at 1× and 4×, in a real window (default
     /// 3440×1440) with the chosen filter (default Smooth pixel art).
     #[test]

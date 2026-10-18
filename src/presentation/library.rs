@@ -325,6 +325,11 @@ impl LibraryController {
         self.publish(ui);
     }
 
+    /// The selected card's game, if any.
+    pub fn selected_game_id(&self) -> Option<i64> {
+        self.selection_game_id()
+    }
+
     fn selection_game_id(&self) -> Option<i64> {
         let s = self.state.borrow();
         s.order

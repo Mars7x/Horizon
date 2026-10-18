@@ -513,6 +513,13 @@ impl HomeController {
         self.state.borrow().selected_index
     }
 
+    /// The selected card's game, if it is a game (not the Library tile).
+    pub fn selected_game_id(&self) -> Option<i64> {
+        let selected = usize::try_from(self.state.borrow().selected_index).ok()?;
+        let index = *self.home_order.borrow().get(selected)?;
+        Some(self.catalog.borrow().get(index)?.game().id().get())
+    }
+
     /// Reset Home to its canonical global-Home destination: the first game.
     pub fn reset_for_global_home(&self, ui: &AppWindow) {
         self.clear_launch_feedback(ui);

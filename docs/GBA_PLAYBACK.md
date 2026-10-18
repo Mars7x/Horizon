@@ -32,7 +32,9 @@ in its original aspect ratio; black bars grow with its surface. The origin uses
 the live carousel/grid camera and scales with the window.
 
 Return to Horizon keeps the last frame visible while saving. Only a successful stop
-starts the reverse 230 ms collapse; the card rebounds as the shell regains input.
+starts the reverse 230 ms collapse; the card rebounds as the shell regains input. If the
+game left the library while it ran (its file deleted), its card is gone, so the
+picture fades out in place over the same 230 ms instead, without a card rebound.
 A save error stays paused with retry available. Input is consumed throughout
 both handoffs. Reduced Motion skips hold/zoom. Closing the application waits for
 saving and skips the decorative return animation.
