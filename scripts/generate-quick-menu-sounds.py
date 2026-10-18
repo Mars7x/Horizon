@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Generate Horizon's original UI cues: navigation, OK, Back, quick menu, launch
-and screenshot (stdlib only).
+"""Generate Horizon's original UI cues: navigation, quick menu, launch and
+screenshot (stdlib only). OK and Back are owner-supplied recordings.
 
 SPDX-FileCopyrightText: Horizon contributors
 SPDX-License-Identifier: GPL-3.0-or-later
@@ -85,33 +85,19 @@ class Noise:
 
 
 def navigation() -> bytes:
-    """A tight, dry snap: a sharp transient with a very short body."""
-    noise = Noise(65, 0.75)
+    """A warm, soft-edged snap. Its ring sits at 2.6 kHz, below the 3-5 kHz band
+    ears are most sensitive to, and its first half millisecond is softened, so
+    it stays comfortable on every focus move."""
+    noise = Noise(65, 0.4)
     samples = []
     for frame in range(round(0.05 * RATE)):
         time = frame / RATE
         texture = noise.next()
-        snap = 0.5 * texture * math.exp(-time / 0.0008) + math.sin(2 * math.pi * 4200 * time) * math.exp(-time / 0.0025)
-        body = 0.35 * math.sin(2 * math.pi * 900 * time) * math.exp(-time / 0.006) * min(1.0, time / 0.001)
-        samples.append(snap + body)
+        edge = min(1.0, time / 0.0005)
+        snap = 0.35 * texture * math.exp(-time / 0.0008) + math.sin(2 * math.pi * 2600 * time) * math.exp(-time / 0.0022)
+        body = 0.45 * math.sin(2 * math.pi * 850 * time) * math.exp(-time / 0.006) * min(1.0, time / 0.001)
+        samples.append(edge * (snap + body))
     fade = int(0.006 * RATE)
-    for index in range(fade):
-        samples[-1 - index] *= index / fade
-    return encode_level(samples)
-
-
-def confirm(ok: bool) -> bytes:
-    """The navigation snap blended with a clear note: A6 for OK, D6 for Back."""
-    noise = Noise(121 if ok else 122, 0.75)
-    tone = 1760.0 if ok else 1174.7
-    samples = []
-    for frame in range(round(0.05 * RATE)):
-        time = frame / RATE
-        texture = noise.next()
-        snap = 0.5 * texture * math.exp(-time / 0.0008) + math.sin(2 * math.pi * 4200 * time) * math.exp(-time / 0.0025)
-        note = 0.9 * math.sin(2 * math.pi * tone * time) * min(1.0, time / 0.001) * math.exp(-time / 0.012)
-        samples.append(snap + note)
-    fade = int(0.004 * RATE)
     for index in range(fade):
         samples[-1 - index] *= index / fade
     return encode_level(samples)
@@ -158,8 +144,6 @@ def main() -> None:
     parser.add_argument("--check", action="store_true", help="verify bundled bytes without writing")
     args = parser.parse_args()
     for name, data in [("horizon-navigation", navigation()),
-                       ("horizon-ok", confirm(True)),
-                       ("horizon-back", confirm(False)),
                        ("horizon-launch", launch()),
                        ("horizon-quick-menu-open", cue(True)),
                        ("horizon-quick-menu-close", cue(False)),

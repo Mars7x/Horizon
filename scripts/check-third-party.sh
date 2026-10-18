@@ -6,8 +6,6 @@ notice="$root/THIRD_PARTY_NOTICES.md"
 
 required_assets=(
   "horizon-navigation.wav"
-  "horizon-ok.wav"
-  "horizon-back.wav"
   "horizon-launch.wav"
   "horizon-quick-menu-open.wav"
   "horizon-quick-menu-close.wav"
