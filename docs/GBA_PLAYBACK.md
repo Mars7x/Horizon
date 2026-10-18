@@ -80,6 +80,18 @@ The game worker publishes atomic stereo frames to a bounded queue; PipeWire does
 not lock against core filtering or allocate. Playback builds about 31 ms of
 headroom on startup and after a real underrun (anything queued beyond that before
 the first sample is heard is trimmed), with short ramps at audio boundaries.
+Each frame waits as long as the audio it produced lasts (averaged over about 32
+frames), not a fixed frame interval, plus a gentle correction of at most 5% from
+how full the queue is. GBA frames are all one length, but a Game Boy frame is
+shorter or longer whenever a game switches its screen off or on (common while
+loading), and mGBA hands Game Boy audio over in 512-frame blocks; pacing by
+frames made such games run up to ~9% fast in audio terms and drop samples, and
+the uneven blocks emptied the queue just after launch. `real_core_audio_drift_at_normal_speed`
+with `HORIZON_AUDIO_DRIFT_ROM=gb` or `gb-toggle` measures both.
+The player logs a warning whenever, in a 5-second window, the output ran dry (an
+audible gap) or samples were dropped at the limit, and an info summary of both
+when the game closes; deliberate clears (speed changes, state loads) are not
+counted. Run `flatpak run io.github.Mars7x.Horizon` from a terminal to see them.
 The core is paced by the system clock and the output device by its own, which
 differ slightly (about 15 ppm measured on a Ryzen desktop). The reader keeps the
 queue's average in a steady band by skipping or repeating a single sample now and

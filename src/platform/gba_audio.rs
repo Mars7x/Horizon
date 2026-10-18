@@ -17,6 +17,10 @@ pub struct GameAudio {
     limit: AtomicUsize,
     epoch: AtomicU64,
     paused: AtomicBool,
+    /// Times the output ran dry and had to rebuild headroom (an audible gap).
+    gaps: AtomicU64,
+    /// Stereo frames evicted unheard because the queue was full.
+    dropped: AtomicU64,
 }
 impl Default for GameAudio {
     fn default() -> Self {
@@ -27,6 +31,8 @@ impl Default for GameAudio {
             limit: AtomicUsize::new(32768 / 20),
             epoch: AtomicU64::new(0),
             paused: AtomicBool::new(false),
+            gaps: AtomicU64::new(0),
+            dropped: AtomicU64::new(0),
         }
     }
 }
@@ -62,12 +68,18 @@ impl GameAudio {
             if write.wrapping_sub(read) < limit {
                 break;
             }
-            let _ = self.read.compare_exchange(
-                read,
-                read.wrapping_add(1),
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            );
+            if self
+                .read
+                .compare_exchange(
+                    read,
+                    read.wrapping_add(1),
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
+                .is_ok()
+            {
+                self.dropped.fetch_add(1, Ordering::Relaxed);
+            }
         }
         let packed = u64::from(stereo[0].to_bits()) | (u64::from(stereo[1].to_bits()) << 32);
         self.slots[write % CAPACITY].store(packed, Ordering::Relaxed);
@@ -105,9 +117,72 @@ impl GameAudio {
             .store(self.write.load(Ordering::Acquire), Ordering::Release);
         self.epoch.fetch_add(1, Ordering::Release);
     }
+    /// Audible problems so far: gaps where the output ran dry, and stereo
+    /// frames dropped at the limit. Deliberate clears are not counted.
+    pub fn problems(&self) -> (u64, u64) {
+        (
+            self.gaps.load(Ordering::Relaxed),
+            self.dropped.load(Ordering::Relaxed),
+        )
+    }
+    /// The most stereo frames the queue holds before evicting the oldest.
+    pub fn limit(&self) -> usize {
+        self.limit.load(Ordering::Acquire)
+    }
+    /// Stereo frames pushed since the queue was created (wrapping).
+    pub fn written(&self) -> usize {
+        self.write.load(Ordering::Acquire)
+    }
     #[cfg(test)]
     pub fn drain(&self) -> Vec<f32> {
         std::iter::from_fn(|| self.pop()).flatten().collect()
+    }
+}
+
+/// The reader's target fill, as a share of the queue limit.
+const SETPOINT: f64 = 0.62;
+
+/// Paces the core by the audio it produces rather than by frame count.
+///
+/// GBA frames are all one length, but a Game Boy frame is shorter or longer
+/// whenever the game switches its screen off or on (games do this while
+/// loading), and mGBA hands Game Boy audio over in 512-frame blocks. Pacing by
+/// frames then makes the game run up to ~9% fast in audio terms, overfilling
+/// the queue. Each frame instead waits as long as the audio it pushed lasts,
+/// averaged over about 32 frames so the 512-frame blocks do not jitter the
+/// picture. Pushed audio is already at the output rate after speed
+/// decimation, so this holds at every playback speed.
+pub struct FramePacer {
+    rate: f64,
+    per_frame: f64,
+    /// The queue's fill as a share of its limit, averaged over about 16
+    /// frames. Above the reader's setpoint frames slow a little (at most 5%),
+    /// below it they quicken, so a change of pace (a game starting to toggle
+    /// its screen) cannot overfill the queue while the average catches up.
+    fill: f64,
+}
+impl FramePacer {
+    pub fn new(rate: u32, fps: f64, speed: u8) -> Self {
+        let mut pacer = Self {
+            rate: f64::from(rate.max(1)),
+            per_frame: 0.0,
+            fill: SETPOINT,
+        };
+        pacer.reset(fps, speed);
+        pacer
+    }
+    /// A new speed or a discontinuity: start again from the nominal frame.
+    pub fn reset(&mut self, fps: f64, speed: u8) {
+        self.per_frame = self.rate / fps.max(1.0) / f64::from(speed.max(1));
+        self.fill = SETPOINT;
+    }
+    /// How long to wait after a frame that pushed `pushed` stereo frames,
+    /// with the queue now holding `queued` of at most `limit`.
+    pub fn interval(&mut self, pushed: usize, queued: usize, limit: usize) -> std::time::Duration {
+        self.per_frame += (pushed as f64 - self.per_frame) / 32.0;
+        self.fill += (queued as f64 / limit.max(1) as f64 - self.fill) / 16.0;
+        let correction = ((self.fill - SETPOINT) * 0.5).clamp(-0.05, 0.05);
+        std::time::Duration::from_secs_f64(self.per_frame.max(0.0) / self.rate * (1.0 + correction))
     }
 }
 
@@ -189,7 +264,7 @@ impl AudioReader {
         self.level += (fill as f32 - self.level) / 64.0;
         self.since_correction = self.since_correction.saturating_add(1);
         let limit = self.audio.limit.load(Ordering::Acquire) as f32;
-        let (setpoint, band) = (limit * 0.62, limit * 0.05);
+        let (setpoint, band) = (limit * SETPOINT as f32, limit * 0.05);
         let mut repeat = false;
         if self.since_correction >= CORRECTION_SPACING {
             if self.level > setpoint + band && self.audio.pop().is_some() {
@@ -219,7 +294,10 @@ impl AudioReader {
             } else {
                 // Fade to silence on a real starvation, then rebuild headroom
                 // rather than repeatedly alternating a frame with silence.
-                self.priming = true;
+                // The rest of this callback comes here too: count one gap.
+                if !std::mem::replace(&mut self.priming, true) {
+                    self.audio.gaps.fetch_add(1, Ordering::Relaxed);
+                }
                 self.fade = 0;
                 self.last = self.last.map(|sample| sample * 0.875);
                 stereo.copy_from_slice(&self.last);
@@ -350,6 +428,92 @@ mod tests {
 }
 
 #[cfg(test)]
+mod problem_tests {
+    use super::*;
+
+    #[test]
+    fn gaps_and_drops_are_counted_but_deliberate_clears_are_not() {
+        let audio = Arc::new(GameAudio::default());
+        audio.configure(32768);
+        let limit = audio.limit();
+        for _ in 0..limit + 10 {
+            audio.push([0.1, 0.1]);
+        }
+        assert_eq!(audio.problems(), (0, 10));
+        audio.clear();
+        assert_eq!(audio.problems(), (0, 10));
+        let mut reader = AudioReader::new(Arc::clone(&audio), 32768);
+        for _ in 0..limit {
+            audio.push([0.1, 0.1]);
+        }
+        let mut output = vec![0.0; 512];
+        // Priming after a clear is deliberate; running dry afterwards is not.
+        reader.render(&mut output);
+        assert_eq!(audio.problems().0, 0);
+        for _ in 0..20 {
+            reader.render(&mut output);
+        }
+        assert_eq!(audio.problems().0, 1);
+    }
+}
+
+#[cfg(test)]
+mod pacer_tests {
+    use super::FramePacer;
+
+    #[test]
+    fn game_boy_blocks_pace_like_the_audio_without_jitter() {
+        let mut pacer = FramePacer::new(32768, 59.7275, 1);
+        let nominal = 1.0 / 59.7275;
+        // Steady Game Boy: 512-frame blocks, a double block every 14 frames.
+        let mut total = 0.0;
+        let (mut shortest, mut longest) = (f64::MAX, 0.0f64);
+        for frame in 0..1400 {
+            let pushed = if frame % 14 == 13 { 1024 } else { 512 };
+            let wait = pacer.interval(pushed, 1015, 1638).as_secs_f64();
+            if frame >= 200 {
+                shortest = shortest.min(wait);
+                longest = longest.max(wait);
+            }
+            total += wait;
+        }
+        // About real time overall, with each frame within 6% of nominal.
+        assert!((total / 1400.0 / nominal - 1.0).abs() < 0.01);
+        assert!(
+            shortest > nominal * 0.94 && longest < nominal * 1.06,
+            "{shortest} {longest}"
+        );
+        // Screen toggling: 9% more audio per frame means 9% slower frames.
+        let mut pacer = FramePacer::new(32768, 59.7275, 1);
+        let mut total = 0.0;
+        for frame in 0..1200 {
+            let wait = pacer
+                .interval(if frame % 6 == 5 { 1024 } else { 512 }, 1015, 1638)
+                .as_secs_f64();
+            if frame >= 600 {
+                total += wait;
+            }
+        }
+        let average_audio = (5.0 * 512.0 + 1024.0) / 6.0 / 32768.0;
+        assert!((total / 600.0 / average_audio - 1.0).abs() < 0.01);
+        // A queue running full slows frames by at most 5%; an empty one
+        // quickens them by at most 5%.
+        let mut full = FramePacer::new(32768, 59.7275, 1);
+        let mut empty = FramePacer::new(32768, 59.7275, 1);
+        let (mut slow, mut fast) = (0.0, 0.0);
+        for _ in 0..200 {
+            slow = full.interval(549, 1638, 1638).as_secs_f64();
+            fast = empty.interval(549, 0, 1638).as_secs_f64();
+        }
+        assert!((slow / nominal - 1.05).abs() < 0.005, "{slow}");
+        assert!((fast / nominal - 0.95).abs() < 0.005, "{fast}");
+        // Fast-forward pushes decimated audio; reset starts from its pace.
+        let mut pacer = FramePacer::new(32768, 59.7275, 4);
+        assert!((pacer.interval(137, 1015, 1638).as_secs_f64() * 4.0 / nominal - 1.0).abs() < 0.01);
+    }
+}
+
+#[cfg(test)]
 mod queue_tests {
     use super::*;
 
@@ -427,9 +591,16 @@ mod queue_tests {
             .unwrap_or(600)
             .clamp(20, 7200);
         let audio = Arc::new(GameAudio::default());
+        // HORIZON_AUDIO_DRIFT_ROM: gba (default), gb, or gb-toggle (screen
+        // switched off and on every few frames, as games do while loading).
+        let rom = match std::env::var("HORIZON_AUDIO_DRIFT_ROM").as_deref() {
+            Ok("gb") => gba_core::test_gb_rom(false, false, false),
+            Ok("gb-toggle") => gba_core::test_gb_toggling_rom(),
+            _ => gba_core::test_rom(),
+        };
         let mut core = gba_core::Core::load(
             std::path::Path::new(&path),
-            &gba_core::test_rom(),
+            &rom,
             Default::default(),
             audio.clone(),
             Default::default(),
@@ -437,7 +608,12 @@ mod queue_tests {
         .unwrap();
         let rate = core.av.sample_rate.round() as u32;
         let limit = audio.limit.load(Ordering::Acquire);
+        let mut dropped = 0u64;
+        // Paced like the player (HORIZON_AUDIO_DRIFT_FRAME_PACING=1 for the
+        // old fixed frame interval, to compare).
+        let fixed = std::env::var_os("HORIZON_AUDIO_DRIFT_FRAME_PACING").is_some();
         let interval = Duration::from_secs_f64(1.0 / core.av.fps);
+        let mut pacer = FramePacer::new(rate, core.av.fps, 1);
         let refills = Arc::new(AtomicU64::new(0));
         let consumed = Arc::new(AtomicU64::new(0));
         let mut reader = AudioReader::new(audio.clone(), rate);
@@ -468,8 +644,12 @@ mod queue_tests {
         println!("drift: rate={rate} fps={:.4} limit={limit}", core.av.fps);
         while start.elapsed() < Duration::from_secs(seconds) {
             let before = audio.write.load(Ordering::Acquire);
+            let fill_before = audio.len();
             core.run_frame();
-            produced += audio.write.load(Ordering::Acquire).wrapping_sub(before) as u64;
+            let made = audio.write.load(Ordering::Acquire).wrapping_sub(before);
+            produced += made as u64;
+            // Anything beyond the cap evicts the oldest queued samples.
+            dropped += (fill_before + made).saturating_sub(limit) as u64;
             let fill = audio.len();
             checks += 1;
             if fill + 8 >= limit {
@@ -479,14 +659,18 @@ mod queue_tests {
                 low = low.min(fill);
                 high = high.max(fill);
             }
-            deadline += interval;
+            deadline += if fixed {
+                interval
+            } else {
+                pacer.interval(made, audio.len(), limit)
+            };
             if Instant::now().saturating_duration_since(deadline) > Duration::from_millis(100) {
                 deadline = Instant::now();
             }
             std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
             if start.elapsed() >= report_at {
                 println!(
-                    "drift {:>4}s: fill={fill:>5} (min {low}, max {high}) refills={} at_limit={:.1}% produced={produced} played={}",
+                    "drift {:>4}s: fill={fill:>5} (min {low}, max {high}) refills={} dropped={dropped} at_limit={:.1}% produced={produced} played={}",
                     report_at.as_secs(),
                     refills.load(Ordering::Relaxed),
                     pinned_checks as f64 * 100.0 / checks as f64,

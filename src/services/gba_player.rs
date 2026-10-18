@@ -295,7 +295,10 @@ fn play(
         Box::new(move |output, _| audio_reader.render(output)),
     )
     .map_err(|_| "Could not open game audio. Check the audio output and try again.".to_owned())?;
-    let interval = Duration::from_secs_f64(1.0 / core.av.fps);
+    let (fps, rate) = (core.av.fps, core.av.sample_rate.round() as u32);
+    let mut reported = (0u64, 0u64);
+    // Frames wait as long as the audio they produced (see FramePacer).
+    let mut pacer = crate::platform::gba_audio::FramePacer::new(rate, fps, 1);
     let mut deadline = Instant::now();
     let mut checkpoint = Instant::now();
     let mut paused = false;
@@ -325,6 +328,7 @@ fn play(
                     Command::Speed(next) => {
                         speed = next;
                         core.set_speed(next);
+                        pacer.reset(fps, next.factor());
                         audio.set_paused(true);
                         audio.clear();
                         audio.set_paused(paused);
@@ -429,7 +433,9 @@ fn play(
                 }
             }
             if !paused {
+                let before = audio.written();
                 core.run_frame();
+                let pushed = audio.written().wrapping_sub(before);
                 present(&core);
                 frame_attempts = frame_attempts.saturating_add(1);
                 if frame_attempts >= 120 && core.frames.load(Ordering::Acquire) == 0 {
@@ -448,12 +454,23 @@ fn play(
                     );
                     let _ = events.send(Event::Started(location.title.clone()));
                 }
-                deadline += interval / u32::from(speed.factor());
+                deadline += pacer.interval(pushed, audio.len(), audio.limit());
                 if Instant::now().saturating_duration_since(deadline) > Duration::from_millis(100) {
                     deadline = Instant::now();
                 }
             }
             if checkpoint.elapsed() >= Duration::from_secs(5) {
+                // Report audible audio trouble, so a hitch can be told apart
+                // from anything else.
+                let now = audio.problems();
+                if now != reported {
+                    tracing::warn!(
+                        gaps = now.0 - reported.0,
+                        dropped_ms = (now.1 - reported.1) * 1000 / u64::from(rate.max(1)),
+                        "game audio ran dry or overflowed in the last 5 seconds"
+                    );
+                    reported = now;
+                }
                 if let Err(error) = if session.is_some() {
                     save_current(&core, &save_path, &mut last_save)
                 } else {
@@ -481,6 +498,12 @@ fn play(
             }
         }
     })();
+    let (gaps, dropped) = audio.problems();
+    tracing::info!(
+        gaps,
+        dropped_ms = dropped * 1000 / u64::from(rate.max(1)),
+        "game audio for this session"
+    );
     if let Some(session) = session {
         let end = if result.is_ok() {
             repository.complete_play_session(session, chrono::Utc::now().timestamp())

@@ -659,8 +659,58 @@ pub(crate) fn test_gb_rom(color: bool, clock: bool, sgb: bool) -> Vec<u8> {
 }
 
 #[cfg(test)]
+/// Game Boy homebrew that switches its screen off and on every few
+/// frames, as games do while loading.
+pub(crate) fn test_gb_toggling_rom() -> Vec<u8> {
+    let mut rom = test_gb_rom(false, false, false);
+    let program = [
+        0x3E, 0x11, 0xE0, 0x40, // ld a,0x11; ldh (LCDC),a: screen off
+        0x01, 0x00, 0x20, // ld bc,0x2000
+        0x0B, 0x78, 0xB1, 0x20, 0xFB, // delay: dec bc; ld a,b; or c; jr nz
+        0x3E, 0x91, 0xE0, 0x40, // ld a,0x91; ldh (LCDC),a: screen on
+        0x01, 0x00, 0x20, // ld bc,0x2000
+        0x0B, 0x78, 0xB1, 0x20, 0xFB, // delay
+        0x18, 0xE6, // jr back to the start
+    ];
+    rom[0x150..0x150 + program.len()].copy_from_slice(&program);
+    rom
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "measurement; requires the built pinned mGBA core with Game Boy support"]
+    fn real_core_game_boy_audio_per_frame_report() {
+        let path = std::env::var_os("HORIZON_GBA_CORE").unwrap();
+        for (name, rom) in [
+            ("steady", test_gb_rom(false, false, false)),
+            ("screen toggling", test_gb_toggling_rom()),
+        ] {
+            let audio = Arc::new(super::super::gba_audio::GameAudio::default());
+            let mut core = Core::load(
+                Path::new(&path),
+                &rom,
+                MgbaPreferences::default(),
+                Arc::clone(&audio),
+                Arc::new(AtomicU16::new(0)),
+            )
+            .unwrap();
+            let mut counts = Vec::new();
+            for _ in 0..300 {
+                audio.clear();
+                core.run_frame();
+                counts.push(audio.len());
+            }
+            let (min, max) = (counts.iter().min().unwrap(), counts.iter().max().unwrap());
+            let unusual = counts.iter().filter(|c| c.abs_diff(549) > 10).count();
+            eprintln!(
+                "AUDIO {name}: per frame min {min} max {max}, {unusual} of 300 frames off by more than 10"
+            );
+            eprintln!("AUDIO {name}: first 40 {:?}", &counts[..40]);
+        }
+    }
 
     #[test]
     #[ignore = "requires the built pinned mGBA core with Game Boy support"]
