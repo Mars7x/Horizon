@@ -617,7 +617,8 @@ impl GbaPlayer {
             RETURN_TO_HORIZON => {
                 self.set_state_mode(&ui, StateMode::Menu);
                 ui.set_player_busy(true);
-                ui.set_player_message("Saving game".into());
+                // Saving is quick and quiet; only a failure is shown.
+                ui.set_player_message("".into());
                 if let Some(game) = self.running.borrow().as_ref() {
                     let _ = game.commands.send(Command::Stop);
                 } else {
