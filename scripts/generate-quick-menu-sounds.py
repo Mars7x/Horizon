@@ -17,39 +17,30 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def cue(opening: bool) -> bytes:
-    duration = 0.160 if opening else 0.140
-    # A soft, continuous shuffle with broad, overlapping brush strokes.
-    # Seeded noise keeps the texture reproducible, without recordings or tones.
-    noise = random.Random(0x485A01 if opening else 0x485A02)
-    grains = []
-    for index in range(10):
-        center = (index + noise.random() * 0.7) / 10 * duration
-        width = 0.006 + noise.random() * 0.005
-        grains.append((center, width, 0.15 + noise.random() * 0.25))
+    """Two tiny soft clicks, like a small latch: brighter opening, duller closing."""
+    noise = random.Random(21 if opening else 22)
+    body = [0.0, 0.0]
+    clicks = [(0.0, 1.0), (0.045, 0.6)] if opening else [(0.0, 0.6), (0.04, 1.0)]
+    tone = 2600 if opening else 1700
+    smoothing = 0.35 if opening else 0.25
     samples = []
-    low = 0.0
-    body = 0.0
-    softened = 0.0
-    for frame in range(round(duration * RATE)):
+    for frame in range(round(0.09 * RATE)):
         time = frame / RATE
-        position = time / duration
-        # Two low-pass stages soften the scratchy high end. Opening brightens
-        # gently; closing brushes downward, without a pitched sweep.
-        cutoff = 1100 + 500 * (position if opening else 1 - position)
         raw = noise.random() * 2 - 1
-        smoothing = 1 - math.exp(-2 * math.pi * cutoff / RATE)
-        body += smoothing * (raw - body)
-        softened += smoothing * (body - softened)
-        low += (1 - math.exp(-2 * math.pi * 180 / RATE)) * (softened - low)
-        texture = 0.7 + sum(
-            gain * math.exp(-0.5 * ((time - center) / width) ** 2)
-            for center, width, gain in grains
-        )
-        attack = math.sin(min(1.0, time / 0.022) * math.pi / 2) ** 2
-        release = math.sin(min(1.0, (duration - time) / 0.055) * math.pi / 2) ** 2
-        weight = math.exp(-position * (1.8 if opening else 2.3))
-        samples.append((softened - low) * texture * attack * release * weight)
-    return encode(samples)
+        body[0] += smoothing * (raw - body[0])
+        body[1] += smoothing * (body[0] - body[1])
+        value = 0.0
+        for start, gain in clicks:
+            since = time - start
+            if since >= 0:
+                value += gain * (0.5 * body[1] * math.exp(-since / 0.0025)
+                                 + math.sin(2 * math.pi * tone * since) * math.exp(-since / 0.006))
+        samples.append(value)
+    # Fade the last 8 ms so the cue ends at silence.
+    fade = int(0.008 * RATE)
+    for index in range(fade):
+        samples[-1 - index] *= index / fade
+    return encode_level(samples)
 
 
 def shutter() -> bytes:
@@ -70,6 +61,24 @@ def shutter() -> bytes:
         release = math.sin(min(1.0, (duration - time) / 0.025) * math.pi / 2) ** 2
         samples.append((softened - low) * envelope * attack * release)
     return encode(samples)
+
+
+def encode_level(samples: list[float]) -> bytes:
+    """Match the owner-supplied menu cues' loudness (RMS about 0.0095, peak at
+    most 0.06), so the latch sits level with navigation, OK and Back."""
+    rms = math.sqrt(sum(sample * sample for sample in samples) / len(samples))
+    scale = min(0.0095 / rms, 0.06 / max(map(abs, samples)))
+    return pcm16([max(-1.0, min(1.0, sample * scale)) * 32767 for sample in samples])
+
+
+def pcm16(scaled: list[float]) -> bytes:
+    pcm = [round(sample) for sample in scaled]
+    pcm[0] = pcm[-1] = 0
+    output = io.BytesIO()
+    with wave.open(output, "wb") as wav:
+        wav.setparams((1, 2, RATE, 0, "NONE", "not compressed"))
+        wav.writeframes(struct.pack(f"<{len(pcm)}h", *pcm))
+    return output.getvalue()
 
 
 def encode(samples: list[float]) -> bytes:

@@ -31,7 +31,10 @@ export component GamePlayer inherits Rectangle {
     in property <int> restart-focus;
     callback restart-answer(int);
     private property <float> pause-reveal: root.paused && !root.failed && root.phase == 2 ? 1.0 : 0.0;
-    animate pause-reveal { duration: Motion.dialog-duration; easing: ease-out; }
+    animate pause-reveal {
+        duration: root.paused ? Motion.pause-open-duration : Motion.dialog-duration;
+        easing: root.paused ? ease-out-quart : ease-out;
+    }
     in property <bool> busy;
     in property <bool> failed;
     in property <bool> has-frame;

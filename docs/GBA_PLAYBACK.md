@@ -50,9 +50,10 @@ saving and skips the decorative return animation.
 | Pause | Escape or F10 | Guide or stick click |
 
 Pause slides a square-edged, full-height panel in from the left edge over the
-dimmed game, with no floating margins. Reduced Motion makes it immediate. Continue is initially
+dimmed game, with no floating margins, over 120 ms; it leaves over 180 ms.
+Reduced Motion makes it immediate. Continue is initially
 focused; Up/Down selects enabled actions, and Back continues. Opening and closing
-use distinct short, smooth shuffle sounds under UI Sounds. Only actual transitions play
+use distinct short latch sounds (two tiny soft clicks) under UI Sounds. Only actual transitions play
 these cues; repeated opens, ignored inputs and focus freezing are silent. Closing
 is heard on Continue/Back, successful restart or successful Return to Horizon;
 cancelling a nested confirmation keeps the usual Back sound. Save state opens four

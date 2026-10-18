@@ -336,8 +336,8 @@ mod tests {
             (UiSoundCue::Navigation, NAVIGATION_WAV, 4080),
             (UiSoundCue::Ok, OK_WAV, 9120),
             (UiSoundCue::Back, BACK_WAV, 6306),
-            (UiSoundCue::QuickMenuOpen, MENU_OPEN_WAV, 7680),
-            (UiSoundCue::QuickMenuClose, MENU_CLOSE_WAV, 6720),
+            (UiSoundCue::QuickMenuOpen, MENU_OPEN_WAV, 4320),
+            (UiSoundCue::QuickMenuClose, MENU_CLOSE_WAV, 4320),
             (UiSoundCue::Screenshot, SCREENSHOT_WAV, 5760),
         ] {
             assert_eq!(decode_pcm16_mono_48k(wav).unwrap().len(), frames);

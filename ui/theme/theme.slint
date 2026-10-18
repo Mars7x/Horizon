@@ -212,6 +212,8 @@ export global Motion {
     // Modal dialogs (components/modal-dialog.slint): the backdrop fades and
     // the card lifts into place together.
     out property <duration> dialog-duration: reduced-motion ? 0ms : 180ms;
+    // The quick menu comes in quicker than it leaves, so pausing feels immediate.
+    out property <duration> pause-open-duration: reduced-motion ? 0ms : 120ms;
     out property <length> dialog-rise: reduced-motion ? 0px : 12px;
     // How long a focus frame takes to start or stop its idle breathing.
     out property <duration> focus-idle-fade: reduced-motion ? 0ms : 220ms;

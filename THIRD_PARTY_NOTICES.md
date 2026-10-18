@@ -365,10 +365,10 @@ only on explicit Save; key content and clipboard data must not be logged.
 - **Author/license:** Horizon contributors, GPL-3.0-or-later; see `LICENSE` and
   `LICENSES/GPL-3.0-or-later.txt`. Asset annotations are in `REUSE.toml`.
 - **Source:** `scripts/generate-quick-menu-sounds.py` synthesizes the original
-  smooth shuffle pair from seeded noise, two low-pass stages and overlapping
-  grain envelopes using Python's standard library, with no recordings, external samples or third-party
-  synthesis. The soft shutter uses two filtered-noise envelopes. PCM16 mono,
-  48 kHz; menu 160/140 ms, shutter 120 ms.
+  latch pair (two soft clicks each: a decaying sine tone plus a burst of seeded,
+  low-passed noise) using Python's standard library, with no recordings,
+  external samples or third-party synthesis. The soft shutter uses two
+  filtered-noise envelopes. PCM16 mono, 48 kHz; menu 90 ms each, shutter 120 ms.
 - **Use:** Actual quick-menu opening and successful closing. The UI Sounds
   preference mutes all three; the shutter plays only after screenshot publication. Existing owner-supplied WAVs are preserved unmodified.
 

@@ -104,8 +104,10 @@ LINE Seed JP is the shared family: Regular 400 for interface text, Bold 700 for
 emphasis/game titles, ExtraBold 800 for clock digits. Flatpak bundles four
 unmodified static faces including Thin 100. Font packaging/provenance is in
 [Licensing](LICENSING.md) and the manifest. UI sounds play through PipeWire and follow the appearance preference.
-Quick-menu opening and closing use distinct short, smooth shuffle cues with a
-soft noise texture and gentle fades. Continue/Back, successful restart and successful Return to Horizon share
+Quick-menu opening and closing use distinct short latch cues: two tiny soft
+clicks, brighter when opening and duller when closing, level with the
+navigation/OK/Back cues. The panel slides in over 120 ms (ease-out-quart) and out
+over the shared 180 ms dialog duration. Continue/Back, successful restart and successful Return to Horizon share
 the closing cue; nested confirmation cancellation keeps the normal Back cue.
 Repeat/ignored input and background freezing stay silent. The UI sound stream
 stays warm during embedded gameplay in the active Horizon window, allowing the
