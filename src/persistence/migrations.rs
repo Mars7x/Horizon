@@ -69,9 +69,14 @@ const MIGRATIONS: &[Migration] = &[
         name: "onboarding",
         sql: include_str!("migrations/0012_onboarding.sql"),
     },
+    Migration {
+        version: 13,
+        name: "large_rom_files",
+        sql: include_str!("migrations/0013_large_rom_files.sql"),
+    },
 ];
 
-pub(crate) const LATEST_SCHEMA_VERSION: i64 = 12;
+pub(crate) const LATEST_SCHEMA_VERSION: i64 = 13;
 
 const MIGRATION_LEDGER_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -431,6 +436,95 @@ mod tests {
             )
             .expect("archived Steam identity");
         assert_eq!(archived, 1);
+    }
+
+    #[test]
+    fn large_rom_files_migration_keeps_rows_and_admits_ds_sizes() {
+        let mut connection = Connection::open_in_memory().expect("in-memory database");
+        connection
+            .execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("foreign keys");
+        connection
+            .execute_batch(MIGRATION_LEDGER_SQL)
+            .expect("create migration ledger");
+        for migration in MIGRATIONS
+            .iter()
+            .filter(|migration| migration.version <= 12)
+        {
+            connection
+                .execute_batch(migration.sql)
+                .expect("apply old migration");
+            connection
+                .execute(
+                    "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?1, ?2, 0)",
+                    params![migration.version, migration.name],
+                )
+                .expect("record old migration");
+        }
+        let (sha1, sha256) = ("a".repeat(40), "b".repeat(64));
+        connection
+            .execute_batch(&format!(
+                "INSERT INTO games(id, title, created_at, updated_at) VALUES (1, 'Game', 0, 0);
+                 INSERT INTO rom_files(path, game_id, sha1, sha256, size, catalog_name, imported_at)
+                 VALUES (x'2f612e676261', 1, '{sha1}', '{sha256}', 4096, 'Catalog', 7);"
+            ))
+            .expect("seed version-12 rom file");
+        let oversized = format!(
+            "INSERT INTO rom_files(path, game_id, sha1, sha256, size, catalog_name, imported_at)
+             VALUES (x'2f622e6e6473', 1, '{sha1}', '{}', 419430400, NULL, 8)",
+            "c".repeat(64)
+        );
+        assert!(
+            connection.execute_batch(&oversized).is_err(),
+            "32 MiB limit before"
+        );
+        migrate(&mut connection).expect("apply large rom files migration");
+        let kept: (Vec<u8>, i64, String, i64, Option<String>, i64) = connection
+            .query_row(
+                "SELECT path, game_id, sha256, size, catalog_name, imported_at FROM rom_files",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .expect("row kept");
+        assert_eq!(
+            kept,
+            (
+                b"/a.gba".to_vec(),
+                1,
+                sha256,
+                4096,
+                Some("Catalog".into()),
+                7
+            )
+        );
+        connection
+            .execute_batch(&oversized)
+            .expect("400 MiB DS file fits");
+        let index: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_rom_files_game_id'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("index");
+        assert_eq!(index, 1);
+        // Deleting the game still removes its files.
+        connection
+            .execute_batch("DELETE FROM games WHERE id = 1")
+            .expect("delete game");
+        let left: i64 = connection
+            .query_row("SELECT COUNT(*) FROM rom_files", [], |row| row.get(0))
+            .expect("count");
+        assert_eq!(left, 0);
     }
 
     #[test]

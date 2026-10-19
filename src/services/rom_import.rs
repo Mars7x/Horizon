@@ -222,4 +222,29 @@ mod tests {
         drop(repository);
         fs::remove_dir_all(dir).unwrap();
     }
+
+    #[test]
+    fn large_ds_cartridges_import() {
+        // Most DS games are 64-512 MiB, far beyond the GB/GBA 32 MiB limit.
+        let stamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("horizon-large-ds-{}-{stamp}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let mut rom = crate::platform::gba_core::test_ds_rom();
+        rom.resize(40 * 1024 * 1024, 0xFF);
+        fs::write(dir.join("Large.nds"), &rom).unwrap();
+        let scan = scan_folder(&dir, None).unwrap();
+        assert_eq!(scan.candidates.len(), 1);
+        assert!(scan.candidates[0].selected, "{}", scan.candidates[0].status);
+        let mut repository = SqliteLibraryRepository::open(dir.join("library.sqlite3")).unwrap();
+        repository
+            .save_rom_import(&RomSetup::default(), &scan.candidates)
+            .unwrap();
+        assert_eq!(repository.list_games().unwrap().len(), 1);
+        drop(repository);
+        fs::remove_dir_all(dir).unwrap();
+    }
 }

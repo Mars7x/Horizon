@@ -1,6 +1,6 @@
 # Database
 
-Latest schema: `12`
+Latest schema: `13`
 
 [SqliteLibraryRepository](../src/persistence/sqlite.rs) owns SQL and the shared
 connection. Data lives in `library/library.sqlite3` at the location chosen by

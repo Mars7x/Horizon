@@ -132,7 +132,7 @@ profile, core/integration preference and Album paths are not read, moved or
 deleted. Appearance, controller and cache paths already match this layout and
 continue to be used. Existing files remain untouched; the new database starts
 an independent library/setup.
-SQL schema remains 12 and deployed migrations remain immutable. This is not
+Deployed migrations remain immutable (schema 13 only widens the imported-file size limit for DS). This is not
 permission to delete old data. See [ADR 0205](adr/0205-human-readable-storage.md).
 
 Nintendo DS uses the same game-named cartridge save layout, with states under
