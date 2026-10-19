@@ -1270,6 +1270,7 @@ mod tests {
         let phase = Rc::new(Cell::new(0));
         let step = Rc::clone(&phase);
         let started = Instant::now();
+        let paused_at = Cell::new(None::<Instant>);
         let pictures = Rc::new(RefCell::new(Vec::new()));
         let shots = Rc::clone(&pictures);
         let timer = Timer::default();
@@ -1304,6 +1305,21 @@ mod tests {
                         0
                     );
                     ui.invoke_player_touch(0.5, 0.75, false);
+                    live.pause();
+                    assert!(ui.get_player_paused());
+                    paused_at.set(Some(Instant::now()));
+                    step.set(5);
+                }
+                5 if paused_at
+                    .get()
+                    .is_some_and(|at| at.elapsed() > Duration::from_millis(500)) =>
+                {
+                    assert!(ui.get_player_paused());
+                    shots
+                        .borrow_mut()
+                        .push(ui.window().take_snapshot().unwrap());
+                    live.choose(0);
+                    assert!(!ui.get_player_paused());
                     live.running
                         .borrow()
                         .as_ref()
