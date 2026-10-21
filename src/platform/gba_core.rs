@@ -78,6 +78,8 @@ struct Callbacks {
     scale: u8,
     /// The GPU context an upscaling core draws with, when it has one.
     hardware: Option<Hardware>,
+    /// Buttons pressed for the next frame only, beside the player's.
+    pulse: u16,
 }
 thread_local! { static CALLBACKS: RefCell<Option<Callbacks>> = const { RefCell::new(None) }; }
 
@@ -335,6 +337,7 @@ impl Core {
                     frames: Arc::clone(&core.frames),
                     scale,
                     hardware,
+                    pulse: 0,
                 })
             });
             set_environment(environment);
@@ -465,6 +468,20 @@ impl Core {
     }
     pub fn run_frame(&mut self) {
         unsafe { (self.run)() }
+        CALLBACKS.with(|state| {
+            if let Some(state) = state.borrow_mut().as_mut() {
+                state.pulse = 0;
+            }
+        });
+    }
+    /// Press `mask` (libretro joypad bits) for the next frame only: the DS
+    /// lid toggles on melonDS's L2 + Y.
+    pub fn pulse_buttons(&mut self, mask: u16) {
+        CALLBACKS.with(|state| {
+            if let Some(state) = state.borrow_mut().as_mut() {
+                state.pulse = mask;
+            }
+        });
     }
     /// Hands the newest frame to the filter stage, once. False when the core
     /// has not drawn a new one since.
@@ -569,6 +586,41 @@ unsafe extern "C" {
     fn hz_retro_log(level: u32, format: *const c_char, ...);
 }
 
+/// libretro's language for the system locale (LC_ALL, LC_MESSAGES, LANG);
+/// English when unknown.
+fn system_language() -> u32 {
+    let locale = ["LC_ALL", "LC_MESSAGES", "LANG"]
+        .iter()
+        .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()))
+        .unwrap_or_default();
+    language_for_locale(&locale)
+}
+
+fn language_for_locale(locale: &str) -> u32 {
+    let locale = locale.to_ascii_lowercase();
+    let (language, region) = locale
+        .split(['.', '@'])
+        .next()
+        .unwrap_or("")
+        .split_once(['_', '-'])
+        .unwrap_or((locale.split(['.', '@']).next().unwrap_or(""), ""));
+    match (language, region) {
+        ("ja", _) => 1,
+        ("fr", _) => 2,
+        ("es", _) => 3,
+        ("de", _) => 4,
+        ("it", _) => 5,
+        ("nl", _) => 6,
+        ("pt", "br") => 7,
+        ("pt", _) => 8,
+        ("ru", _) => 9,
+        ("ko", _) => 10,
+        ("zh", "tw" | "hk" | "mo") => 11,
+        ("zh", _) => 12,
+        _ => 0,
+    }
+}
+
 /// Core log lines join Horizon's log. Cores are chatty at debug and info,
 /// so those stay at debug and trace; warnings and errors stay visible.
 extern "C" fn core_log(level: u32, message: *const c_char) {
@@ -577,6 +629,22 @@ extern "C" fn core_log(level: u32, message: *const c_char) {
     }
     // SAFETY: the shim passes a NUL-terminated buffer valid for this call.
     let message = unsafe { std::ffi::CStr::from_ptr(message) }.to_string_lossy();
+    // Notes about features Horizon doesn't offer (Wi-Fi, a host microphone,
+    // newer option formats, a VFS, cheat memory maps) are expected on every
+    // launch: they stay in debug logs, so real problems stand out.
+    const EXPECTED: [&str; 7] = [
+        "PCap: init failed",
+        "Failed to enumerate Wi-fi adapters",
+        "Microphone interface not available",
+        "core options not supported",
+        "Could not get VFS interface",
+        "Frontend refused the memory map",
+        "Failed to get language from frontend",
+    ];
+    if level >= 2 && EXPECTED.iter().any(|expected| message.contains(expected)) {
+        tracing::debug!(target: "horizon::core", "{message}");
+        return;
+    }
     match level {
         0 => tracing::trace!(target: "horizon::core", "{message}"),
         1 => tracing::debug!(target: "horizon::core", "{message}"),
@@ -701,6 +769,10 @@ extern "C" fn environment(command: u32, data: *mut c_void) -> bool {
                             // cursor, and the core draws none.
                             b"melonds_touch_mode" => Some(c"touch"),
                             b"melonds_show_cursor" => Some(c"disabled"),
+                            // Horizon's Blow control holds the core's mic
+                            // button, which plays its built-in blowing sound.
+                            b"melonds_mic_input" => Some(c"blow"),
+                            b"melonds_mic_input_active" => Some(c"hold"),
                             b"melonds_network_mode"
                             | b"melonds_homebrew_sdcard"
                             | b"melonds_dsi_sdcard" => Some(c"disabled"),
@@ -814,6 +886,14 @@ extern "C" fn environment(command: u32, data: *mut c_void) -> bool {
             }
             true
         }
+        39 => {
+            // GET_LANGUAGE: the system's, so multi-language DS cartridges
+            // start in it (the DS firmware's language).
+            unsafe {
+                *data.cast::<u32>() = system_language();
+            }
+            true
+        }
         37 => true, // SET_GEOMETRY: software frames carry their actual dimensions.
         8 => true,  // SET_PERFORMANCE_LEVEL (advisory)
         18 | 11 | 35 => true, // options, input descriptors, no-game, controllers
@@ -844,9 +924,9 @@ extern "C" fn input_state(port: u32, device: u32, index: u32, id: u32) -> i16 {
             .try_borrow()
             .ok()
             .and_then(|state| {
-                state
-                    .as_ref()
-                    .map(|s| i16::from(s.buttons.load(Ordering::Acquire) & (1 << id) != 0))
+                state.as_ref().map(|s| {
+                    i16::from((s.buttons.load(Ordering::Acquire) | s.pulse) & (1 << id) != 0)
+                })
             })
             .unwrap_or(0)
     })
@@ -1175,6 +1255,18 @@ mod tests {
         assert_eq!(core.capture_frame().unwrap().height, 384);
         drop(core);
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn locales_map_to_libretro_languages() {
+        assert_eq!(language_for_locale("en_US.UTF-8"), 0);
+        assert_eq!(language_for_locale("de_DE.UTF-8"), 4);
+        assert_eq!(language_for_locale("fr"), 2);
+        assert_eq!(language_for_locale("pt_BR.UTF-8"), 7);
+        assert_eq!(language_for_locale("zh_TW.UTF-8"), 11);
+        assert_eq!(language_for_locale("zh_CN.UTF-8"), 12);
+        assert_eq!(language_for_locale("C.UTF-8"), 0);
+        assert_eq!(language_for_locale(""), 0);
     }
 
     #[test]

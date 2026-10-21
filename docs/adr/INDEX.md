@@ -31,6 +31,7 @@
 | [0216](0216-nintendo-ds-playback.md) | Nintendo DS through the bundled melonDS DS core, in-process |
 | [0217](0217-ds-screen-layouts-and-mapping.md) | DS screen layouts, swapping and button mapping |
 | [0218](0218-ds-gpu-upscaling-and-dev-speed.md) | DS GPU upscaling, faster launches, crash-safe resume and representative dev builds |
+| [0219](0219-ds-lid-microphone-language-and-per-game-view.md) | DS lid, microphone, language, imported saves and per-game view |
 
 Earlier decisions and their supporting phase notes are in
 [history](../history/INDEX.md). Their numbered identifiers remain reserved.

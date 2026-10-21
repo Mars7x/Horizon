@@ -1298,6 +1298,7 @@ impl SettingsController {
                 .map(|(row, title)| crate::ControllerBindingRow {
                     title: match title {
                         "Start" | "Select" => title.into(),
+                        "Microphone" => "Microphone (hold to blow)".into(),
                         _ => format!("{title} button").into(),
                     },
                     value: binding_label(
@@ -1455,7 +1456,7 @@ fn selection_count(view: SettingsView) -> i32 {
         SettingsView::Appearance => 15,
         SettingsView::Controller => 4,
         SettingsView::GameBindings => 7,
-        SettingsView::DsBindings => 9,
+        SettingsView::DsBindings => 10,
         SettingsView::ThirdParty => 2,
         SettingsView::SteamGridDb => 3,
         SettingsView::SteamAccount => 2,
@@ -1612,7 +1613,7 @@ mod editor_navigation_tests {
         assert_eq!(super::selection_count(SettingsView::Root), 4);
         assert_eq!(super::selection_count(SettingsView::Controller), 4);
         assert_eq!(super::selection_count(SettingsView::Cores), 4);
-        assert_eq!(super::selection_count(SettingsView::DsBindings), 9);
+        assert_eq!(super::selection_count(SettingsView::DsBindings), 10);
         assert_eq!(
             super::settings_parent(SettingsView::MelonDs),
             Some((SettingsView::Cores, 1))
@@ -2264,7 +2265,7 @@ mod mapping_runtime_tests {
                         assert!(live.back_inside(&ui));
                         ui.invoke_settings_activate(3);
                         assert_eq!(ui.get_settings_view(), 10);
-                        assert_eq!(ui.get_settings_binding_rows().row_count(), 8);
+                        assert_eq!(ui.get_settings_binding_rows().row_count(), 9);
                         snapshot.set(Some((0, 7)));
                         ui.invoke_settings_activate(3);
                         assert_eq!(ui.get_settings_binding_title(), "Assign Y");
@@ -2277,10 +2278,10 @@ mod mapping_runtime_tests {
                         let ds = live.controller.get().ds_bindings;
                         assert_eq!((ds.source(3, true), ds.source(2, true)), (Some(9), Some(1)));
                         shot("mapping-ds");
-                        for _ in 0..5 {
+                        for _ in 0..6 {
                             live.handle_action(&ui, UiActionEvent::fresh(UiAction::Down));
                         }
-                        assert_eq!(ui.get_settings_selection(), 8);
+                        assert_eq!(ui.get_settings_selection(), 9);
                         progress.set(108);
                     }
                     108 => {

@@ -10,8 +10,9 @@ builds use an `io.github.Mars7x.Horizon` subdirectory beneath each XDG root.
 ```text
 data/
   library/library.sqlite3
-  saves/<system>/<game>/      (gb, gbc or gba)
+  saves/<system>/<game>/      (gb, gbc, gba or nds)
     game.json
+    view.json                 (DS: remembered layout and swap)
     <game name>.sav
     backups/<game name>.previous.sav
   album/<system>/<game>/
@@ -85,7 +86,7 @@ RAM changed. A flushed replacement is published atomically, preserving the prior
 valid save under `backups/`. Invalid/unreadable saves, occupied partial paths and
 failed writes preserve existing files and surface an error. A failed game save
 pauses playback and allows retry. `.part` captures are invisible until complete.
-No other application's files are scanned or deleted.
+No other application's files are scanned or deleted. The one exception is reading a same-named save beside a game file, in the folder the user chose for games, once, when Horizon has none (ADR 0219).
 
 `playback.json` owns shared focus freezing and automatic resume; `cores/mgba.json` owns only mGBA
 preferences and `cores/melonds-ds.json` only melonDS DS ones. Settings load/save on the existing worker. Each action commits one

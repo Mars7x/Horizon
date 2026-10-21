@@ -51,6 +51,10 @@ pub enum Command {
     LoadState(u8),
     /// Refresh the automatic resume point now (Horizon lost focus).
     Autosave,
+    /// Close (true) or open the DS lid.
+    Lid(bool),
+    /// Remember how this game is shown (DS layout and swap) for next time.
+    RememberView(crate::services::game_storage::GameView),
 }
 
 /// Refreshes the automatic resume point while a game is played, so a crash
@@ -142,8 +146,10 @@ pub enum Event {
     Ready {
         title: String,
         freeze_when_unfocused: bool,
-        /// A DS game's screen layout; None for other systems.
+        /// A DS game's screen layout, and whether its screens are swapped;
+        /// None for other systems.
         ds_layout: Option<crate::domain::core_settings::DsLayout>,
+        ds_swapped: bool,
     },
     /// Saving on exit has begun: the last frame, blurred, for the player to
     /// show if saving takes a moment.
@@ -153,6 +159,7 @@ pub enum Event {
     Loading {
         preview: Option<crate::platform::gba_core::Frame>,
         ds_layout: Option<crate::domain::core_settings::DsLayout>,
+        ds_swapped: bool,
     },
     Started(String),
     Stopped,
@@ -358,23 +365,26 @@ fn play(
         crate::domain::ExternalGameId::new(format!("sha256:{sha256}"))
             .map_err(|e| e.to_string())?,
     );
-    // Something to look at while a large game loads: the state it resumes.
-    let preview = locations.first().and_then(|location| {
-        if !preferences.resume_last_state {
-            return None;
-        }
-        let folder = crate::services::game_storage::GameFolder::prepare(
-            &paths.saves,
-            &game,
-            &location.title,
-        )
-        .ok()?;
-        crate::services::save_states::Store::latest_preview(folder)
-            .map(|frame| crate::platform::gba_video::loading_picture(&frame, ds))
+    let early_folder = locations.first().and_then(|location| {
+        crate::services::game_storage::GameFolder::prepare(&paths.saves, &game, &location.title)
+            .ok()
     });
+    // A DS game keeps the layout and swap it was last shown with; Settings'
+    // layout is for games never changed.
+    let view = early_folder
+        .as_ref()
+        .map(crate::services::game_storage::GameFolder::view)
+        .unwrap_or_default();
+    let ds_layout = ds.then(|| view.ds_layout.unwrap_or(preferences.ds.layout));
+    // Something to look at while a large game loads: the state it resumes.
+    let preview = early_folder
+        .filter(|_| preferences.resume_last_state)
+        .and_then(crate::services::save_states::Store::latest_preview)
+        .map(|frame| crate::platform::gba_video::loading_picture(&frame, ds));
     let _ = events.send(Event::Loading {
         preview,
-        ds_layout: ds.then_some(preferences.ds.layout),
+        ds_layout,
+        ds_swapped: view.ds_swapped,
     });
     let mut read_at = Duration::ZERO;
     let mut selected = None;
@@ -467,6 +477,17 @@ fn play(
         ),
     };
     let save_path = game_folder.save_path();
+    // A game new to Horizon may have a save from another emulator beside it.
+    if !save_path.exists()
+        && let Some((found, bytes)) = save_beside(&location.path, ds, core.max_save_size())
+    {
+        match write_save_bounded(&save_path, &bytes, core.max_save_size()) {
+            Ok(()) => {
+                tracing::info!(file = %found.display(), "imported the save found beside the game")
+            }
+            Err(error) => tracing::warn!(%error, "could not import the save beside the game"),
+        }
+    }
     let mut last_save = read_save_bounded(&save_path, core.max_save_size())?.unwrap_or_default();
     if !last_save.is_empty() {
         core.restore_save(&last_save)?;
@@ -493,6 +514,8 @@ fn play(
         played: Duration::ZERO,
     };
     let mut last_tick = Instant::now();
+    let mut lid_closed = false;
+    let mut view_writer: Option<JoinHandle<()>> = None;
     let mut audio_reader = crate::platform::gba_audio::AudioReader::new(
         Arc::clone(&audio),
         core.av.sample_rate.round() as u32,
@@ -541,7 +564,8 @@ fn play(
     let _ = events.send(Event::Ready {
         title: location.title.clone(),
         freeze_when_unfocused: preferences.freeze_when_unfocused,
-        ds_layout: ds.then_some(preferences.ds.layout),
+        ds_layout,
+        ds_swapped: view.ds_swapped,
     });
     let result = (|| -> Result<(), String> {
         loop {
@@ -589,6 +613,29 @@ fn play(
                             Err(error) => Event::ActionFailed(error),
                         });
                     }
+                    Command::RememberView(view) => {
+                        // Written beside the game, one at a time and in
+                        // order, off the game thread.
+                        if let Some(writer) = view_writer.take() {
+                            let _ = writer.join();
+                        }
+                        let folder = game_folder.clone();
+                        view_writer = thread::Builder::new()
+                            .name("horizon-view".into())
+                            .spawn(move || {
+                                if let Err(error) = folder.remember_view(view) {
+                                    tracing::warn!(%error, "could not remember the game's view");
+                                }
+                            })
+                            .ok();
+                    }
+                    Command::Lid(closed) => {
+                        if ds && closed != lid_closed {
+                            // melonDS toggles its lid on L2 + Y.
+                            core.pulse_buttons((1 << 12) | (1 << 1));
+                            lid_closed = closed;
+                        }
+                    }
                     Command::Autosave => {
                         if session.is_some()
                             && core.supports_states()
@@ -617,6 +664,7 @@ fn play(
                             buttons.store(0, Ordering::Release);
                             audio.clear();
                             core.restore_state(&snapshot.bytes)?;
+                            lid_closed = false; // A fresh or loaded console has its lid open.
                             core.set_speed(speed);
                             core.run_frame();
                             present(&core);
@@ -640,6 +688,7 @@ fn play(
                             continue;
                         }
                         core.restart();
+                        lid_closed = false; // A fresh or loaded console has its lid open.
                         core.set_speed(speed);
                         if !last_save.is_empty()
                             && let Err(error) = core.restore_save(&last_save)
@@ -791,6 +840,10 @@ fn play(
             }
         }
     })();
+    // A remembered view is small and quick: let it finish before leaving.
+    if let Some(writer) = view_writer.take() {
+        let _ = writer.join();
+    }
     let (gaps, dropped) = audio.problems();
     tracing::info!(
         gaps,
@@ -847,6 +900,34 @@ fn write_screenshot(
 fn read_save(path: &Path) -> Result<Option<Vec<u8>>, String> {
     read_save_bounded(path, 128 * 1024)
 }
+/// A save with the game file's name beside it: `.sav` (mGBA, melonDS and most
+/// emulators), `.srm` (RetroArch) or, for DS, DeSmuME's `.dsv` without its
+/// footer. Read only; the file itself is never changed. The first that reads
+/// as a plausible save wins.
+fn save_beside(rom: &Path, ds: bool, maximum: usize) -> Option<(PathBuf, Vec<u8>)> {
+    let extensions: &[&str] = if ds {
+        &["sav", "dsv", "srm"]
+    } else {
+        &["sav", "srm"]
+    };
+    extensions.iter().find_map(|extension| {
+        let path = rom.with_extension(extension);
+        let mut bytes = read_save_bounded(&path, maximum + 1024).ok()??;
+        if *extension == "dsv" {
+            bytes.truncate(dsv_payload(&bytes)?);
+        }
+        (!bytes.is_empty() && bytes.len() <= maximum).then_some((path, bytes))
+    })
+}
+
+/// DeSmuME appends a footer to the raw save, introduced by a text marker.
+fn dsv_payload(bytes: &[u8]) -> Option<usize> {
+    const MARKER: &[u8] = b"|<--Snip above here to create a raw sav";
+    bytes
+        .windows(MARKER.len())
+        .rposition(|window| window == MARKER)
+}
+
 fn read_save_bounded(path: &Path, maximum: usize) -> Result<Option<Vec<u8>>, String> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if !metadata.is_file() => {
@@ -1062,5 +1143,42 @@ mod storage_failure_tests {
         assert_eq!(fs::read(original).unwrap(), vec![1; 512]);
         assert!(fs::symlink_metadata(save).unwrap().file_type().is_symlink());
         fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod save_import_tests {
+    use super::*;
+
+    #[test]
+    fn saves_beside_the_game_are_found_and_desmume_footers_dropped() {
+        let directory =
+            std::env::temp_dir().join(format!("horizon-save-import-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let rom = directory.join("Game (USA).nds");
+        fs::write(&rom, b"rom").unwrap();
+        assert!(save_beside(&rom, true, 1024).is_none());
+        // DeSmuME: the raw save, then its footer.
+        let mut dsv = vec![7u8; 512];
+        dsv.extend_from_slice(
+            b"|<--Snip above here to create a raw sav by excluding this DeSmuME savedata footer:",
+        );
+        dsv.extend_from_slice(&[0; 40]);
+        dsv.extend_from_slice(b"|-DESMUME SAVE-|");
+        fs::write(directory.join("Game (USA).dsv"), &dsv).unwrap();
+        let (found, bytes) = save_beside(&rom, true, 1024).unwrap();
+        assert!(found.ends_with("Game (USA).dsv"));
+        assert_eq!(bytes, vec![7u8; 512]);
+        // The file itself is left as it was.
+        assert_eq!(fs::read(directory.join("Game (USA).dsv")).unwrap(), dsv);
+        // A plain .sav is preferred; other systems don't read .dsv.
+        fs::write(directory.join("Game (USA).sav"), [1u8; 256]).unwrap();
+        assert_eq!(save_beside(&rom, true, 1024).unwrap().1, vec![1u8; 256]);
+        fs::remove_file(directory.join("Game (USA).sav")).unwrap();
+        assert!(save_beside(&rom, false, 1024).is_none());
+        // Too large for the cartridge: not a save of this game.
+        fs::write(directory.join("Game (USA).sav"), vec![1u8; 4096]).unwrap();
+        assert_eq!(save_beside(&rom, true, 1024).unwrap().1, vec![7u8; 512]);
+        fs::remove_dir_all(directory).unwrap();
     }
 }

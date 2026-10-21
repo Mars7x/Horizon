@@ -176,6 +176,47 @@ fn publish_manifest(directory: &Path, manifest: &GameManifest) -> io::Result<()>
     result.and(cleanup)
 }
 
+/// How the player last showed a game: its DS screen layout and whether the
+/// screens were swapped. Absent for games never changed from Settings'.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct GameView {
+    pub ds_layout: Option<crate::domain::core_settings::DsLayout>,
+    pub ds_swapped: bool,
+}
+
+impl GameFolder {
+    /// The remembered view; an unreadable or invalid file counts as none.
+    pub fn view(&self) -> GameView {
+        fs::read(data_paths::game_view_path(&self.directory))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default()
+    }
+    /// Replace the remembered view atomically (written, synced, renamed).
+    pub fn remember_view(&self, view: GameView) -> io::Result<()> {
+        let temporary = data_paths::game_view_temporary_path(
+            &self.directory,
+            NEXT_MANIFEST.fetch_add(1, Ordering::Relaxed),
+        );
+        let result = (|| {
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&temporary)?;
+            file.write_all(&serde_json::to_vec_pretty(&view).map_err(io::Error::other)?)?;
+            file.sync_all()?;
+            fs::rename(&temporary, data_paths::game_view_path(&self.directory))?;
+            File::open(&self.directory)?.sync_all()
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        result
+    }
+}
+
 /// Reject symlink components so writes cannot escape a Horizon-owned root.
 pub fn ensure_directory(root: &Path, path: &Path) -> io::Result<()> {
     let relative = path.strip_prefix(root).map_err(io::Error::other)?;

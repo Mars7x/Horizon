@@ -58,6 +58,7 @@ export component PausePanel inherits Rectangle {
     // A DS game: offer Screen layout (action 8) and Swap screens (action 7)
     // after Playback speed.
     in property <bool> ds;
+    in property <bool> ds-lid-closed;
     in property <string> ds-layout;
     in property <bool> ds-layout-forward: true;
     in property <string> title;
@@ -105,10 +106,10 @@ export component PausePanel inherits Rectangle {
             returning: root.view-back; phase: root.view-phase;
             x: Metrics.spacing-lg; rest-y: 0px;
             width: root.width - Metrics.spacing-lg * 2; height: root.content-height;
-            // DS has nine actions: in a small window every row shrinks a
+            // DS has ten actions: in a small window every row shrinks a
             // little so they all fit, rather than the menu scrolling.
             menu := VerticalLayout {
-                property <int> rows: root.ds ? 9 : 7;
+                property <int> rows: root.ds ? 10 : 7;
                 property <length> fit: (root.content-height - Metrics.spacing-xs * (self.rows + 1) - Metrics.spacing-sm * 2) / self.rows;
                 property <length> row-size: max(36px, min(Metrics.pause-row-height, self.fit));
                 y: 0px; width: parent.width;
@@ -118,6 +119,7 @@ export component PausePanel inherits Rectangle {
                 PauseAction { row-height: menu.row-size; title: "Playback speed"; value: root.speed + "×"; forward: root.speed-forward; focused: root.view == 0 && root.focused == 1; enabled: root.open && root.view == 0; activated => { root.activate(1); } }
                 if root.ds : PauseAction { row-height: menu.row-size; title: "Screen layout"; value: root.ds-layout; value-width: Metrics.spacing-xxl * 3.5; forward: root.ds-layout-forward; focused: root.view == 0 && root.focused == 8; enabled: root.open && root.view == 0; activated => { root.activate(8); } }
                 if root.ds : PauseAction { row-height: menu.row-size; title: "Swap screens"; focused: root.view == 0 && root.focused == 7; enabled: root.open && root.view == 0; activated => { root.activate(7); } }
+                if root.ds : PauseAction { row-height: menu.row-size; title: root.ds-lid-closed ? "Open lid" : "Close lid"; focused: root.view == 0 && root.focused == 9; enabled: root.open && root.view == 0; activated => { root.activate(9); } }
                 Rectangle { height: Metrics.spacing-sm; background: transparent; }
                 PauseAction { row-height: menu.row-size; title: "Save state"; focused: root.view == 0 && root.focused == 2; enabled: root.open && root.view == 0; activated => { root.activate(2); } }
                 PauseAction { row-height: menu.row-size; title: "Load state"; focused: root.view == 0 && root.focused == 3; enabled: root.open && root.view == 0; activated => { root.activate(3); } }

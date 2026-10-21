@@ -86,10 +86,14 @@ The menu never scrolls: when a small window can't fit every row (DS has nine
 actions), the rows shrink slightly, down to 36 px, and larger windows keep
 their full size.
 
-DS games add Screen layout and Swap screens after Playback speed. Screen
-layout steps through the layouts with Left/Right (Select cycles) for this
-session only; Settings keeps the layout each launch starts with. Swap screens
-exchanges them. Both keep the menu open and move the screens animated.
+DS games add Screen layout, Swap screens and Close lid after Playback speed.
+Screen layout steps through the layouts with Left/Right (Select cycles); Swap
+screens exchanges them. Both keep the menu open, move the screens animated and
+are remembered for that game (`view.json` in its save folder); Settings' layout
+applies to games never changed. Close lid closes the DS lid and continues, so
+the game sees it (games ask for this, such as Phantom Hourglass); the row then
+reads Open lid. Restarting or loading a state opens it. melonDS toggles its lid
+on L2 + Y, so the game also sees Y for that one frame.
 
 Playback speed offers 1×, 2×, 3× and 4× for this loaded game. When the core
 can't reach the chosen speed (some DS games manage about 3.6× here), the worker
@@ -206,6 +210,12 @@ treatments. No RetroArch shader runtime or imported presets are supported.
 
 ## Saves and sessions
 
+A game new to Horizon (no save of its own yet) takes the save beside its file
+with the same name: `.sav` (mGBA, melonDS and most emulators), then `.srm`
+(RetroArch) and, for DS, DeSmuME's `.dsv` without its footer. It is copied
+once into Horizon's save folder; the original is only read, never changed, and
+one that doesn't fit the cartridge is ignored.
+
 Battery saves belong to Horizon under `saves/<system>/<game>/<game name>.sav`
 (`gb`, `gbc` or `gba`), with full ROM identity in `game.json`. A Game Boy
 cartridge clock (MBC3, as in Pokémon Gold, Silver and Crystal) is saved after the
@@ -278,20 +288,29 @@ other a third of its size beside it, bottom-aligned). Each screen is filtered on
 its own at the size it is shown, using the DS's own Video filter (None, LCD,
 Smooth or Smooth pixel art); mGBA's colour correction does not apply.
 Swap screens in the quick menu, or L3 during play without pausing, exchanges
-the two screens with a 150 ms slide (instant under Reduced Motion). The swap lasts
-for the session; every launch starts with the touchscreen second.
+the two screens with a 150 ms slide (instant under Reduced Motion). Layout and
+swap are remembered per game.
 Built-in BIOS/firmware replacements and direct boot avoid a firmware setup step.
 No DSi, network play, virtual SD cards or slot-2 content is exposed.
 
-Mouse press/drag touches the touchscreen wherever the layout places it; it is
-the only way to touch. Controllers have no touch cursor, and the core draws
-none. Controllers use the DS button mapping (A, B, X, Y, L, R, Start, Select;
-Settings → Controller), which follows the global A/B swap and is independent of
+Mouse press/drag touches the touchscreen wherever the layout places it, and so
+does a touchscreen (Slint delivers both as the same pointer events; a real
+touchscreen is untested). Controllers have no touch cursor, and the core draws
+none. Controllers use the DS button mapping (A, B, X, Y, L, R, Start, Select,
+Microphone; Settings → Controller), which follows the global A/B swap and is independent of
 the Game Boy mapping. Guide opens the quick menu; stick clicks don't (L3 swaps
 the screens, R3 does nothing). Keyboard Z/X are A/B, C/V are X/Y, A/S are shoulders, arrows are
-directions, Enter is Start and Backspace is Select. Escape opens the quick menu.
+directions, Enter is Start, Backspace is Select and B is the microphone.
+Escape opens the quick menu. Holding Microphone (left trigger by default) has
+the game hear a blow: melonDS's built-in blowing sound, so games that ask you
+to blow or speak respond, without any access to a real microphone. The game
+language follows the system locale (LC_ALL, LC_MESSAGES, LANG), so
+multi-language cartridges start in it; English otherwise.
 Screenshots include both screens.
 
+Core notes about features Horizon doesn't offer (Wi-Fi capture, a host
+microphone, newer option formats, a VFS, cheat memory maps) appear on every
+launch and are logged at debug, so warnings and errors are real problems.
 Core log output goes through the libretro log interface into Horizon's log
 under the `horizon::core` target: warnings and errors by default, info at
 debug and debug at trace.

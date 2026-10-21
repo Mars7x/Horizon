@@ -25,8 +25,10 @@ another action swaps those two assignments. D-pad/stick directions and the
 Guide/stick-click quick-menu controls stay fixed (in DS games L3 swaps the screens instead). Stick click, Guide, Escape or
 the dialog's Cancel button cancels capture. Capture times out after ten seconds;
 disconnect, device changes and focus loss cancel it without saving.
-DS button mapping is the same page for the DS's A, B, X, Y, L, R, Start and
-Select, stored separately. When its rows don't fit the window, the list follows
+DS button mapping is the same page for the DS's A, B, X, Y, L, R, Start,
+Select and Microphone (hold to blow; left trigger by default), stored
+separately. Older eight-control files keep their buttons and gain Microphone's
+default, or the first free button. When its rows don't fit the window, the list follows
 focus.
 
 Mappings apply to all controllers after family normalization, independently of
@@ -67,7 +69,9 @@ timing and developer controls are not exposed.
 Cores → melonDS (the melonDS DS libretro core) contains Screen layout (Side by side, Stacked, Large and
 small; default Side by side), Video filter (the same four presets, default
 None) and Internal resolution (Native, then 2× to 6× with their DS line counts;
-default Native). Higher resolutions draw 3D on the graphics card. Swapping the screens is a quick-menu action, not a setting.
+default Native). Higher resolutions draw 3D on the graphics card. Swapping the screens is a quick-menu action, not a setting. Layout and swap
+changed from the quick menu are remembered for that game, which then ignores
+this default.
 
 All preferences apply on the next game launch; the pages don't repeat this
 under their rows, which show only save errors. Shared focus freezing and resume are stored

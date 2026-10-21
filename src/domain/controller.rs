@@ -3,21 +3,34 @@ use serde::{Deserialize, Serialize};
 pub const ACTIONS: [u8; 6] = [8, 0, 10, 11, 3, 2];
 pub const ACTION_NAMES: [&str; 6] = ["A", "B", "L", "R", "Start", "Select"];
 pub const SOURCES: [u8; 10] = [8, 0, 9, 1, 10, 11, 12, 13, 3, 2];
-/// Nintendo DS has four face buttons, so its mapping has X and Y too.
-pub const DS_ACTIONS: [u8; 8] = [8, 0, 9, 1, 10, 11, 3, 2];
-pub const DS_ACTION_NAMES: [&str; 8] = ["A", "B", "X", "Y", "L", "R", "Start", "Select"];
+/// Nintendo DS has four face buttons, so its mapping has X and Y too, and a
+/// Microphone control: held, the core hears a blow (its mic button, L3).
+pub const DS_ACTIONS: [u8; 9] = [8, 0, 9, 1, 10, 11, 3, 2, 14];
+pub const DS_ACTION_NAMES: [&str; 9] = [
+    "A",
+    "B",
+    "X",
+    "Y",
+    "L",
+    "R",
+    "Start",
+    "Select",
+    "Microphone",
+];
+/// The DS defaults: the same buttons, and the left trigger blows.
+const DS_DEFAULTS: [u8; 9] = [8, 0, 9, 1, 10, 11, 3, 2, 12];
 
 /// One system's mapping: for each of its actions (in `$actions` order), the
 /// controller button that presses it. A and B lead, so the global swap can
 /// exchange them.
 macro_rules! bindings {
-    ($name:ident, $count:literal, $array:literal, $actions:ident) => {
+    ($(#[$serde:meta])* $name:ident, $count:literal, $actions:ident, $defaults:ident) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-        #[serde(try_from = $array, into = $array)]
+        $(#[$serde])*
         pub struct $name([u8; $count]);
         impl Default for $name {
             fn default() -> Self {
-                Self($actions)
+                Self($defaults)
             }
         }
         impl TryFrom<[u8; $count]> for $name {
@@ -69,8 +82,43 @@ macro_rules! bindings {
         }
     };
 }
-bindings!(GameplayBindings, 6, "[u8; 6]", ACTIONS);
-bindings!(DsBindings, 8, "[u8; 8]", DS_ACTIONS);
+bindings!(
+    #[serde(try_from = "[u8; 6]", into = "[u8; 6]")]
+    GameplayBindings,
+    6,
+    ACTIONS,
+    ACTIONS
+);
+bindings!(
+    #[serde(try_from = "Vec<u8>", into = "Vec<u8>")]
+    DsBindings,
+    9,
+    DS_ACTIONS,
+    DS_DEFAULTS
+);
+/// Saved DS mappings from before the Microphone row have eight entries: they
+/// keep them and gain its default (or the first free button).
+impl TryFrom<Vec<u8>> for DsBindings {
+    type Error = &'static str;
+    fn try_from(mut values: Vec<u8>) -> Result<Self, Self::Error> {
+        if values.len() == 8 {
+            let free = std::iter::once(DS_DEFAULTS[8])
+                .chain(SOURCES)
+                .find(|source| !values.contains(source))
+                .ok_or("No free button for the DS microphone")?;
+            values.push(free);
+        }
+        let values: [u8; 9] = values
+            .try_into()
+            .map_err(|_| "A DS mapping has nine controls")?;
+        Self::try_from(values)
+    }
+}
+impl From<DsBindings> for Vec<u8> {
+    fn from(value: DsBindings) -> Self {
+        <[u8; 9]>::from(value).to_vec()
+    }
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ControllerPreferences {
@@ -121,7 +169,13 @@ mod tests {
         assert_eq!(map.source(2, false), Some(1));
         assert_eq!(map.source(3, false), Some(9));
         assert_eq!(map.apply(1 << 1), 1 << 9);
-        assert!(DsBindings::try_from([8, 0, 9, 1, 10, 11, 3, 3]).is_err());
+        assert!(DsBindings::try_from([8, 0, 9, 1, 10, 11, 3, 3, 12]).is_err());
+        // The left trigger blows by default; eight-control files gain it.
+        assert_eq!(defaults.apply(1 << 12), 1 << 14);
+        let eight: DsBindings = serde_json::from_str("[8,0,9,1,10,11,3,2]").unwrap();
+        assert_eq!(eight, DsBindings::default());
+        let taken: DsBindings = serde_json::from_str("[8,0,9,1,10,12,3,2]").unwrap();
+        assert_eq!(taken.source(8, false), Some(11));
         let old: ControllerPreferences =
             serde_json::from_str(r#"{"swap_confirm":false,"gba_bindings":[8,0,10,11,3,2]}"#)
                 .unwrap();

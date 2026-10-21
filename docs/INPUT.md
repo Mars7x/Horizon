@@ -72,8 +72,9 @@ profile name, including [first-run creation](ONBOARDING.md), is normalized and
 capped at 32 characters. Dialog lift keeps fields
 above the keyboard. Sound and reduced-motion preferences still apply.
 
-Nintendo DS adds keyboard C/V for X/Y and its own controller mapping for all
-four face buttons, still following the shared A/B swap. Its touchscreen accepts
+Nintendo DS adds keyboard C/V for X/Y and B for the microphone, and its own
+controller mapping for all four face buttons and the microphone (left trigger),
+still following the shared A/B swap. Its touchscreen accepts
 mouse press/drag only; controllers have no touch cursor. During a DS game L3
 swaps the screens, R3 does nothing and Guide opens the quick menu; other games
 keep either stick click for the quick menu. See [playback](GBA_PLAYBACK.md).

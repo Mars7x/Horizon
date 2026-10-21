@@ -31,12 +31,15 @@ const RETURN_TO_HORIZON: i32 = 6;
 /// DS only, shown after Playback speed. Their own numbers keep the others'.
 const SWAP_SCREENS: i32 = 7;
 const SCREEN_LAYOUT: i32 = 8;
+/// Closes or opens the DS lid, then continues so the game sees it.
+const LID: i32 = 9;
 const PAUSE_ACTIONS: [i32; 7] = [0, 1, 2, 3, 4, 5, RETURN_TO_HORIZON];
-const DS_PAUSE_ACTIONS: [i32; 9] = [
+const DS_PAUSE_ACTIONS: [i32; 10] = [
     0,
     1,
     SCREEN_LAYOUT,
     SWAP_SCREENS,
+    LID,
     2,
     3,
     4,
@@ -699,6 +702,16 @@ impl GbaPlayer {
             }
             SWAP_SCREENS => self.swap_screens(&ui),
             SCREEN_LAYOUT => self.step_layout(&ui, true),
+            LID => {
+                let closed = !ui.get_player_ds_lid_closed();
+                if let Some(game) = self.running.borrow().as_ref()
+                    && game.commands.send(Command::Lid(closed)).is_ok()
+                {
+                    ui.set_player_ds_lid_closed(closed);
+                    // The game reacts to the lid as it runs.
+                    self.choose(0);
+                }
+            }
             RETURN_TO_HORIZON => {
                 self.set_state_mode(&ui, StateMode::Menu);
                 ui.set_player_busy(true);
@@ -954,19 +967,25 @@ impl GbaPlayer {
                         title,
                         freeze_when_unfocused,
                         ds_layout,
+                        ds_swapped,
                     } => {
                         self.freeze_when_unfocused.set(freeze_when_unfocused);
                         self.ds_layout.set(ds_layout);
-                        self.ds_swapped.set(false);
+                        self.ds_swapped.set(ds_swapped);
+                        ui.set_player_ds_lid_closed(false);
                         ui.set_player_ds(ds_layout.is_some());
                         self.publish_ds(&ui);
                         self.sync_pause(&ui);
                         ui.set_player_title(super::titles::game_title(&title).into());
                     }
-                    Event::Loading { preview, ds_layout } => {
+                    Event::Loading {
+                        preview,
+                        ds_layout,
+                        ds_swapped,
+                    } => {
                         if ds_layout.is_some() {
                             self.ds_layout.set(ds_layout);
-                            self.ds_swapped.set(false);
+                            self.ds_swapped.set(ds_swapped);
                             ui.set_player_ds(true);
                             self.publish_ds(&ui);
                         }
@@ -1019,6 +1038,7 @@ impl GbaPlayer {
                         }
                     }
                     Event::StateLoaded => {
+                        ui.set_player_ds_lid_closed(false);
                         if self.closing.get() {
                             continue;
                         }
@@ -1061,6 +1081,7 @@ impl GbaPlayer {
                         }
                     }
                     Event::Restarted => {
+                        ui.set_player_ds_lid_closed(false);
                         ui.set_player_busy(false);
                         ui.set_player_restart_confirm(false);
                         self.close_pause(&ui);
@@ -1291,6 +1312,19 @@ impl GbaPlayer {
         self.ds_layout.set(Some(layout.step(forward)));
         ui.set_player_ds_layout_forward(forward);
         self.publish_ds(ui);
+        self.remember_view();
+    }
+
+    /// The game is shown this way next time too.
+    fn remember_view(&self) {
+        if let Some(game) = self.running.borrow().as_ref() {
+            let _ = game.commands.send(Command::RememberView(
+                crate::services::game_storage::GameView {
+                    ds_layout: self.ds_layout.get(),
+                    ds_swapped: self.ds_swapped.get(),
+                },
+            ));
+        }
     }
 
     /// The DS screens trade places, animated (instant with Reduced Motion).
@@ -1300,6 +1334,7 @@ impl GbaPlayer {
         }
         self.ds_swapped.set(!self.ds_swapped.get());
         self.publish_ds(ui);
+        self.remember_view();
     }
 }
 
@@ -1397,6 +1432,8 @@ fn keyboard_button(text: &str) -> Option<u32> {
         "v" => Some(1),
         "a" => Some(10),
         "s" => Some(11),
+        // DS: held, the microphone hears a blow.
+        "b" => Some(14),
         _ => None,
     }
 }
@@ -1412,6 +1449,9 @@ mod tests {
             services::rom_import::{self, RomSetup},
         };
         use std::path::PathBuf;
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .try_init();
         let directory = PathBuf::from(std::env::var_os("HORIZON_DS_TEST_DIR").unwrap());
         std::fs::create_dir_all(&directory).unwrap();
         std::fs::write(
@@ -1479,7 +1519,15 @@ mod tests {
                     shots
                         .borrow_mut()
                         .push(ui.window().take_snapshot().unwrap());
-                    ui.invoke_player_touch(0.5, 0.75, true);
+                    // A press on the touchscreen where the layout shows it
+                    // (side by side: the right half), as a mouse or a
+                    // touchscreen delivers it.
+                    let at = slint::LogicalPosition::new(960.0, 360.0);
+                    ui.window()
+                        .dispatch_event(slint::platform::WindowEvent::PointerPressed {
+                            position: at,
+                            button: slint::platform::PointerEventButton::Left,
+                        });
                     assert_ne!(
                         live.running
                             .borrow()
@@ -1493,7 +1541,11 @@ mod tests {
                             >> 32,
                         0
                     );
-                    ui.invoke_player_touch(0.5, 0.75, false);
+                    ui.window()
+                        .dispatch_event(slint::platform::WindowEvent::PointerReleased {
+                            position: at,
+                            button: slint::platform::PointerEventButton::Left,
+                        });
                     live.pause();
                     assert!(ui.get_player_paused());
                     paused_at.set(Some(Instant::now()));
@@ -1545,6 +1597,18 @@ mod tests {
                     shots
                         .borrow_mut()
                         .push(ui.window().take_snapshot().unwrap());
+                    // Close lid continues the game, which then sees the lid.
+                    live.pause();
+                    live.choose(LID);
+                    assert!(ui.get_player_ds_lid_closed());
+                    assert!(!ui.get_player_paused());
+                    paused_at.set(Some(Instant::now()));
+                    step.set(9);
+                }
+                9 if paused_at
+                    .get()
+                    .is_some_and(|at| at.elapsed() > Duration::from_millis(300)) =>
+                {
                     live.running
                         .borrow()
                         .as_ref()
@@ -1560,8 +1624,10 @@ mod tests {
                 }
                 2 if live.stage.get() == PlayerStage::Playing => {
                     assert!(ui.get_player_has_frame());
-                    // A new launch starts from the Settings layout again.
-                    assert_eq!(ui.get_player_ds_layout(), "Side by side");
+                    // A new launch keeps the layout and swap this game was
+                    // last shown with.
+                    assert_eq!(ui.get_player_ds_layout(), "Stacked");
+                    assert!(live.ds_swapped.get());
                     // A slow exit save shows the last frame blurred, with
                     // a spinner, instead of a dialog.
                     // SAFETY: this test's own variable, read by its worker.
@@ -1763,12 +1829,13 @@ mod tests {
         assert_eq!(pause_step(0, false, true, false), 0);
         assert_eq!(pause_step(6, true, true, false), 6);
         assert_eq!(pause_step(6, true, false, false), 0);
-        // DS: Screen layout and Swap screens sit between Playback speed and
-        // Save state.
+        // DS: Screen layout, Swap screens and the lid sit between Playback
+        // speed and Save state.
         assert_eq!(pause_step(1, true, false, true), SCREEN_LAYOUT);
         assert_eq!(pause_step(SCREEN_LAYOUT, true, false, true), SWAP_SCREENS);
-        assert_eq!(pause_step(SWAP_SCREENS, true, false, true), 2);
-        assert_eq!(pause_step(2, false, false, true), SWAP_SCREENS);
+        assert_eq!(pause_step(SWAP_SCREENS, true, false, true), LID);
+        assert_eq!(pause_step(LID, true, false, true), 2);
+        assert_eq!(pause_step(2, false, false, true), LID);
     }
     #[test]
     fn game_keys_have_separate_start_select_and_shoulders() {

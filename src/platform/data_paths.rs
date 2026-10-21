@@ -131,6 +131,13 @@ pub fn game_manifest_path(directory: &Path) -> PathBuf {
 pub fn game_manifest_temporary_path(directory: &Path, nonce: u64) -> PathBuf {
     directory.join(format!(".game.json.{}.{nonce}.part", std::process::id()))
 }
+/// How the player last showed this game (DS screen layout and swap).
+pub fn game_view_path(directory: &Path) -> PathBuf {
+    directory.join("view.json")
+}
+pub fn game_view_temporary_path(directory: &Path, nonce: u64) -> PathBuf {
+    directory.join(format!(".view.json.{}.{nonce}.part", std::process::id()))
+}
 pub fn game_save_path(directory: &Path, stem: &str) -> PathBuf {
     directory.join(format!("{stem}.sav"))
 }
