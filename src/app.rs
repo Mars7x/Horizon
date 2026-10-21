@@ -647,6 +647,8 @@ pub fn run() -> Result<(), AppError> {
     player.set_gamepads(Rc::new(move || gameplay_input.gameplay_buttons()));
     let ds_input = Rc::clone(&input);
     player.set_ds_gamepad(Rc::new(move || ds_input.ds_buttons()));
+    let shortcut_input = Rc::clone(&input);
+    player.set_shortcut_buttons(Rc::new(move || shortcut_input.shortcut_buttons()));
     {
         let (home, library, weak) = (
             Rc::clone(&home),
@@ -700,11 +702,13 @@ pub fn run() -> Result<(), AppError> {
     // hints swap their A and B to match, unless the user keeps them as they
     // were.
     let apply_controller = {
-        let (input, glyph_ui) = (Rc::clone(&input), ui.as_weak());
+        let (input, glyph_ui, player) = (Rc::clone(&input), ui.as_weak(), Rc::clone(&player));
         move |preferences: ControllerPreferences| {
+            player.set_shortcuts(preferences.shortcuts);
             input.set_swap_confirm(preferences.swap_confirm);
             input.set_gameplay_bindings(preferences.gba_bindings);
             input.set_ds_bindings(preferences.ds_bindings);
+            input.set_shortcuts(preferences.shortcuts);
             if let Some(ui) = glyph_ui.upgrade() {
                 ui.global::<InputGlyphs>()
                     .set_swap_confirm(preferences.hints_swapped());

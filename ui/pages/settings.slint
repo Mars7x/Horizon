@@ -213,10 +213,11 @@ export component SettingsPage inherits Rectangle {
     // Depth: Settings 0, Appearance/Controller/Third-Party/Cores 1, their sub-pages 2.
     view-transition := TransitionDriver { key: root.view; }
     private property <bool> view-back: root.view-depth(root.view) < root.view-depth(view-transition.from-key);
-    // Button mapping (8) and DS button mapping (10) share one page.
-    private property <bool> binding-view: root.view == 8 || root.view == 10;
+    // Button mapping (8), DS button mapping (10) and Shortcuts (11) share one page.
+    private property <bool> binding-view: root.view == 8 || root.view == 10 || root.view == 11;
     pure function view-depth(view: int) -> int {
-        return view == 0 ? 0 : (view <= 2 || view == 5 || view == 6 ? 1 : 2);
+        // A core's button mapping (8, 10) sits under the core list (12).
+        return view == 0 ? 0 : (view <= 2 || view == 5 || view == 6 ? 1 : (view == 8 || view == 10 ? 3 : 2));
     }
 
     settings-home := TransitionLayer {
@@ -660,6 +661,42 @@ export component SettingsPage inherits Rectangle {
         }
     }
 
+    // Button mapping: one row per core, each opening its mapping.
+    mapping-cores := TransitionLayer {
+        x: Metrics.page-margin;
+        rest-y: Metrics.page-header-height;
+        width: root.content-width;
+        height: root.height - Metrics.page-header-height;
+        opaque: true;
+        active: root.view == 12;
+        outgoing: view-transition.from-key == 12;
+        returning: root.view-back;
+        phase: view-transition.phase;
+        Breadcrumb {
+            x: 0px; y: 0px; width: parent.width;
+            section: "Controller"; page: "Button mapping";
+            back => { if (root.view == 12) { root.go-back(); } }
+        }
+        SettingsRow {
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm;
+            width: parent.width;
+            title: "mGBA";
+            subtitle: "Game Boy, Color and Advance";
+            trailing: "Open";
+            focused: root.view == 12 && root.selection == 0;
+            activated => { if (root.view == 12) { root.activate(0); } }
+        }
+        SettingsRow {
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 1;
+            width: parent.width;
+            title: "melonDS";
+            subtitle: "Nintendo DS";
+            trailing: "Open";
+            focused: root.view == 12 && root.selection == 1;
+            activated => { if (root.view == 12) { root.activate(1); } }
+        }
+    }
+
     controller := TransitionLayer {
         x: Metrics.page-margin;
         rest-y: Metrics.page-header-height;
@@ -698,13 +735,13 @@ export component SettingsPage inherits Rectangle {
         }
         SettingsRow {
             x: 0px; y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 2;
-            width: parent.width; title: "Button mapping"; subtitle: "Game Boy gameplay controls"; trailing: "Open";
+            width: parent.width; title: "Button mapping"; subtitle: "Gameplay controls for each core"; trailing: "Open";
             focused: root.view == 5 && root.selection == 2;
             activated => { if (root.view == 5 && !root.binding-open) {root.activate(2);} }
         }
         SettingsRow {
             x: 0px; y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 3;
-            width: parent.width; title: "DS button mapping"; subtitle: "Nintendo DS gameplay controls"; trailing: "Open";
+            width: parent.width; title: "Shortcuts"; subtitle: "Fast-forward, quick save and load, screenshot"; trailing: "Open";
             focused: root.view == 5 && root.selection == 3;
             activated => { if (root.view == 5 && !root.binding-open) {root.activate(3);} }
         }
@@ -722,9 +759,9 @@ export component SettingsPage inherits Rectangle {
     bindings := TransitionLayer {
         x: Metrics.page-margin; rest-y: Metrics.page-header-height;
         width: root.content-width; height: root.height - Metrics.page-header-height - Metrics.page-bottom-bar-height;
-        opaque: true; active: root.binding-view; outgoing: view-transition.from-key == 8 || view-transition.from-key == 10;
+        opaque: true; active: root.binding-view; outgoing: view-transition.from-key == 8 || view-transition.from-key == 10 || view-transition.from-key == 11;
         returning: root.view-back; phase: view-transition.phase;
-        Breadcrumb { x: 0px; y: 0px; width: parent.width; section: "Controller"; page: root.view == 10 ? "DS button mapping" : "Button mapping"; back => {if (root.binding-view && !root.binding-open) {root.go-back();}} }
+        Breadcrumb { x: 0px; y: 0px; width: parent.width; section: root.view == 11 ? "Controller" : "Button mapping"; page: root.view == 10 ? "melonDS" : root.view == 11 ? "Shortcuts" : "mGBA"; back => {if (root.binding-view && !root.binding-open) {root.go-back();}} }
         // Eight DS rows don't fit a 720p window: the list follows focus
         // inside its own viewport, and doesn't move when everything fits.
         property <length> binding-stride: Metrics.compact-row-height + Metrics.list-row-gap;
@@ -746,7 +783,7 @@ export component SettingsPage inherits Rectangle {
                 Text {
                     x: Metrics.spacing-lg; y: Metrics.spacing-md;
                     width: parent.width / 2; height: Metrics.spacing-lg;
-                    text: root.view == 10 ? "DS control" : "Game Boy control"; color: Theme.secondary-foreground; font-size: Typography.caption-size;
+                    text: root.view == 10 ? "DS control" : root.view == 11 ? "Shortcut (one button, or two pressed together)" : "Game Boy control"; color: Theme.secondary-foreground; font-size: Typography.caption-size;
                     vertical-alignment: center;
                 }
                 Text {

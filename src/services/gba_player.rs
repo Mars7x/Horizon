@@ -48,7 +48,13 @@ pub enum Command {
     Restart,
     ListStates,
     SaveState(u8),
-    LoadState(u8),
+    /// Load a slot; `quick` reports trouble as a notice over the game.
+    LoadState {
+        slot: u8,
+        quick: bool,
+    },
+    /// Save the quick slot without pausing (its writing doesn't stall play).
+    QuickSave,
     /// Refresh the automatic resume point now (Horizon lost focus).
     Autosave,
     /// Close (true) or open the DS lid.
@@ -57,15 +63,159 @@ pub enum Command {
     RememberView(crate::services::game_storage::GameView),
 }
 
+/// Quick save and quick load use the first manual slot.
+pub const QUICK_SLOT: u8 = 1;
+
+/// One background thread for everything the player writes while a game may
+/// be running: state bundles (the automatic resume point, quick saves) and
+/// screenshots. The game thread only takes the snapshot (a few milliseconds);
+/// encoding and synced writes happen here, in order. The game thread waits
+/// for it to be idle before it touches states itself.
+struct Writer {
+    jobs: Option<Sender<WriteJob>>,
+    thread: Option<JoinHandle<()>>,
+    /// Jobs queued or being written.
+    pending: Arc<(std::sync::Mutex<usize>, std::sync::Condvar)>,
+}
+enum WriteJob {
+    State {
+        store: crate::services::save_states::Store,
+        slot: u8,
+        bytes: Vec<u8>,
+        frame: crate::platform::gba_core::Frame,
+        /// A quick save: the player is told how it went.
+        quick: bool,
+    },
+    Screenshot {
+        album: PathBuf,
+        game: crate::domain::SourceGameRef,
+        title: String,
+        frame: crate::platform::gba_core::Frame,
+    },
+}
+impl Writer {
+    fn new(events: Sender<Event>) -> Self {
+        let (jobs, queue) = mpsc::channel::<WriteJob>();
+        let pending = Arc::new((std::sync::Mutex::new(0usize), std::sync::Condvar::new()));
+        let done = Arc::clone(&pending);
+        let thread = thread::Builder::new()
+            .name("horizon-writer".into())
+            .spawn(move || {
+                for job in queue {
+                    let started = Instant::now();
+                    match job {
+                        WriteJob::State {
+                            store,
+                            slot,
+                            bytes,
+                            frame,
+                            quick,
+                        } => {
+                            let result = store.save(slot, &bytes, &frame);
+                            if quick {
+                                let _ = events.send(Event::QuickSaved(
+                                    result.map_err(|_| "Couldn't save the state".to_owned()),
+                                ));
+                            } else {
+                                match result {
+                                    Ok(()) => tracing::debug!(
+                                        write_ms = started.elapsed().as_millis(),
+                                        "automatic resume point refreshed"
+                                    ),
+                                    Err(error) => tracing::warn!(
+                                        %error,
+                                        "automatic resume point not refreshed"
+                                    ),
+                                }
+                            }
+                        }
+                        WriteJob::Screenshot {
+                            album,
+                            game,
+                            title,
+                            frame,
+                        } => {
+                            let _ = events.send(
+                                match write_screenshot(&album, &game, &title, &frame) {
+                                    Ok(()) => Event::ScreenshotSaved(frame),
+                                    Err(error) => Event::ActionFailed(error),
+                                },
+                            );
+                        }
+                    }
+                    let (count, idle) = &*done;
+                    let mut count = count
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    *count = count.saturating_sub(1);
+                    idle.notify_all();
+                }
+            })
+            .map_err(|error| tracing::warn!(%error, "the background writer could not start"))
+            .ok();
+        Self {
+            jobs: thread.is_some().then_some(jobs),
+            thread,
+            pending,
+        }
+    }
+
+    fn busy(&self) -> bool {
+        *self
+            .pending
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            > 0
+    }
+
+    /// Queue a job; false if the writer isn't running (nothing was queued).
+    fn send(&self, job: WriteJob) -> bool {
+        let Some(jobs) = &self.jobs else {
+            return false;
+        };
+        let (count, _) = &*self.pending;
+        *count
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) += 1;
+        if jobs.send(job).is_err() {
+            *count
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) -= 1;
+            return false;
+        }
+        true
+    }
+
+    /// Wait until everything queued is written.
+    fn wait(&self) {
+        let (count, idle) = &*self.pending;
+        let _idle = idle
+            .wait_while(
+                count
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+                |count| *count > 0,
+            )
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+    }
+}
+impl Drop for Writer {
+    fn drop(&mut self) {
+        self.jobs.take();
+        if let Some(thread) = self.thread.take()
+            && thread.join().is_err()
+        {
+            tracing::warn!("the background writer stopped unexpectedly");
+        }
+    }
+}
+
 /// Refreshes the automatic resume point while a game is played, so a crash
-/// or power cut loses at most about a minute. The game thread only takes the
-/// snapshot (the core's state and picture, a few milliseconds); encoding the
-/// preview and the synced writes happen on a thread of their own. One write
-/// at a time; the game thread waits for it before touching states itself.
+/// or power cut loses at most about a minute (through the `Writer`).
 struct Autosave {
     folder: crate::services::game_storage::GameFolder,
     identity: String,
-    writing: Option<JoinHandle<()>>,
     /// Unpaused play since the last refresh.
     played: Duration,
 }
@@ -87,15 +237,16 @@ impl Autosave {
         self.played >= Self::EVERY
     }
 
-    fn start(&mut self, core: &Core) {
-        if self
-            .writing
-            .as_ref()
-            .is_some_and(|writer| !writer.is_finished())
-        {
+    fn store(&self) -> crate::services::save_states::Store {
+        crate::services::save_states::Store::new(self.folder.clone(), self.identity.clone())
+    }
+
+    /// Snapshot `core` into `slot` through `writer`. An automatic refresh
+    /// is skipped while the writer is still busy; a quick save queues.
+    fn start(&mut self, core: &Core, writer: &Writer, slot: u8, quick: bool) {
+        if !quick && writer.busy() {
             return;
         }
-        self.finish();
         let taken = Instant::now();
         let snapshot = core
             .serialize_state()
@@ -103,43 +254,25 @@ impl Autosave {
         let (bytes, frame) = match snapshot {
             Ok(snapshot) => snapshot,
             Err(error) => {
-                tracing::warn!(%error, "automatic resume point not refreshed");
+                tracing::warn!(%error, slot, "state not saved");
                 return;
             }
         };
         tracing::debug!(
             snapshot_ms = taken.elapsed().as_secs_f64() * 1000.0,
-            "refreshing the automatic resume point"
+            slot,
+            "state snapshot"
         );
-        let written = Instant::now();
-        self.played = Duration::ZERO;
-        let store =
-            crate::services::save_states::Store::new(self.folder.clone(), self.identity.clone());
-        self.writing = thread::Builder::new()
-            .name("horizon-autosave".into())
-            .spawn(move || match store.save(0, &bytes, &frame) {
-                Ok(()) => tracing::debug!(
-                    write_ms = written.elapsed().as_millis(),
-                    "automatic resume point refreshed"
-                ),
-                Err(error) => tracing::warn!(%error, "automatic resume point not refreshed"),
-            })
-            .map_err(|error| tracing::warn!(%error, "automatic resume point not refreshed"))
-            .ok();
-    }
-
-    /// Wait for a write in progress.
-    fn finish(&mut self) {
-        if let Some(writer) = self.writing.take()
-            && writer.join().is_err()
-        {
-            tracing::warn!("the automatic resume point writer stopped unexpectedly");
+        if slot == 0 {
+            self.played = Duration::ZERO;
         }
-    }
-}
-impl Drop for Autosave {
-    fn drop(&mut self) {
-        self.finish();
+        writer.send(WriteJob::State {
+            store: self.store(),
+            slot,
+            bytes,
+            frame,
+            quick,
+        });
     }
 }
 pub enum Event {
@@ -171,6 +304,10 @@ pub enum Event {
     States(Vec<crate::services::save_states::Entry>),
     StateSaved,
     StateLoaded,
+    /// A quick save finished.
+    QuickSaved(Result<(), String>),
+    /// A short message to show over the game.
+    Notice(String),
     ActionFailed(String),
 }
 pub struct RunningGame {
@@ -510,9 +647,9 @@ fn play(
     let mut autosave = Autosave {
         folder: game_folder.clone(),
         identity: core.state_identity.clone(),
-        writing: None,
         played: Duration::ZERO,
     };
+    let writer = Writer::new(events.clone());
     let mut last_tick = Instant::now();
     let mut lid_closed = false;
     let mut view_writer: Option<JoinHandle<()>> = None;
@@ -575,11 +712,11 @@ fn play(
                     command,
                     Command::ListStates
                         | Command::SaveState(_)
-                        | Command::LoadState(_)
+                        | Command::LoadState { .. }
                         | Command::Stop
                         | Command::Shutdown
                 ) {
-                    autosave.finish();
+                    writer.wait();
                 }
                 match command {
                     Command::Pause(value) => {
@@ -599,17 +736,21 @@ fn play(
                         let _ = events.send(Event::SpeedChanged(next));
                     }
                     Command::Screenshot => {
-                        let result = core.capture_frame().and_then(|frame| {
-                            write_screenshot(
-                                &paths.album,
-                                &game,
-                                &game_folder.manifest.title,
-                                &frame,
-                            )
-                            .map(|()| frame)
+                        // Encoding and writing happen on the writer, so a
+                        // screenshot taken during play doesn't stall it.
+                        let queued = core.capture_frame().and_then(|frame| {
+                            writer
+                                .send(WriteJob::Screenshot {
+                                    album: paths.album.clone(),
+                                    game: game.clone(),
+                                    title: game_folder.manifest.title.clone(),
+                                    frame,
+                                })
+                                .then_some(())
+                                .ok_or_else(|| "Could not save the screenshot".to_owned())
                         });
-                        let _ = events.send(match result {
-                            Ok(frame) => Event::ScreenshotSaved(frame),
+                        let _ = events.send(match queued {
+                            Ok(()) => continue,
                             Err(error) => Event::ActionFailed(error),
                         });
                     }
@@ -629,6 +770,14 @@ fn play(
                             })
                             .ok();
                     }
+                    Command::QuickSave => {
+                        if session.is_some() && core.supports_states() {
+                            autosave.start(&core, &writer, QUICK_SLOT, true);
+                        } else {
+                            let _ = events
+                                .send(Event::QuickSaved(Err("This game can't save states".into())));
+                        }
+                    }
                     Command::Lid(closed) => {
                         if ds && closed != lid_closed {
                             // melonDS toggles its lid on L2 + Y.
@@ -641,7 +790,7 @@ fn play(
                             && core.supports_states()
                             && autosave.played >= Autosave::AT_LEAST
                         {
-                            autosave.start(&core);
+                            autosave.start(&core, &writer, 0, false);
                         }
                     }
                     Command::ListStates => {
@@ -657,7 +806,7 @@ fn play(
                             let _ = events.send(Event::StateSaved);
                         }
                     }
-                    Command::LoadState(slot) => match states.load_state(slot) {
+                    Command::LoadState { slot, quick } => match states.load_state(slot) {
                         Ok(Some(snapshot)) => {
                             save_current(&core, &save_path, &mut last_save)?;
                             audio.set_paused(true);
@@ -673,11 +822,19 @@ fn play(
                             let _ = events.send(Event::StateLoaded);
                         }
                         Ok(None) => {
-                            let _ =
-                                events.send(Event::ActionFailed("This state slot is empty".into()));
+                            let message = format!("Slot {slot} is empty");
+                            let _ = events.send(if quick {
+                                Event::Notice(message)
+                            } else {
+                                Event::ActionFailed("This state slot is empty".into())
+                            });
                         }
                         Err(error) => {
-                            let _ = events.send(Event::ActionFailed(error.to_string()));
+                            let _ = events.send(if quick {
+                                Event::Notice(format!("Couldn't load slot {slot}"))
+                            } else {
+                                Event::ActionFailed(error.to_string())
+                            });
                         }
                     },
                     Command::Restart => {
@@ -750,7 +907,7 @@ fn play(
             }
             last_tick = now;
             if !paused && session.is_some() && core.supports_states() && autosave.due() {
-                autosave.start(&core);
+                autosave.start(&core, &writer, 0, false);
             }
             if !paused {
                 let before = audio.written();

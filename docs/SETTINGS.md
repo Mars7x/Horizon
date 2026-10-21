@@ -14,22 +14,32 @@ Focus is distinct from the selected value. See [UI standards](UI_STANDARDS.md).
 
 Controller has Swap Select and Back, plus Swap Hints. The first changes controller
 menu actions and gameplay A/B; the second determines whether hints follow the swap. Keyboard
-Enter/Escape remains unchanged. Button mapping opens a shared settings subpage
-for A, B, L, R, Start and Select, shared by Game Boy, Game Boy Color and GBA
+Enter/Escape remains unchanged. Button mapping lists the cores (mGBA, melonDS);
+each opens its mapping, and Back returns to the list, then to Controller. mGBA's
+page covers A, B, L, R, Start and Select, shared by Game Boy, Game Boy Color and GBA
 games (L and R are GBA only). Each row pairs a named game control with
 its assigned controller input in a keycap, using controller-family labels;
 selecting either side changes the same
 assignment. Select a row, release held controls, then
 press a face button, shoulder, trigger, Start or Select. A binding already used by
 another action swaps those two assignments. D-pad/stick directions and the
-Guide/stick-click quick-menu controls stay fixed (in DS games L3 swaps the screens instead). Stick click, Guide, Escape or
+Guide's quick-menu control stays fixed (in DS games L3 swaps the screens). Stick click, Guide, Escape or
 the dialog's Cancel button cancels capture. Capture times out after ten seconds;
 disconnect, device changes and focus loss cancel it without saving.
-DS button mapping is the same page for the DS's A, B, X, Y, L, R, Start,
+melonDS's page is the same layout for the DS's A, B, X, Y, L, R, Start,
 Select and Microphone (hold to blow; left trigger by default), stored
 separately. Older eight-control files keep their buttons and gain Microphone's
 default, or the first free button. When its rows don't fit the window, the list follows
 focus.
+
+Shortcuts is the same page for in-game shortcuts shared by every system:
+Fast-forward (hold; both triggers together by default), Quick save, Quick load
+and Screenshot (not set by default). Each takes one button or two pressed
+together: hold them, then let go (more than two asks again). X clears a row. A
+one-button shortcut's button is held back from games; a pair's buttons still
+reach the game alone and are held back only while the whole pair is down, so
+the DS microphone (left trigger) keeps working. A button serves one shortcut:
+giving it to another clears the first. Restore defaults restores the triggers.
 
 Mappings apply to all controllers after family normalization, independently of
 keyboard gameplay. Swap Select and Back exchanges mapped gameplay A/B; the rows

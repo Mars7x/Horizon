@@ -126,6 +126,122 @@ pub struct ControllerPreferences {
     pub swap_hints: bool,
     pub gba_bindings: GameplayBindings,
     pub ds_bindings: DsBindings,
+    pub shortcuts: Shortcuts,
+}
+
+pub const SHORTCUT_NAMES: [&str; 4] = ["Fast-forward", "Quick save", "Quick load", "Screenshot"];
+
+/// In-game shortcuts, shared by every system: one or two controller buttons
+/// (`SOURCES`) for each, or none. A one-button shortcut's button is held back
+/// from games; a pair's buttons still reach the game alone and are held back
+/// only while the whole pair is down. No button serves two shortcuts.
+/// Fast-forward works while held; the others act once per press.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "Vec<Vec<u8>>", into = "Vec<Vec<u8>>")]
+pub struct Shortcuts([u16; 4]);
+impl Default for Shortcuts {
+    /// Both triggers fast-forward: a pair, so either trigger alone still
+    /// reaches the game (the DS microphone is the left trigger).
+    fn default() -> Self {
+        Self([1 << 12 | 1 << 13, 0, 0, 0])
+    }
+}
+impl TryFrom<Vec<Vec<u8>>> for Shortcuts {
+    type Error = &'static str;
+    fn try_from(rows: Vec<Vec<u8>>) -> Result<Self, Self::Error> {
+        let mut masks = [0u16; 4];
+        if rows.len() != masks.len() {
+            return Err("Shortcuts have four rows");
+        }
+        for (mask, row) in masks.iter_mut().zip(&rows) {
+            if row.len() > 2 || row.iter().any(|v| !SOURCES.contains(v)) {
+                return Err("Invalid shortcut button");
+            }
+            *mask = row.iter().fold(0, |mask, bit| mask | 1 << bit);
+            if mask.count_ones() as usize != row.len() {
+                return Err("Duplicate shortcut button");
+            }
+        }
+        let all = masks.iter().fold(0u16, |all, mask| all | mask);
+        if all.count_ones() != masks.iter().map(|m| m.count_ones()).sum::<u32>() {
+            return Err("A button serves two shortcuts");
+        }
+        Ok(Self(masks))
+    }
+}
+impl From<Shortcuts> for Vec<Vec<u8>> {
+    fn from(value: Shortcuts) -> Self {
+        value
+            .0
+            .iter()
+            .map(|mask| {
+                SOURCES
+                    .into_iter()
+                    .filter(|bit| mask & (1 << bit) != 0)
+                    .collect()
+            })
+            .collect()
+    }
+}
+impl Shortcuts {
+    pub const FAST_FORWARD: usize = 0;
+    pub const QUICK_SAVE: usize = 1;
+    pub const QUICK_LOAD: usize = 2;
+    pub const SCREENSHOT: usize = 3;
+    /// `row`'s buttons, in `SOURCES` order (none, one or two).
+    pub fn buttons(self, row: usize) -> Vec<u8> {
+        let mask = self.0.get(row).copied().unwrap_or(0);
+        SOURCES
+            .into_iter()
+            .filter(|bit| mask & (1 << bit) != 0)
+            .collect()
+    }
+    /// Give `row` one or two buttons (a mask of `SOURCES` bits); shortcuts
+    /// that used any of them lose them.
+    pub fn assign(mut self, row: usize, buttons: u16) -> Self {
+        let valid = SOURCES.iter().fold(0u16, |all, bit| all | 1 << bit);
+        if row >= self.0.len() || buttons == 0 || buttons & !valid != 0 || buttons.count_ones() > 2
+        {
+            return self;
+        }
+        for (index, mask) in self.0.iter_mut().enumerate() {
+            if index != row && *mask & buttons != 0 {
+                *mask = 0;
+            }
+        }
+        self.0[row] = buttons;
+        self
+    }
+    pub fn clear(mut self, row: usize) -> Self {
+        if let Some(value) = self.0.get_mut(row) {
+            *value = 0;
+        }
+        self
+    }
+    pub fn is_set(self, row: usize) -> bool {
+        self.0.get(row).is_some_and(|mask| *mask != 0)
+    }
+    /// Every button some shortcut uses.
+    pub fn mask(self) -> u16 {
+        self.0.iter().fold(0, |all, mask| all | mask)
+    }
+    /// Whether all of `row`'s buttons are down in `buttons`.
+    pub fn held(self, row: usize, buttons: u16) -> bool {
+        self.0
+            .get(row)
+            .is_some_and(|&mask| mask != 0 && buttons & mask == mask)
+    }
+    /// The buttons to hold back from the game given what's held: single
+    /// shortcut buttons always, a pair's only while the whole pair is down.
+    pub fn withheld(self, buttons: u16) -> u16 {
+        self.0.iter().fold(0, |out, &mask| {
+            if mask.count_ones() == 1 || (mask != 0 && buttons & mask == mask) {
+                out | mask
+            } else {
+                out
+            }
+        })
+    }
 }
 impl Default for ControllerPreferences {
     fn default() -> Self {
@@ -134,6 +250,7 @@ impl Default for ControllerPreferences {
             swap_hints: true,
             gba_bindings: GameplayBindings::default(),
             ds_bindings: DsBindings::default(),
+            shortcuts: Shortcuts::default(),
         }
     }
 }
@@ -180,5 +297,29 @@ mod tests {
             serde_json::from_str(r#"{"swap_confirm":false,"gba_bindings":[8,0,10,11,3,2]}"#)
                 .unwrap();
         assert_eq!(old.ds_bindings, DsBindings::default());
+    }
+    #[test]
+    fn shortcuts_take_pairs_and_hold_back_only_what_they_use() {
+        let defaults = Shortcuts::default();
+        assert_eq!(defaults.buttons(Shortcuts::FAST_FORWARD), vec![12, 13]);
+        // A pair: either trigger alone still reaches the game.
+        assert_eq!(defaults.withheld(1 << 12), 0);
+        assert_eq!(defaults.withheld(1 << 12 | 1 << 13), 1 << 12 | 1 << 13);
+        assert!(defaults.held(Shortcuts::FAST_FORWARD, 1 << 12 | 1 << 13 | 1));
+        assert!(!defaults.held(Shortcuts::FAST_FORWARD, 1 << 13));
+        // One button: always held back. Taking a pair's button clears it.
+        let map = defaults.assign(Shortcuts::QUICK_SAVE, 1 << 13);
+        assert!(!map.is_set(Shortcuts::FAST_FORWARD));
+        assert_eq!(map.withheld(1 << 13), 1 << 13);
+        assert_eq!(
+            map.assign(Shortcuts::QUICK_LOAD, 1 << 9 | 1 << 1 | 1 << 8),
+            map
+        );
+        assert_eq!(map.clear(Shortcuts::QUICK_SAVE).mask(), 0);
+        let round: Vec<Vec<u8>> = defaults.into();
+        assert_eq!(Shortcuts::try_from(round).unwrap(), defaults);
+        assert!(Shortcuts::try_from(vec![vec![12, 13], vec![13], vec![], vec![]]).is_err());
+        let old: ControllerPreferences = serde_json::from_str(r#"{"swap_confirm":false}"#).unwrap();
+        assert_eq!(old.shortcuts, Shortcuts::default());
     }
 }

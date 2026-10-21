@@ -22,7 +22,8 @@ import and Ready. Completed setup is skipped; unfinished confirmed steps resume.
 | Activity | Retained session totals, recent history and distinct lifetime counters |
 | Album | Horizon-owned pictures/clips, viewer, video playback and confirmed deletion |
 | Achievements | Retained page and Milestones layout; no provider, “Achievements unavailable” |
-| Settings | Appearance, Controller → Button mapping, Cores → mGBA, Third-Party → SteamGridDB and Steam Account |
+| Settings | Appearance; Controller → Button mapping and DS button mapping; Cores → mGBA and melonDS; Third-Party → SteamGridDB and Steam Account |
+| Player | GB/GBC/GBA and DS in a zoomed shell with quick menu, playback speed, four state slots and a crash-safe automatic resume point; DS layouts, swap, lid, blow and GPU internal resolution |
 | Profile | Local name/picture, Steam profile picture and read-only Steam friends |
 
 Utilities are **Album, Activity, Achievements, Settings**, in that order.
@@ -32,15 +33,18 @@ RetroAchievements is intended future work, not an available backend.
 
 Storage uses the fresh [purpose-first layout](STORAGE.md), with readable game
 folders, game-named saves and independent playback/core preference files. Old
-layout files remain untouched and are not migrated. Four manual save slots and a separate automatic exit state support seamless
-resume, enabled by default. States include previews and compatibility checks. Stored screenshots, previews,
+layout files remain untouched and are not migrated. Four manual save slots and a separate automatic resume
+state (written on exit, every minute of play and when Horizon loses focus) support seamless
+resume, enabled by default. A game new to Horizon imports a same-named save from
+beside its file once. DS layout and swap are remembered per game. States include previews and compatibility checks. Stored screenshots, previews,
 profiles and artwork caches use lossless JXL; profile/Album JXL animations are
 supported, with import decoders retained for external PNG/JPEG/GIF/APNG images.
 
 ## Inactive boundaries
 
-The mGBA systems launch only their imported content through the embedded player; no capture
-sources are registered. External URI/foreground-handoff execution remains dormant.
+The cartridge systems launch only their imported content through the embedded player; no capture
+sources are registered. Only melonDS may draw with the GPU (its internal
+resolution, through a hidden OpenGL context); mGBA stays software-only. External URI/foreground-handoff execution remains dormant.
 Optional SteamGridDB lookup can supply covers for imported games. The reusable importer
 opens from first-run setup.
 The shared append-only catalog and historical SQLite identities remain intact.
@@ -58,4 +62,6 @@ actual commands, toolchain, failures and tested architecture when delivering a
 change. See [Development](DEVELOPMENT.md). Current decisions are in
 [ADR 0190](adr/0190-flatpak-embedded-emulator-direction.md),
 [ADR 0191](adr/0191-steam-profile-and-friends-only.md) and
-[ADR 0192](adr/0192-repository-maintenance.md).
+[ADR 0192](adr/0192-repository-maintenance.md); DS playback follows
+[ADR 0216](adr/0216-nintendo-ds-playback.md) to
+[ADR 0219](adr/0219-ds-lid-microphone-language-and-per-game-view.md).

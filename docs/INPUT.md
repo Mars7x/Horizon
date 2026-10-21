@@ -30,8 +30,12 @@ recognition is separate from Steam account services.
 
 During [GBA playback](GBA_PLAYBACK.md), held buttons and key releases drive the
 core independently of menu repeats. Keyboard: arrows move, Z/X are A/B, A/S are
-L/R, Enter is Start and Backspace is Select. Escape/F10, Guide or a stick click
-opens Pause. Its vertical menu includes save/load state browsers; Left/Right
+L/R, Enter is Start and Backspace is Select. Escape/F10 or Guide opens Pause;
+stick clicks never do. Shortcuts: Tab held fast-forwards, F5 quick saves, F8 quick loads
+and F12 takes a screenshot; controller shortcuts are set in Settings →
+Controller → Shortcuts (one button, or a pair such as the default both triggers
+for fast-forward); a single shortcut button never reaches the game, a pair's
+only while both are held. Its vertical menu includes save/load state browsers; Left/Right
 adjusts the focused speed choice. Back continues, or cancels restart confirmation. Focus loss clears and blocks
 gameplay input without opening this menu; optional background freezing resumes
 automatically, while an explicit pause remains paused.
@@ -76,5 +80,5 @@ Nintendo DS adds keyboard C/V for X/Y and B for the microphone, and its own
 controller mapping for all four face buttons and the microphone (left trigger),
 still following the shared A/B swap. Its touchscreen accepts
 mouse press/drag only; controllers have no touch cursor. During a DS game L3
-swaps the screens, R3 does nothing and Guide opens the quick menu; other games
-keep either stick click for the quick menu. See [playback](GBA_PLAYBACK.md).
+swaps the screens; in every game Guide opens the quick menu and stick clicks
+never do. See [playback](GBA_PLAYBACK.md).

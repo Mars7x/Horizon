@@ -55,8 +55,10 @@ struct PageState {
 
 struct BindingCapture {
     row: usize,
-    /// Capturing for the DS mapping rather than the Game Boy one.
-    ds: bool,
+    /// The page capturing: Game Boy mapping, DS mapping or shortcuts.
+    target: SettingsView,
+    /// Shortcuts: every button held so far; set once all are let go.
+    combo: u16,
     since: std::time::Instant,
     armed: bool,
     device: Option<u64>,
@@ -345,7 +347,8 @@ impl SettingsController {
         }
         *self.capture.borrow_mut() = Some(BindingCapture {
             row,
-            ds: self.page.borrow().view == SettingsView::DsBindings,
+            target: self.page.borrow().view,
+            combo: 0,
             since: std::time::Instant::now(),
             armed: false,
             device: None,
@@ -397,6 +400,35 @@ impl SettingsController {
             return;
         }
         current.device = Some(device);
+        let valid = crate::domain::controller::SOURCES
+            .iter()
+            .fold(0u16, |all, bit| all | 1 << bit);
+        if current.target == SettingsView::Shortcuts {
+            // One or two buttons, held together, then let go.
+            if !current.armed {
+                current.armed = buttons == 0;
+                return;
+            }
+            if buttons != 0 {
+                current.combo |= buttons & valid;
+                return;
+            }
+            let (row, combo) = (current.row, std::mem::take(&mut current.combo));
+            if combo == 0 {
+                return;
+            }
+            if combo.count_ones() > 2 {
+                *self.controller_feedback.borrow_mut() = "Use one or two buttons.".into();
+                self.publish(ui);
+                return;
+            }
+            capture.take();
+            drop(capture);
+            let mut values = self.controller.get();
+            values.shortcuts = values.shortcuts.assign(row, combo);
+            self.save_controller(ui, values);
+            return;
+        }
         if buttons == 0 {
             current.armed = true;
             return;
@@ -412,15 +444,16 @@ impl SettingsController {
             current.armed = false;
             return;
         }
-        let (row, ds) = (current.row, current.ds);
+        let (row, target) = (current.row, current.target);
         let source = pressed[0];
         capture.take();
         drop(capture);
         let mut values = self.controller.get();
-        if ds {
-            values.ds_bindings = values.ds_bindings.assign(row, source, values.swap_confirm);
-        } else {
-            values.gba_bindings = values.gba_bindings.assign(row, source, values.swap_confirm);
+        match target {
+            SettingsView::DsBindings => {
+                values.ds_bindings = values.ds_bindings.assign(row, source, values.swap_confirm)
+            }
+            _ => values.gba_bindings = values.gba_bindings.assign(row, source, values.swap_confirm),
         }
         self.save_controller(ui, values);
     }
@@ -659,8 +692,15 @@ impl SettingsController {
                 self.activate(ui, selected);
             }
             UiAction::Secondary if !event.repeated => {
-                let selected = self.page.borrow().selected;
-                self.ask_remove(ui, selected);
+                let (view, selected) = {
+                    let page = self.page.borrow();
+                    (page.view, page.selected)
+                };
+                if view == SettingsView::Shortcuts {
+                    self.clear_shortcut(ui, selected);
+                } else {
+                    self.ask_remove(ui, selected);
+                }
                 return true;
             }
             UiAction::Home | UiAction::Menu => return false,
@@ -846,7 +886,7 @@ impl SettingsController {
                 self.change_core(ui, selected, None);
                 return;
             }
-            SettingsView::GameBindings | SettingsView::DsBindings => {
+            SettingsView::GameBindings | SettingsView::DsBindings | SettingsView::Shortcuts => {
                 if !self.controller_ready.get() || self.controller_busy.get() {
                     return;
                 }
@@ -868,13 +908,27 @@ impl SettingsController {
                 }
                 return;
             }
+            SettingsView::MappingCores => {
+                let child = match selected {
+                    0 => SettingsView::GameBindings,
+                    1 => SettingsView::DsBindings,
+                    _ => return,
+                };
+                let mut page = self.page.borrow_mut();
+                page.view = child;
+                page.selected = 0;
+                drop(page);
+                self.cue(UiSoundCue::Ok);
+                self.publish(ui);
+                return;
+            }
             SettingsView::Controller => {
                 if matches!(selected, 2 | 3) {
                     let mut page = self.page.borrow_mut();
                     page.view = if selected == 2 {
-                        SettingsView::GameBindings
+                        SettingsView::MappingCores
                     } else {
-                        SettingsView::DsBindings
+                        SettingsView::Shortcuts
                     };
                     page.selected = 0;
                     drop(page);
@@ -965,8 +1019,28 @@ impl SettingsController {
                 "Remove"
             }
             (SettingsView::SteamAccount, 0) if self.steam_account.borrow().saved() => "Disconnect",
+            (SettingsView::Shortcuts, 0..=3)
+                if self.controller.get().shortcuts.is_set(row as usize) =>
+            {
+                "Clear"
+            }
             _ => "",
         }
+    }
+
+    /// A shortcut no longer has a button (X on its row): nothing to confirm.
+    fn clear_shortcut(&self, ui: &AppWindow, row: i32) {
+        let mut values = self.controller.get();
+        if self.capture.borrow().is_some()
+            || !self.controller_ready.get()
+            || self.controller_busy.get()
+            || !values.shortcuts.is_set(row as usize)
+        {
+            return;
+        }
+        values.shortcuts = values.shortcuts.clear(row as usize);
+        self.cue(UiSoundCue::Back);
+        self.save_controller(ui, values);
     }
 
     /// Ask before removing what a row sets (X, or the row's Remove button).
@@ -991,12 +1065,17 @@ impl SettingsController {
             return;
         };
         let view = self.page.borrow().view;
-        if choice == 1 && matches!(view, SettingsView::GameBindings | SettingsView::DsBindings) {
+        if choice == 1
+            && matches!(
+                view,
+                SettingsView::GameBindings | SettingsView::DsBindings | SettingsView::Shortcuts
+            )
+        {
             let mut next = self.controller.get();
-            if view == SettingsView::DsBindings {
-                next.ds_bindings = Default::default();
-            } else {
-                next.gba_bindings = Default::default();
+            match view {
+                SettingsView::DsBindings => next.ds_bindings = Default::default(),
+                SettingsView::Shortcuts => next.shortcuts = Default::default(),
+                _ => next.gba_bindings = Default::default(),
             }
             self.save_controller(ui, next);
         } else if choice == 1 {
@@ -1268,6 +1347,8 @@ impl SettingsController {
             SettingsView::Controller => 5,
             SettingsView::GameBindings => 8,
             SettingsView::DsBindings => 10,
+            SettingsView::Shortcuts => 11,
+            SettingsView::MappingCores => 12,
             SettingsView::Cores => 6,
             SettingsView::Mgba => 7,
             SettingsView::MelonDs => 9,
@@ -1278,10 +1359,10 @@ impl SettingsController {
                 .borrow()
                 .as_ref()
                 .map(|capture| {
-                    let names: &[&str] = if capture.ds {
-                        &crate::domain::controller::DS_ACTION_NAMES
-                    } else {
-                        &crate::domain::controller::ACTION_NAMES
+                    let names: &[&str] = match capture.target {
+                        SettingsView::DsBindings => &crate::domain::controller::DS_ACTION_NAMES,
+                        SettingsView::Shortcuts => &crate::domain::controller::SHORTCUT_NAMES,
+                        _ => &crate::domain::controller::ACTION_NAMES,
                     };
                     format!("Assign {}", names.get(capture.row).copied().unwrap_or(""))
                 })
@@ -1290,8 +1371,32 @@ impl SettingsController {
         );
         let values = self.controller.get();
         let family = ui.global::<crate::InputGlyphs>().get_family();
-        let ds = page.view == SettingsView::DsBindings;
-        let rows: Vec<_> = if ds {
+        let rows: Vec<_> = if page.view == SettingsView::Shortcuts {
+            crate::domain::controller::SHORTCUT_NAMES
+                .into_iter()
+                .enumerate()
+                .map(|(row, title)| crate::ControllerBindingRow {
+                    title: if row == crate::domain::controller::Shortcuts::FAST_FORWARD {
+                        "Fast-forward (hold)".into()
+                    } else {
+                        title.into()
+                    },
+                    value: {
+                        let buttons = values.shortcuts.buttons(row);
+                        if buttons.is_empty() {
+                            "Not set".into()
+                        } else {
+                            buttons
+                                .into_iter()
+                                .map(|source| binding_label(Some(source), family))
+                                .collect::<Vec<_>>()
+                                .join(" + ")
+                                .into()
+                        }
+                    },
+                })
+                .collect()
+        } else if page.view == SettingsView::DsBindings {
             crate::domain::controller::DS_ACTION_NAMES
                 .into_iter()
                 .enumerate()
@@ -1384,7 +1489,10 @@ impl SettingsController {
         ui.set_settings_feedback(
             if matches!(
                 page.view,
-                SettingsView::Controller | SettingsView::GameBindings | SettingsView::DsBindings
+                SettingsView::Controller
+                    | SettingsView::GameBindings
+                    | SettingsView::DsBindings
+                    | SettingsView::Shortcuts
             ) {
                 self.controller_feedback.borrow().clone()
             } else {
@@ -1395,7 +1503,7 @@ impl SettingsController {
         ui.set_settings_confirm_open(page.confirm.is_some());
         ui.set_settings_confirm_focus(page.confirm_focus);
         let (title, action) = match page.view {
-            SettingsView::GameBindings | SettingsView::DsBindings => {
+            SettingsView::GameBindings | SettingsView::DsBindings | SettingsView::Shortcuts => {
                 ("Restore default controls?", "Restore")
             }
             SettingsView::SteamAccount => ("Disconnect Steam?", "Disconnect"),
@@ -1438,8 +1546,10 @@ fn settings_parent(view: SettingsView) -> Option<(SettingsView, i32)> {
         SettingsView::MelonDs => Some((SettingsView::Cores, 1)),
         SettingsView::Appearance => Some((SettingsView::Root, 0)),
         SettingsView::Controller => Some((SettingsView::Root, 1)),
-        SettingsView::GameBindings => Some((SettingsView::Controller, 2)),
-        SettingsView::DsBindings => Some((SettingsView::Controller, 3)),
+        SettingsView::MappingCores => Some((SettingsView::Controller, 2)),
+        SettingsView::GameBindings => Some((SettingsView::MappingCores, 0)),
+        SettingsView::DsBindings => Some((SettingsView::MappingCores, 1)),
+        SettingsView::Shortcuts => Some((SettingsView::Controller, 3)),
         SettingsView::ThirdParty => Some((SettingsView::Root, 2)),
         SettingsView::SteamGridDb => Some((SettingsView::ThirdParty, 0)),
         SettingsView::SteamAccount => Some((SettingsView::ThirdParty, 1)),
@@ -1455,8 +1565,10 @@ fn selection_count(view: SettingsView) -> i32 {
         SettingsView::MelonDs => 3,
         SettingsView::Appearance => 15,
         SettingsView::Controller => 4,
+        SettingsView::MappingCores => 2,
         SettingsView::GameBindings => 7,
         SettingsView::DsBindings => 10,
+        SettingsView::Shortcuts => 5,
         SettingsView::ThirdParty => 2,
         SettingsView::SteamGridDb => 3,
         SettingsView::SteamAccount => 2,
@@ -1620,7 +1732,11 @@ mod editor_navigation_tests {
         );
         assert_eq!(
             super::settings_parent(SettingsView::DsBindings),
-            Some((SettingsView::Controller, 3))
+            Some((SettingsView::MappingCores, 1))
+        );
+        assert_eq!(
+            super::settings_parent(SettingsView::MappingCores),
+            Some((SettingsView::Controller, 2))
         );
         assert_eq!(super::selection_count(SettingsView::Appearance), 15);
         assert_eq!(super::selection_count(SettingsView::ThirdParty), 2);
@@ -2161,7 +2277,10 @@ mod mapping_runtime_tests {
                     0 => {
                         ui.invoke_settings_activate(1);
                         assert_eq!(ui.get_settings_view(), 5);
+                        // Button mapping lists the cores; each opens its own.
                         ui.invoke_settings_activate(2);
+                        assert_eq!(ui.get_settings_view(), 12);
+                        ui.invoke_settings_activate(0);
                         assert_eq!(ui.get_settings_view(), 8);
                         progress.set(100);
                     }
@@ -2263,7 +2382,11 @@ mod mapping_runtime_tests {
                     106 => {
                         // The DS page maps all four face buttons.
                         assert!(live.back_inside(&ui));
-                        ui.invoke_settings_activate(3);
+                        assert_eq!(
+                            (ui.get_settings_view(), ui.get_settings_selection()),
+                            (12, 0)
+                        );
+                        ui.invoke_settings_activate(1);
                         assert_eq!(ui.get_settings_view(), 10);
                         assert_eq!(ui.get_settings_binding_rows().row_count(), 9);
                         snapshot.set(Some((0, 7)));
@@ -2292,15 +2415,62 @@ mod mapping_runtime_tests {
                         assert!(live.back_inside(&ui));
                         assert_eq!(
                             (ui.get_settings_view(), ui.get_settings_selection()),
+                            (12, 1)
+                        );
+                        progress.set(120);
+                    }
+                    120 => progress.set(121),
+                    121 => progress.set(122),
+                    122 => {
+                        shot("mapping-cores");
+                        assert!(live.back_inside(&ui));
+                        assert_eq!(
+                            (ui.get_settings_view(), ui.get_settings_selection()),
+                            (5, 2)
+                        );
+                        // Shortcuts: same page, four rows, X clears one.
+                        ui.invoke_settings_activate(3);
+                        assert_eq!(ui.get_settings_view(), 11);
+                        assert_eq!(ui.get_settings_binding_rows().row_count(), 4);
+                        // A pair: both held, then let go.
+                        snapshot.set(Some((0, 7)));
+                        ui.invoke_settings_activate(1);
+                        assert_eq!(ui.get_settings_binding_title(), "Assign Quick save");
+                        live.poll_binding(&ui);
+                        snapshot.set(Some((1 << 10, 7)));
+                        live.poll_binding(&ui);
+                        snapshot.set(Some((1 << 10 | 1 << 9, 7)));
+                        live.poll_binding(&ui);
+                        assert!(ui.get_settings_binding_open());
+                        snapshot.set(Some((0, 7)));
+                        live.poll_binding(&ui);
+                        progress.set(110);
+                    }
+                    110 => {
+                        let shortcuts = live.controller.get().shortcuts;
+                        assert_eq!(shortcuts.buttons(1), vec![9, 10]);
+                        assert_eq!(shortcuts.buttons(0), vec![12, 13]);
+                        shot("mapping-shortcuts");
+                        live.page.borrow_mut().selected = 1;
+                        live.handle_action(&ui, UiActionEvent::fresh(UiAction::Secondary));
+                        progress.set(111);
+                    }
+                    111 => {
+                        assert!(!live.controller.get().shortcuts.is_set(1));
+                        assert!(live.back_inside(&ui));
+                        assert_eq!(
+                            (ui.get_settings_view(), ui.get_settings_selection()),
                             (5, 3)
                         );
                         ui.invoke_settings_activate(2);
+                        ui.invoke_settings_activate(0);
                         assert_eq!(ui.get_settings_binding_rows().row_count(), 6);
                         progress.set(4);
                     }
                     4 => {
                         assert_eq!(live.controller.get().gba_bindings, Default::default());
                         assert!(live.controller.get().swap_confirm);
+                        assert!(live.back_inside(&ui));
                         assert!(live.back_inside(&ui));
                         assert_eq!(
                             (ui.get_settings_view(), ui.get_settings_selection()),

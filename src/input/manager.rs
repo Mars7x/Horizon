@@ -39,6 +39,9 @@ pub struct InputManager {
     swap_confirm: Rc<Cell<bool>>,
     bindings: Cell<crate::domain::controller::GameplayBindings>,
     ds_bindings: Cell<crate::domain::controller::DsBindings>,
+    /// Shortcuts: their buttons are held back from the game (see
+    /// `Shortcuts::withheld`).
+    shortcuts: Cell<crate::domain::controller::Shortcuts>,
 }
 
 /// Follows the keyboard or controller used last and tells the UI when its
@@ -117,6 +120,7 @@ impl InputManager {
             swap_confirm,
             bindings: Cell::default(),
             ds_bindings: Cell::default(),
+            shortcuts: Cell::default(),
         })
     }
 
@@ -135,11 +139,25 @@ impl InputManager {
         self.gamepad_input.as_ref()?.gameplay_snapshot()
     }
 
-    pub fn ds_buttons(&self) -> u16 {
-        let buttons = self
-            .gamepad_input
+    pub fn set_shortcuts(&self, shortcuts: crate::domain::controller::Shortcuts) {
+        self.shortcuts.set(shortcuts);
+    }
+    /// Shortcut buttons held right now (raw controller buttons).
+    pub fn shortcut_buttons(&self) -> u16 {
+        self.raw_buttons() & self.shortcuts.get().mask()
+    }
+    fn raw_buttons(&self) -> u16 {
+        self.gamepad_input
             .as_ref()
-            .map_or(0, SdlGamepadInput::gameplay_buttons);
+            .map_or(0, SdlGamepadInput::gameplay_buttons)
+    }
+    /// The controller's buttons for the game: shortcuts' held back.
+    fn game_buttons(&self) -> u16 {
+        let raw = self.raw_buttons();
+        raw & !self.shortcuts.get().withheld(raw)
+    }
+    pub fn ds_buttons(&self) -> u16 {
+        let buttons = self.game_buttons();
         // DS has four face buttons, so it has its own mapping; the global
         // confirm/back swap still applies.
         gameplay_mapping(
@@ -149,11 +167,10 @@ impl InputManager {
     }
 
     pub fn gameplay_buttons(&self) -> u16 {
-        let buttons = self
-            .gamepad_input
-            .as_ref()
-            .map_or(0, SdlGamepadInput::gameplay_buttons);
-        gameplay_mapping(self.bindings.get().apply(buttons), self.swap_confirm.get())
+        gameplay_mapping(
+            self.bindings.get().apply(self.game_buttons()),
+            self.swap_confirm.get(),
+        )
     }
 
     pub fn mark_keyboard_used(&self) {
@@ -283,6 +300,7 @@ mod tests {
             swap_confirm: Rc::default(),
             bindings: Cell::default(),
             ds_bindings: Cell::default(),
+            shortcuts: Cell::default(),
         };
         let right: SharedString = Key::RightArrow.into();
         let t = Instant::now();
@@ -323,6 +341,7 @@ mod tests {
             swap_confirm: Rc::default(),
             bindings: Cell::default(),
             ds_bindings: Cell::default(),
+            shortcuts: Cell::default(),
         };
         let right: SharedString = Key::RightArrow.into();
 
@@ -354,6 +373,7 @@ mod tests {
             swap_confirm: Rc::default(),
             bindings: Cell::default(),
             ds_bindings: Cell::default(),
+            shortcuts: Cell::default(),
         };
         let pad = GlyphStyle::Controller(ControllerFamily::PlayStation);
         manager.glyphs.set(pad);
@@ -391,6 +411,7 @@ mod tests {
             swap_confirm: Rc::default(),
             bindings: Cell::default(),
             ds_bindings: Cell::default(),
+            shortcuts: Cell::default(),
         };
         manager.set_swap_confirm(true);
         let enter: SharedString = Key::Return.into();

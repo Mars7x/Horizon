@@ -64,7 +64,20 @@ saving and skips the decorative return animation.
 | A / B | Z / X | Device-family A/B equivalents |
 | L / R (GBA only) | A / S | Left / right shoulder |
 | Start / Select | Enter / Backspace | Start / Back |
-| Pause | Escape or F10 | Guide or stick click (Guide only for DS) |
+| Pause | Escape or F10 | Guide (stick clicks never pause) |
+| Fast-forward (hold, 4×) | Tab | Both triggers together (Shortcuts) |
+| Quick save / quick load | F5 / F8 | Not set (Shortcuts) |
+| Screenshot | F12 | Not set (Shortcuts) |
+
+Shortcuts work during play without opening the quick menu. Fast-forward plays
+at 4× while held and returns to the chosen speed, silently; opening the quick
+menu or leaving Horizon ends it. Quick save writes slot 1 ("Slot 1 · Quick" in
+the state lists) without asking (the previous state stays in the state
+backups) and quick load loads it; both, and screenshots, show a short notice
+over the game. Their writing (state bundles, screenshots, and the automatic
+resume point) happens on one background writer, in order, so play doesn't
+stall; the game thread only snapshots, and state actions and exit wait for the
+writer first.
 
 Pause slides a square-edged, full-height panel in from the left edge over the
 dimmed game, with no floating margins, over 120 ms; it leaves over 180 ms.

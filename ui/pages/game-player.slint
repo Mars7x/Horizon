@@ -57,6 +57,9 @@ export component GamePlayer inherits Rectangle {
     // Saving on exit is taking a moment: the same blurred picture, of the
     // last frame, replaces the quick menu until the player collapses.
     in property <bool> saving;
+    // A short message over the game from a shortcut ("Saved to slot 1").
+    in property <string> notice;
+    in property <bool> notice-shown;
     // Return to Horizon is saving: no dialog, whatever the timing.
     in property <bool> exiting;
     private property <bool> live: root.has-frame;
@@ -222,6 +225,26 @@ export component GamePlayer inherits Rectangle {
                 transform-rotation: Motion.reduced-motion ? 0deg
                     : mod(animation-tick(), Motion.spinner-cycle) / Motion.spinner-cycle * 360deg;
             }
+        }
+    }
+    // Shortcut notices: a pill at the top, over the game only.
+    Rectangle {
+        private property <float> shown: root.notice-shown && root.phase == 2 && !root.paused ? 1.0 : 0.0;
+        animate shown { duration: Motion.reduced-motion ? 0ms : 160ms; easing: ease-out; }
+        visible: self.shown > 0.001;
+        opacity: self.shown;
+        y: Metrics.spacing-lg - (1.0 - self.shown) * Metrics.spacing-sm;
+        width: notice-text.preferred-width + Metrics.spacing-lg * 2;
+        height: Metrics.compact-row-height;
+        x: (parent.width - self.width) / 2;
+        border-radius: self.height / 2;
+        background: #000000b8;
+        notice-text := Text {
+            text: root.notice;
+            color: #fff;
+            font-size: Typography.body-size;
+            font-weight: Typography.emphasis-weight;
+            vertical-alignment: center;
         }
     }
     Rectangle {

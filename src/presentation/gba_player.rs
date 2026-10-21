@@ -88,6 +88,16 @@ pub struct GbaPlayer {
     keyboard: Cell<u16>,
     pad_ready: Cell<bool>,
     gamepads: CallbackSlot<dyn Fn() -> u16>,
+    /// Shortcut buttons held now, their assignments and the last reading
+    /// (presses act once); Tab held on the keyboard; the speed fast-forward
+    /// returns to; a quick load in progress; when the notice hides.
+    shortcut_buttons: CallbackSlot<dyn Fn() -> u16>,
+    shortcuts: Cell<crate::domain::controller::Shortcuts>,
+    shortcuts_held: Cell<u16>,
+    keyboard_fast_forward: Cell<bool>,
+    speed_before_fast_forward: Cell<Option<PlaybackSpeed>>,
+    quick_loading: Cell<bool>,
+    notice_until: Cell<Option<Instant>>,
     ds_gamepad: CallbackSlot<dyn Fn() -> u16>,
     /// A DS game's screen layout (None for other systems), and whether its
     /// screens are swapped for this session.
@@ -137,6 +147,13 @@ impl GbaPlayer {
             keyboard: Cell::new(0),
             pad_ready: Cell::new(false),
             gamepads: RefCell::new(None),
+            shortcut_buttons: RefCell::new(None),
+            shortcuts: Cell::default(),
+            shortcuts_held: Cell::new(0),
+            keyboard_fast_forward: Cell::new(false),
+            speed_before_fast_forward: Cell::new(None),
+            quick_loading: Cell::new(false),
+            notice_until: Cell::new(None),
             ds_gamepad: RefCell::new(None),
             ds_layout: Cell::new(None),
             ds_swapped: Cell::new(false),
@@ -232,6 +249,12 @@ impl GbaPlayer {
     }
     pub fn set_ds_gamepad(&self, source: Rc<dyn Fn() -> u16>) {
         *self.ds_gamepad.borrow_mut() = Some(source);
+    }
+    pub fn set_shortcut_buttons(&self, source: Rc<dyn Fn() -> u16>) {
+        *self.shortcut_buttons.borrow_mut() = Some(source);
+    }
+    pub fn set_shortcuts(&self, shortcuts: crate::domain::controller::Shortcuts) {
+        self.shortcuts.set(shortcuts);
     }
     pub fn set_gamepads(&self, source: Rc<dyn Fn() -> u16>) {
         *self.gamepads.borrow_mut() = Some(source);
@@ -357,6 +380,33 @@ impl GbaPlayer {
                 self.handle_action(UiActionEvent { action, repeated });
             }
             return true;
+        }
+        // Shortcuts: Tab held fast-forwards; F5/F8/F12 quick save, quick
+        // load and screenshot.
+        if text == slint::SharedString::from(slint::platform::Key::Tab).as_str() {
+            self.keyboard_fast_forward.set(pressed);
+            return true;
+        }
+        for (key, row) in [
+            (
+                slint::platform::Key::F5,
+                crate::domain::controller::Shortcuts::QUICK_SAVE,
+            ),
+            (
+                slint::platform::Key::F8,
+                crate::domain::controller::Shortcuts::QUICK_LOAD,
+            ),
+            (
+                slint::platform::Key::F12,
+                crate::domain::controller::Shortcuts::SCREENSHOT,
+            ),
+        ] {
+            if text == slint::SharedString::from(key).as_str() {
+                if pressed && !repeated {
+                    self.shortcut(&ui, row);
+                }
+                return true;
+            }
         }
         if let Some(bit) = keyboard_button(text) {
             let mask = 1 << bit;
@@ -512,15 +562,16 @@ impl GbaPlayer {
                 UiAction::Back | UiAction::Home if !event.repeated => self.choose(0),
                 _ => {}
             }
-        } else if self.ds_layout.get().is_some() && event.action.any_stick_press() {
-            // In a DS game L3 swaps the screens without pausing; neither
-            // stick click opens the quick menu.
-            if event.action == UiAction::StickPress && !event.repeated {
+        } else if event.action.any_stick_press() {
+            // Stick clicks never open the quick menu (Guide and Escape do);
+            // in a DS game L3 swaps the screens without pausing.
+            if event.action == UiAction::StickPress
+                && !event.repeated
+                && self.ds_layout.get().is_some()
+            {
                 self.swap_screens(&ui);
             }
-        } else if (event.action == UiAction::Home || event.action.any_stick_press())
-            && !event.repeated
-        {
+        } else if event.action == UiAction::Home && !event.repeated {
             self.pause();
         }
         // Game B/Start and menu repeats never navigate the shell underneath.
@@ -594,7 +645,11 @@ impl GbaPlayer {
                     title: if entry.slot == 0 {
                         "Automatic resume".into()
                     } else {
-                        format!("Slot {}", entry.slot).into()
+                        if entry.slot == crate::services::gba_player::QUICK_SLOT {
+                            format!("Slot {} · Quick", entry.slot).into()
+                        } else {
+                            format!("Slot {}", entry.slot).into()
+                        }
                     },
                     detail: detail.into(),
                     preview,
@@ -631,7 +686,14 @@ impl GbaPlayer {
                 self.send_action(&ui, Command::SaveState(entry.slot), "");
             }
         } else if self.state_mode.get() == StateMode::Load && entry.metadata.is_some() {
-            self.send_action(&ui, Command::LoadState(entry.slot), "");
+            self.send_action(
+                &ui,
+                Command::LoadState {
+                    slot: entry.slot,
+                    quick: false,
+                },
+                "",
+            );
         }
     }
     fn choose(&self, index: i32) {
@@ -728,6 +790,112 @@ impl GbaPlayer {
             _ => {}
         }
     }
+    /// Controller shortcuts during play: presses act once; fast-forward
+    /// lasts while its button (or Tab) is held. Anything else (the quick
+    /// menu, losing focus) ends fast-forward.
+    fn poll_shortcuts(&self, ui: &AppWindow) {
+        use crate::domain::controller::Shortcuts;
+        let raw = self
+            .shortcut_buttons
+            .borrow()
+            .as_ref()
+            .map_or(0, |source| source());
+        let shortcuts = self.shortcuts.get();
+        // Rows whose buttons are all down now; a press is a row newly held.
+        let held = (0..4).fold(0u16, |rows, row| {
+            rows | u16::from(shortcuts.held(row, raw)) << row
+        });
+        let pressed = held & !self.shortcuts_held.replace(held);
+        let playing = self.foreground.get()
+            && self.stage.get() == PlayerStage::Playing
+            && !ui.get_player_paused()
+            && !ui.get_player_busy()
+            && !ui.get_player_failed();
+        if !playing {
+            self.keyboard_fast_forward
+                .set(self.keyboard_fast_forward.get() && self.foreground.get());
+            self.fast_forward(ui, false);
+            return;
+        }
+        for row in [
+            Shortcuts::QUICK_SAVE,
+            Shortcuts::QUICK_LOAD,
+            Shortcuts::SCREENSHOT,
+        ] {
+            if pressed & (1 << row) != 0 {
+                self.shortcut(ui, row);
+            }
+        }
+        self.fast_forward(
+            ui,
+            shortcuts.held(Shortcuts::FAST_FORWARD, raw) || self.keyboard_fast_forward.get(),
+        );
+    }
+
+    /// Quick save, quick load or screenshot, during play only.
+    fn shortcut(&self, ui: &AppWindow, row: usize) {
+        use crate::domain::controller::Shortcuts;
+        if !self.foreground.get()
+            || self.stage.get() != PlayerStage::Playing
+            || ui.get_player_paused()
+            || ui.get_player_busy()
+            || ui.get_player_failed()
+        {
+            return;
+        }
+        let Some(game) = self
+            .running
+            .borrow()
+            .as_ref()
+            .map(|game| game.commands.clone())
+        else {
+            return;
+        };
+        let command = match row {
+            Shortcuts::QUICK_SAVE => Command::QuickSave,
+            Shortcuts::QUICK_LOAD => {
+                self.quick_loading.set(true);
+                Command::LoadState {
+                    slot: crate::services::gba_player::QUICK_SLOT,
+                    quick: true,
+                }
+            }
+            Shortcuts::SCREENSHOT => Command::Screenshot,
+            _ => return,
+        };
+        let _ = game.send(command);
+    }
+
+    /// Hold to play at 4×; let go to return to the chosen speed. Quiet: no
+    /// sound, and the quick menu's own speed is what it returns to.
+    fn fast_forward(&self, ui: &AppWindow, on: bool) {
+        let before = self.speed_before_fast_forward.get();
+        let target = match (on, before) {
+            (true, None) => {
+                self.speed_before_fast_forward.set(Some(current_speed(ui)));
+                PlaybackSpeed::Quadruple
+            }
+            (false, Some(speed)) => {
+                self.speed_before_fast_forward.set(None);
+                speed
+            }
+            _ => return,
+        };
+        if target != current_speed(ui)
+            && let Some(game) = self.running.borrow().as_ref()
+        {
+            let _ = game.commands.send(Command::Speed(target));
+        }
+    }
+
+    /// A short message over the game (quick save, load, screenshot).
+    fn notice(&self, ui: &AppWindow, text: &str) {
+        ui.set_player_notice(text.into());
+        ui.set_player_notice_shown(true);
+        self.notice_until
+            .set(Some(Instant::now() + Duration::from_millis(1600)));
+    }
+
     fn set_speed(&self, ui: &AppWindow, speed: PlaybackSpeed) {
         if speed != current_speed(ui) && !ui.get_player_busy() {
             self.cue(UiSoundCue::Ok);
@@ -858,6 +1026,10 @@ impl GbaPlayer {
         ui.set_player_saving(false);
         ui.set_player_exiting(false);
         self.exit_since.set(None);
+        self.speed_before_fast_forward.set(None);
+        self.keyboard_fast_forward.set(false);
+        self.notice_until.set(None);
+        ui.set_player_notice_shown(false);
         ui.set_player_ds(false);
         self.ds_layout.set(None);
         if self.closing.get()
@@ -1037,7 +1209,30 @@ impl GbaPlayer {
                             self.cue(UiSoundCue::Ok);
                         }
                     }
+                    Event::QuickSaved(result) => match result {
+                        Ok(()) => {
+                            self.cue(UiSoundCue::Ok);
+                            self.notice(
+                                &ui,
+                                &format!(
+                                    "Saved to slot {}",
+                                    crate::services::gba_player::QUICK_SLOT
+                                ),
+                            );
+                        }
+                        Err(error) => self.notice(&ui, &error),
+                    },
+                    Event::Notice(text) => {
+                        self.quick_loading.set(false);
+                        self.notice(&ui, &text);
+                    }
                     Event::StateLoaded => {
+                        if self.quick_loading.replace(false) {
+                            self.notice(
+                                &ui,
+                                &format!("Loaded slot {}", crate::services::gba_player::QUICK_SLOT),
+                            );
+                        }
                         ui.set_player_ds_lid_closed(false);
                         if self.closing.get() {
                             continue;
@@ -1078,6 +1273,10 @@ impl GbaPlayer {
                                     ),
                             ));
                             self.cue(UiSoundCue::Screenshot);
+                        } else if !ui.get_player_paused() {
+                            // Taken with a shortcut during play.
+                            self.cue(UiSoundCue::Screenshot);
+                            self.notice(&ui, "Screenshot saved");
                         }
                     }
                     Event::Restarted => {
@@ -1160,6 +1359,15 @@ impl GbaPlayer {
                 self.keyboard.get() | if self.pad_ready.get() { pad } else { 0 }
             };
             game.buttons.store(buttons, Ordering::Release);
+        }
+        self.poll_shortcuts(&ui);
+        if self
+            .notice_until
+            .get()
+            .is_some_and(|until| Instant::now() >= until)
+        {
+            self.notice_until.set(None);
+            ui.set_player_notice_shown(false);
         }
         if close {
             self.exit_since.set(None);
@@ -1492,6 +1700,10 @@ mod tests {
                 },
             },
         );
+        let keys = Rc::clone(&player);
+        ui.on_raw_key_input(move |text, repeat| keys.keyboard(&text, repeat, true));
+        let keys = Rc::clone(&player);
+        ui.on_raw_key_released(move |text| keys.keyboard(&text, false, false));
         ui.show().unwrap();
         player.execute(&target).unwrap();
         let weak = ui.as_weak();
@@ -1609,6 +1821,32 @@ mod tests {
                     .get()
                     .is_some_and(|at| at.elapsed() > Duration::from_millis(300)) =>
                 {
+                    // Shortcuts during play: quick save, then quick load.
+                    live.shortcut(&ui, crate::domain::controller::Shortcuts::QUICK_SAVE);
+                    step.set(10);
+                }
+                10 if ui.get_player_notice_shown() => {
+                    assert_eq!(ui.get_player_notice(), "Saved to slot 1");
+                    assert!(!ui.get_player_paused());
+                    live.shortcut(&ui, crate::domain::controller::Shortcuts::QUICK_LOAD);
+                    step.set(11);
+                }
+                11 if ui.get_player_notice() == "Loaded slot 1" => {
+                    // Holding fast-forward plays at 4×, letting go returns.
+                    ui.window()
+                        .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+                            text: slint::platform::Key::Tab.into(),
+                        });
+                    step.set(12);
+                }
+                12 if ui.get_player_speed() == 4 => {
+                    ui.window()
+                        .dispatch_event(slint::platform::WindowEvent::KeyReleased {
+                            text: slint::platform::Key::Tab.into(),
+                        });
+                    step.set(13);
+                }
+                13 if ui.get_player_speed() == 1 => {
                     live.running
                         .borrow()
                         .as_ref()
@@ -2669,6 +2907,10 @@ mod runtime_tests {
                     assert!(!ui.get_player_paused());
                     assert_eq!(ui.get_player_speed(), 2);
                     snapshot("gba-restarted");
+                    // Stick clicks never open the quick menu; Guide does.
+                    live.handle_action(UiActionEvent::fresh(UiAction::StickPress));
+                    live.handle_action(UiActionEvent::fresh(UiAction::RightStickPress));
+                    assert!(!ui.get_player_paused());
                     live.handle_action(UiActionEvent::fresh(UiAction::Home));
                     tap(slint::platform::Key::DownArrow);
                     tap(slint::platform::Key::LeftArrow);
