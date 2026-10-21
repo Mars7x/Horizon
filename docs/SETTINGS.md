@@ -40,6 +40,8 @@ one-button shortcut's button is held back from games; a pair's buttons still
 reach the game alone and are held back only while the whole pair is down, so
 the DS microphone (left trigger) keeps working. A button serves one shortcut:
 giving it to another clears the first. Restore defaults restores the triggers.
+Earlier single-button/null shortcut files retain their assignments; the next
+settings save writes them in the current format that also supports pairs.
 
 Mappings apply to all controllers after family normalization, independently of
 keyboard gameplay. Swap Select and Back exchanges mapped gameplay A/B; the rows

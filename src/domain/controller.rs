@@ -137,8 +137,33 @@ pub const SHORTCUT_NAMES: [&str; 4] = ["Fast-forward", "Quick save", "Quick load
 /// only while the whole pair is down. No button serves two shortcuts.
 /// Fast-forward works while held; the others act once per press.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(try_from = "Vec<Vec<u8>>", into = "Vec<Vec<u8>>")]
+#[serde(try_from = "SavedShortcuts", into = "Vec<Vec<u8>>")]
 pub struct Shortcuts([u16; 4]);
+
+/// Keep the original single-button/null settings readable when adding pairs.
+/// Writes always use the current list-of-buttons format.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum SavedShortcuts {
+    Buttons(Vec<Vec<u8>>),
+    SingleButtons(Vec<Option<u8>>),
+}
+
+impl TryFrom<SavedShortcuts> for Shortcuts {
+    type Error = &'static str;
+
+    fn try_from(saved: SavedShortcuts) -> Result<Self, Self::Error> {
+        let rows = match saved {
+            SavedShortcuts::Buttons(rows) => rows,
+            SavedShortcuts::SingleButtons(rows) => rows
+                .into_iter()
+                .map(|button| button.into_iter().collect())
+                .collect(),
+        };
+        Self::try_from(rows)
+    }
+}
+
 impl Default for Shortcuts {
     /// Both triggers fast-forward: a pair, so either trigger alone still
     /// reaches the game (the DS microphone is the left trigger).
@@ -298,6 +323,35 @@ mod tests {
                 .unwrap();
         assert_eq!(old.ds_bindings, DsBindings::default());
     }
+    #[test]
+    fn legacy_shortcuts_preserve_bindings_and_write_the_current_format() {
+        let old: ControllerPreferences = serde_json::from_str(
+            r#"{"swap_confirm":true,"swap_hints":false,"shortcuts":[13,null,9,0]}"#,
+        )
+        .unwrap();
+        assert!(old.swap_confirm);
+        assert!(!old.swap_hints);
+        assert_eq!(old.shortcuts.buttons(Shortcuts::FAST_FORWARD), vec![13]);
+        assert!(!old.shortcuts.is_set(Shortcuts::QUICK_SAVE));
+        assert_eq!(old.shortcuts.buttons(Shortcuts::QUICK_LOAD), vec![9]);
+        assert_eq!(old.shortcuts.buttons(Shortcuts::SCREENSHOT), vec![0]);
+        let saved = serde_json::to_string(&old).unwrap();
+        assert!(saved.contains(r#""shortcuts":[[13],[],[9],[0]]"#));
+        assert_eq!(
+            serde_json::from_str::<ControllerPreferences>(&saved).unwrap(),
+            old
+        );
+        // The reported configuration keeps its right-trigger binding.
+        let reported: Shortcuts = serde_json::from_str("[13,null,null,null]").unwrap();
+        assert_eq!(reported.mask(), 1 << 13);
+        // Legacy data still goes through the same validation as button pairs.
+        for invalid in ["[13,null,null]", "[13,13,null,null]", "[4,null,null,null]"] {
+            assert!(serde_json::from_str::<Shortcuts>(invalid).is_err());
+        }
+        let pairs: Shortcuts = serde_json::from_str("[[12,13],[],[9],[0]]").unwrap();
+        assert_eq!(pairs.buttons(Shortcuts::FAST_FORWARD), vec![12, 13]);
+    }
+
     #[test]
     fn shortcuts_take_pairs_and_hold_back_only_what_they_use() {
         let defaults = Shortcuts::default();
