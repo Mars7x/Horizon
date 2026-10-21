@@ -145,6 +145,9 @@ pub enum Event {
         /// A DS game's screen layout; None for other systems.
         ds_layout: Option<crate::domain::core_settings::DsLayout>,
     },
+    /// Saving on exit has begun: the last frame, blurred, for the player to
+    /// show if saving takes a moment.
+    Exiting(crate::platform::gba_core::Frame),
     /// While the game loads: the newest state's picture (if resuming) and,
     /// for DS, the layout to show it in.
     Loading {
@@ -367,7 +370,7 @@ fn play(
         )
         .ok()?;
         crate::services::save_states::Store::latest_preview(folder)
-            .map(|frame| crate::platform::gba_video::blurred(&frame, if ds { 2 } else { 1 }))
+            .map(|frame| crate::platform::gba_video::loading_picture(&frame, ds))
     });
     let _ = events.send(Event::Loading {
         preview,
@@ -655,6 +658,19 @@ fn play(
                     }
                     Command::Stop | Command::Shutdown => {
                         let stopping = matches!(command, Command::Stop);
+                        if stopping && let Ok(frame) = core.capture_frame() {
+                            let _ = events.send(Event::Exiting(
+                                crate::platform::gba_video::loading_picture(&frame, ds),
+                            ));
+                        }
+                        // Tests can make the exit save slow.
+                        #[cfg(test)]
+                        if let Some(delay) = std::env::var("HORIZON_TEST_EXIT_DELAY_MS")
+                            .ok()
+                            .and_then(|value| value.parse().ok())
+                        {
+                            thread::sleep(Duration::from_millis(delay));
+                        }
                         if let Err(error) = if session.is_some() {
                             save_current(&core, &save_path, &mut last_save).and_then(|()| {
                                 if !core.supports_states() { return Ok(()); }

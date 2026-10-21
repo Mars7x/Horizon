@@ -79,6 +79,48 @@ pub fn present_ds(raw: &Frame, filter: VideoFilter, targets: [(u32, u32); 2]) ->
     }
 }
 
+/// The blurred picture shown while a game loads or saves on exit: an
+/// upscaled frame is first averaged down to native size (blurring needs no
+/// detail, and it keeps this a few milliseconds).
+pub fn loading_picture(frame: &Frame, ds: bool) -> Frame {
+    let factor = (frame.width / if ds { 256 } else { 240 }).max(1);
+    let native = if factor > 1
+        && frame.width.is_multiple_of(factor)
+        && frame.height.is_multiple_of(factor)
+        && frame.rgba.len() == (frame.width * frame.height * 4) as usize
+    {
+        let (width, height) = (frame.width / factor, frame.height / factor);
+        let (stride, factor) = (frame.width as usize * 4, factor as usize);
+        let mut rgba = vec![0u8; (width * height * 4) as usize];
+        for (index, pixel) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            let (x, y) = (index % width as usize, index / width as usize);
+            let mut sum = [0u32; 3];
+            for dy in 0..factor {
+                let row = &frame.rgba[(y * factor + dy) * stride + x * factor * 4..][..factor * 4];
+                for source in row.as_chunks::<4>().0 {
+                    (0..3).for_each(|c| sum[c] += u32::from(source[c]));
+                }
+            }
+            let area = (factor * factor) as u32;
+            *pixel = [
+                (sum[0] / area) as u8,
+                (sum[1] / area) as u8,
+                (sum[2] / area) as u8,
+                255,
+            ];
+        }
+        Frame {
+            width,
+            height,
+            rgba,
+            smooth: true,
+        }
+    } else {
+        frame.clone()
+    };
+    blurred(&native, if ds { 2 } else { 1 })
+}
+
 /// A soft blur of `frame` for the loading picture: three box blurs (close
 /// to a Gaussian) of a radius proportional to its width. `bands` horizontal
 /// strips are blurred apart, so the DS's two screens don't bleed together.

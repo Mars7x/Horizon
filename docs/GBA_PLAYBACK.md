@@ -45,8 +45,11 @@ launch's time by step ("game ready in … ms"); a 512 MiB DS cartridge takes abo
 in its original aspect ratio; black bars grow with its surface. The origin uses
 the live carousel/grid camera and scales with the window.
 
-Return to Horizon keeps the last frame visible while saving. Only a successful stop
-starts the reverse 230 ms collapse; the card rebounds as the shell regains input. If the
+Return to Horizon keeps the last frame visible while saving; a save that takes
+longer than 200 ms slides the quick menu away and shows that frame blurred and
+dimmed under the launch spinner (the worker blurs it before saving), with no
+dialog. Quick saves never show it. Only a successful stop starts the reverse
+230 ms collapse, during which the blurred picture fades out; the card rebounds as the shell regains input. If the
 game left the library while it ran (its file deleted), its card is gone, so the
 picture fades out in place over the same 230 ms instead, without a card rebound.
 A save error stays paused with retry available. Input is consumed throughout

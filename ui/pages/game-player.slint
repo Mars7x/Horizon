@@ -30,7 +30,7 @@ export component GamePlayer inherits Rectangle {
     in property <bool> restart-confirm;
     in property <int> restart-focus;
     callback restart-answer(int);
-    private property <float> pause-reveal: root.paused && !root.failed && root.phase == 2 ? 1.0 : 0.0;
+    private property <float> pause-reveal: root.paused && !root.failed && !root.saving && root.phase == 2 ? 1.0 : 0.0;
     animate pause-reveal {
         duration: root.paused ? Motion.pause-open-duration : Motion.dialog-duration;
         easing: root.paused ? ease-out-quart : ease-out;
@@ -54,8 +54,13 @@ export component GamePlayer inherits Rectangle {
     // shown dimmed under a spinner until the first real frame.
     in property <image> loading-frame;
     in property <bool> loading-picture;
+    // Saving on exit is taking a moment: the same blurred picture, of the
+    // last frame, replaces the quick menu until the player collapses.
+    in property <bool> saving;
+    // Return to Horizon is saving: no dialog, whatever the timing.
+    in property <bool> exiting;
     private property <bool> live: root.has-frame;
-    private property <float> loading-veil: root.open && !root.live && !root.failed ? 1.0 : 0.0;
+    private property <float> loading-veil: root.open && !root.failed && (!root.live || root.saving) ? 1.0 : 0.0;
     animate loading-veil { duration: Motion.reduced-motion ? 0ms : 200ms; easing: ease-out; }
     in property <string> title;
     in property <string> message;
@@ -248,7 +253,7 @@ export component GamePlayer inherits Rectangle {
         }
     }
     if root.phase == 2 : ModalDialog {
-        open: root.failed || (root.busy && !root.paused && root.live);
+        open: root.failed || (root.busy && !root.paused && root.live && !root.exiting);
         area-width: parent.width; area-height: parent.height;
         card-width: 520px; card-height: root.message == "" ? 196px : 272px;
         VerticalLayout {

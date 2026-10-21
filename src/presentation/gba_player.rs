@@ -105,6 +105,8 @@ pub struct GbaPlayer {
     /// When the worker said the game is loading (with a picture to show,
     /// if any), so the launch can zoom into it instead of waiting.
     loading_at: Cell<Option<(Instant, bool)>>,
+    /// When Return to Horizon started saving, until the collapse begins.
+    exit_since: Cell<Option<Instant>>,
     /// Called by the game worker when a frame is ready (see `show_frame`).
     frame_ready: std::cell::OnceCell<crate::services::worker::Notify>,
     /// When the last game frame was handed to the screen. Frames are shown
@@ -147,6 +149,7 @@ impl GbaPlayer {
             stage_since: Cell::new(Instant::now()),
             first_frame_at: Cell::new(None),
             loading_at: Cell::new(None),
+            exit_since: Cell::new(None),
             frame_ready: std::cell::OnceCell::new(),
             last_shown: Cell::new(None),
             frame_period: Cell::new(Duration::from_micros(16_667)),
@@ -699,6 +702,8 @@ impl GbaPlayer {
             RETURN_TO_HORIZON => {
                 self.set_state_mode(&ui, StateMode::Menu);
                 ui.set_player_busy(true);
+                self.exit_since.set(Some(Instant::now()));
+                ui.set_player_exiting(true);
                 // Saving is quick and quiet; only a failure is shown.
                 ui.set_player_message("".into());
                 if let Some(game) = self.running.borrow().as_ref() {
@@ -837,6 +842,9 @@ impl GbaPlayer {
         ui.set_player_has_frame(false);
         ui.set_player_loading_frame(Image::default());
         ui.set_player_loading_picture(false);
+        ui.set_player_saving(false);
+        ui.set_player_exiting(false);
+        self.exit_since.set(None);
         ui.set_player_ds(false);
         self.ds_layout.set(None);
         if self.closing.get()
@@ -1070,7 +1078,20 @@ impl GbaPlayer {
                         ui.set_player_restart_confirm(false);
                         ui.set_player_message(error.into());
                     }
+                    Event::Exiting(frame) => {
+                        // Shown only if saving outlasts EXIT_PICTURE_DELAY.
+                        ui.set_player_loading_frame(Image::from_rgba8(SharedPixelBuffer::<
+                            Rgba8Pixel,
+                        >::clone_from_slice(
+                            &frame.rgba,
+                            frame.width,
+                            frame.height,
+                        )));
+                    }
                     Event::SaveFailed(error) => {
+                        self.exit_since.set(None);
+                        ui.set_player_saving(false);
+                        ui.set_player_exiting(false);
                         ui.set_player_restart_confirm(false);
                         ui.set_player_paused(true);
                         self.worker_paused.set(true); // Save failures pause in the worker.
@@ -1120,8 +1141,24 @@ impl GbaPlayer {
             game.buttons.store(buttons, Ordering::Release);
         }
         if close {
+            self.exit_since.set(None);
+            // The saving picture fades as the player collapses.
+            ui.set_player_saving(false);
+            ui.set_player_exiting(false);
             self.begin_exit(&ui);
             return;
+        }
+        // A save that takes a moment shows the last frame blurred, with a
+        // spinner, instead of a menu that seems stuck; quick ones never do.
+        if self
+            .exit_since
+            .get()
+            .is_some_and(|since| since.elapsed() >= EXIT_PICTURE_DELAY)
+            && !ui.get_player_saving()
+            && !ui.get_player_failed()
+        {
+            ui.set_player_loading_picture(true);
+            ui.set_player_saving(true);
         }
         if self.stage.get() == PlayerStage::Waiting {
             let elapsed = self.stage_since.get().elapsed();
@@ -1187,6 +1224,9 @@ impl GbaPlayer {
         slint::CloseRequestResponse::KeepWindowShown
     }
 }
+/// How long saving on exit may take before the player shows it.
+const EXIT_PICTURE_DELAY: Duration = Duration::from_millis(200);
+
 /// The display's refresh interval, a little short so a frame due right at a
 /// refresh is not pushed to the next; 60 Hz when the display does not say.
 /// (Pacing by Slint's rendering notifier is not possible: it is never called
@@ -1522,16 +1562,29 @@ mod tests {
                     assert!(ui.get_player_has_frame());
                     // A new launch starts from the Settings layout again.
                     assert_eq!(ui.get_player_ds_layout(), "Side by side");
-                    live.running
-                        .borrow()
-                        .as_ref()
-                        .unwrap()
-                        .commands
-                        .send(Command::Stop)
-                        .unwrap();
+                    // A slow exit save shows the last frame blurred, with
+                    // a spinner, instead of a dialog.
+                    // SAFETY: this test's own variable, read by its worker.
+                    unsafe { std::env::set_var("HORIZON_TEST_EXIT_DELAY_MS", "700") };
+                    live.choose(RETURN_TO_HORIZON);
+                    paused_at.set(Some(Instant::now()));
+                    step.set(8);
+                }
+                8 if paused_at
+                    .get()
+                    .is_some_and(|at| at.elapsed() > Duration::from_millis(450)) =>
+                {
+                    assert!(ui.get_player_saving());
+                    assert!(ui.get_player_exiting());
+                    shots
+                        .borrow_mut()
+                        .push(ui.window().take_snapshot().unwrap());
                     step.set(3);
                 }
                 3 if !live.is_open() => {
+                    assert!(!ui.get_player_saving());
+                    // SAFETY: as above.
+                    unsafe { std::env::remove_var("HORIZON_TEST_EXIT_DELAY_MS") };
                     step.set(4);
                     slint::quit_event_loop().unwrap();
                 }
