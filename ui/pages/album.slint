@@ -59,11 +59,20 @@ component AlbumTile inherits Rectangle {
         drop-shadow-blur: root.selected ? 16px : 10px;
         drop-shadow-color: Theme.shadow.with-alpha(root.selected ? 0.9 : 0.6);
         clip: true;
+        // Captures far from 16:9 (DS screenshots) show whole, on black,
+        // rather than cropped; within 20% (GBA's 3:2) they fill the tile.
+        private property <float> aspect: root.tile.thumbnail.height > 0
+            ? root.tile.thumbnail.width / root.tile.thumbnail.height : 16 / 9;
+        private property <bool> letterbox: root.tile.has-thumbnail && abs(self.aspect / (16 / 9) - 1) > 0.2;
+        if root.tile.has-thumbnail && shell.letterbox : Rectangle {
+            width: parent.width; height: parent.height;
+            background: #000;
+        }
         if root.tile.has-thumbnail : Image {
             width: parent.width; height: parent.height;
             source: root.tile.thumbnail;
             image-rendering: !root.tile.is-video && root.tile.thumbnail.width * 1px < self.width ? ImageRendering.pixelated : ImageRendering.smooth;
-            image-fit: cover;
+            image-fit: shell.letterbox ? ImageFit.contain : ImageFit.cover;
             // Captures that can't be deleted step back while selecting.
             opacity: root.selecting && !root.tile.deletable ? 0.35 : 1.0;
             animate opacity { duration: Motion.focus-duration; easing: ease-in-out; }
@@ -494,10 +503,20 @@ export component AlbumPage inherits Rectangle {
         frame := Rectangle {
             private property <length> offset: slide.phase == 1 ? parent.travel : 0px;
             animate offset { duration: slide.phase == 2 ? Motion.page-duration : 0ms; easing: ease-out; }
-            private property <length> lifted-width: root.tile-width * root.tile-lift;
-            private property <length> lifted-height: root.tile-height * root.tile-lift;
-            x: root.tile-x + ((root.width - root.fit-width) / 2 - root.tile-x) * root.reveal + self.offset;
-            y: root.tile-y + ((root.height - root.fit-height) / 2 - root.tile-y) * root.reveal;
+            // A letterboxed tile shows the whole capture: grow from exactly
+            // that, the same shape throughout, so it never zooms. Others
+            // grow from the tile they fill.
+            private property <bool> letterbox: abs(root.aspect / (16 / 9) - 1) > 0.2;
+            private property <length> tile-w: root.tile-width * root.tile-lift;
+            private property <length> tile-h: root.tile-height * root.tile-lift;
+            private property <length> lifted-width: !self.letterbox ? self.tile-w
+                : (root.aspect > 16 / 9 ? self.tile-w : self.tile-h * root.aspect);
+            private property <length> lifted-height: !self.letterbox ? self.tile-h
+                : (root.aspect > 16 / 9 ? self.tile-w / root.aspect : self.tile-h);
+            private property <length> start-x: root.tile-x + (self.tile-w - self.lifted-width) / 2;
+            private property <length> start-y: root.tile-y + (self.tile-h - self.lifted-height) / 2;
+            x: self.start-x + ((root.width - root.fit-width) / 2 - self.start-x) * root.reveal + self.offset;
+            y: self.start-y + ((root.height - root.fit-height) / 2 - self.start-y) * root.reveal;
             width: self.lifted-width + (root.fit-width - self.lifted-width) * root.reveal;
             height: self.lifted-height + (root.fit-height - self.lifted-height) * root.reveal;
             border-radius: Metrics.radius-md * (1.0 - root.reveal);

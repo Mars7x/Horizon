@@ -79,6 +79,101 @@ pub fn present_ds(raw: &Frame, filter: VideoFilter, targets: [(u32, u32); 2]) ->
     }
 }
 
+/// A DS screenshot as the player shows it: the two screens of the core's
+/// stacked frame in `layout`, in `swapped` order, at full resolution. Large
+/// and small at native resolution is drawn at 3× so the small screen keeps
+/// whole pixels (1024×576); upscaled frames average the small screen down.
+/// Anything not two stacked 4:3 screens is returned as it is.
+pub fn ds_screenshot(
+    raw: &Frame,
+    layout: crate::domain::core_settings::DsLayout,
+    swapped: bool,
+) -> Frame {
+    use crate::domain::core_settings::DsLayout;
+    let (width, height) = (raw.width as usize, raw.height as usize / 2);
+    if width == 0
+        || width * 3 != height * 4
+        || !raw.height.is_multiple_of(2)
+        || raw.rgba.len() != width * height * 8
+    {
+        return raw.clone();
+    }
+    let half = width * height * 4;
+    let mut screens = [&raw.rgba[..half], &raw.rgba[half..]];
+    if swapped {
+        screens.swap(0, 1);
+    }
+    // Copy `source` (w×h) scaled by whole `up` or averaged down by `down`
+    // into `canvas` (stride `cw` pixels) at (x, y).
+    let place = |canvas: &mut [u8],
+                 cw: usize,
+                 source: &[u8],
+                 (x, y): (usize, usize),
+                 up: usize,
+                 down: usize| {
+        let (sw, sh) = (width * up / down, height * up / down);
+        for row in 0..sh {
+            for column in 0..sw {
+                let mut sum = [0u32; 4];
+                for dy in 0..down {
+                    for dx in 0..down {
+                        let (sx, sy) = ((column * down + dx) / up, (row * down + dy) / up);
+                        let p = &source[(sy * width + sx) * 4..][..4];
+                        (0..4).for_each(|c| sum[c] += u32::from(p[c]));
+                    }
+                }
+                let area = (down * down) as u32;
+                let target = ((y + row) * cw + x + column) * 4;
+                for c in 0..4 {
+                    canvas[target + c] = (sum[c] / area) as u8;
+                }
+            }
+        }
+    };
+    let (cw, ch, rgba) = match layout {
+        DsLayout::SideBySide => {
+            let (cw, ch) = (width * 2, height);
+            let mut canvas = vec![0; cw * ch * 4];
+            place(&mut canvas, cw, screens[0], (0, 0), 1, 1);
+            place(&mut canvas, cw, screens[1], (width, 0), 1, 1);
+            (cw, ch, canvas)
+        }
+        DsLayout::Stacked => {
+            let mut rgba = Vec::with_capacity(half * 2);
+            rgba.extend_from_slice(screens[0]);
+            rgba.extend_from_slice(screens[1]);
+            (width, height * 2, rgba)
+        }
+        DsLayout::LargeAndSmall => {
+            // The small screen is a third the size, bottom-aligned beside.
+            let up = if width.is_multiple_of(3) { 1 } else { 3 };
+            let (main_w, main_h) = (width * up, height * up);
+            let (small_w, small_h) = (main_w / 3, main_h / 3);
+            let (cw, ch) = (main_w + small_w, main_h);
+            let mut canvas = vec![0; cw * ch * 4];
+            for alpha in canvas.iter_mut().skip(3).step_by(4) {
+                *alpha = 255;
+            }
+            place(&mut canvas, cw, screens[0], (0, 0), up, 1);
+            place(
+                &mut canvas,
+                cw,
+                screens[1],
+                (main_w, main_h - small_h),
+                up,
+                3,
+            );
+            (cw, ch, canvas)
+        }
+    };
+    Frame {
+        width: cw as u32,
+        height: ch as u32,
+        rgba,
+        smooth: raw.smooth,
+    }
+}
+
 /// The blurred picture shown while a game loads or saves on exit: an
 /// upscaled frame is first averaged down to native size (blurring needs no
 /// detail, and it keeps this a few milliseconds).
@@ -455,6 +550,38 @@ pub(super) fn correct_color(rgba: &mut [u8]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ds_screenshots_follow_the_layout_and_swap() {
+        use crate::domain::core_settings::DsLayout;
+        // Top screen red, bottom blue, at native size.
+        let mut rgba = [255u8, 0, 0, 255].repeat(256 * 192);
+        rgba.extend([0u8, 0, 255, 255].repeat(256 * 192));
+        let raw = Frame {
+            width: 256,
+            height: 384,
+            rgba,
+            smooth: false,
+        };
+        let pixel = |frame: &Frame, x: u32, y: u32| {
+            frame.rgba[((y * frame.width + x) * 4) as usize..][..3].to_vec()
+        };
+        let side = ds_screenshot(&raw, DsLayout::SideBySide, false);
+        assert_eq!((side.width, side.height), (512, 192));
+        assert_eq!(pixel(&side, 0, 0), [255, 0, 0]);
+        assert_eq!(pixel(&side, 300, 0), [0, 0, 255]);
+        let swapped = ds_screenshot(&raw, DsLayout::SideBySide, true);
+        assert_eq!(pixel(&swapped, 0, 0), [0, 0, 255]);
+        let stacked = ds_screenshot(&raw, DsLayout::Stacked, true);
+        assert_eq!((stacked.width, stacked.height), (256, 384));
+        assert_eq!(pixel(&stacked, 0, 0), [0, 0, 255]);
+        let large = ds_screenshot(&raw, DsLayout::LargeAndSmall, false);
+        assert_eq!((large.width, large.height), (1024, 576));
+        assert_eq!(pixel(&large, 10, 10), [255, 0, 0]);
+        // The small screen, bottom right; black above it.
+        assert_eq!(pixel(&large, 1000, 570), [0, 0, 255]);
+        assert_eq!(pixel(&large, 1000, 10), [0, 0, 0]);
+    }
     /// Test shorthand: the presented frame for `frame`, without correction,
     /// read back as a plain frame.
     fn apply(frame: Frame, filter: VideoFilter) -> Frame {

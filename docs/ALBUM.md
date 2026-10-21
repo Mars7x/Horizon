@@ -19,9 +19,13 @@ writer creates screenshots only. The new layout does not scan or migrate old
 source/hash folders. See [Storage](STORAGE.md).
 Writes use a temporary `.part` path, published atomically only when complete. The file is the record; no media
 table is needed. External changes appear on the next visit. Thumbnails/durations
-are disposable caches, not the original media. Version 5 thumbnails are lossless
-JPEG XL, including video posters. Large photos are centre-cropped to the grid's
-16:9 shape before shrinking to at most 960×540, so portrait/square pictures retain enough detail for 4K tiles.
+are disposable caches, not the original media. Version 6 thumbnails are lossless
+JPEG XL, including video posters. Captures within 20% of the grid's 16:9 (GBA's
+3:2 is) fill their tile: large ones are centre-cropped to 16:9 before shrinking
+to at most 960×540, keeping detail for 4K tiles. Others (DS screenshots side by
+side or stacked, portrait and square pictures) show whole, letterboxed on black,
+and their thumbnails keep the whole picture. The viewer grows from exactly what
+the tile shows, so a letterboxed capture keeps its shape and never zooms.
 Small originals keep their native pixels and alpha. Only the disposable thumbnail
 cache is regenerated after an update; originals and full-screen decoding are unchanged.
 Small still images use nearest pixel sampling when enlarged in the grid, viewer,

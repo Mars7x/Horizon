@@ -16,8 +16,9 @@ typedef struct {
  * borrowed, never closed. A small output buffer avoids a second image-sized
  * allocation. No parallel runner: this work already runs on a worker. */
 int horizon_jxl_write(int fd, const HorizonJxlFrame *frames, size_t count,
-                      uint32_t width, uint32_t height) {
-    if (!frames || !count || !width || !height || width > SIZE_MAX / height / 4)
+                      uint32_t width, uint32_t height, int effort) {
+    if (!frames || !count || !width || !height || width > SIZE_MAX / height / 4 ||
+        effort < 1 || effort > 9)
         return EINVAL;
     for (size_t i = 0; i < count; i++) {
         if (!frames[i].rgba || frames[i].length != (size_t)width * height * 4 ||
@@ -49,7 +50,7 @@ int horizon_jxl_write(int fd, const HorizonJxlFrame *frames, size_t count,
     if (!settings ||
         JxlEncoderSetFrameLossless(settings, JXL_TRUE) != JXL_ENC_SUCCESS ||
         JxlEncoderSetExtraChannelDistance(settings, 0, 0) != JXL_ENC_SUCCESS ||
-        JxlEncoderFrameSettingsSetOption(settings, JXL_ENC_FRAME_SETTING_EFFORT, 7)
+        JxlEncoderFrameSettingsSetOption(settings, JXL_ENC_FRAME_SETTING_EFFORT, effort)
             != JXL_ENC_SUCCESS) goto done;
     JxlPixelFormat format = {4, JXL_TYPE_UINT8, JXL_NATIVE_ENDIAN, 0};
     for (size_t i = 0; i < count; i++) {

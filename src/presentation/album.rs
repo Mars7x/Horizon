@@ -2014,6 +2014,8 @@ mod runtime_tests {
             ("square", 1920, 1920),
             ("wide", 3840, 1080),
             ("native", 240, 160),
+            ("ds-side", 512, 192),
+            ("ds-stacked", 256, 384),
         ] {
             let original = image::RgbaImage::from_fn(width, height, |x, y| {
                 image::Rgba(if (x / 4 + y / 4) % 2 == 0 {
@@ -2062,7 +2064,7 @@ mod runtime_tests {
                 let ui = weak_ui.upgrade().unwrap();
                 ticks.set(ticks.get() + 1);
                 assert!(ticks.get() < 80, "thumbnail runtime timed out");
-                if album.tiles.row_count() != 4
+                if album.tiles.row_count() != 6
                     || album.tiles.iter().any(|tile| !tile.has_thumbnail)
                 {
                     return;
@@ -2073,8 +2075,16 @@ mod runtime_tests {
                         .borrow_mut()
                         .get(&capture.path().to_owned())
                         .unwrap();
-                    let native = capture.path().file_stem().unwrap() == "native";
-                    let expected = if native { (240, 160) } else { (960, 540) };
+                    // Near 16:9 (or small, native): cropped to the tile or
+                    // kept; far from it: the whole capture, fitted.
+                    let expected = match capture.path().file_stem().unwrap().to_str().unwrap() {
+                        "native" => (240, 160),
+                        "ds-side" => (512, 192),
+                        "ds-stacked" => (256, 384),
+                        "portrait" => (304, 540),
+                        "square" => (540, 540),
+                        _ => (960, 270),
+                    };
                     assert_eq!((image.size().width, image.size().height), expected);
                 }
                 let snapshot = ui.window().take_snapshot().unwrap();

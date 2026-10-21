@@ -87,9 +87,7 @@ enum WriteJob {
         quick: bool,
     },
     Screenshot {
-        album: PathBuf,
-        game: crate::domain::SourceGameRef,
-        title: String,
+        target: ScreenshotFile,
         frame: crate::platform::gba_core::Frame,
     },
 }
@@ -129,18 +127,11 @@ impl Writer {
                                 }
                             }
                         }
-                        WriteJob::Screenshot {
-                            album,
-                            game,
-                            title,
-                            frame,
-                        } => {
-                            let _ = events.send(
-                                match write_screenshot(&album, &game, &title, &frame) {
-                                    Ok(()) => Event::ScreenshotSaved(frame),
-                                    Err(error) => Event::ActionFailed(error),
-                                },
-                            );
+                        WriteJob::Screenshot { target, frame } => {
+                            // Success was confirmed when it was taken.
+                            if let Err(error) = finish_screenshot(target, &frame) {
+                                let _ = events.send(Event::ScreenshotFailed(error));
+                            }
                         }
                     }
                     let (count, idle) = &*done;
@@ -308,6 +299,8 @@ pub enum Event {
     QuickSaved(Result<(), String>),
     /// A short message to show over the game.
     Notice(String),
+    /// A screenshot already confirmed could not be written after all.
+    ScreenshotFailed(String),
     ActionFailed(String),
 }
 pub struct RunningGame {
@@ -736,21 +729,37 @@ fn play(
                         let _ = events.send(Event::SpeedChanged(next));
                     }
                     Command::Screenshot => {
-                        // Encoding and writing happen on the writer, so a
-                        // screenshot taken during play doesn't stall it.
+                        // A DS screenshot is what the screen shows: its
+                        // layout and swap. It's taken now (confirmed at
+                        // once) and written by the writer, so it's instant.
                         let queued = core.capture_frame().and_then(|frame| {
+                            let frame = match ds_input.as_ref() {
+                                Some(input) => {
+                                    let (layout, swapped) =
+                                        crate::platform::gba_core::unpack_ds_view(
+                                            input.view.load(Ordering::Acquire),
+                                        );
+                                    crate::platform::gba_video::ds_screenshot(
+                                        &frame, layout, swapped,
+                                    )
+                                }
+                                None => frame,
+                            };
+                            let target = prepare_screenshot(
+                                &paths.album,
+                                &game,
+                                &game_folder.manifest.title,
+                            )?;
                             writer
                                 .send(WriteJob::Screenshot {
-                                    album: paths.album.clone(),
-                                    game: game.clone(),
-                                    title: game_folder.manifest.title.clone(),
-                                    frame,
+                                    target,
+                                    frame: frame.clone(),
                                 })
-                                .then_some(())
+                                .then_some(frame)
                                 .ok_or_else(|| "Could not save the screenshot".to_owned())
                         });
                         let _ = events.send(match queued {
-                            Ok(()) => continue,
+                            Ok(frame) => Event::ScreenshotSaved(frame),
                             Err(error) => Event::ActionFailed(error),
                         });
                     }
@@ -1021,12 +1030,20 @@ fn play(
     result
 }
 
-fn write_screenshot(
+/// A screenshot's place in Album, claimed (its partial file created) before
+/// it is confirmed, so a missing or blocked Album is reported at once; the
+/// slow part, `finish_screenshot`, runs on the writer.
+struct ScreenshotFile {
+    path: PathBuf,
+    partial: PathBuf,
+    file: File,
+}
+
+fn prepare_screenshot(
     album: &Path,
     game: &crate::domain::SourceGameRef,
     title: &str,
-    frame: &crate::platform::gba_core::Frame,
-) -> Result<(), String> {
+) -> Result<ScreenshotFile, String> {
     use crate::services::album::catalog::{HorizonAlbum, part_path};
     let path = HorizonAlbum::new(album.to_owned())
         .new_capture_path(Some(game), title, "jxl", chrono::Utc::now())
@@ -1038,8 +1055,24 @@ fn write_screenshot(
         .mode(0o600)
         .open(&partial)
         .map_err(|_| "Could not create the screenshot".to_owned())?;
+    Ok(ScreenshotFile {
+        path,
+        partial,
+        file,
+    })
+}
+
+fn finish_screenshot(
+    target: ScreenshotFile,
+    frame: &crate::platform::gba_core::Frame,
+) -> Result<(), String> {
+    let ScreenshotFile {
+        path,
+        partial,
+        file,
+    } = target;
     let result = (|| -> Result<(), String> {
-        crate::platform::jpeg_xl::write_rgba(&file, &frame.rgba, frame.width, frame.height)
+        crate::platform::jpeg_xl::write_rgba_quickly(&file, &frame.rgba, frame.width, frame.height)
             .map_err(|_| "Could not encode the screenshot".to_owned())?;
         file.sync_all()
             .map_err(|_| "Could not save the screenshot".to_owned())?;
@@ -1051,6 +1084,16 @@ fn write_screenshot(
         tracing::warn!(%error, "could not remove screenshot partial file");
     }
     result
+}
+
+#[cfg(test)]
+fn write_screenshot(
+    album: &Path,
+    game: &crate::domain::SourceGameRef,
+    title: &str,
+    frame: &crate::platform::gba_core::Frame,
+) -> Result<(), String> {
+    finish_screenshot(prepare_screenshot(album, game, title)?, frame)
 }
 
 #[cfg(test)]

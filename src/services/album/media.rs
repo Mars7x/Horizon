@@ -18,7 +18,8 @@ use crate::{
 
 /// Bump when the thumbnail format or size changes; the folder is cleared.
 // 5: lossless JXL thumbnails, including video posters.
-pub const ALBUM_CACHE_VERSION: &str = "5";
+// 6: captures far from 16:9 (DS layouts) keep their whole picture.
+pub const ALBUM_CACHE_VERSION: &str = "6";
 /// Enough pixels for a selected grid tile at 4K, including its lift. Photos
 /// use the grid's centre crop; small originals retain their native pixels.
 pub const THUMBNAIL_SIZE: (u32, u32) = (960, 540);
@@ -242,6 +243,11 @@ fn photo_thumbnail(image: DynamicImage) -> RgbaImage {
         return image.into_rgba8();
     }
 
+    // Far from the tile's 16:9 (a DS screenshot, side by side or stacked),
+    // the grid shows the whole capture letterboxed: keep all of it.
+    if !near_tile_shape(width, height) {
+        return fit(image, THUMBNAIL_SIZE);
+    }
     // The grid uses image-fit: cover. Fitting the *whole* portrait/square into
     // a wide box first discards most of its useful resolution, only to enlarge
     // and crop it again in Slint. Apply that same centre crop before reducing.
@@ -261,6 +267,13 @@ fn photo_thumbnail(image: DynamicImage) -> RgbaImage {
         ),
         THUMBNAIL_SIZE,
     )
+}
+
+/// Within 20% of the grid tile's 16:9 (GBA's 3:2 is): shown cropped to fill
+/// the tile, as before. The Album page uses the same test (`album.slint`).
+fn near_tile_shape(width: u32, height: u32) -> bool {
+    let aspect = f64::from(width) / f64::from(height.max(1));
+    (aspect / (16.0 / 9.0) - 1.0).abs() <= 0.2
 }
 
 fn read_cached(dir: &Path, key: &str, kind: MediaKind) -> Option<Thumbnail> {
@@ -436,7 +449,8 @@ mod tests {
         let cache_dir = dir.join("cache");
         fs::create_dir_all(&cache_dir).unwrap();
         let cache = ThumbnailCache::new(Some(cache_dir));
-        for (width, height) in [(1920, 1920), (1080, 1920), (3840, 1080)] {
+        // Shapes near the tile's 16:9 keep the grid's centre crop.
+        for (width, height) in [(2000, 1000), (1600, 1000)] {
             let path = dir.join(format!("{width}x{height}.png"));
             let original = RgbaImage::from_fn(width, height, |x, y| {
                 // Edges that must be cropped out, and fine central detail.
@@ -474,8 +488,14 @@ mod tests {
             image::Rgba([x as u8, y as u8, 0, (x % 255) as u8])
         });
         assert_eq!(photo_thumbnail(DynamicImage::ImageRgba8(gba.clone())), gba);
+        // Far from 16:9, the whole capture is kept, fitted.
         let portrait = DynamicImage::ImageRgba8(RgbaImage::new(320, 1920));
-        assert_eq!(photo_thumbnail(portrait).dimensions(), (320, 180));
+        assert_eq!(photo_thumbnail(portrait).dimensions(), (90, 540));
+        let square = DynamicImage::ImageRgba8(RgbaImage::new(1920, 1920));
+        assert_eq!(photo_thumbnail(square).dimensions(), (540, 540));
+        // A 4× DS screenshot side by side (2048×768) stays whole.
+        let side = DynamicImage::ImageRgba8(RgbaImage::new(2048, 768));
+        assert_eq!(photo_thumbnail(side).dimensions(), (960, 360));
     }
 
     #[test]
@@ -497,7 +517,7 @@ mod tests {
         // A different file at the same path gets a new key.
         RgbaImage::new(800, 800).save(&shot).unwrap();
         let changed = cache.thumbnail(&capture, &FixedVideo).unwrap();
-        assert_eq!(changed.image.dimensions(), (800, 450));
+        assert_eq!(changed.image.dimensions(), (540, 540));
 
         cache.prune(&[capture]);
         assert_eq!(

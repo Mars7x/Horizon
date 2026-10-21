@@ -416,7 +416,12 @@ impl Store {
             .create_new(true)
             .mode(0o600)
             .open(&files.screenshot)?;
-        crate::platform::jpeg_xl::write_rgba(&file, &frame.rgba, frame.width, frame.height)?;
+        crate::platform::jpeg_xl::write_rgba_quickly(
+            &file,
+            &frame.rgba,
+            frame.width,
+            frame.height,
+        )?;
         file.sync_all()?;
         let preview = read(&files.screenshot, 512 * 1024)?;
         let metadata = Metadata {

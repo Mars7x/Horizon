@@ -15,13 +15,30 @@ unsafe extern "C" {
         count: usize,
         width: u32,
         height: u32,
+        effort: std::ffi::c_int,
     ) -> std::ffi::c_int;
 }
+
+/// libjxl's effort: 7 for files kept long (profiles, artwork, thumbnails),
+/// where size matters; 2 for game screenshots and state previews, which must
+/// be quick even for a 4× DS frame. Both are lossless.
+const EFFORT: std::ffi::c_int = 7;
+const QUICK_EFFORT: std::ffi::c_int = 2;
 
 /// Write a single lossless sRGB RGBA8 frame on a media worker. The caller
 /// owns atomic publication and cleanup; this function never closes the file.
 pub(crate) fn write_rgba(file: &File, rgba: &[u8], width: u32, height: u32) -> io::Result<()> {
-    write_frames(file, &[(rgba, Duration::ZERO)], width, height)
+    encode(file, &[(rgba, Duration::ZERO)], width, height, EFFORT)
+}
+
+/// `write_rgba`, encoding quickly: for game screenshots and state previews.
+pub(crate) fn write_rgba_quickly(
+    file: &File,
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+) -> io::Result<()> {
+    encode(file, &[(rgba, Duration::ZERO)], width, height, QUICK_EFFORT)
 }
 
 /// Lossless full-frame animation with millisecond timing and looping, matching
@@ -31,6 +48,16 @@ pub(crate) fn write_frames(
     frames: &[(&[u8], Duration)],
     width: u32,
     height: u32,
+) -> io::Result<()> {
+    encode(file, frames, width, height, EFFORT)
+}
+
+fn encode(
+    file: &File,
+    frames: &[(&[u8], Duration)],
+    width: u32,
+    height: u32,
+    effort: std::ffi::c_int,
 ) -> io::Result<()> {
     let expected = (width as usize)
         .checked_mul(height as usize)
@@ -69,6 +96,7 @@ pub(crate) fn write_frames(
             native.len(),
             width,
             height,
+            effort,
         )
     };
     if error == 0 {

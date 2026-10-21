@@ -319,7 +319,13 @@ the game hear a blow: melonDS's built-in blowing sound, so games that ask you
 to blow or speak respond, without any access to a real microphone. The game
 language follows the system locale (LC_ALL, LC_MESSAGES, LANG), so
 multi-language cartridges start in it; English otherwise.
-Screenshots include both screens.
+Screenshots show what the screen shows: both screens in the current layout and
+swap (side by side 512×192, stacked 256×384, large and small at 3× as 1024×576
+so the small screen keeps whole pixels; upscaled games at their resolution).
+Every screenshot is confirmed (sound, notice or quick-menu preview) the moment
+it is taken (a missing or blocked Album is reported first); it's written in the background, with a fast lossless JPEG XL
+setting (screenshots and state previews; long-lived images keep the slower,
+smaller one), and a failure to write is reported afterwards.
 
 Core notes about features Horizon doesn't offer (Wi-Fi capture, a host
 microphone, newer option formats, a VFS, cheat memory maps) appear on every

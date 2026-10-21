@@ -1222,6 +1222,13 @@ impl GbaPlayer {
                         }
                         Err(error) => self.notice(&ui, &error),
                     },
+                    Event::ScreenshotFailed(error) => {
+                        if ui.get_player_paused() {
+                            ui.set_player_message(error.into());
+                        } else {
+                            self.notice(&ui, &error);
+                        }
+                    }
                     Event::Notice(text) => {
                         self.quick_loading.set(false);
                         self.notice(&ui, &text);
@@ -1649,6 +1656,19 @@ fn keyboard_button(text: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn walk(directory: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let mut found = Vec::new();
+        for entry in std::fs::read_dir(directory).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                found.extend(walk(&path));
+            } else {
+                found.push(path);
+            }
+        }
+        found
+    }
+
     #[test]
     #[ignore = "requires Wayland, PipeWire, HORIZON_DS_CORE and fresh HORIZON_DS_TEST_DIR"]
     fn real_ds_player_import_pause_resume_and_exit() {
@@ -1847,6 +1867,16 @@ mod tests {
                     step.set(13);
                 }
                 13 if ui.get_player_speed() == 1 => {
+                    // A screenshot is confirmed at once, as the screen shows.
+                    live.shortcut(&ui, crate::domain::controller::Shortcuts::SCREENSHOT);
+                    paused_at.set(Some(Instant::now()));
+                    step.set(14);
+                }
+                14 if ui.get_player_notice() == "Screenshot saved" => {
+                    assert!(
+                        paused_at.get().unwrap().elapsed() < Duration::from_millis(300),
+                        "screenshot confirmed late"
+                    );
                     live.running
                         .borrow()
                         .as_ref()
@@ -1897,6 +1927,17 @@ mod tests {
         });
         slint::run_event_loop().unwrap();
         assert_eq!(phase.get(), 4);
+        // The screenshot: stacked and swapped, as shown (touchscreen first).
+        let shot = walk(&directory.join("album"))
+            .into_iter()
+            .find(|path| path.extension().is_some_and(|e| e == "jxl"))
+            .expect("a screenshot in Album");
+        let picture = crate::services::image::decode_file(&shot)
+            .unwrap()
+            .into_rgba8();
+        assert_eq!(picture.dimensions(), (256, 384));
+        assert!(picture.get_pixel(128, 96)[2] > picture.get_pixel(128, 96)[0]);
+        assert!(picture.get_pixel(128, 300)[0] > picture.get_pixel(128, 300)[2]);
         for (i, pixels) in pictures.borrow().iter().enumerate() {
             image::save_buffer(
                 directory.join(format!("ds-{i}.png")),
