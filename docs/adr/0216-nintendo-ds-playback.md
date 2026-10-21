@@ -13,7 +13,8 @@ plus size catalog recognition, SHA-256 identity and launch-time verification.
 Allow DS-enhanced cartridges in DS mode; reject DSi-exclusive headers. Cap DS
 files at 512 MiB, retaining the existing 32 MiB cap for GB/GBC/GBA.
 
-Use built-in BIOS/firmware replacements, direct boot and software rendering.
+Use built-in BIOS/firmware replacements, direct boot and software rendering
+(GPU upscaling was added later: [ADR 0218](0218-ds-gpu-upscaling-and-dev-speed.md)).
 The initial layout stacks two 256×192 screens with no gap. Mouse touch maps to
 the fitted composite image; the right stick moves the core cursor and R2 touches.
 Four DS face buttons use fixed device-family assignments with the global A/B

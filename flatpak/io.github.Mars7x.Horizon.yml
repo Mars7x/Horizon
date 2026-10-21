@@ -79,12 +79,14 @@ modules:
         sha256: 91d6fbd32abcbdf030d58d3f562de25ebbc9d56040d513ff8e5c19bee9dacf14
 
   - name: melonds-ds-core
+    # OpenGL renderer on for Internal resolution (ADR 0218); Horizon supplies
+    # the context at run time, so the core links no GL library.
     buildsystem: simple
     build-commands:
       - >-
         cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
         -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DFETCHCONTENT_FULLY_DISCONNECTED=ON
-        -DENABLE_OPENGL=OFF -DENABLE_COMPUTE_RENDERER=OFF -DBUILD_TESTING=OFF
+        -DENABLE_OPENGL=ON -DENABLE_COMPUTE_RENDERER=OFF -DBUILD_TESTING=OFF
         -DFETCHCONTENT_SOURCE_DIR_MELONDS="$PWD/dependencies/melonds" -DFETCHCONTENT_SOURCE_DIR_LIBRETRO_COMMON="$PWD/dependencies/libretro-common" -DFETCHCONTENT_SOURCE_DIR_EMBED_BINARIES="$PWD/dependencies/embed-binaries" -DFETCHCONTENT_SOURCE_DIR_GLM="$PWD/dependencies/glm" -DFETCHCONTENT_SOURCE_DIR_LIBSLIRP="$PWD/dependencies/libslirp" -DFETCHCONTENT_SOURCE_DIR_PNTR="$PWD/dependencies/pntr" -DFETCHCONTENT_SOURCE_DIR_FMT="$PWD/dependencies/fmt" -DFETCHCONTENT_SOURCE_DIR_YAMC="$PWD/dependencies/yamc" -DFETCHCONTENT_SOURCE_DIR_SPAN_LITE="$PWD/dependencies/span-lite" -DFETCHCONTENT_SOURCE_DIR_DATE="$PWD/dependencies/date" -DFETCHCONTENT_SOURCE_DIR_ZLIB="$PWD/dependencies/zlib" -DFETCHCONTENT_SOURCE_DIR_EMBED-BINARIES="$PWD/dependencies/embed-binaries" -DFETCHCONTENT_SOURCE_DIR_SPAN-LITE="$PWD/dependencies/span-lite" -DFETCHCONTENT_SOURCE_DIR_LIBRETRO-COMMON="$PWD/dependencies/libretro-common" -DCMAKE_MODULE_PATH="$PWD/dependencies/melonds/cmake;$PWD/dependencies/embed-binaries/cmake"
       - cmake --build build
       - install -Dm0755 build/src/libretro/melondsds_libretro.so /app/lib/horizon/melondsds_libretro.so

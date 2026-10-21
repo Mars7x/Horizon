@@ -30,6 +30,7 @@
 | [0215](0215-deleted-games-leave-the-library.md) | Games deleted from the folder are retired, and return if their file does |
 | [0216](0216-nintendo-ds-playback.md) | Nintendo DS through the bundled melonDS DS core, in-process |
 | [0217](0217-ds-screen-layouts-and-mapping.md) | DS screen layouts, swapping and button mapping |
+| [0218](0218-ds-gpu-upscaling-and-dev-speed.md) | DS GPU upscaling, faster launches, crash-safe resume and representative dev builds |
 
 Earlier decisions and their supporting phase notes are in
 [history](../history/INDEX.md). Their numbered identifiers remain reserved.

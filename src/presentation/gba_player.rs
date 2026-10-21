@@ -19,7 +19,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum PlayerStage {
     Waiting,
     Entering,
@@ -102,6 +102,9 @@ pub struct GbaPlayer {
     stage: Cell<PlayerStage>,
     stage_since: Cell<Instant>,
     first_frame_at: Cell<Option<Instant>>,
+    /// When the worker said the game is loading (with a picture to show,
+    /// if any), so the launch can zoom into it instead of waiting.
+    loading_at: Cell<Option<(Instant, bool)>>,
     /// Called by the game worker when a frame is ready (see `show_frame`).
     frame_ready: std::cell::OnceCell<crate::services::worker::Notify>,
     /// When the last game frame was handed to the screen. Frames are shown
@@ -143,6 +146,7 @@ impl GbaPlayer {
             stage: Cell::new(PlayerStage::Waiting),
             stage_since: Cell::new(Instant::now()),
             first_frame_at: Cell::new(None),
+            loading_at: Cell::new(None),
             frame_ready: std::cell::OnceCell::new(),
             last_shown: Cell::new(None),
             frame_period: Cell::new(Duration::from_micros(16_667)),
@@ -241,12 +245,17 @@ impl GbaPlayer {
         self.ui.upgrade().is_some_and(|ui| ui.get_player_open())
     }
     pub fn set_active(&self, active: bool) {
-        self.foreground.set(active);
+        let leaving = self.foreground.replace(active) && !active;
         self.keyboard.set(0);
         self.pad_ready.set(false);
         if let Some(ui) = self.ui.upgrade() {
             if let Some(game) = self.running.borrow().as_ref() {
                 game.buttons.store(0, Ordering::Release);
+                // Leaving Horizon is a likely moment for something else to
+                // go wrong: refresh the automatic resume point.
+                if leaving && self.stage.get() == PlayerStage::Playing {
+                    let _ = game.commands.send(Command::Autosave);
+                }
             }
             self.sync_pause(&ui);
         }
@@ -826,6 +835,8 @@ impl GbaPlayer {
         self.worker_paused.set(false);
         ui.set_player_frame(Image::default());
         ui.set_player_has_frame(false);
+        ui.set_player_loading_frame(Image::default());
+        ui.set_player_loading_picture(false);
         ui.set_player_ds(false);
         self.ds_layout.set(None);
         if self.closing.get()
@@ -943,6 +954,26 @@ impl GbaPlayer {
                         self.publish_ds(&ui);
                         self.sync_pause(&ui);
                         ui.set_player_title(super::titles::game_title(&title).into());
+                    }
+                    Event::Loading { preview, ds_layout } => {
+                        if ds_layout.is_some() {
+                            self.ds_layout.set(ds_layout);
+                            self.ds_swapped.set(false);
+                            ui.set_player_ds(true);
+                            self.publish_ds(&ui);
+                        }
+                        let picture = preview.is_some();
+                        if let Some(frame) = preview {
+                            ui.set_player_loading_frame(Image::from_rgba8(SharedPixelBuffer::<
+                                Rgba8Pixel,
+                            >::clone_from_slice(
+                                &frame.rgba,
+                                frame.width,
+                                frame.height,
+                            )));
+                        }
+                        ui.set_player_loading_picture(picture);
+                        self.loading_at.set(Some((Instant::now(), picture)));
                     }
                     Event::Started(title) => {
                         ui.set_player_title(super::titles::game_title(&title).into());
@@ -1100,7 +1131,14 @@ impl GbaPlayer {
             let prewarmed = self.first_frame_at.get().is_some_and(|first| {
                 Self::zoom_duration(&ui).is_zero() || first.elapsed() >= Duration::from_millis(16)
             });
+            // A picture of the state being resumed can be zoomed into while
+            // the game finishes loading (once it has been uploaded).
+            let preview_ready = self
+                .loading_at
+                .get()
+                .is_some_and(|(at, picture)| picture && at.elapsed() >= Duration::from_millis(16));
             if (ui.get_player_has_frame() && prewarmed && elapsed >= hold)
+                || (preview_ready && elapsed >= hold)
                 || ui.get_player_failed()
                 || elapsed >= Duration::from_millis(500)
             {
@@ -1261,6 +1299,8 @@ impl LaunchExecutor for GbaPlayer {
             self.set_stage(&ui, PlayerStage::Waiting);
             self.closing.set(false);
             self.first_frame_at.set(None);
+            self.loading_at.set(None);
+            ui.set_player_loading_picture(false);
             self.last_shown.set(None);
             self.frame_period.set(display_period(&ui));
             self.timer.restart();
@@ -1545,8 +1585,28 @@ mod tests {
                 .sha256
                 .clone(),
         };
+        // HORIZON_DS_FILTER=xbrz and HORIZON_TEST_WINDOW=3440x1440 match a
+        // demanding real setup.
+        if let Ok(filter) = std::env::var("HORIZON_DS_FILTER") {
+            std::fs::write(
+                directory.join("melonds-ds.json"),
+                format!(
+                    r#"{{"layout":"side_by_side","video_filter":"{filter}","resolution":{}}}"#,
+                    std::env::var("HORIZON_DS_RESOLUTION").unwrap_or_else(|_| "1".into())
+                ),
+            )
+            .unwrap();
+        }
+        let (width, height) = std::env::var("HORIZON_TEST_WINDOW")
+            .ok()
+            .and_then(|size| {
+                let (w, h) = size.split_once('x')?;
+                Some((w.parse().ok()?, h.parse().ok()?))
+            })
+            .unwrap_or((1280, 720));
         let ui = AppWindow::new().unwrap();
-        ui.window().set_size(slint::PhysicalSize::new(1280, 720));
+        ui.window()
+            .set_size(slint::PhysicalSize::new(width, height));
         let player = GbaPlayer::new(
             &ui,
             PlayerPaths {
@@ -1567,11 +1627,63 @@ mod tests {
         let weak = ui.as_weak();
         let live = Rc::clone(&player);
         let started = Instant::now();
+        // The launch must never stall the UI: a 4 ms timer records the
+        // longest wait between its ticks for the first two seconds.
+        let longest = Rc::new(Cell::new(Duration::ZERO));
+        let watch = Timer::default();
+        {
+            let (longest, last) = (Rc::clone(&longest), Cell::new(Instant::now()));
+            watch.start(TimerMode::Repeated, Duration::from_millis(4), move || {
+                let gap = last.get().elapsed();
+                if started.elapsed() < Duration::from_secs(2) {
+                    longest.set(longest.get().max(gap));
+                    if gap > Duration::from_millis(20) {
+                        eprintln!("DS launch: UI waited {gap:?} at {:?}", started.elapsed());
+                    }
+                }
+                last.set(Instant::now());
+            });
+        }
+        let shots = Cell::new(0u32);
+        let shot_directory = directory.clone();
         let timer = Timer::default();
         // Eight seconds at normal speed, then 4× for twenty; the worker logs
         // audio gaps every five seconds.
         timer.start(TimerMode::Repeated, Duration::from_millis(100), move || {
             let ui = weak.upgrade().unwrap();
+            // Pictures of the launch: card press, zoom, loading, playing.
+            // (Snapshots stall the UI themselves: they're taken only with
+            // HORIZON_LAUNCH_SHOTS, and the stall measurement is for runs
+            // without them.)
+            let at: &[u64] =
+                if std::env::var_os("HORIZON_LAUNCH_SHOTS").is_some_and(|v| !v.is_empty()) {
+                    &[450, 700, 1150, 1200, 1250, 1300, 1500]
+                } else {
+                    &[]
+                };
+            if let Some(&due) = at.get(shots.get() as usize)
+                && started.elapsed() >= Duration::from_millis(due)
+            {
+                let pixels = ui.window().take_snapshot().unwrap();
+                image::save_buffer(
+                    shot_directory.join(format!("launch-{due}.png")),
+                    pixels.as_bytes(),
+                    pixels.width(),
+                    pixels.height(),
+                    image::ColorType::Rgba8,
+                )
+                .unwrap();
+                shots.set(shots.get() + 1);
+            }
+            if started.elapsed() > Duration::from_secs(2)
+                && started.elapsed() < Duration::from_millis(2100)
+            {
+                eprintln!(
+                    "DS launch: longest UI wait {:?} (stage {:?})",
+                    longest.get(),
+                    live.stage.get()
+                );
+            }
             assert!(!ui.get_player_failed(), "{}", ui.get_player_message());
             let elapsed = started.elapsed();
             if elapsed > Duration::from_secs(8) && current_speed(&ui) == PlaybackSpeed::Normal {

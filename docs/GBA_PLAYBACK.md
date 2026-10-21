@@ -26,8 +26,22 @@ The Super Game Boy border is off by default, so every Game Boy picture stays
 
 The selected Home or Library card keeps its press/rebound. Once a real frame is
 ready, the rebound releases after a 125 ms press hold and the player expands
-from that card to the full viewport over 230 ms. A slow load may expand a black
-loading surface after 500 ms so progress/errors remain accessible. Content stays
+from that card to the full viewport over 230 ms. While a game loads, the worker
+first sends the picture of the state it will resume (from any core release,
+decoded and blurred off the UI thread, each DS screen apart); the player then
+zooms into that picture, blurred and dimmed under a spinner, as soon as the press
+hold ends. The loading picture is its own layer above the game: the first real
+frame appears beneath it and the layer fades out (200 ms; instant with Reduced
+Motion), so nothing switches mid-transition. Without a state, the zoom waits up to
+500 ms for a frame, then expands a black surface with the spinner. Errors still
+use the dialog; a launch never shows a "Starting game" dialog. The launch keeps
+the UI thread free (`real_ds_player_fast_forward_audio_report` records UI stalls).
+
+Startup reads the cartridge, then checks its imported SHA-256 while the core
+loads it: nothing runs and no save is touched until both finish and it matches.
+Resuming reads the state without decoding its preview. The worker logs each
+launch's time by step ("game ready in … ms"); a 512 MiB DS cartridge takes about
+1.2 s, mostly melonDS loading it. Content stays
 in its original aspect ratio; black bars grow with its surface. The origin uses
 the live carousel/grid camera and scales with the window.
 
@@ -65,6 +79,10 @@ shared 180 ms forward/back zoom and crossfade inside the stationary drawer;
 Reduced Motion switches views immediately. Saving stays paused; a successful load continues
 the game and clears queued audio/input, respecting background freeze.
 
+The menu never scrolls: when a small window can't fit every row (DS has nine
+actions), the rows shrink slightly, down to 36 px, and larger windows keep
+their full size.
+
 DS games add Screen layout and Swap screens after Playback speed. Screen
 layout steps through the layouts with Left/Right (Select cycles) for this
 session only; Settings keeps the layout each launch starts with. Swap screens
@@ -74,7 +92,11 @@ Playback speed offers 1×, 2×, 3× and 4× for this loaded game. When the core
 can't reach the chosen speed (some DS games manage about 3.6× here), the worker
 measures how long its frames take and plays the game, and its audio, at about
 92% of what it can reach, so the sound stays continuous at a slightly lower
-pitch instead of breaking up (`real_ds_player_fast_forward_audio_report`). Left/Right steps
+pitch instead of breaking up (`real_ds_player_fast_forward_audio_report`). The
+worker logs the speed fast-forward reached every five seconds. Unoptimised
+builds once halved the reachable speed; development builds now optimise
+dependencies fully and Horizon lightly (see `Cargo.toml`), and the frame
+conversion is one tight loop per pixel format. Left/Right steps
 between the limits; Select cycles through all four. The worker multiplies its
 frame pace and plays audio at the corresponding faster, higher pitch. Only the newest frame is
 filtered, once per frame shown, so frames fast-forward skips over are never filtered. On a 175 Hz
@@ -273,10 +295,29 @@ debug and debug at trace.
 
 DS uses the shared audio, speed, pause, focus-freeze and exit animation paths.
 Its cartridge saves allow up to 8 MiB; state buffers allow up to 64 MiB.
+The automatic resume point is also refreshed every minute of unpaused play and
+when Horizon loses focus (after at least five seconds of play), so a crash or
+power cut loses at most about a minute; the game's own save is written within
+five seconds of changing. The game thread only takes the snapshot (state and
+picture, about 10 ms for a DS game, which the audio buffer absorbs); encoding
+and synced writes run on a writer thread, one at a time, and state actions and
+exit wait for it. Exits still write the resume point and the save as before.
 Four manual slots and automatic resume use `states/melonds-ds` and JXL previews;
 existing mGBA states stay in `states/mgba`. A core reporting no serializable
 state can still exit after saving available cartridge memory.
-The host accepts only software video. Generated core support files are contained
+Settings → Cores → melonDS → Internal resolution draws the DS's 3D at 2× to 6×
+(384p to 1152p) with melonDS's OpenGL renderer on the graphics card; Native (the
+default) keeps its software renderer. Horizon gives the core a hidden OpenGL 3.2
+core context on the game worker (EGL from the system driver, loaded at run
+time, Mesa's surfaceless platform first; `platform/gl_context.rs`) and reads
+frames back only when the screen can show one. 2D graphics stay at the DS's own
+resolution, as in melonDS. An upscaled picture is scaled smoothly: the LCD and
+Smooth pixel art filters are for native pixels, so they act as Smooth there.
+States and touch are unchanged; state previews are averaged down to 256×384,
+and screenshots keep the full resolution. Without a usable GPU context the game
+plays at Native and logs why. Black 2 runs at about 7.5× at 4× resolution here,
+faster than Native, since the GPU draws its 3D. Other cores remain software only.
+Generated core support files are contained
 in the game folder’s `core-data/melonDS DS` directory; no BIOS manager is exposed.
 
 The ignored `real_ds_core_frames_states_and_restart` test uses an original,

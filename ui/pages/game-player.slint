@@ -50,6 +50,13 @@ export component GamePlayer inherits Rectangle {
     private property <length> exact-w: root.exact-width * root.screen-pixel;
     private property <length> exact-h: root.exact-height * root.screen-pixel;
     in property <image> frame;
+    // While the game loads: the picture of the state it resumes (if any),
+    // shown dimmed under a spinner until the first real frame.
+    in property <image> loading-frame;
+    in property <bool> loading-picture;
+    private property <bool> live: root.has-frame;
+    private property <float> loading-veil: root.open && !root.live && !root.failed ? 1.0 : 0.0;
+    animate loading-veil { duration: Motion.reduced-motion ? 0ms : 200ms; easing: ease-out; }
     in property <string> title;
     in property <string> message;
     in property <int> focused;
@@ -92,7 +99,7 @@ export component GamePlayer inherits Rectangle {
         width: root.width * (root.origin.width + (1.0 - root.origin.width) * root.progress);
         height: root.height * (root.origin.height + (1.0 - root.origin.height) * root.progress);
         // Upload the first frame during the card press, before the zoom clock.
-        opacity: root.phase == 0 ? (root.has-frame ? 0.01 : 0.0) : root.picture-opacity;
+        opacity: root.phase == 0 ? (root.has-frame || root.loading-picture ? 0.01 : 0.0) : root.picture-opacity;
         background: #000;
         border-radius: Metrics.game-shell-radius * (1.0 - max(0.0, min(1.0, root.progress)));
         clip: true;
@@ -106,7 +113,7 @@ export component GamePlayer inherits Rectangle {
             source: root.frame;
             source-clip-x: 0; source-clip-y: 0;
             source-clip-width: root.ds-top-clip-width; source-clip-height: root.ds-top-clip-height;
-            visible: root.has-frame;
+            visible: root.live;
             image-fit: fill;
             image-rendering: root.smooth ? ImageRendering.smooth : ImageRendering.pixelated;
         }
@@ -118,7 +125,7 @@ export component GamePlayer inherits Rectangle {
             source: root.frame;
             source-clip-x: 0; source-clip-y: root.ds-top-clip-height;
             source-clip-width: root.ds-bottom-clip-width; source-clip-height: root.ds-bottom-clip-height;
-            visible: root.has-frame;
+            visible: root.live;
             image-fit: fill;
             image-rendering: root.smooth ? ImageRendering.smooth : ImageRendering.pixelated;
             // melonDS takes touch in its own stacked frame: the bottom half.
@@ -135,7 +142,7 @@ export component GamePlayer inherits Rectangle {
             }
         }
         picture := Image {
-            private property <bool> exact: root.exact-width > 0 && root.exact-height > 0;
+            private property <bool> exact: root.live && root.exact-width > 0 && root.exact-height > 0;
             // Grows with the zoom like a fitted picture, ending at the exact
             // size on whole physical pixels.
             private property <float> grow: self.exact
@@ -147,12 +154,68 @@ export component GamePlayer inherits Rectangle {
             x: self.exact ? round((parent.width - self.width) / 2 / root.screen-pixel) * root.screen-pixel : 0px;
             y: self.exact ? round((parent.height - self.height) / 2 / root.screen-pixel) * root.screen-pixel : 0px;
             source: root.frame;
-            visible: root.has-frame && !root.ds;
+            visible: root.live && !root.ds;
             image-fit: self.exact ? ImageFit.fill : ImageFit.contain;
             // 1:1 when open; during the card zoom it is shrunk, so smooth.
             image-rendering: self.exact
                 ? (root.progress >= 1.0 ? ImageRendering.pixelated : ImageRendering.smooth)
                 : (root.smooth ? ImageRendering.smooth : ImageRendering.pixelated);
+        }
+        // Loading: the resumed state's picture, blurred and dimmed (or
+        // black), with a spinner. It's a layer of its own above the game, so
+        // the first real frame appears beneath it and the whole layer fades:
+        // a crossfade, with nothing switching underneath.
+        Rectangle {
+            width: parent.width; height: parent.height;
+            visible: root.loading-veil > 0.001;
+            opacity: root.loading-veil;
+            background: #000;
+            if root.loading-picture && root.ds : Image {
+                x: round(parent.width * root.top-x / root.screen-pixel) * root.screen-pixel;
+                y: round(parent.height * root.top-y / root.screen-pixel) * root.screen-pixel;
+                width: round(parent.width * root.top-w / root.screen-pixel) * root.screen-pixel;
+                height: round(parent.height * root.top-h / root.screen-pixel) * root.screen-pixel;
+                source: root.loading-frame;
+                source-clip-x: 0; source-clip-y: 0;
+                source-clip-width: root.loading-frame.width; source-clip-height: root.loading-frame.height / 2;
+                image-fit: fill; image-rendering: ImageRendering.smooth;
+            }
+            if root.loading-picture && root.ds : Image {
+                x: round(parent.width * root.bottom-x / root.screen-pixel) * root.screen-pixel;
+                y: round(parent.height * root.bottom-y / root.screen-pixel) * root.screen-pixel;
+                width: round(parent.width * root.bottom-w / root.screen-pixel) * root.screen-pixel;
+                height: round(parent.height * root.bottom-h / root.screen-pixel) * root.screen-pixel;
+                source: root.loading-frame;
+                source-clip-x: 0; source-clip-y: root.loading-frame.height / 2;
+                source-clip-width: root.loading-frame.width; source-clip-height: root.loading-frame.height / 2;
+                image-fit: fill; image-rendering: ImageRendering.smooth;
+            }
+            if root.loading-picture && !root.ds : Image {
+                width: parent.width; height: parent.height;
+                source: root.loading-frame;
+                image-fit: contain; image-rendering: ImageRendering.smooth;
+            }
+            Rectangle {
+                width: parent.width; height: parent.height;
+                background: #00000073;
+            }
+            Rectangle {
+                width: 48px; height: 48px;
+                border-radius: 24px; border-width: 4px;
+                border-color: #ffffff38; background: transparent;
+            }
+            // Turns at a constant speed; stays still with Reduced Motion.
+            Path {
+                width: 48px; height: 48px;
+                commands: "M 24 2 A 22 22 0 1 1 2 24";
+                fill: transparent;
+                stroke: #ffffffe6;
+                stroke-width: 4px;
+                stroke-line-cap: round;
+                transform-origin: { x: 24px, y: 24px };
+                transform-rotation: Motion.reduced-motion ? 0deg
+                    : mod(animation-tick(), Motion.spinner-cycle) / Motion.spinner-cycle * 360deg;
+            }
         }
     }
     Rectangle {
@@ -185,7 +248,7 @@ export component GamePlayer inherits Rectangle {
         }
     }
     if root.phase == 2 : ModalDialog {
-        open: root.failed || (root.busy && !root.paused);
+        open: root.failed || (root.busy && !root.paused && root.live);
         area-width: parent.width; area-height: parent.height;
         card-width: 520px; card-height: root.message == "" ? 196px : 272px;
         VerticalLayout {

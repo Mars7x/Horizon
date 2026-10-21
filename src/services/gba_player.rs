@@ -49,12 +49,106 @@ pub enum Command {
     ListStates,
     SaveState(u8),
     LoadState(u8),
+    /// Refresh the automatic resume point now (Horizon lost focus).
+    Autosave,
+}
+
+/// Refreshes the automatic resume point while a game is played, so a crash
+/// or power cut loses at most about a minute. The game thread only takes the
+/// snapshot (the core's state and picture, a few milliseconds); encoding the
+/// preview and the synced writes happen on a thread of their own. One write
+/// at a time; the game thread waits for it before touching states itself.
+struct Autosave {
+    folder: crate::services::game_storage::GameFolder,
+    identity: String,
+    writing: Option<JoinHandle<()>>,
+    /// Unpaused play since the last refresh.
+    played: Duration,
+}
+impl Autosave {
+    const EVERY: Duration = Duration::from_secs(60);
+    /// Leaving Horizon refreshes only after this much play, so switching
+    /// windows back and forth doesn't keep writing.
+    const AT_LEAST: Duration = Duration::from_secs(5);
+
+    fn due(&self) -> bool {
+        // Measurements can refresh more often (HORIZON_AUTOSAVE_SECONDS).
+        #[cfg(test)]
+        if let Some(seconds) = std::env::var("HORIZON_AUTOSAVE_SECONDS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+        {
+            return self.played >= Duration::from_secs(seconds);
+        }
+        self.played >= Self::EVERY
+    }
+
+    fn start(&mut self, core: &Core) {
+        if self
+            .writing
+            .as_ref()
+            .is_some_and(|writer| !writer.is_finished())
+        {
+            return;
+        }
+        self.finish();
+        let taken = Instant::now();
+        let snapshot = core
+            .serialize_state()
+            .and_then(|bytes| core.capture_frame().map(|frame| (bytes, frame)));
+        let (bytes, frame) = match snapshot {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                tracing::warn!(%error, "automatic resume point not refreshed");
+                return;
+            }
+        };
+        tracing::debug!(
+            snapshot_ms = taken.elapsed().as_secs_f64() * 1000.0,
+            "refreshing the automatic resume point"
+        );
+        let written = Instant::now();
+        self.played = Duration::ZERO;
+        let store =
+            crate::services::save_states::Store::new(self.folder.clone(), self.identity.clone());
+        self.writing = thread::Builder::new()
+            .name("horizon-autosave".into())
+            .spawn(move || match store.save(0, &bytes, &frame) {
+                Ok(()) => tracing::debug!(
+                    write_ms = written.elapsed().as_millis(),
+                    "automatic resume point refreshed"
+                ),
+                Err(error) => tracing::warn!(%error, "automatic resume point not refreshed"),
+            })
+            .map_err(|error| tracing::warn!(%error, "automatic resume point not refreshed"))
+            .ok();
+    }
+
+    /// Wait for a write in progress.
+    fn finish(&mut self) {
+        if let Some(writer) = self.writing.take()
+            && writer.join().is_err()
+        {
+            tracing::warn!("the automatic resume point writer stopped unexpectedly");
+        }
+    }
+}
+impl Drop for Autosave {
+    fn drop(&mut self) {
+        self.finish();
+    }
 }
 pub enum Event {
     Ready {
         title: String,
         freeze_when_unfocused: bool,
         /// A DS game's screen layout; None for other systems.
+        ds_layout: Option<crate::domain::core_settings::DsLayout>,
+    },
+    /// While the game loads: the newest state's picture (if resuming) and,
+    /// for DS, the layout to show it in.
+    Loading {
+        preview: Option<crate::platform::gba_core::Frame>,
         ds_layout: Option<crate::domain::core_settings::DsLayout>,
     },
     Started(String),
@@ -168,6 +262,18 @@ impl Drop for RunningGame {
 }
 
 pub fn read_rom_snapshot(path: &Path, sha256: &str) -> Result<Vec<u8>, String> {
+    let bytes = read_rom(path)?;
+    if !rom_matches(&bytes, sha256) {
+        return Err(CHANGED_ROM.into());
+    }
+    Ok(bytes)
+}
+
+const CHANGED_ROM: &str = "The game file has changed. Add its folder again before playing.";
+
+/// The imported file's bytes, checked for size and (DS) header, but not yet
+/// against its imported identity: see `rom_matches`.
+fn read_rom(path: &Path) -> Result<Vec<u8>, String> {
     let system = RomSystem::from_extension(path).unwrap_or(RomSystem::GameBoyAdvance);
     let maximum = system.max_rom_size();
     let mut file = File::open(path)
@@ -187,15 +293,21 @@ pub fn read_rom_snapshot(path: &Path, sha256: &str) -> Result<Vec<u8>, String> {
         crate::sources::gba::recognition::validate_ds_header(&bytes, bytes.len() as u64)
             .map_err(|_| "This is not a supported Nintendo DS cartridge".to_owned())?;
     }
-    let actual = ring::digest::digest(&ring::digest::SHA256, &bytes)
+    if bytes.len() as u64 != metadata.len() {
+        return Err(CHANGED_ROM.into());
+    }
+    Ok(bytes)
+}
+
+/// The bytes are the game that was imported.
+fn rom_matches(bytes: &[u8], sha256: &str) -> bool {
+    let actual = ring::digest::digest(&ring::digest::SHA256, bytes);
+    actual
         .as_ref()
         .iter()
         .map(|b| format!("{b:02x}"))
-        .collect::<String>();
-    if actual != sha256 || bytes.len() as u64 != metadata.len() {
-        return Err("The game file has changed. Add its folder again before playing.".into());
-    }
-    Ok(bytes)
+        .collect::<String>()
+        == sha256
 }
 
 fn play(
@@ -210,6 +322,7 @@ fn play(
     ),
     frame_ready: Notify,
 ) -> Result<(), String> {
+    let launch = Instant::now();
     fs::create_dir_all(&paths.saves)
         .map_err(|_| "Could not prepare the game save directory".to_owned())?;
     let mut repository =
@@ -217,21 +330,8 @@ fn play(
     let locations = repository
         .rom_locations(system, sha256)
         .map_err(|e| e.to_string())?;
-    let mut selected = None;
     let mut failure =
         "This game has no available imported ROM. Choose its folder again.".to_owned();
-    for location in locations {
-        match read_rom_snapshot(&location.path, sha256) {
-            Ok(bytes) => {
-                selected = Some((location, bytes));
-                break;
-            }
-            Err(error) => failure = error,
-        }
-    }
-    let Some((location, rom)) = selected else {
-        return Err(failure);
-    };
     let audio: AudioBuffer = Arc::new(crate::platform::gba_audio::GameAudio::default());
     let preferences = crate::persistence::core_settings::CoreSettingsStore::new(paths.settings)
         .load()
@@ -255,27 +355,83 @@ fn play(
         crate::domain::ExternalGameId::new(format!("sha256:{sha256}"))
             .map_err(|e| e.to_string())?,
     );
-    let game_folder =
-        crate::services::game_storage::GameFolder::prepare(&paths.saves, &game, &location.title)
-            .map_err(|_| {
-                "Could not prepare the game's save folder. Existing files have been preserved."
-                    .to_owned()
-            })?;
-    let ds_directory = crate::platform::data_paths::ds_support_directory(&game_folder.directory);
-    if ds {
-        crate::services::game_storage::ensure_directory(&game_folder.directory, &ds_directory)
-            .map_err(|_| "Could not prepare DS core data")?;
+    // Something to look at while a large game loads: the state it resumes.
+    let preview = locations.first().and_then(|location| {
+        if !preferences.resume_last_state {
+            return None;
+        }
+        let folder = crate::services::game_storage::GameFolder::prepare(
+            &paths.saves,
+            &game,
+            &location.title,
+        )
+        .ok()?;
+        crate::services::save_states::Store::latest_preview(folder)
+            .map(|frame| crate::platform::gba_video::blurred(&frame, if ds { 2 } else { 1 }))
+    });
+    let _ = events.send(Event::Loading {
+        preview,
+        ds_layout: ds.then_some(preferences.ds.layout),
+    });
+    let mut read_at = Duration::ZERO;
+    let mut selected = None;
+    for location in locations {
+        let rom = match read_rom(&location.path) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                failure = error;
+                continue;
+            }
+        };
+        read_at = launch.elapsed();
+        let game_folder = crate::services::game_storage::GameFolder::prepare(
+            &paths.saves,
+            &game,
+            &location.title,
+        )
+        .map_err(|_| {
+            "Could not prepare the game's save folder. Existing files have been preserved."
+                .to_owned()
+        })?;
+        let ds_directory =
+            crate::platform::data_paths::ds_support_directory(&game_folder.directory);
+        if ds {
+            crate::services::game_storage::ensure_directory(&game_folder.directory, &ds_directory)
+                .map_err(|_| "Could not prepare DS core data")?;
+        }
+        // The identity check (a large DS cartridge takes a few hundred
+        // milliseconds to hash) runs while the core loads. Nothing runs, and
+        // no save is touched, until both are done and the file matched.
+        let (matched, core) = thread::scope(|scope| {
+            let check = scope.spawn(|| rom_matches(&rom, sha256));
+            let core = Core::load_system(
+                if ds { &paths.ds_core } else { &paths.core },
+                &rom,
+                mgba,
+                Arc::clone(&audio),
+                Arc::clone(&buttons),
+                ds_input.clone().map(|input| {
+                    (
+                        input,
+                        ds_directory.as_path(),
+                        preferences.ds.resolution.scale(),
+                    )
+                }),
+            );
+            (check.join().unwrap_or(false), core)
+        });
+        if !matched {
+            drop(core);
+            failure = CHANGED_ROM.into();
+            continue;
+        }
+        selected = Some((location, game_folder, core?));
+        break;
     }
-    let mut core = Core::load_system(
-        if ds { &paths.ds_core } else { &paths.core },
-        &rom,
-        mgba,
-        Arc::clone(&audio),
-        Arc::clone(&buttons),
-        ds_input
-            .clone()
-            .map(|input| (input, ds_directory.as_path())),
-    )?;
+    let Some((location, game_folder, mut core)) = selected else {
+        return Err(failure);
+    };
+    let core_at = launch.elapsed();
     // Filtering runs beside the core, so it never slows the game down.
     struct Filter {
         stage: Arc<FrameStage>,
@@ -319,12 +475,21 @@ fn play(
         core.run_frame();
         audio.clear();
     }
+    let save_at = launch.elapsed();
     let states =
         crate::services::save_states::Store::new(game_folder.clone(), core.state_identity.clone());
     if preferences.resume_last_state && core.supports_states()
         && let Some(snapshot) = states.latest().map_err(|_| "Saved states are unavailable or incompatible. Disable Resume last state in Settings to start normally. Existing states have been preserved.".to_owned())? {
             core.restore_state(&snapshot.bytes)?;
     }
+    let state_at = launch.elapsed();
+    let mut autosave = Autosave {
+        folder: game_folder.clone(),
+        identity: core.state_identity.clone(),
+        writing: None,
+        played: Duration::ZERO,
+    };
+    let mut last_tick = Instant::now();
     let mut audio_reader = crate::platform::gba_audio::AudioReader::new(
         Arc::clone(&audio),
         core.av.sample_rate.round() as u32,
@@ -341,11 +506,22 @@ fn play(
     )
     .map_err(|_| "Could not open game audio. Check the audio output and try again.".to_owned())?;
     let (fps, rate) = (core.av.fps, core.av.sample_rate.round() as u32);
+    let ms = |at: Duration| at.as_millis();
+    tracing::info!(
+        read_and_verify_ms = ms(read_at),
+        core_ms = ms(core_at - read_at),
+        save_ms = ms(save_at - core_at),
+        state_ms = ms(state_at - save_at),
+        audio_ms = ms(launch.elapsed() - state_at),
+        "game ready in {} ms",
+        ms(launch.elapsed())
+    );
     let mut reported = (0u64, 0u64);
     // Frames wait as long as the audio they produced (see FramePacer).
     let mut pacer = crate::platform::gba_audio::FramePacer::new(rate, fps, 1);
     let mut deadline = Instant::now();
     let mut checkpoint = Instant::now();
+    let mut checkpoint_frames = 0u64;
     let mut paused = false;
     let mut speed = PlaybackSpeed::Normal;
     // Seconds of work per frame while fast-forwarding, averaged. Starting
@@ -367,6 +543,17 @@ fn play(
     let result = (|| -> Result<(), String> {
         loop {
             while let Some(command) = pending.take().or_else(|| commands.try_recv().ok()) {
+                // States are touched here only after an autosave finished.
+                if matches!(
+                    command,
+                    Command::ListStates
+                        | Command::SaveState(_)
+                        | Command::LoadState(_)
+                        | Command::Stop
+                        | Command::Shutdown
+                ) {
+                    autosave.finish();
+                }
                 match command {
                     Command::Pause(value) => {
                         paused = value;
@@ -399,6 +586,14 @@ fn play(
                             Err(error) => Event::ActionFailed(error),
                         });
                     }
+                    Command::Autosave => {
+                        if session.is_some()
+                            && core.supports_states()
+                            && autosave.played >= Autosave::AT_LEAST
+                        {
+                            autosave.start(&core);
+                        }
+                    }
                     Command::ListStates => {
                         let _ = events.send(Event::States(states.list()));
                     }
@@ -412,7 +607,7 @@ fn play(
                             let _ = events.send(Event::StateSaved);
                         }
                     }
-                    Command::LoadState(slot) => match states.load(slot) {
+                    Command::LoadState(slot) => match states.load_state(slot) {
                         Ok(Some(snapshot)) => {
                             save_current(&core, &save_path, &mut last_save)?;
                             audio.set_paused(true);
@@ -482,6 +677,16 @@ fn play(
                     }
                 }
             }
+            let now = Instant::now();
+            if !paused {
+                autosave.played += now
+                    .duration_since(last_tick)
+                    .min(Duration::from_millis(100));
+            }
+            last_tick = now;
+            if !paused && session.is_some() && core.supports_states() && autosave.due() {
+                autosave.start(&core);
+            }
             if !paused {
                 let before = audio.written();
                 let started = Instant::now();
@@ -519,6 +724,19 @@ fn play(
                 }
             }
             if checkpoint.elapsed() >= Duration::from_secs(5) {
+                // Fast-forward that falls short is worth knowing about.
+                let emulated = core.frames.load(Ordering::Acquire);
+                let reached = emulated.saturating_sub(checkpoint_frames) as f64
+                    / checkpoint.elapsed().as_secs_f64()
+                    / fps.max(1.0);
+                if speed != PlaybackSpeed::Normal {
+                    tracing::info!(
+                        chosen = speed.factor(),
+                        reached = format!("{reached:.2}"),
+                        "fast-forward speed in the last 5 seconds"
+                    );
+                }
+                checkpoint_frames = emulated;
                 // Report audible audio trouble, so a hitch can be told apart
                 // from anything else.
                 let now = audio.problems();

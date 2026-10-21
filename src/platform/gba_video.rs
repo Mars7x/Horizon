@@ -32,19 +32,28 @@ pub(super) fn xbrz_fit(source: (u32, u32), window: (u32, u32)) -> Option<(u32, u
 /// filtered one screen at a time so filters never blend across the seam,
 /// each at the size it is shown (`targets`, physical pixels; 0×0 unknown).
 pub fn present_ds(raw: &Frame, filter: VideoFilter, targets: [(u32, u32); 2]) -> Presented {
-    const WIDTH: u32 = 256;
-    const HEIGHT: u32 = 192;
-    if (raw.width, raw.height) != (WIDTH, HEIGHT * 2)
-        || raw.rgba.len() != (WIDTH * HEIGHT * 8) as usize
+    // Two 4:3 screens stacked: 256×384 natively, a multiple when upscaled.
+    let (width, height) = (raw.width, raw.height / 2);
+    if raw.width == 0
+        || raw.width * 3 != height * 4
+        || !raw.height.is_multiple_of(2)
+        || raw.rgba.len() != (width * height * 8) as usize
     {
         // Not the expected two screens: show it whole rather than guess.
         return present_source(&raw.rgba, (raw.width, raw.height), filter, (0, 0));
     }
-    let half = (WIDTH * HEIGHT * 4) as usize;
+    // An upscaled picture already has its detail: the pixel-art filters
+    // (LCD grid, xBRZ) are for native pixels, so it's scaled smoothly.
+    let filter = if width > 256 && filter != VideoFilter::None {
+        VideoFilter::Smooth
+    } else {
+        filter
+    };
+    let half = (width * height * 4) as usize;
     let [top, bottom] = [0, 1].map(|index| {
         present_source(
             &raw.rgba[index * half..(index + 1) * half],
-            (WIDTH, HEIGHT),
+            (width, height),
             filter,
             targets[index],
         )
@@ -67,6 +76,67 @@ pub fn present_ds(raw: &Frame, filter: VideoFilter, targets: [(u32, u32); 2]) ->
         smooth: top.smooth,
         exact: None,
         screens: Some(sizes),
+    }
+}
+
+/// A soft blur of `frame` for the loading picture: three box blurs (close
+/// to a Gaussian) of a radius proportional to its width. `bands` horizontal
+/// strips are blurred apart, so the DS's two screens don't bleed together.
+pub fn blurred(frame: &Frame, bands: u32) -> Frame {
+    let (width, height) = (frame.width as usize, frame.height as usize);
+    let bands = bands.max(1) as usize;
+    if width == 0 || height == 0 || frame.rgba.len() != width * height * 4 || height % bands != 0 {
+        return frame.clone();
+    }
+    let radius = (width / 48).max(2);
+    let mut pixels: Vec<[f32; 3]> = frame
+        .rgba
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|p| [f32::from(p[0]), f32::from(p[1]), f32::from(p[2])])
+        .collect();
+    let band = height / bands;
+    let mut line = Vec::new();
+    // One box pass along a line of `count` pixels, `step` apart from `start`.
+    let mut pass = |pixels: &mut [[f32; 3]], start: usize, step: usize, count: usize| {
+        line.clear();
+        line.extend((0..count).map(|i| pixels[start + i * step]));
+        let mut sum = [0.0f32; 3];
+        let at = |i: isize| line[i.clamp(0, count as isize - 1) as usize];
+        for i in -(radius as isize)..=radius as isize {
+            let p = at(i);
+            (0..3).for_each(|c| sum[c] += p[c]);
+        }
+        let scale = 1.0 / (radius * 2 + 1) as f32;
+        for i in 0..count {
+            pixels[start + i * step] = sum.map(|v| v * scale);
+            let (leaving, entering) = (
+                at(i as isize - radius as isize),
+                at(i as isize + radius as isize + 1),
+            );
+            (0..3).for_each(|c| sum[c] += entering[c] - leaving[c]);
+        }
+    };
+    for _ in 0..3 {
+        for y in 0..height {
+            pass(&mut pixels, y * width, 1, width);
+        }
+        for b in 0..bands {
+            for x in 0..width {
+                pass(&mut pixels, b * band * width + x, width, band);
+            }
+        }
+    }
+    let rgba = pixels
+        .iter()
+        .flat_map(|p| [p[0] as u8, p[1] as u8, p[2] as u8, 255])
+        .collect();
+    Frame {
+        width: frame.width,
+        height: frame.height,
+        rgba,
+        smooth: true,
     }
 }
 

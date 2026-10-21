@@ -74,8 +74,61 @@ struct Callbacks {
     fresh: bool,
     audio_speed: super::gba_audio::SpeedAudio,
     frames: Arc<AtomicU64>,
+    /// melonDS's upscaled DS resolution (1 is native, software rendering).
+    scale: u8,
+    /// The GPU context an upscaling core draws with, when it has one.
+    hardware: Option<Hardware>,
 }
 thread_local! { static CALLBACKS: RefCell<Option<Callbacks>> = const { RefCell::new(None) }; }
+
+/// A core drawing with OpenGL (libretro's hardware rendering).
+struct Hardware {
+    gl: super::gl_context::GlContext,
+    /// The core's own context callbacks, once it asked for the context.
+    reset: Option<extern "C" fn()>,
+    destroy: Option<extern "C" fn()>,
+    stencil: bool,
+    /// The size of a frame the core drew and Horizon hasn't read back yet.
+    pending: Option<(u32, u32)>,
+}
+// What the core calls during `retro_run`, while CALLBACKS may be in use.
+thread_local! {
+    static HW_FRAMEBUFFER: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static HW_PROC: std::cell::Cell<Option<super::gl_context::ProcAddress>> =
+        const { std::cell::Cell::new(None) };
+}
+extern "C" fn hw_framebuffer() -> usize {
+    HW_FRAMEBUFFER.with(std::cell::Cell::get)
+}
+extern "C" fn hw_proc_address(name: *const c_char) -> *const c_void {
+    match HW_PROC.with(std::cell::Cell::get) {
+        // SAFETY: the driver's eglGetProcAddress, with the core's symbol name.
+        Some(get) if !name.is_null() => unsafe { get(name) },
+        _ => std::ptr::null(),
+    }
+}
+/// libretro: the frame is in the framebuffer, not in memory.
+const HW_FRAME: usize = usize::MAX;
+impl Callbacks {
+    /// Read the core's drawn frame back into `raw_frame` if one is waiting.
+    fn read_back(&mut self) {
+        let Some(hardware) = self.hardware.as_mut() else {
+            return;
+        };
+        let Some(size) = hardware.pending.take() else {
+            return;
+        };
+        let raw = self.raw_frame.get_or_insert_with(|| Frame {
+            width: 0,
+            height: 0,
+            rgba: Vec::new(),
+            smooth: false,
+        });
+        hardware.gl.read(size, &mut raw.rgba);
+        raw.width = size.0;
+        raw.height = size.1;
+    }
+}
 
 /// libretro memory ids.
 const SAVE_RAM: u32 = 0;
@@ -138,10 +191,10 @@ impl Core {
         preferences: MgbaPreferences,
         audio: AudioBuffer,
         buttons: Arc<AtomicU16>,
-        extra: Option<(Arc<DsInput>, &Path)>,
+        extra: Option<(Arc<DsInput>, &Path, u8)>,
     ) -> Result<Self, String> {
         let ds = extra.is_some();
-        let (extra, directory) = if let Some((input, path)) = extra {
+        let (extra, directory, scale) = if let Some((input, path, scale)) = extra {
             use std::os::unix::ffi::OsStrExt;
             (
                 input,
@@ -149,10 +202,30 @@ impl Core {
                     std::ffi::CString::new(path.as_os_str().as_bytes())
                         .map_err(|_| "Invalid core data directory")?,
                 ),
+                scale.max(1),
             )
         } else {
-            (Arc::default(), None)
+            (Arc::default(), None, 1)
         };
+        // Upscaling draws on the graphics card. Without a usable context the
+        // game still plays, at native resolution.
+        let hardware = (scale > 1)
+            .then(|| match super::gl_context::GlContext::new(3, 2) {
+                Ok(gl) => Some(Hardware {
+                    gl,
+                    reset: None,
+                    destroy: None,
+                    stencil: false,
+                    pending: None,
+                }),
+                Err(error) => {
+                    tracing::warn!(%error, "DS upscaling unavailable; playing at native resolution");
+                    None
+                }
+            })
+            .flatten();
+        let scale = if hardware.is_some() { scale } else { 1 };
+        HW_PROC.with(|cell| cell.set(hardware.as_ref().map(|h| h.gl.proc_address())));
         // SAFETY: only the application-packaged, pinned mGBA core is loaded;
         // the explicit development override is selected by data_paths.
         let library = unsafe { Library::new(path) }.map_err(|_| {
@@ -260,6 +333,8 @@ impl Core {
                     fresh: false,
                     audio_speed: super::gba_audio::SpeedAudio::default(),
                     frames: Arc::clone(&core.frames),
+                    scale,
+                    hardware,
                 })
             });
             set_environment(environment);
@@ -283,6 +358,23 @@ impl Core {
                 return Err("The core could not load this game".into());
             }
             get_av(&mut core.av);
+            // The core drew nothing yet: give it its framebuffer and context.
+            let reset = CALLBACKS.with(|state| {
+                let mut state = state.borrow_mut();
+                let hardware = state.as_mut()?.hardware.as_mut()?;
+                let size = (
+                    core.av.max_width.clamp(256, 4096),
+                    core.av.max_height.clamp(384, 4096),
+                );
+                match hardware.gl.framebuffer(size, hardware.stencil) {
+                    Ok(name) => HW_FRAMEBUFFER.with(|cell| cell.set(name as usize)),
+                    Err(error) => tracing::warn!(%error, "DS upscaling framebuffer"),
+                }
+                hardware.reset
+            });
+            if let Some(reset) = reset {
+                reset();
+            }
             if !core.av.fps.is_finite()
                 || !(30.0..=120.0).contains(&core.av.fps)
                 || !core.av.sample_rate.is_finite()
@@ -364,10 +456,10 @@ impl Core {
     pub fn capture_frame(&self) -> Result<Frame, String> {
         CALLBACKS
             .with(|state| {
-                state
-                    .borrow()
-                    .as_ref()
-                    .and_then(|state| state.raw_frame.clone())
+                let mut state = state.borrow_mut();
+                let state = state.as_mut()?;
+                state.read_back();
+                state.raw_frame.clone()
             })
             .ok_or_else(|| "No game frame is available yet".into())
     }
@@ -384,7 +476,17 @@ impl Core {
             let Some(state) = state.as_mut() else {
                 return false;
             };
-            let Some(raw) = state.raw_frame.as_ref().filter(|_| state.fresh) else {
+            if !state.fresh {
+                return false;
+            }
+            // Reading a GPU frame back costs time: only for one to be shown.
+            if state.hardware.is_some() {
+                if !stage.wanted() {
+                    return false;
+                }
+                state.read_back();
+            }
+            let Some(raw) = state.raw_frame.as_ref() else {
                 return false;
             };
             stage.submit(raw);
@@ -440,12 +542,24 @@ impl Core {
 }
 impl Drop for Core {
     fn drop(&mut self) {
+        // A GPU-drawing core lets go of its context first, while it's current.
+        let destroy = CALLBACKS.with(|state| {
+            state
+                .borrow()
+                .as_ref()
+                .and_then(|state| state.hardware.as_ref()?.destroy)
+        });
+        if let Some(destroy) = destroy {
+            destroy();
+        }
         // SAFETY: lifecycle stays on the same worker; library is still alive.
         unsafe {
             (self.unload)();
             (self.deinit)();
         }
         CALLBACKS.with(|state| *state.borrow_mut() = None);
+        HW_FRAMEBUFFER.with(|cell| cell.set(0));
+        HW_PROC.with(|cell| cell.set(None));
     }
 }
 
@@ -564,11 +678,22 @@ extern "C" fn environment(command: u32, data: *mut c_void) -> bool {
                     let preferences = state.as_ref()?.preferences;
                     let key = CStr::from_ptr(variable.key).to_bytes();
                     if state.as_ref()?.ds {
+                        #[cfg(test)]
+                        if let Some(value) = test_ds_option(key) {
+                            return Some(&*Box::leak(value.into_boxed_c_str()));
+                        }
                         return match key {
                             b"melonds_console_mode" => Some(c"ds"),
                             b"melonds_sysfile_mode" => Some(c"builtin"),
                             b"melonds_boot_mode" => Some(c"direct"),
-                            b"melonds_render_mode" => Some(c"software"),
+                            b"melonds_render_mode" => Some(if state.as_ref()?.scale > 1 {
+                                c"opengl"
+                            } else {
+                                c"software"
+                            }),
+                            b"melonds_opengl_resolution" => [c"1", c"2", c"3", c"4", c"5", c"6"]
+                                .get(usize::from(state.as_ref()?.scale.clamp(1, 6) - 1))
+                                .copied(),
                             b"melonds_screen_layout1" => Some(c"top-bottom"),
                             b"melonds_screen_gap" => Some(c"0"),
                             b"melonds_number_of_screen_layouts" => Some(c"1"),
@@ -633,6 +758,53 @@ extern "C" fn environment(command: u32, data: *mut c_void) -> bool {
             }
             true
         } // GET_CAN_DUPE
+        14 => CALLBACKS.with(|state| {
+            // SET_HW_RENDER: struct retro_hw_render_callback.
+            #[repr(C)]
+            struct HwRender {
+                context_type: u32,
+                context_reset: Option<extern "C" fn()>,
+                get_current_framebuffer: Option<extern "C" fn() -> usize>,
+                get_proc_address: Option<extern "C" fn(*const c_char) -> *const c_void>,
+                depth: bool,
+                stencil: bool,
+                bottom_left_origin: bool,
+                version_major: u32,
+                version_minor: u32,
+                cache_context: bool,
+                context_destroy: Option<extern "C" fn()>,
+                debug_context: bool,
+            }
+            let Ok(mut state) = state.try_borrow_mut() else {
+                return false;
+            };
+            let Some(hardware) = state.as_mut().and_then(|s| s.hardware.as_mut()) else {
+                return false;
+            };
+            // SAFETY: the core passes its retro_hw_render_callback.
+            let request = unsafe { &mut *data.cast::<HwRender>() };
+            match request.context_type {
+                // NONE: the core gave up on hardware rendering.
+                0 => {
+                    hardware.reset = None;
+                    hardware.destroy = None;
+                    true
+                }
+                // OPENGL or OPENGL_CORE up to the context Horizon made (3.2).
+                1 | 3
+                    if (request.version_major, request.version_minor) <= (3, 2)
+                        && request.bottom_left_origin =>
+                {
+                    request.get_current_framebuffer = Some(hw_framebuffer);
+                    request.get_proc_address = Some(hw_proc_address);
+                    hardware.reset = request.context_reset;
+                    hardware.destroy = request.context_destroy;
+                    hardware.stencil = request.stencil;
+                    true
+                }
+                _ => false,
+            }
+        }),
         27 => {
             // GET_LOG_INTERFACE: struct retro_log_callback { retro_log_printf_t log; }.
             // SAFETY: the shim only formats and forwards to `core_log`.
@@ -680,6 +852,22 @@ extern "C" fn input_state(port: u32, device: u32, index: u32, id: u32) -> i16 {
     })
 }
 extern "C" fn video(data: *const c_void, width: u32, height: u32, pitch: usize) {
+    if data as usize == HW_FRAME {
+        // Drawn on the GPU: read back only when needed (see `hand_off`).
+        CALLBACKS.with(|state| {
+            if let Ok(mut state) = state.try_borrow_mut()
+                && let Some(state) = state.as_mut()
+                && let Some(hardware) = state.hardware.as_mut()
+                && (1..=4096).contains(&width)
+                && (1..=4096).contains(&height)
+            {
+                hardware.pending = Some((width, height));
+                state.fresh = true;
+                state.frames.fetch_add(1, Ordering::Release);
+            }
+        });
+        return;
+    }
     if data.is_null() || width == 0 || height == 0 || width > 1024 || height > 1024 {
         return;
     }
@@ -714,36 +902,42 @@ extern "C" fn video(data: *const c_void, width: u32, height: u32, pitch: usize) 
         raw.width = width as u32;
         raw.height = height as u32;
         raw.rgba.resize(width * height * 4, 0);
-        for (y, row) in raw.rgba.chunks_exact_mut(width * 4).enumerate() {
-            let line = &data[y * pitch..][..width * bpp];
-            for (pixel, source) in row
-                .as_chunks_mut::<4>()
-                .0
-                .iter_mut()
-                .zip(line.chunks_exact(bpp))
-            {
-                *pixel = if bpp == 4 {
-                    let value = u32::from_ne_bytes([source[0], source[1], source[2], source[3]]);
-                    [(value >> 16) as u8, (value >> 8) as u8, value as u8, 255]
-                } else {
-                    let value = u16::from_ne_bytes([source[0], source[1]]);
-                    let green = if pixel_format == 2 {
-                        ((value >> 5) & 63) * 255 / 63
-                    } else {
-                        ((value >> 5) & 31) * 255 / 31
-                    };
-                    let red = if pixel_format == 2 {
-                        (value >> 11) & 31
-                    } else {
-                        (value >> 10) & 31
-                    };
-                    [
-                        (red * 255 / 31) as u8,
-                        green as u8,
-                        ((value & 31) * 255 / 31) as u8,
-                        255,
-                    ]
-                };
+        // One tight loop per pixel format: this runs for every frame, up to
+        // hundreds a second when fast-forwarding.
+        let rows = raw.rgba.chunks_exact_mut(width * 4).zip(data.chunks(pitch));
+        match pixel_format {
+            1 => {
+                for (row, line) in rows {
+                    for (pixel, source) in row
+                        .as_chunks_mut::<4>()
+                        .0
+                        .iter_mut()
+                        .zip(line[..width * 4].as_chunks::<4>().0)
+                    {
+                        let value = u32::from_ne_bytes(*source);
+                        *pixel = [(value >> 16) as u8, (value >> 8) as u8, value as u8, 255];
+                    }
+                }
+            }
+            format => {
+                // RGB565 (2) or 0RGB1555 (0), widened to 8 bits a channel.
+                let (green_bits, red_shift) = if format == 2 { (63, 11) } else { (31, 10) };
+                for (row, line) in rows {
+                    for (pixel, source) in row
+                        .as_chunks_mut::<4>()
+                        .0
+                        .iter_mut()
+                        .zip(line[..width * 2].as_chunks::<2>().0)
+                    {
+                        let value = u16::from_ne_bytes(*source);
+                        *pixel = [
+                            (((value >> red_shift) & 31) * 255 / 31) as u8,
+                            (((value >> 5) & green_bits) * 255 / green_bits) as u8,
+                            ((value & 31) * 255 / 31) as u8,
+                            255,
+                        ];
+                    }
+                }
             }
         }
         state.fresh = true;
@@ -776,6 +970,17 @@ extern "C" fn audio_batch(data: *const i16, frames: usize) -> usize {
         }
     });
     frames
+}
+
+/// Measurements can try other melonDS options: `HORIZON_DS_OPTIONS` holds
+/// `key=value` pairs separated by commas.
+#[cfg(test)]
+fn test_ds_option(key: &[u8]) -> Option<std::ffi::CString> {
+    let options = std::env::var("HORIZON_DS_OPTIONS").ok()?;
+    options.split(',').find_map(|pair| {
+        let (name, value) = pair.split_once('=')?;
+        (name.as_bytes() == key).then(|| std::ffi::CString::new(value).ok())?
+    })
 }
 
 #[cfg(test)]
@@ -947,7 +1152,7 @@ mod tests {
             MgbaPreferences::default(),
             Arc::clone(&audio),
             Arc::new(AtomicU16::new(0)),
-            Some((Arc::new(DsInput::default()), &directory)),
+            Some((Arc::new(DsInput::default()), &directory, 1)),
         )
         .unwrap();
         for _ in 0..120 {
@@ -987,7 +1192,14 @@ mod tests {
             MgbaPreferences::default(),
             Arc::clone(&audio),
             Arc::new(AtomicU16::new(0)),
-            Some((Arc::new(DsInput::default()), &directory)),
+            Some((
+                Arc::new(DsInput::default()),
+                &directory,
+                std::env::var("HORIZON_DS_SCALE")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(1),
+            )),
         )
         .unwrap();
         for _ in 0..600 {
@@ -1005,6 +1217,18 @@ mod tests {
                 "DS speed round {round}: {rate:.0} frames/s ({:.2}x)",
                 rate / 59.83
             );
+        }
+        let frame = core.capture_frame().unwrap();
+        eprintln!("DS speed frame {}x{}", frame.width, frame.height);
+        if let Some(path) = std::env::var_os("HORIZON_DS_SHOT") {
+            image::save_buffer(
+                path,
+                &frame.rgba,
+                frame.width,
+                frame.height,
+                image::ColorType::Rgba8,
+            )
+            .unwrap();
         }
         drop(core);
         std::fs::remove_dir_all(directory).unwrap();

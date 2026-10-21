@@ -37,6 +37,15 @@ cc = "1"
 pkg-config = "0.3"
 slint-build = "~1.18"
 
+# Development builds (cargo run, GNOME Builder) must still play games at full
+# and fast-forward speed: dependencies (xBRZ, the renderer, decoders) are fully
+# optimised once, and Horizon's own code lightly, keeping rebuilds quick.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

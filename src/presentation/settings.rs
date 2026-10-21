@@ -202,6 +202,9 @@ impl SettingsController {
             (SettingsView::MelonDs, 1) => {
                 next.ds.video_filter = next.ds.video_filter.step(direction != Some(false))
             }
+            (SettingsView::MelonDs, 2) => {
+                next.ds.resolution = next.ds.resolution.step(direction != Some(false))
+            }
             (SettingsView::Mgba, 0) => {
                 next.mgba.sunlight =
                     next.mgba
@@ -839,7 +842,7 @@ impl SettingsController {
                 return;
             }
             SettingsView::MelonDs => {
-                self.page.borrow_mut().selected = selected.clamp(0, 1);
+                self.page.borrow_mut().selected = selected.clamp(0, 2);
                 self.change_core(ui, selected, None);
                 return;
             }
@@ -1346,6 +1349,7 @@ impl SettingsController {
         ui.set_settings_core_border(self.core_values.get().mgba.sgb_border);
         ui.set_settings_ds_layout(self.core_values.get().ds.layout.label().into());
         ui.set_settings_ds_filter(self.core_values.get().ds.video_filter.label().into());
+        ui.set_settings_ds_resolution(self.core_values.get().ds.resolution.label().into());
         ui.set_settings_core_freeze(self.core_values.get().freeze_when_unfocused);
         ui.set_settings_core_resume(self.core_values.get().resume_last_state);
         ui.set_settings_core_sunlight(i32::from(self.core_values.get().mgba.sunlight.level()));
@@ -1447,7 +1451,7 @@ fn selection_count(view: SettingsView) -> i32 {
         SettingsView::Root => 4,
         SettingsView::Cores => 4,
         SettingsView::Mgba => 5,
-        SettingsView::MelonDs => 2,
+        SettingsView::MelonDs => 3,
         SettingsView::Appearance => 15,
         SettingsView::Controller => 4,
         SettingsView::GameBindings => 7,
@@ -1904,6 +1908,14 @@ mod core_runtime_tests {
                     }
                     15 => {
                         assert_eq!(ui.get_settings_ds_filter(), "LCD");
+                        tap(slint::platform::Key::DownArrow);
+                        assert_eq!(ui.get_settings_selection(), 2);
+                        assert_eq!(ui.get_settings_ds_resolution(), "Native");
+                        tap(slint::platform::Key::RightArrow);
+                        progress.set(16);
+                    }
+                    16 => {
+                        assert_eq!(ui.get_settings_ds_resolution(), "2× (384p)");
                         let pixels = ui.window().take_snapshot().unwrap();
                         image::save_buffer(
                             output.join("melonds-settings.png"),
@@ -1996,6 +2008,7 @@ mod core_runtime_tests {
             saved.ds.video_filter,
             crate::domain::core_settings::VideoFilter::Lcd
         );
+        assert_eq!(saved.ds.resolution.scale(), 2);
     }
 }
 

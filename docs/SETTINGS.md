@@ -65,10 +65,12 @@ RetroArch shader files, audio smoothing controls, BIOS, core download, advanced
 timing and developer controls are not exposed.
 
 Cores → melonDS (the melonDS DS libretro core) contains Screen layout (Side by side, Stacked, Large and
-small; default Side by side) and Video filter (the same four presets, default
-None). Swapping the screens is a quick-menu action, not a setting.
+small; default Side by side), Video filter (the same four presets, default
+None) and Internal resolution (Native, then 2× to 6× with their DS line counts;
+default Native). Higher resolutions draw 3D on the graphics card. Swapping the screens is a quick-menu action, not a setting.
 
-All preferences apply on the next game launch. Shared focus freezing and resume are stored
+All preferences apply on the next game launch; the pages don't repeat this
+under their rows, which show only save errors. Shared focus freezing and resume are stored
 in `playback.json`; mGBA sunlight, filtering, colour correction, palette and border are stored in
 `cores/mgba.json`; the DS layout and filter in `cores/melonds-ds.json`. Old `cores.json` files are not loaded or migrated. Invalid
 files and failed writes preserve prior data and remain visible as errors.

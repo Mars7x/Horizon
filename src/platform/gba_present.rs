@@ -47,6 +47,15 @@ impl FrameStage {
         self.wake.notify_one();
     }
 
+    /// The filter can take a frame now (a newer one would replace it unseen
+    /// otherwise): costly frames are produced only then.
+    pub fn wanted(&self) -> bool {
+        self.pending
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .wanted
+    }
+
     /// The screen took the last frame: prepare the next.
     pub fn want(&self) {
         self.pending

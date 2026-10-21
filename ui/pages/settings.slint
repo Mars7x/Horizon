@@ -117,6 +117,7 @@ export component SettingsPage inherits Rectangle {
     in property <string> core-filter: "None";
     in property <string> ds-layout: "Side by side";
     in property <string> ds-filter: "None";
+    in property <string> ds-resolution: "Native";
     in property <int> core-sunlight;
     in property <string> core-feedback;
     callback core-decrease();
@@ -520,7 +521,7 @@ export component SettingsPage inherits Rectangle {
         Text {
             y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 4;
             width: parent.width; height: 60px;
-            text: root.core-feedback != "" ? root.core-feedback : "Applies to all cores on the next game launch";
+            text: root.core-feedback;
             color: Theme.secondary-foreground; font-size: Typography.caption-size; wrap: word-wrap;
         }
     }
@@ -597,7 +598,7 @@ export component SettingsPage inherits Rectangle {
         Text {
             y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 5;
             width: parent.width; height: 60px;
-            text: root.core-feedback != "" ? root.core-feedback : "Applies next time you launch a game";
+            text: root.core-feedback;
             color: Theme.secondary-foreground;
             font-size: Typography.caption-size;
             wrap: word-wrap;
@@ -623,7 +624,7 @@ export component SettingsPage inherits Rectangle {
             y: Metrics.breadcrumb-height + Metrics.spacing-sm;
             width: parent.width;
             title: "Screen layout";
-            subtitle: "Swap the screens from the quick menu or with R3";
+            subtitle: "Swap the screens from the quick menu or with L3";
             trailing: root.ds-layout; value-forward: root.core-value-forward;
             enabled: root.view == 9 && root.core-ready;
             focused: root.view == 9 && root.selection == 0;
@@ -639,10 +640,20 @@ export component SettingsPage inherits Rectangle {
             focused: root.view == 9 && root.selection == 1;
             activated => { if (root.view == 9) { root.activate(1); } }
         }
-        Text {
+        SettingsRow {
             y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 2;
+            width: parent.width;
+            title: "Internal resolution";
+            subtitle: "Sharper 3D, drawn on the graphics card";
+            trailing: root.ds-resolution; value-forward: root.core-value-forward;
+            enabled: root.view == 9 && root.core-ready;
+            focused: root.view == 9 && root.selection == 2;
+            activated => { if (root.view == 9) { root.activate(2); } }
+        }
+        Text {
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 3;
             width: parent.width; height: 60px;
-            text: root.core-feedback != "" ? root.core-feedback : "Applies next time you launch a game";
+            text: root.core-feedback;
             color: Theme.secondary-foreground;
             font-size: Typography.caption-size;
             wrap: word-wrap;

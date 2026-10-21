@@ -19,13 +19,63 @@ impl Default for CorePreferences {
     }
 }
 
-/// melonDS DS preferences: how Horizon arranges the two screens, and the
-/// filter each screen gets.
+/// melonDS DS preferences: how Horizon arranges the two screens, the
+/// filter each screen gets, and the resolution 3D graphics are drawn at.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DsPreferences {
     pub layout: DsLayout,
     pub video_filter: VideoFilter,
+    pub resolution: DsResolution,
+}
+
+/// How many times the DS's own resolution its picture is drawn at. Native
+/// uses melonDS's software renderer; higher ones its OpenGL renderer, drawn
+/// on the graphics card.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "u8", into = "u8")]
+pub struct DsResolution(u8);
+impl DsResolution {
+    pub const MAX: u8 = 6;
+    pub const fn scale(self) -> u8 {
+        self.0
+    }
+    pub fn step(self, forward: bool) -> Self {
+        Self(if forward {
+            if self.0 >= Self::MAX { 1 } else { self.0 + 1 }
+        } else if self.0 <= 1 {
+            Self::MAX
+        } else {
+            self.0 - 1
+        })
+    }
+    pub fn label(self) -> String {
+        if self.0 == 1 {
+            "Native".into()
+        } else {
+            format!("{}× ({}p)", self.0, u32::from(self.0) * 192)
+        }
+    }
+}
+impl Default for DsResolution {
+    fn default() -> Self {
+        Self(1)
+    }
+}
+impl TryFrom<u8> for DsResolution {
+    type Error = &'static str;
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        if (1..=Self::MAX).contains(&value) {
+            Ok(Self(value))
+        } else {
+            Err("DS resolution must be 1 to 6")
+        }
+    }
+}
+impl From<DsResolution> for u8 {
+    fn from(value: DsResolution) -> Self {
+        value.0
+    }
 }
 
 /// How the DS's two 256×192 screens are arranged in the player.

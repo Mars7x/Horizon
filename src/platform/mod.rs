@@ -3,6 +3,7 @@ pub mod data_paths;
 pub mod ffmpeg;
 pub mod file_chooser;
 pub mod gba_core;
+pub mod gl_context;
 pub(crate) mod jpeg_xl;
 pub mod launcher;
 pub mod pipewire;

@@ -17,6 +17,47 @@ pub const MANUAL_SLOTS: u8 = 4;
 /// Boy game with its border.
 const PREVIEW_SIZES: [(u32, u32); 4] = [(240, 160), (160, 144), (256, 224), (256, 384)];
 
+/// An upscaled frame (DS drawn at 2× to 6×) averaged down to its native
+/// preview size; None when it already is one, or isn't a whole multiple.
+fn preview_size(frame: &Frame) -> Option<Frame> {
+    if PREVIEW_SIZES.contains(&(frame.width, frame.height)) {
+        return None;
+    }
+    let &(width, height) = PREVIEW_SIZES.iter().find(|(w, h)| {
+        frame.width.is_multiple_of(*w)
+            && frame.height.is_multiple_of(*h)
+            && frame.width / w == frame.height / h
+    })?;
+    let factor = (frame.width / width) as usize;
+    if frame.rgba.len() != (frame.width * frame.height * 4) as usize {
+        return None;
+    }
+    let stride = frame.width as usize * 4;
+    let mut rgba = vec![0u8; (width * height * 4) as usize];
+    for (index, pixel) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        let (x, y) = (index % width as usize, index / width as usize);
+        let mut sum = [0u32; 4];
+        for dy in 0..factor {
+            let row = &frame.rgba[(y * factor + dy) * stride + x * factor * 4..][..factor * 4];
+            for source in row.as_chunks::<4>().0 {
+                for channel in 0..4 {
+                    sum[channel] += u32::from(source[channel]);
+                }
+            }
+        }
+        let area = (factor * factor) as u32;
+        for channel in 0..4 {
+            pixel[channel] = ((sum[channel] + area / 2) / area) as u8;
+        }
+    }
+    Some(Frame {
+        width,
+        height,
+        rgba,
+        smooth: frame.smooth,
+    })
+}
+
 /// States follow the mGBA release (`mGBA@<version>`), not the exact binary:
 /// rebuilding the same release, such as adding its Game Boy core, keeps
 /// them. mGBA itself rejects a state it cannot read, and the session rolls back.
@@ -50,11 +91,15 @@ pub struct Entry {
 pub struct Snapshot {
     pub bytes: Vec<u8>,
     pub metadata: Metadata,
-    pub preview: Frame,
+    /// Decoded only when the slot is loaded for showing (see `Store::load`).
+    pub preview: Option<Frame>,
 }
 pub struct Store {
     folder: GameFolder,
     core_build: String,
+    /// Accept states from any release of the core: only for showing a
+    /// picture while the game loads, never for loading.
+    any_build: bool,
     #[cfg(test)]
     preview_decodes: std::cell::Cell<usize>,
 }
@@ -63,6 +108,7 @@ impl Store {
         Self {
             folder,
             core_build,
+            any_build: false,
             #[cfg(test)]
             preview_decodes: std::cell::Cell::new(0),
         }
@@ -103,7 +149,7 @@ impl Store {
             || metadata.saved_at < 0
             || metadata.slot != slot
             || metadata.core != self.core_name()
-            || !same_release(&metadata.core_build, &self.core_build)
+            || !(self.any_build || same_release(&metadata.core_build, &self.core_build))
             || metadata.rom_identity != self.folder.manifest.game_id
         {
             return Err(io::Error::other(
@@ -112,7 +158,10 @@ impl Store {
         }
         Ok(metadata)
     }
-    fn read_bundle(&self, directory: &Path, slot: u8) -> io::Result<Snapshot> {
+    /// A slot's state and, when `decode` asks for it, its preview picture.
+    /// Without it the preview is still checked (checksum, size, format), so
+    /// damage is found either way, but resuming doesn't pay for decoding.
+    fn read_bundle(&self, directory: &Path, slot: u8, decode: bool) -> io::Result<Snapshot> {
         let metadata = self.read_metadata(directory, slot)?;
         let files = self.files(directory, slot);
         let bytes = read(&files.state, self.max_state_size() as u64).map_err(incomplete)?;
@@ -136,20 +185,25 @@ impl Store {
         {
             return Err(io::Error::other("Invalid saved state preview"));
         }
-        #[cfg(test)]
-        self.preview_decodes.set(self.preview_decodes.get() + 1);
-        let rgba = crate::services::image::decode(&preview, None)
-            .map_err(io::Error::other)?
-            .into_rgba8();
-        Ok(Snapshot {
-            bytes,
-            metadata,
-            preview: Frame {
+        let preview = if decode {
+            #[cfg(test)]
+            self.preview_decodes.set(self.preview_decodes.get() + 1);
+            let rgba = crate::services::image::decode(&preview, None)
+                .map_err(io::Error::other)?
+                .into_rgba8();
+            Some(Frame {
                 width,
                 height,
                 rgba: rgba.into_raw(),
                 smooth: false,
-            },
+            })
+        } else {
+            None
+        };
+        Ok(Snapshot {
+            bytes,
+            metadata,
+            preview,
         })
     }
     fn backups(&self, slot: u8) -> io::Result<Vec<PathBuf>> {
@@ -189,7 +243,15 @@ impl Store {
         }
         Ok(Some(core))
     }
+    /// A slot with its preview, for showing it.
     pub fn load(&self, slot: u8) -> io::Result<Option<Snapshot>> {
+        self.load_bundle(slot, true)
+    }
+    /// A slot's state only, for loading it into the game.
+    pub fn load_state(&self, slot: u8) -> io::Result<Option<Snapshot>> {
+        self.load_bundle(slot, false)
+    }
+    fn load_bundle(&self, slot: u8, decode: bool) -> io::Result<Option<Snapshot>> {
         if slot > MANUAL_SLOTS {
             return Err(io::Error::other("Invalid state slot"));
         }
@@ -198,14 +260,14 @@ impl Store {
         };
         let current = data_paths::state_slot_directory(&core, slot);
         let mut failure = None;
-        match self.read_bundle(&current, slot) {
+        match self.read_bundle(&current, slot, decode) {
             Ok(snapshot) => return Ok(Some(snapshot)),
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => failure = Some(error),
         }
         let mut previous = None;
         for path in self.backups(slot)? {
-            match self.read_bundle(&path, slot) {
+            match self.read_bundle(&path, slot, decode) {
                 Ok(snapshot)
                     if previous.as_ref().is_none_or(|old: &Snapshot| {
                         snapshot.metadata.saved_at > old.metadata.saved_at
@@ -231,7 +293,7 @@ impl Store {
                 Ok(Some(snapshot)) => Entry {
                     slot,
                     metadata: Some(snapshot.metadata),
-                    preview: Some(snapshot.preview),
+                    preview: snapshot.preview,
                     issue: None,
                 },
                 Ok(None) => Entry {
@@ -265,7 +327,19 @@ impl Store {
         }
         Ok(newest)
     }
+    /// The newest state's picture, from any release of the core, shown while
+    /// the game loads; the core then resumes only a compatible state.
+    pub fn latest_preview(folder: GameFolder) -> Option<Frame> {
+        let store = Self {
+            any_build: true,
+            ..Self::new(folder, String::new())
+        };
+        store.latest_with(true).ok().flatten()?.preview
+    }
     pub fn latest(&self) -> io::Result<Option<Snapshot>> {
+        self.latest_with(false)
+    }
+    fn latest_with(&self, decode: bool) -> io::Result<Option<Snapshot>> {
         let Some(core) = self.available_core()? else {
             return Ok(None);
         };
@@ -290,7 +364,7 @@ impl Store {
             }) {
                 break;
             }
-            match self.load(slot) {
+            match self.load_bundle(slot, decode) {
                 Ok(Some(snapshot))
                     if newest.as_ref().is_none_or(|old| {
                         (snapshot.metadata.saved_at, std::cmp::Reverse(slot))
@@ -312,6 +386,8 @@ impl Store {
         }
     }
     pub fn save(&self, slot: u8, bytes: &[u8], frame: &Frame) -> io::Result<()> {
+        let reduced = preview_size(frame);
+        let frame = reduced.as_ref().unwrap_or(frame);
         if slot > MANUAL_SLOTS
             || bytes.is_empty()
             || bytes.len() > self.max_state_size()
@@ -392,7 +468,7 @@ impl Store {
             })
             .into_iter()
             .filter_map(|path| {
-                self.read_bundle(&path, slot)
+                self.read_bundle(&path, slot, false)
                     .ok()
                     .map(|s| (s.metadata.saved_at, path))
             })
@@ -540,8 +616,9 @@ mod tests {
         assert!(fixture.store.core().ends_with("states/melonds-ds"));
         let state = fixture.store.load(1).unwrap().unwrap();
         assert_eq!(state.metadata.core, "melonds-ds");
-        assert_eq!((state.preview.width, state.preview.height), (256, 384));
-        assert_eq!(state.preview.rgba, fixture.frame.rgba);
+        let preview = state.preview.as_ref().unwrap();
+        assert_eq!((preview.width, preview.height), (256, 384));
+        assert_eq!(preview.rgba, fixture.frame.rgba);
         fixture.store.folder.manifest.system = "gba".into();
         assert!(fixture.store.load(1).unwrap().is_none());
     }
@@ -571,7 +648,8 @@ mod tests {
         }
         f.store.preview_decodes.set(0);
         assert_eq!(f.store.latest().unwrap().unwrap().metadata.slot, 4);
-        assert_eq!(f.store.preview_decodes.get(), 1);
+        // Resuming needs the state, not its picture.
+        assert_eq!(f.store.preview_decodes.get(), 0);
         f.save(0, b"automatic tie", 104);
         assert_eq!(f.store.latest().unwrap().unwrap().metadata.slot, 0);
     }
@@ -640,7 +718,7 @@ mod tests {
             ordered.push(start.elapsed());
             assert_eq!(selected.bytes, newest.unwrap().bytes);
             assert_eq!(selected.metadata.slot, 4);
-            assert_eq!(f.store.preview_decodes.get(), 1);
+            assert_eq!(f.store.preview_decodes.get(), 0);
         }
         baseline.sort();
         ordered.sort();
@@ -671,7 +749,10 @@ mod tests {
         metadata.preview_sha256 = hash(&fs::read(&legacy.screenshot).unwrap());
         fs::write(&files.metadata, serde_json::to_vec(&metadata).unwrap()).unwrap();
         fs::remove_file(&files.screenshot).unwrap();
-        assert_eq!(f.store.load(1).unwrap().unwrap().preview.rgba, f.frame.rgba);
+        assert_eq!(
+            f.store.load(1).unwrap().unwrap().preview.unwrap().rgba,
+            f.frame.rgba
+        );
         f.save(1, b"new", 200);
         assert_eq!(f.store.load(1).unwrap().unwrap().metadata.format_version, 2);
         assert!(f.store.backups(1).unwrap().iter().any(|dir| {
@@ -751,6 +832,40 @@ mod tests {
         assert!(f.store.load(1).is_err());
     }
     #[test]
+    fn upscaled_ds_frames_keep_a_native_preview() {
+        let f = Fixture::new();
+        // 3×: each native pixel is a 3×3 block; the preview averages it.
+        let mut rgba = Vec::with_capacity(768 * 1152 * 4);
+        for y in 0..1152 {
+            for _ in 0..768 {
+                rgba.extend_from_slice(if y < 576 {
+                    &[255, 0, 0, 255]
+                } else {
+                    &[0, 0, 255, 255]
+                });
+            }
+        }
+        let frame = Frame {
+            width: 768,
+            height: 1152,
+            rgba,
+            smooth: false,
+        };
+        f.store.save(1, b"upscaled", &frame).unwrap();
+        let preview = f.store.load(1).unwrap().unwrap().preview.unwrap();
+        assert_eq!((preview.width, preview.height), (256, 384));
+        assert_eq!(&preview.rgba[..4], &[255, 0, 0, 255]);
+        assert_eq!(&preview.rgba[256 * 383 * 4..][..4], &[0, 0, 255, 255]);
+        // Not a whole multiple: refused, as before.
+        let odd = Frame {
+            width: 300,
+            height: 400,
+            rgba: vec![0; 300 * 400 * 4],
+            smooth: false,
+        };
+        assert!(f.store.save(2, b"odd", &odd).is_err());
+    }
+    #[test]
     fn game_boy_states_keep_their_own_preview_size() {
         let f = Fixture::new();
         let frame = Frame {
@@ -760,12 +875,9 @@ mod tests {
             smooth: false,
         };
         f.store.save(1, b"game boy", &frame).unwrap();
-        let snapshot = f.store.load(1).unwrap().unwrap();
-        assert_eq!(
-            (snapshot.preview.width, snapshot.preview.height),
-            (160, 144)
-        );
-        assert_eq!(snapshot.preview.rgba, frame.rgba);
+        let preview = f.store.load(1).unwrap().unwrap().preview.unwrap();
+        assert_eq!((preview.width, preview.height), (160, 144));
+        assert_eq!(preview.rgba, frame.rgba);
         let bordered = Frame {
             width: 256,
             height: 224,

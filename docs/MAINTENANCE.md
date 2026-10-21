@@ -49,3 +49,8 @@ helpers use the existing lockfile and must not silently resolve new versions.
 Builds, caches, credentials and generated artifacts do not belong in patch
 packages. Ignored local build output is not source and is not automatically
 deleted by repository cleanup. Commit and push only with explicit approval.
+
+Development builds (`cargo run`, GNOME Builder's default configuration) use
+`opt-level = 1` for Horizon and `3` for dependencies, so games keep their full
+and fast-forward speed while testing. Measure performance with these or
+release builds, never an unoptimised one.

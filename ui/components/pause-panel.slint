@@ -13,6 +13,9 @@ component PauseAction inherits ListRow {
     in property <bool> available: true;
     // Room for the value; wider values ("Large and small") ask for more.
     in property <length> value-width: Metrics.spacing-xxl * 2;
+    // The menu shrinks its rows a little when a small window can't fit them.
+    in property <length> row-height: Metrics.pause-row-height;
+    height: root.row-height;
     compact: true;
     trailing-width: root.value-width;
     accessible-description: root.available ? root.value : "Not available yet";
@@ -102,32 +105,25 @@ export component PausePanel inherits Rectangle {
             returning: root.view-back; phase: root.view-phase;
             x: Metrics.spacing-lg; rest-y: 0px;
             width: root.width - Metrics.spacing-lg * 2; height: root.content-height;
-            // DS has nine actions, more than a 720p window holds: the list
-            // follows focus, and doesn't move when everything fits.
+            // DS has nine actions: in a small window every row shrinks a
+            // little so they all fit, rather than the menu scrolling.
             menu := VerticalLayout {
-                property <length> stride: Metrics.pause-row-height + Metrics.spacing-xs;
-                property <length> gap: Metrics.spacing-sm + Metrics.spacing-xs;
-                // Focused action's place in the list, and spacers above it.
-                property <int> place: root.ds
-                    ? (root.focused == 8 ? 2 : root.focused == 7 ? 3 : root.focused <= 1 ? root.focused : root.focused + 2)
-                    : root.focused;
-                property <int> spacers: root.ds ? (self.place >= 6 ? 2 : self.place >= 4 ? 1 : 0)
-                    : (self.place >= 4 ? 2 : self.place >= 2 ? 1 : 0);
-                property <length> focus-bottom: (self.place + 1) * self.stride + self.spacers * self.gap;
-                property <length> scroll: max(0px, min(self.focus-bottom - root.content-height, self.height - root.content-height));
-                y: -self.scroll; width: parent.width;
-                animate y { duration: Motion.scroll-duration; easing: ease-out; }
-                height: Metrics.pause-row-height * (root.ds ? 9 : 7) + Metrics.spacing-xs * (root.ds ? 10 : 8) + Metrics.spacing-sm * 2;
+                property <int> rows: root.ds ? 9 : 7;
+                property <length> fit: (root.content-height - Metrics.spacing-xs * (self.rows + 1) - Metrics.spacing-sm * 2) / self.rows;
+                property <length> row-size: max(36px, min(Metrics.pause-row-height, self.fit));
+                y: 0px; width: parent.width;
+                height: self.row-size * self.rows + Metrics.spacing-xs * (self.rows + 1) + Metrics.spacing-sm * 2;
                 spacing: Metrics.spacing-xs;
-                PauseAction { title: "Continue"; focused: root.view == 0 && root.focused == 0; enabled: root.open && root.view == 0; activated => { root.activate(0); } }
-                PauseAction { title: "Playback speed"; value: root.speed + "×"; forward: root.speed-forward; focused: root.view == 0 && root.focused == 1; enabled: root.open && root.view == 0; activated => { root.activate(1); } }
-                if root.ds : PauseAction { title: "Screen layout"; value: root.ds-layout; value-width: Metrics.spacing-xxl * 3.5; forward: root.ds-layout-forward; focused: root.view == 0 && root.focused == 8; enabled: root.open && root.view == 0; activated => { root.activate(8); } }
-                if root.ds : PauseAction { title: "Swap screens"; focused: root.view == 0 && root.focused == 7; enabled: root.open && root.view == 0; activated => { root.activate(7); } }
+                PauseAction { row-height: menu.row-size; title: "Continue"; focused: root.view == 0 && root.focused == 0; enabled: root.open && root.view == 0; activated => { root.activate(0); } }
+                PauseAction { row-height: menu.row-size; title: "Playback speed"; value: root.speed + "×"; forward: root.speed-forward; focused: root.view == 0 && root.focused == 1; enabled: root.open && root.view == 0; activated => { root.activate(1); } }
+                if root.ds : PauseAction { row-height: menu.row-size; title: "Screen layout"; value: root.ds-layout; value-width: Metrics.spacing-xxl * 3.5; forward: root.ds-layout-forward; focused: root.view == 0 && root.focused == 8; enabled: root.open && root.view == 0; activated => { root.activate(8); } }
+                if root.ds : PauseAction { row-height: menu.row-size; title: "Swap screens"; focused: root.view == 0 && root.focused == 7; enabled: root.open && root.view == 0; activated => { root.activate(7); } }
                 Rectangle { height: Metrics.spacing-sm; background: transparent; }
-                PauseAction { title: "Save state"; focused: root.view == 0 && root.focused == 2; enabled: root.open && root.view == 0; activated => { root.activate(2); } }
-                PauseAction { title: "Load state"; focused: root.view == 0 && root.focused == 3; enabled: root.open && root.view == 0; activated => { root.activate(3); } }
+                PauseAction { row-height: menu.row-size; title: "Save state"; focused: root.view == 0 && root.focused == 2; enabled: root.open && root.view == 0; activated => { root.activate(2); } }
+                PauseAction { row-height: menu.row-size; title: "Load state"; focused: root.view == 0 && root.focused == 3; enabled: root.open && root.view == 0; activated => { root.activate(3); } }
                 Rectangle { height: Metrics.spacing-sm; background: transparent; }
                 PauseAction {
+                    row-height: menu.row-size;
                     title: "Take screenshot"; focused: root.view == 0 && root.focused == 4;
                     enabled: root.open && root.view == 0;
                     accessible-description: root.screenshot-visible ? "Screenshot saved to Album" : "";
@@ -144,14 +140,8 @@ export component PausePanel inherits Rectangle {
                             image-fit: contain; image-rendering: pixelated; }
                     }
                 }
-                PauseAction { title: "Restart"; focused: root.view == 0 && root.focused == 5; enabled: root.open && root.view == 0; activated => { root.activate(5); } }
-                PauseAction { title: "Return to Horizon"; focused: root.view == 0 && root.focused == 6; enabled: root.open && root.view == 0; activated => { root.activate(6); } }
-            }
-            // Shadows show there's more above or below.
-            ScrollEdgeShadow { y: 0px; width: parent.width; strength: menu.scroll / 16px; }
-            ScrollEdgeShadow {
-                y: root.content-height - self.height; width: parent.width; bottom: true;
-                strength: (menu.height - root.content-height - menu.scroll) / 16px;
+                PauseAction { row-height: menu.row-size; title: "Restart"; focused: root.view == 0 && root.focused == 5; enabled: root.open && root.view == 0; activated => { root.activate(5); } }
+                PauseAction { row-height: menu.row-size; title: "Return to Horizon"; focused: root.view == 0 && root.focused == 6; enabled: root.open && root.view == 0; activated => { root.activate(6); } }
             }
         }
         for view in [1, 2] : TransitionLayer {
