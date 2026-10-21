@@ -52,6 +52,7 @@ mod tests {
         let paths = CoreSettingsPaths {
             playback: root.join("playback.json"),
             mgba: root.join("cores/mgba.json"),
+            ds: root.join("cores/melonds-ds.json"),
         };
         let worker = CoreSettings::new(paths.clone(), worker::no_notify());
         let mut next = worker.results.recv().unwrap().unwrap();

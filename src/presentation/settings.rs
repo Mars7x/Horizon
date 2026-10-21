@@ -55,6 +55,8 @@ struct PageState {
 
 struct BindingCapture {
     row: usize,
+    /// Capturing for the DS mapping rather than the Game Boy one.
+    ds: bool,
     since: std::time::Instant,
     armed: bool,
     device: Option<u64>,
@@ -188,11 +190,17 @@ impl SettingsController {
         }
         let mut next = self.core_values.get();
         match (self.page.borrow().view, row) {
-            (SettingsView::Cores, 1) => {
+            (SettingsView::Cores, 2) => {
                 next.freeze_when_unfocused = direction.unwrap_or(!next.freeze_when_unfocused)
             }
-            (SettingsView::Cores, 2) => {
+            (SettingsView::Cores, 3) => {
                 next.resume_last_state = direction.unwrap_or(!next.resume_last_state)
+            }
+            (SettingsView::MelonDs, 0) => {
+                next.ds.layout = next.ds.layout.step(direction != Some(false))
+            }
+            (SettingsView::MelonDs, 1) => {
+                next.ds.video_filter = next.ds.video_filter.step(direction != Some(false))
             }
             (SettingsView::Mgba, 0) => {
                 next.mgba.sunlight =
@@ -334,6 +342,7 @@ impl SettingsController {
         }
         *self.capture.borrow_mut() = Some(BindingCapture {
             row,
+            ds: self.page.borrow().view == SettingsView::DsBindings,
             since: std::time::Instant::now(),
             armed: false,
             device: None,
@@ -400,12 +409,16 @@ impl SettingsController {
             current.armed = false;
             return;
         }
-        let row = current.row;
+        let (row, ds) = (current.row, current.ds);
         let source = pressed[0];
         capture.take();
         drop(capture);
         let mut values = self.controller.get();
-        values.gba_bindings = values.gba_bindings.assign(row, source, values.swap_confirm);
+        if ds {
+            values.ds_bindings = values.ds_bindings.assign(row, source, values.swap_confirm);
+        } else {
+            values.gba_bindings = values.gba_bindings.assign(row, source, values.swap_confirm);
+        }
         self.save_controller(ui, values);
     }
 
@@ -504,7 +517,8 @@ impl SettingsController {
         if self.capture.borrow().is_some() {
             let keyboard =
                 ui.global::<crate::InputGlyphs>().get_family() == crate::GlyphFamily::Keyboard;
-            if matches!(action, UiAction::Home | UiAction::StickPress)
+            if action == UiAction::Home
+                || action.any_stick_press()
                 || (keyboard && matches!(action, UiAction::Back | UiAction::Accept))
             {
                 self.cancel_binding(ui);
@@ -617,8 +631,8 @@ impl SettingsController {
                 } else if page.view == SettingsView::Appearance && page.selected == 14 {
                     drop(page);
                     self.set_ui_sounds_enabled(ui, action == UiAction::Right);
-                } else if page.view == SettingsView::Mgba
-                    || (page.view == SettingsView::Cores && matches!(page.selected, 1 | 2))
+                } else if matches!(page.view, SettingsView::Mgba | SettingsView::MelonDs)
+                    || (page.view == SettingsView::Cores && matches!(page.selected, 2 | 3))
                 {
                     let row = page.selected;
                     drop(page);
@@ -801,16 +815,18 @@ impl SettingsController {
                 return;
             }
             SettingsView::Cores => {
-                if matches!(selected, 1 | 2) {
+                if matches!(selected, 2 | 3) {
                     self.page.borrow_mut().selected = selected;
                     self.change_core(ui, selected, None);
                     return;
                 }
-                if selected != 0 {
-                    return;
-                }
+                let child = match selected {
+                    0 => SettingsView::Mgba,
+                    1 => SettingsView::MelonDs,
+                    _ => return,
+                };
                 let mut page = self.page.borrow_mut();
-                page.view = SettingsView::Mgba;
+                page.view = child;
                 page.selected = 0;
                 drop(page);
                 self.cue(UiSoundCue::Ok);
@@ -822,20 +838,27 @@ impl SettingsController {
                 self.change_core(ui, selected, None);
                 return;
             }
-            SettingsView::GameBindings => {
+            SettingsView::MelonDs => {
+                self.page.borrow_mut().selected = selected.clamp(0, 1);
+                self.change_core(ui, selected, None);
+                return;
+            }
+            SettingsView::GameBindings | SettingsView::DsBindings => {
                 if !self.controller_ready.get() || self.controller_busy.get() {
                     return;
                 }
                 if self.capture.borrow().is_some() {
                     return;
                 }
-                if (0..6).contains(&selected) {
+                // The last row restores the defaults.
+                let reset = selection_count(view) - 1;
+                if (0..reset).contains(&selected) {
                     self.page.borrow_mut().selected = selected;
                     self.begin_binding(ui, selected as usize);
-                } else if selected == 6 {
+                } else if selected == reset {
                     let mut page = self.page.borrow_mut();
-                    page.selected = 6;
-                    page.confirm = Some(6);
+                    page.selected = reset;
+                    page.confirm = Some(reset);
                     page.confirm_focus = 0;
                     drop(page);
                     self.publish(ui);
@@ -843,9 +866,13 @@ impl SettingsController {
                 return;
             }
             SettingsView::Controller => {
-                if selected == 2 {
+                if matches!(selected, 2 | 3) {
                     let mut page = self.page.borrow_mut();
-                    page.view = SettingsView::GameBindings;
+                    page.view = if selected == 2 {
+                        SettingsView::GameBindings
+                    } else {
+                        SettingsView::DsBindings
+                    };
                     page.selected = 0;
                     drop(page);
                     self.cue(UiSoundCue::Ok);
@@ -960,9 +987,14 @@ impl SettingsController {
         let Some(row) = self.page.borrow_mut().confirm.take() else {
             return;
         };
-        if choice == 1 && self.page.borrow().view == SettingsView::GameBindings {
+        let view = self.page.borrow().view;
+        if choice == 1 && matches!(view, SettingsView::GameBindings | SettingsView::DsBindings) {
             let mut next = self.controller.get();
-            next.gba_bindings = Default::default();
+            if view == SettingsView::DsBindings {
+                next.ds_bindings = Default::default();
+            } else {
+                next.gba_bindings = Default::default();
+            }
             self.save_controller(ui, next);
         } else if choice == 1 {
             self.remove(ui, row);
@@ -1232,8 +1264,10 @@ impl SettingsController {
             SettingsView::SteamGridDb => 4,
             SettingsView::Controller => 5,
             SettingsView::GameBindings => 8,
+            SettingsView::DsBindings => 10,
             SettingsView::Cores => 6,
             SettingsView::Mgba => 7,
+            SettingsView::MelonDs => 9,
         });
         ui.set_settings_binding_open(self.capture.borrow().is_some());
         ui.set_settings_binding_title(
@@ -1241,32 +1275,59 @@ impl SettingsController {
                 .borrow()
                 .as_ref()
                 .map(|capture| {
-                    format!(
-                        "Assign {}",
-                        crate::domain::controller::ACTION_NAMES[capture.row]
-                    )
+                    let names: &[&str] = if capture.ds {
+                        &crate::domain::controller::DS_ACTION_NAMES
+                    } else {
+                        &crate::domain::controller::ACTION_NAMES
+                    };
+                    format!("Assign {}", names.get(capture.row).copied().unwrap_or(""))
                 })
                 .unwrap_or_default()
                 .into(),
         );
         let values = self.controller.get();
-        let rows: Vec<_> = crate::domain::controller::ACTION_NAMES
-            .into_iter()
-            .enumerate()
-            .map(|(row, title)| crate::ControllerBindingRow {
-                // Game Boy games have no shoulder buttons.
-                title: match title {
-                    "Start" | "Select" => title.into(),
-                    "L" | "R" => format!("{title} button (GBA)").into(),
-                    _ => format!("{title} button").into(),
-                },
-                value: binding_label(
-                    values.gba_bindings.source(row, values.swap_confirm),
-                    ui.global::<crate::InputGlyphs>().get_family(),
-                )
-                .into(),
-            })
-            .collect();
+        let family = ui.global::<crate::InputGlyphs>().get_family();
+        let ds = page.view == SettingsView::DsBindings;
+        let rows: Vec<_> = if ds {
+            crate::domain::controller::DS_ACTION_NAMES
+                .into_iter()
+                .enumerate()
+                .map(|(row, title)| crate::ControllerBindingRow {
+                    title: match title {
+                        "Start" | "Select" => title.into(),
+                        _ => format!("{title} button").into(),
+                    },
+                    value: binding_label(
+                        values.ds_bindings.source(row, values.swap_confirm),
+                        family,
+                    )
+                    .into(),
+                })
+                .collect()
+        } else {
+            crate::domain::controller::ACTION_NAMES
+                .into_iter()
+                .enumerate()
+                .map(|(row, title)| crate::ControllerBindingRow {
+                    // Game Boy games have no shoulder buttons.
+                    title: match title {
+                        "Start" | "Select" => title.into(),
+                        "L" | "R" => format!("{title} button (GBA)").into(),
+                        _ => format!("{title} button").into(),
+                    },
+                    value: binding_label(
+                        values.gba_bindings.source(row, values.swap_confirm),
+                        family,
+                    )
+                    .into(),
+                })
+                .collect()
+        };
+        // The DS page has more rows than the Game Boy page.
+        while self.binding_model.row_count() > rows.len() {
+            self.binding_model
+                .remove(self.binding_model.row_count() - 1);
+        }
         for (index, row) in rows.into_iter().enumerate() {
             if let Some(previous) = self.binding_model.row_data(index) {
                 if previous.title != row.title || previous.value != row.value {
@@ -1283,6 +1344,8 @@ impl SettingsController {
         ui.set_settings_core_color(self.core_values.get().mgba.color_correction);
         ui.set_settings_core_palette(self.core_values.get().mgba.game_boy_palette.label().into());
         ui.set_settings_core_border(self.core_values.get().mgba.sgb_border);
+        ui.set_settings_ds_layout(self.core_values.get().ds.layout.label().into());
+        ui.set_settings_ds_filter(self.core_values.get().ds.video_filter.label().into());
         ui.set_settings_core_freeze(self.core_values.get().freeze_when_unfocused);
         ui.set_settings_core_resume(self.core_values.get().resume_last_state);
         ui.set_settings_core_sunlight(i32::from(self.core_values.get().mgba.sunlight.level()));
@@ -1316,7 +1379,7 @@ impl SettingsController {
         ui.set_settings_feedback(
             if matches!(
                 page.view,
-                SettingsView::Controller | SettingsView::GameBindings
+                SettingsView::Controller | SettingsView::GameBindings | SettingsView::DsBindings
             ) {
                 self.controller_feedback.borrow().clone()
             } else {
@@ -1327,7 +1390,9 @@ impl SettingsController {
         ui.set_settings_confirm_open(page.confirm.is_some());
         ui.set_settings_confirm_focus(page.confirm_focus);
         let (title, action) = match page.view {
-            SettingsView::GameBindings => ("Restore default controls?", "Restore"),
+            SettingsView::GameBindings | SettingsView::DsBindings => {
+                ("Restore default controls?", "Restore")
+            }
             SettingsView::SteamAccount => ("Disconnect Steam?", "Disconnect"),
             _ => ("Remove your SteamGridDB key?", "Remove"),
         };
@@ -1365,9 +1430,11 @@ fn settings_parent(view: SettingsView) -> Option<(SettingsView, i32)> {
         SettingsView::Root => None,
         SettingsView::Cores => Some((SettingsView::Root, 3)),
         SettingsView::Mgba => Some((SettingsView::Cores, 0)),
+        SettingsView::MelonDs => Some((SettingsView::Cores, 1)),
         SettingsView::Appearance => Some((SettingsView::Root, 0)),
         SettingsView::Controller => Some((SettingsView::Root, 1)),
         SettingsView::GameBindings => Some((SettingsView::Controller, 2)),
+        SettingsView::DsBindings => Some((SettingsView::Controller, 3)),
         SettingsView::ThirdParty => Some((SettingsView::Root, 2)),
         SettingsView::SteamGridDb => Some((SettingsView::ThirdParty, 0)),
         SettingsView::SteamAccount => Some((SettingsView::ThirdParty, 1)),
@@ -1378,11 +1445,13 @@ fn settings_parent(view: SettingsView) -> Option<(SettingsView, i32)> {
 fn selection_count(view: SettingsView) -> i32 {
     match view {
         SettingsView::Root => 4,
-        SettingsView::Cores => 3,
+        SettingsView::Cores => 4,
         SettingsView::Mgba => 5,
+        SettingsView::MelonDs => 2,
         SettingsView::Appearance => 15,
-        SettingsView::Controller => 3,
+        SettingsView::Controller => 4,
         SettingsView::GameBindings => 7,
+        SettingsView::DsBindings => 9,
         SettingsView::ThirdParty => 2,
         SettingsView::SteamGridDb => 3,
         SettingsView::SteamAccount => 2,
@@ -1537,7 +1606,17 @@ mod editor_navigation_tests {
     #[test]
     fn refresh_row_is_included_only_with_saved_key() {
         assert_eq!(super::selection_count(SettingsView::Root), 4);
-        assert_eq!(super::selection_count(SettingsView::Controller), 3);
+        assert_eq!(super::selection_count(SettingsView::Controller), 4);
+        assert_eq!(super::selection_count(SettingsView::Cores), 4);
+        assert_eq!(super::selection_count(SettingsView::DsBindings), 9);
+        assert_eq!(
+            super::settings_parent(SettingsView::MelonDs),
+            Some((SettingsView::Cores, 1))
+        );
+        assert_eq!(
+            super::settings_parent(SettingsView::DsBindings),
+            Some((SettingsView::Controller, 3))
+        );
         assert_eq!(super::selection_count(SettingsView::Appearance), 15);
         assert_eq!(super::selection_count(SettingsView::ThirdParty), 2);
         // Removing a key is X on its row, not a row of its own.
@@ -1689,6 +1768,7 @@ mod core_runtime_tests {
             crate::platform::data_paths::CoreSettingsPaths {
                 playback: directory.join("playback.json"),
                 mgba: directory.join("cores/mgba.json"),
+                ds: directory.join("cores/melonds-ds.json"),
             },
         );
         let weak = Rc::downgrade(&controller);
@@ -1809,6 +1889,37 @@ mod core_runtime_tests {
                         );
                         tap(slint::platform::Key::DownArrow);
                         assert_eq!(ui.get_settings_selection(), 1);
+                        tap(slint::platform::Key::Return);
+                        assert_eq!(ui.get_settings_view(), 9);
+                        assert_eq!(ui.get_settings_ds_layout(), "Side by side");
+                        tap(slint::platform::Key::RightArrow);
+                        progress.set(14);
+                    }
+                    14 => {
+                        assert_eq!(ui.get_settings_ds_layout(), "Stacked");
+                        tap(slint::platform::Key::DownArrow);
+                        assert_eq!(ui.get_settings_selection(), 1);
+                        tap(slint::platform::Key::RightArrow);
+                        progress.set(15);
+                    }
+                    15 => {
+                        assert_eq!(ui.get_settings_ds_filter(), "LCD");
+                        let pixels = ui.window().take_snapshot().unwrap();
+                        image::save_buffer(
+                            output.join("melonds-settings.png"),
+                            pixels.as_bytes(),
+                            pixels.width(),
+                            pixels.height(),
+                            image::ColorType::Rgba8,
+                        )
+                        .unwrap();
+                        tap(slint::platform::Key::Escape);
+                        assert_eq!(
+                            (ui.get_settings_view(), ui.get_settings_selection()),
+                            (6, 1)
+                        );
+                        tap(slint::platform::Key::DownArrow);
+                        assert_eq!(ui.get_settings_selection(), 2);
                         assert!(ui.get_settings_core_freeze());
                         tap(slint::platform::Key::LeftArrow);
                         progress.set(11);
@@ -1816,7 +1927,7 @@ mod core_runtime_tests {
                     11 => {
                         assert!(!ui.get_settings_core_freeze());
                         tap(slint::platform::Key::DownArrow);
-                        assert_eq!(ui.get_settings_selection(), 2);
+                        assert_eq!(ui.get_settings_selection(), 3);
                         assert!(ui.get_settings_core_resume());
                         tap(slint::platform::Key::LeftArrow);
                         progress.set(13);
@@ -1845,7 +1956,7 @@ mod core_runtime_tests {
                         .unwrap();
                         std::fs::create_dir(output.join("playback.json")).unwrap();
                         live.activate(&ui, 3);
-                        live.activate(&ui, 1);
+                        live.activate(&ui, 2);
                         progress.set(12);
                     }
                     12 => {
@@ -1864,6 +1975,7 @@ mod core_runtime_tests {
             crate::platform::data_paths::CoreSettingsPaths {
                 playback: directory.join("saved-playback.json"),
                 mgba: directory.join("cores/mgba.json"),
+                ds: directory.join("cores/melonds-ds.json"),
             },
         )
         .load()
@@ -1876,6 +1988,14 @@ mod core_runtime_tests {
         );
         assert!(saved.mgba.color_correction);
         assert!(!saved.freeze_when_unfocused);
+        assert_eq!(
+            saved.ds.layout,
+            crate::domain::core_settings::DsLayout::Stacked
+        );
+        assert_eq!(
+            saved.ds.video_filter,
+            crate::domain::core_settings::VideoFilter::Lcd
+        );
     }
 }
 
@@ -1982,6 +2102,7 @@ mod mapping_runtime_tests {
             crate::platform::data_paths::CoreSettingsPaths {
                 playback: directory.join("playback.json"),
                 mgba: directory.join("cores/mgba.json"),
+                ds: directory.join("cores/melonds-ds.json"),
             },
         );
         let snapshot = Rc::new(Cell::new(Some((1 << 8, 7))));
@@ -2123,6 +2244,44 @@ mod mapping_runtime_tests {
                     105 => {
                         shot("mapping-restore");
                         live.choose_confirm(&ui, 1);
+                        progress.set(106);
+                    }
+                    106 => {
+                        // The DS page maps all four face buttons.
+                        assert!(live.back_inside(&ui));
+                        ui.invoke_settings_activate(3);
+                        assert_eq!(ui.get_settings_view(), 10);
+                        assert_eq!(ui.get_settings_binding_rows().row_count(), 8);
+                        snapshot.set(Some((0, 7)));
+                        ui.invoke_settings_activate(3);
+                        assert_eq!(ui.get_settings_binding_title(), "Assign Y");
+                        live.poll_binding(&ui);
+                        snapshot.set(Some((1 << 9, 7)));
+                        live.poll_binding(&ui);
+                        progress.set(107);
+                    }
+                    107 => {
+                        let ds = live.controller.get().ds_bindings;
+                        assert_eq!((ds.source(3, true), ds.source(2, true)), (Some(9), Some(1)));
+                        shot("mapping-ds");
+                        for _ in 0..5 {
+                            live.handle_action(&ui, UiActionEvent::fresh(UiAction::Down));
+                        }
+                        assert_eq!(ui.get_settings_selection(), 8);
+                        progress.set(108);
+                    }
+                    108 => {
+                        progress.set(109);
+                    }
+                    109 => {
+                        shot("mapping-ds-restore");
+                        assert!(live.back_inside(&ui));
+                        assert_eq!(
+                            (ui.get_settings_view(), ui.get_settings_selection()),
+                            (5, 3)
+                        );
+                        ui.invoke_settings_activate(2);
+                        assert_eq!(ui.get_settings_binding_rows().row_count(), 6);
                         progress.set(4);
                     }
                     4 => {

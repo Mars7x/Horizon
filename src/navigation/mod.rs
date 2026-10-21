@@ -487,8 +487,10 @@ pub enum SettingsPage {
     Appearance,
     Controller,
     GameBindings,
+    DsBindings,
     Cores,
     Mgba,
+    MelonDs,
     // Third-Party lists one "Open" row per service; each service has its
     // own sub-page so SteamGridDB and Steam work the same way.
     ThirdParty,

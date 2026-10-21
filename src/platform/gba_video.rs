@@ -28,6 +28,48 @@ pub(super) fn xbrz_fit(source: (u32, u32), window: (u32, u32)) -> Option<(u32, u
     Some((factor, size(width, window.0), size(height, window.1)))
 }
 
+/// A DS frame (both 256×192 screens stacked, as melonDS outputs them),
+/// filtered one screen at a time so filters never blend across the seam,
+/// each at the size it is shown (`targets`, physical pixels; 0×0 unknown).
+pub fn present_ds(raw: &Frame, filter: VideoFilter, targets: [(u32, u32); 2]) -> Presented {
+    const WIDTH: u32 = 256;
+    const HEIGHT: u32 = 192;
+    if (raw.width, raw.height) != (WIDTH, HEIGHT * 2)
+        || raw.rgba.len() != (WIDTH * HEIGHT * 8) as usize
+    {
+        // Not the expected two screens: show it whole rather than guess.
+        return present_source(&raw.rgba, (raw.width, raw.height), filter, (0, 0));
+    }
+    let half = (WIDTH * HEIGHT * 4) as usize;
+    let [top, bottom] = [0, 1].map(|index| {
+        present_source(
+            &raw.rgba[index * half..(index + 1) * half],
+            (WIDTH, HEIGHT),
+            filter,
+            targets[index],
+        )
+    });
+    let sizes = [&top, &bottom].map(|screen| (screen.pixels.width(), screen.pixels.height()));
+    let width = sizes[0].0.max(sizes[1].0);
+    let mut pixels = SharedPixelBuffer::<Rgba8Pixel>::new(width, sizes[0].1 + sizes[1].1);
+    let stride = width as usize * 4;
+    let target = pixels.make_mut_bytes();
+    let mut row = 0;
+    for screen in [&top, &bottom] {
+        let line = screen.pixels.width() as usize * 4;
+        for source in screen.pixels.as_bytes().chunks_exact(line) {
+            target[row * stride..row * stride + line].copy_from_slice(source);
+            row += 1;
+        }
+    }
+    Presented {
+        pixels,
+        smooth: top.smooth,
+        exact: None,
+        screens: Some(sizes),
+    }
+}
+
 /// Fixed-point weight total for area resampling.
 const ONE: u32 = 1 << 14;
 
@@ -208,6 +250,7 @@ fn present_source(
                 pixels: SharedPixelBuffer::clone_from_slice(&scaled, scaled_width, scaled_height),
                 smooth: true,
                 exact: None,
+                screens: None,
             };
         };
         // Shown 1:1 at the screen's own size, so the GPU never resamples.
@@ -226,6 +269,7 @@ fn present_source(
             pixels,
             smooth: false,
             exact: Some((target_width, target_height)),
+            screens: None,
         };
     }
     if filter != VideoFilter::Lcd || !whole {
@@ -233,6 +277,7 @@ fn present_source(
             pixels: SharedPixelBuffer::clone_from_slice(source, width, height),
             smooth,
             exact: None,
+            screens: None,
         };
     }
     // Input is validated and bounded by the libretro video callback. Three
@@ -261,6 +306,7 @@ fn present_source(
         pixels,
         smooth: true,
         exact: None,
+        screens: None,
     }
 }
 

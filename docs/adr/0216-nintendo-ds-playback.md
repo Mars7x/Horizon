@@ -19,7 +19,8 @@ the fitted composite image; the right stick moves the core cursor and R2 touches
 Four DS face buttons use fixed device-family assignments with the global A/B
 swap. Existing mGBA remapping remains mGBA-specific. No DSi, firmware manager,
 network play, microphone recording, virtual SD card or slot-2 cartridge support
-is exposed. DS layout/filter/remapping preferences can be designed separately.
+is exposed. DS layout, filter and remapping
+preferences are in [ADR 0217](0217-ds-screen-layouts-and-mapping.md).
 
 Keep game-named cartridge saves in the existing per-game folder. DS states live
 under `states/melonds-ds`, separate from `states/mgba`, and retain the existing

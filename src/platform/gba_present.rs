@@ -2,8 +2,8 @@
 //! has drawn the last one. The core never waits for a filter, so fast-forward
 //! keeps its speed, and the picture keeps up with the display's refresh rate
 //! as far as the filter allows.
-use super::gba_core::{DisplaySize, Frame, LatestFrame};
-use super::gba_video::{Scratch, present};
+use super::gba_core::{DisplaySize, Frame, LatestFrame, unpack_ds_view};
+use super::gba_video::{Scratch, present, present_ds};
 use crate::domain::core_settings::MgbaPreferences;
 use std::sync::{Condvar, Mutex, PoisonError, atomic::Ordering};
 
@@ -69,6 +69,7 @@ impl FrameStage {
     pub fn run(
         &self,
         preferences: MgbaPreferences,
+        ds_view: Option<&std::sync::atomic::AtomicU8>,
         display: &DisplaySize,
         output: &LatestFrame,
         ready: &dyn Fn(),
@@ -93,13 +94,23 @@ impl FrameStage {
                 continue;
             };
             let size = display.load(Ordering::Acquire);
-            let presented = present(
-                &raw,
-                preferences.color_correction,
-                preferences.video_filter,
-                ((size >> 32) as u32, size as u32),
-                &mut scratch,
-            );
+            let window = ((size >> 32) as u32, size as u32);
+            let presented = if let Some(view) = ds_view {
+                // Each screen is filtered at the size the layout shows it.
+                let (layout, swapped) = unpack_ds_view(view.load(Ordering::Acquire));
+                let rects = layout.screens(swapped, (f64::from(window.0), f64::from(window.1)));
+                let targets =
+                    rects.map(|rect| (rect.width.round() as u32, rect.height.round() as u32));
+                present_ds(&raw, preferences.video_filter, targets)
+            } else {
+                present(
+                    &raw,
+                    preferences.color_correction,
+                    preferences.video_filter,
+                    window,
+                    &mut scratch,
+                )
+            };
             *output.lock().unwrap_or_else(PoisonError::into_inner) = Some(presented);
             ready();
         }
@@ -137,7 +148,7 @@ mod tests {
                 Arc::clone(&shown),
             );
             std::thread::spawn(move || {
-                stage.run(MgbaPreferences::default(), &display, &output, &|| {
+                stage.run(MgbaPreferences::default(), None, &display, &output, &|| {
                     shown.fetch_add(1, Ordering::SeqCst);
                 })
             })

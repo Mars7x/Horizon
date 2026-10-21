@@ -22,14 +22,18 @@ selecting either side changes the same
 assignment. Select a row, release held controls, then
 press a face button, shoulder, trigger, Start or Select. A binding already used by
 another action swaps those two assignments. D-pad/stick directions and the
-Guide/stick-click quick-menu controls stay fixed. Stick click, Guide, Escape or
+Guide/stick-click quick-menu controls stay fixed (R3 swaps DS screens). Stick click, Guide, Escape or
 the dialog's Cancel button cancels capture. Capture times out after ten seconds;
 disconnect, device changes and focus loss cancel it without saving.
+DS button mapping is the same page for the DS's A, B, X, Y, L, R, Start and
+Select, stored separately. When its rows don't fit the window, the list follows
+focus.
 
 Mappings apply to all controllers after family normalization, independently of
 keyboard gameplay. Swap Select and Back exchanges mapped gameplay A/B; the rows
 show the effective assignment. Restore defaults asks for confirmation with Cancel
-focused and preserves the two menu/hint switches. Values live in `controller.json`.
+focused and preserves the two menu/hint switches and the other system's mapping.
+Values live in `controller.json`.
 Loads/writes use a serial worker and the shared atomic settings store. Old files
 without mappings get the existing defaults; invalid files remain intact and
 report an error. Values and live input publish only after a successful write.
@@ -37,7 +41,7 @@ See [ADR 0208](adr/0208-controller-remapping-and-playback-speed.md).
 
 ## Cores
 
-The Cores page contains the mGBA entry and shared Freeze when unfocused and
+The Cores page contains the mGBA and melonDS entries and shared Freeze when unfocused and
 Resume last state switches. Resume defaults on and loads the newest compatible
 manual or automatic state at launch. Off starts normally; exit still updates the
 automatic point. Manual slots remain separate.
@@ -60,15 +64,19 @@ Filter, correction and border default off. These are Horizon presets;
 RetroArch shader files, audio smoothing controls, BIOS, core download, advanced
 timing and developer controls are not exposed.
 
+Cores → melonDS (the melonDS DS libretro core) contains Screen layout (Side by side, Stacked, Large and
+small; default Side by side) and Video filter (the same four presets, default
+None). Swapping the screens is a quick-menu action, not a setting.
+
 All preferences apply on the next game launch. Shared focus freezing and resume are stored
 in `playback.json`; mGBA sunlight, filtering, colour correction, palette and border are stored in
-`cores/mgba.json`. Old `cores.json` files are not loaded or migrated. Invalid
+`cores/mgba.json`; the DS layout and filter in `cores/melonds-ds.json`. Old `cores.json` files are not loaded or migrated. Invalid
 files and failed writes preserve prior data and remain visible as errors.
 
 Left/Right turns switches off/on or adjusts sunlight. Select toggles a switch
 or increases sunlight; the sunlight row also has a pointer decrement button.
 On Video filter, Left/Right cycles presets and Select/click chooses the next one.
-Back restores mGBA's row in Cores, then Cores' row in Settings. Preferences load
+Back restores the core's row in Cores, then Cores' row in Settings. Preferences load
 and save on a serial worker using independent atomic files. Each action commits
 only the file that owns the changed preference.
 Changes publish only after a successful save. Pending writes preserve row styling,

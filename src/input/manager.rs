@@ -38,6 +38,7 @@ pub struct InputManager {
     /// confirm button (Settings → Controller). The keyboard is unchanged.
     swap_confirm: Rc<Cell<bool>>,
     bindings: Cell<crate::domain::controller::GameplayBindings>,
+    ds_bindings: Cell<crate::domain::controller::DsBindings>,
 }
 
 /// Follows the keyboard or controller used last and tells the UI when its
@@ -115,6 +116,7 @@ impl InputManager {
             glyphs,
             swap_confirm,
             bindings: Cell::default(),
+            ds_bindings: Cell::default(),
         })
     }
 
@@ -126,6 +128,9 @@ impl InputManager {
     pub fn set_gameplay_bindings(&self, bindings: crate::domain::controller::GameplayBindings) {
         self.bindings.set(bindings);
     }
+    pub fn set_ds_bindings(&self, bindings: crate::domain::controller::DsBindings) {
+        self.ds_bindings.set(bindings);
+    }
     pub fn mapping_snapshot(&self) -> Option<(u16, u64)> {
         self.gamepad_input.as_ref()?.gameplay_snapshot()
     }
@@ -135,10 +140,13 @@ impl InputManager {
             return (0, 0, 0);
         };
         let (x, y) = input.ds_stick();
-        // DS has four face buttons. Keep their fixed assignments independent
-        // of the six-action mGBA mapping; global confirm/back swap still applies.
+        // DS has four face buttons, so it has its own mapping; the global
+        // confirm/back swap still applies.
         (
-            gameplay_mapping(input.gameplay_buttons(), self.swap_confirm.get()),
+            gameplay_mapping(
+                self.ds_bindings.get().apply(input.gameplay_buttons()),
+                self.swap_confirm.get(),
+            ),
             x,
             y,
         )
@@ -278,6 +286,7 @@ mod tests {
             glyphs: Rc::new(GlyphTracker::new(Rc::new(|_| {}))),
             swap_confirm: Rc::default(),
             bindings: Cell::default(),
+            ds_bindings: Cell::default(),
         };
         let right: SharedString = Key::RightArrow.into();
         let t = Instant::now();
@@ -317,6 +326,7 @@ mod tests {
             glyphs: Rc::new(GlyphTracker::new(Rc::new(|_| {}))),
             swap_confirm: Rc::default(),
             bindings: Cell::default(),
+            ds_bindings: Cell::default(),
         };
         let right: SharedString = Key::RightArrow.into();
 
@@ -347,6 +357,7 @@ mod tests {
             }))),
             swap_confirm: Rc::default(),
             bindings: Cell::default(),
+            ds_bindings: Cell::default(),
         };
         let pad = GlyphStyle::Controller(ControllerFamily::PlayStation);
         manager.glyphs.set(pad);
@@ -383,6 +394,7 @@ mod tests {
             glyphs: Rc::new(GlyphTracker::new(Rc::new(|_| {}))),
             swap_confirm: Rc::default(),
             bindings: Cell::default(),
+            ds_bindings: Cell::default(),
         };
         manager.set_swap_confirm(true);
         let enter: SharedString = Key::Return.into();

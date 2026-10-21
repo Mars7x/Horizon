@@ -75,6 +75,7 @@ pub fn gba_save_directory() -> Result<PathBuf, DataPathError> {
 pub struct CoreSettingsPaths {
     pub playback: PathBuf,
     pub mgba: PathBuf,
+    pub ds: PathBuf,
 }
 
 const PROFILE_PICTURE_FILE: &str = "profile/pictures/custom.jxl";
@@ -237,6 +238,7 @@ pub fn core_settings_paths() -> Result<CoreSettingsPaths, DataPathError> {
     Ok(CoreSettingsPaths {
         playback: config_file_path("playback.json")?,
         mgba: config_file_path("cores/mgba.json")?,
+        ds: config_file_path("cores/melonds-ds.json")?,
     })
 }
 

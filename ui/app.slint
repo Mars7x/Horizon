@@ -336,6 +336,8 @@ export component AppWindow inherits Window {
     in property <bool> settings-core-border;
     in property <bool> settings-core-value-forward: true;
     in property <string> settings-core-filter: "None";
+    in property <string> settings-ds-layout: "Side by side";
+    in property <string> settings-ds-filter: "None";
     in property <int> settings-core-sunlight: 0;
     in property <string> settings-core-feedback: "";
     callback settings-core-decrease();
@@ -431,6 +433,13 @@ export component AppWindow inherits Window {
     in property <[SaveStateRow]> player-state-rows;
     callback player-state-choose(int);
     callback player-touch(float, float, bool);
+    in property <bool> player-ds;
+    in property <CardRect> player-ds-top;
+    in property <CardRect> player-ds-bottom;
+    in property <int> player-ds-top-clip-width;
+    in property <int> player-ds-top-clip-height;
+    in property <int> player-ds-bottom-clip-width;
+    in property <int> player-ds-bottom-clip-height;
     in property <bool> player-restart-confirm: false;
     in property <int> player-restart-focus: 0;
     callback player-restart-answer(int);
@@ -951,6 +960,8 @@ export component AppWindow inherits Window {
                     core-ready: root.settings-core-ready;
                     core-value-forward: root.settings-core-value-forward;
                     core-filter: root.settings-core-filter;
+                    ds-layout: root.settings-ds-layout;
+                    ds-filter: root.settings-ds-filter;
                     core-color: root.settings-core-color;
                     core-palette: root.settings-core-palette;
                     core-border: root.settings-core-border;
@@ -1145,6 +1156,9 @@ export component AppWindow inherits Window {
                 state-rows: root.player-state-rows;
                 state-choose(slot) => { root.player-state-choose(slot); }
                 touch(x, y, pressed) => { root.player-touch(x, y, pressed); }
+                ds: root.player-ds; ds-top: root.player-ds-top; ds-bottom: root.player-ds-bottom;
+                ds-top-clip-width: root.player-ds-top-clip-width; ds-top-clip-height: root.player-ds-top-clip-height;
+                ds-bottom-clip-width: root.player-ds-bottom-clip-width; ds-bottom-clip-height: root.player-ds-bottom-clip-height;
                 restart-confirm: root.player-restart-confirm; restart-focus: root.player-restart-focus;
                 restart-answer(choice) => { root.player-restart-answer(choice); }
                 open: root.player-open; paused: root.player-paused; frozen: root.player-frozen; busy: root.player-busy;

@@ -50,6 +50,8 @@ export component PausePanel inherits Rectangle {
     in property <bool> restart-confirm;
     in property <int> restart-focus;
     in property <int> focused;
+    // A DS game: offer Swap screens (action 7) after Playback speed.
+    in property <bool> ds;
     in property <string> title;
     in property <string> message;
     callback choose(int);
@@ -97,10 +99,11 @@ export component PausePanel inherits Rectangle {
             width: root.width - Metrics.spacing-lg * 2; height: root.content-height;
             VerticalLayout {
                 y: 0px; width: parent.width;
-                height: Metrics.pause-row-height * 7 + Metrics.spacing-xs * 8 + Metrics.spacing-sm * 2;
+                height: Metrics.pause-row-height * (root.ds ? 8 : 7) + Metrics.spacing-xs * (root.ds ? 9 : 8) + Metrics.spacing-sm * 2;
                 spacing: Metrics.spacing-xs;
                 PauseAction { title: "Continue"; focused: root.view == 0 && root.focused == 0; enabled: root.open && root.view == 0; activated => { root.activate(0); } }
                 PauseAction { title: "Playback speed"; value: root.speed + "×"; forward: root.speed-forward; focused: root.view == 0 && root.focused == 1; enabled: root.open && root.view == 0; activated => { root.activate(1); } }
+                if root.ds : PauseAction { title: "Swap screens"; focused: root.view == 0 && root.focused == 7; enabled: root.open && root.view == 0; activated => { root.activate(7); } }
                 Rectangle { height: Metrics.spacing-sm; background: transparent; }
                 PauseAction { title: "Save state"; focused: root.view == 0 && root.focused == 2; enabled: root.open && root.view == 0; activated => { root.activate(2); } }
                 PauseAction { title: "Load state"; focused: root.view == 0 && root.focused == 3; enabled: root.open && root.view == 0; activated => { root.activate(3); } }

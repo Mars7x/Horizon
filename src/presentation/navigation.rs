@@ -817,7 +817,8 @@ impl NavigationController {
             | UiAction::LeftBumper
             | UiAction::RightBumper
             | UiAction::Secondary
-            | UiAction::StickPress => {
+            | UiAction::StickPress
+            | UiAction::RightStickPress => {
                 debug!(
                     action = ?event.action,
                     repeated = event.repeated,
@@ -1122,6 +1123,7 @@ mod runtime_tests {
             crate::platform::data_paths::CoreSettingsPaths {
                 playback: directory.join("playback.json"),
                 mgba: directory.join("cores/mgba.json"),
+                ds: directory.join("cores/melonds-ds.json"),
             },
         );
         let navigation = NavigationController::new(&ui, home, library, settings);

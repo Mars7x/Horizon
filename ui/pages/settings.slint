@@ -115,6 +115,8 @@ export component SettingsPage inherits Rectangle {
     in property <bool> core-border;
     in property <bool> core-value-forward: true;
     in property <string> core-filter: "None";
+    in property <string> ds-layout: "Side by side";
+    in property <string> ds-filter: "None";
     in property <int> core-sunlight;
     in property <string> core-feedback;
     callback core-decrease();
@@ -207,9 +209,11 @@ export component SettingsPage inherits Rectangle {
     PageHeader { width: parent.width; title: "Settings"; }
 
     // Sub-views use the shared Zoom: going deeper zooms in, Back zooms out.
-    // Depth: Settings 0, Appearance/Controller/Third-Party 1, Steam Account/SteamGridDB 2.
+    // Depth: Settings 0, Appearance/Controller/Third-Party/Cores 1, their sub-pages 2.
     view-transition := TransitionDriver { key: root.view; }
     private property <bool> view-back: root.view-depth(root.view) < root.view-depth(view-transition.from-key);
+    // Button mapping (8) and DS button mapping (10) share one page.
+    private property <bool> binding-view: root.view == 8 || root.view == 10;
     pure function view-depth(view: int) -> int {
         return view == 0 ? 0 : (view <= 2 || view == 5 || view == 6 ? 1 : 2);
     }
@@ -486,26 +490,35 @@ export component SettingsPage inherits Rectangle {
         SettingsRow {
             y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 1;
             width: parent.width;
-            title: "Freeze when unfocused";
-            subtitle: "Resume automatically when you return";
-            toggle: true;
-            checked: root.core-freeze;
-            enabled: root.view == 6 && root.core-ready;
+            title: "melonDS";
+            subtitle: "Nintendo DS";
+            trailing: "Open";
             focused: root.view == 6 && root.selection == 1;
             activated => { if (root.view == 6) { root.activate(1); } }
         }
         SettingsRow {
             y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 2;
             width: parent.width;
+            title: "Freeze when unfocused";
+            subtitle: "Resume automatically when you return";
+            toggle: true;
+            checked: root.core-freeze;
+            enabled: root.view == 6 && root.core-ready;
+            focused: root.view == 6 && root.selection == 2;
+            activated => { if (root.view == 6) { root.activate(2); } }
+        }
+        SettingsRow {
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 3;
+            width: parent.width;
             title: "Resume last state";
             subtitle: "Load the newest state when starting a game";
             toggle: true; checked: root.core-resume;
             enabled: root.view == 6 && root.core-ready;
-            focused: root.view == 6 && root.selection == 2;
-            activated => { if root.view == 6 { root.activate(2); } }
+            focused: root.view == 6 && root.selection == 3;
+            activated => { if root.view == 6 { root.activate(3); } }
         }
         Text {
-            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 3;
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 4;
             width: parent.width; height: 60px;
             text: root.core-feedback != "" ? root.core-feedback : "Applies to all cores on the next game launch";
             color: Theme.secondary-foreground; font-size: Typography.caption-size; wrap: word-wrap;
@@ -591,6 +604,51 @@ export component SettingsPage inherits Rectangle {
         }
     }
 
+    melonds := TransitionLayer {
+        x: Metrics.page-margin;
+        rest-y: Metrics.page-header-height;
+        width: root.content-width;
+        height: root.height - Metrics.page-header-height;
+        opaque: true;
+        active: root.view == 9;
+        outgoing: view-transition.from-key == 9;
+        returning: root.view-back;
+        phase: view-transition.phase;
+        Breadcrumb {
+            x: 0px; y: 0px; width: parent.width;
+            section: "Cores"; page: "melonDS";
+            back => { if (root.view == 9) { root.go-back(); } }
+        }
+        SettingsRow {
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm;
+            width: parent.width;
+            title: "Screen layout";
+            subtitle: "Swap the screens from the quick menu or with R3";
+            trailing: root.ds-layout; value-forward: root.core-value-forward;
+            enabled: root.view == 9 && root.core-ready;
+            focused: root.view == 9 && root.selection == 0;
+            activated => { if (root.view == 9) { root.activate(0); } }
+        }
+        SettingsRow {
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 1;
+            width: parent.width;
+            title: "Video filter";
+            subtitle: "Sharp, LCD, smooth scaling or smooth pixel art";
+            trailing: root.ds-filter; value-forward: root.core-value-forward;
+            enabled: root.view == 9 && root.core-ready;
+            focused: root.view == 9 && root.selection == 1;
+            activated => { if (root.view == 9) { root.activate(1); } }
+        }
+        Text {
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 2;
+            width: parent.width; height: 60px;
+            text: root.core-feedback != "" ? root.core-feedback : "Applies next time you launch a game";
+            color: Theme.secondary-foreground;
+            font-size: Typography.caption-size;
+            wrap: word-wrap;
+        }
+    }
+
     controller := TransitionLayer {
         x: Metrics.page-margin;
         rest-y: Metrics.page-header-height;
@@ -633,8 +691,14 @@ export component SettingsPage inherits Rectangle {
             focused: root.view == 5 && root.selection == 2;
             activated => { if (root.view == 5 && !root.binding-open) {root.activate(2);} }
         }
-        Text {
+        SettingsRow {
             x: 0px; y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 3;
+            width: parent.width; title: "DS button mapping"; subtitle: "Nintendo DS gameplay controls"; trailing: "Open";
+            focused: root.view == 5 && root.selection == 3;
+            activated => { if (root.view == 5 && !root.binding-open) {root.activate(3);} }
+        }
+        Text {
+            x: 0px; y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 4;
             width: parent.width; height: 30px;
             text: root.feedback;
             visible: root.view == 5 && root.feedback != "";
@@ -647,58 +711,76 @@ export component SettingsPage inherits Rectangle {
     bindings := TransitionLayer {
         x: Metrics.page-margin; rest-y: Metrics.page-header-height;
         width: root.content-width; height: root.height - Metrics.page-header-height - Metrics.page-bottom-bar-height;
-        opaque: true; active: root.view == 8; outgoing: view-transition.from-key == 8;
+        opaque: true; active: root.binding-view; outgoing: view-transition.from-key == 8 || view-transition.from-key == 10;
         returning: root.view-back; phase: view-transition.phase;
-        Breadcrumb { x: 0px; y: 0px; width: parent.width; section: "Controller"; page: "Button mapping"; back => {if (root.view == 8 && !root.binding-open) {root.go-back();}} }
-        // The action and assigned physical input have distinct visual roles.
-        // Keep each pair one shared focus/click target, including its keycap.
-        Text {
-            x: Metrics.spacing-lg; y: Metrics.breadcrumb-height + Metrics.spacing-md;
-            width: parent.width / 2; height: Metrics.spacing-lg;
-            text: "Game Boy control"; color: Theme.secondary-foreground; font-size: Typography.caption-size;
-            vertical-alignment: center;
-        }
-        Text {
-            x: parent.width - Metrics.spacing-xxl * 4 - Metrics.spacing-lg;
-            y: Metrics.breadcrumb-height + Metrics.spacing-md;
-            width: Metrics.spacing-xxl * 4; height: Metrics.spacing-lg;
-            text: "Controller input"; color: Theme.secondary-foreground; font-size: Typography.caption-size;
-            horizontal-alignment: center; vertical-alignment: center;
-        }
-        for row[index] in root.binding-rows: ListRow {
-            x: 0px;
-            y: Metrics.breadcrumb-height + Metrics.spacing-xxl + index * (Metrics.compact-row-height + Metrics.list-row-gap);
-            width: parent.width; compact: true;
-            title: row.title;
-            subtitle: "Assigned to controller input " + row.value + ". Select to change.";
-            trailing-width: Metrics.spacing-xxl * 6;
-            focused: root.view == 8 && root.selection == index && !root.binding-open;
-            enabled: root.view == 8 && root.controller-ready && !root.binding-open;
-            activated => {if (root.view == 8 && !root.binding-open) {root.activate(index);}}
+        Breadcrumb { x: 0px; y: 0px; width: parent.width; section: "Controller"; page: root.view == 10 ? "DS button mapping" : "Button mapping"; back => {if (root.binding-view && !root.binding-open) {root.go-back();}} }
+        // Eight DS rows don't fit a 720p window: the list follows focus
+        // inside its own viewport, and doesn't move when everything fits.
+        property <length> binding-stride: Metrics.compact-row-height + Metrics.list-row-gap;
+        property <length> binding-content: Metrics.spacing-xxl + (root.binding-rows.length + 1) * self.binding-stride + Metrics.spacing-md + Metrics.compact-row-height;
+        property <length> binding-focus-bottom: root.selection >= root.binding-rows.length
+            ? self.binding-content
+            : Metrics.spacing-xxl + (root.selection + 1) * self.binding-stride;
+        property <length> binding-scroll: max(0px, min(self.binding-focus-bottom - binding-viewport.height, self.binding-content - binding-viewport.height));
+        binding-viewport := Rectangle {
+            y: Metrics.breadcrumb-height;
+            width: parent.width; height: parent.height - Metrics.breadcrumb-height;
+            clip: true;
             Rectangle {
-                x: parent.width - Metrics.spacing-xxl * 4 - Metrics.spacing-lg;
-                y: Metrics.spacing-sm; width: Metrics.spacing-xxl * 4;
-                height: parent.height - Metrics.spacing-sm * 2;
-                background: Theme.surface-raised; border-radius: Metrics.radius-sm;
-                ValueText {
-                    width: parent.width; height: parent.height;
-                    text: row.value; text-color: Theme.foreground; edge-color: Theme.surface-raised;
-                    font-size: Typography.body-size; font-weight: Typography.emphasis-weight;
-                    horizontal-alignment: center;
+                y: -bindings.binding-scroll;
+                animate y { duration: Motion.scroll-duration; easing: ease-out; }
+                width: parent.width; height: max(parent.height, bindings.binding-content);
+                // The action and assigned physical input have distinct visual roles.
+                // Keep each pair one shared focus/click target, including its keycap.
+                Text {
+                    x: Metrics.spacing-lg; y: Metrics.spacing-md;
+                    width: parent.width / 2; height: Metrics.spacing-lg;
+                    text: root.view == 10 ? "DS control" : "Game Boy control"; color: Theme.secondary-foreground; font-size: Typography.caption-size;
+                    vertical-alignment: center;
+                }
+                Text {
+                    x: parent.width - Metrics.spacing-xxl * 4 - Metrics.spacing-lg;
+                    y: Metrics.spacing-md;
+                    width: Metrics.spacing-xxl * 4; height: Metrics.spacing-lg;
+                    text: "Controller input"; color: Theme.secondary-foreground; font-size: Typography.caption-size;
+                    horizontal-alignment: center; vertical-alignment: center;
+                }
+                for row[index] in root.binding-rows: ListRow {
+                    x: 0px;
+                    y: Metrics.spacing-xxl + index * (Metrics.compact-row-height + Metrics.list-row-gap);
+                    width: parent.width; compact: true;
+                    title: row.title;
+                    subtitle: "Assigned to controller input " + row.value + ". Select to change.";
+                    trailing-width: Metrics.spacing-xxl * 6;
+                    focused: root.binding-view && root.selection == index && !root.binding-open;
+                    enabled: root.binding-view && root.controller-ready && !root.binding-open;
+                    activated => {if (root.binding-view && !root.binding-open) {root.activate(index);}}
+                    Rectangle {
+                        x: parent.width - Metrics.spacing-xxl * 4 - Metrics.spacing-lg;
+                        y: Metrics.spacing-sm; width: Metrics.spacing-xxl * 4;
+                        height: parent.height - Metrics.spacing-sm * 2;
+                        background: Theme.surface-raised; border-radius: Metrics.radius-sm;
+                        ValueText {
+                            width: parent.width; height: parent.height;
+                            text: row.value; text-color: Theme.foreground; edge-color: Theme.surface-raised;
+                            font-size: Typography.body-size; font-weight: Typography.emphasis-weight;
+                            horizontal-alignment: center;
+                        }
+                    }
+                }
+                SettingsRow {
+                    y: Metrics.spacing-xxl + root.binding-rows.length * (Metrics.compact-row-height + Metrics.list-row-gap) + Metrics.spacing-md;
+                    width: parent.width; compact: true; title: "Restore defaults";
+                    focused: root.binding-view && root.selection == root.binding-rows.length && !root.binding-open;
+                    enabled: root.binding-view && root.controller-ready && !root.binding-open;
+                    activated => {if (root.binding-view && !root.binding-open) {root.activate(root.binding-rows.length);}}
+                }
+                Text {
+                    y: Metrics.spacing-xxl + (root.binding-rows.length + 1) * (Metrics.compact-row-height + Metrics.list-row-gap) + Metrics.spacing-md;
+                    width: parent.width; height: Metrics.compact-row-height;
+                    text: root.feedback; color: Theme.secondary-foreground; font-size: Typography.caption-size; wrap: word-wrap;
                 }
             }
-        }
-        SettingsRow {
-            y: Metrics.breadcrumb-height + Metrics.spacing-xxl + 6 * (Metrics.compact-row-height + Metrics.list-row-gap) + Metrics.spacing-md;
-            width: parent.width; compact: true; title: "Restore defaults";
-            focused: root.view == 8 && root.selection == 6 && !root.binding-open;
-            enabled: root.view == 8 && root.controller-ready && !root.binding-open;
-            activated => {if (root.view == 8 && !root.binding-open) {root.activate(6);}}
-        }
-        Text {
-            y: Metrics.breadcrumb-height + Metrics.spacing-xxl + 7 * (Metrics.compact-row-height + Metrics.list-row-gap) + Metrics.spacing-md;
-            width: parent.width; height: Metrics.compact-row-height;
-            text: root.feedback; color: Theme.secondary-foreground; font-size: Typography.caption-size; wrap: word-wrap;
         }
     }
     // Third-Party lists one row per service; each opens its own page, so

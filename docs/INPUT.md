@@ -72,7 +72,8 @@ profile name, including [first-run creation](ONBOARDING.md), is normalized and
 capped at 32 characters. Dialog lift keeps fields
 above the keyboard. Sound and reduced-motion preferences still apply.
 
-Nintendo DS adds keyboard C/V for X/Y and fixed four-face-button controller
-bindings, still following the shared A/B swap. Its touchscreen accepts mouse
-press/drag, or right-stick cursor movement with R2 to touch. The mGBA remapping
-screen does not alter these DS bindings. See [playback](GBA_PLAYBACK.md).
+Nintendo DS adds keyboard C/V for X/Y and its own controller mapping for all
+four face buttons, still following the shared A/B swap. Its touchscreen accepts
+mouse press/drag, or right-stick cursor movement with R2 to touch. During a DS
+game R3 swaps the screens and L3 alone opens the quick menu; other games keep
+either stick click for the quick menu. See [playback](GBA_PLAYBACK.md).

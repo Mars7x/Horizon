@@ -247,7 +247,7 @@ impl KeyboardController {
                 self.move_cursor(ui, delta);
                 return KeyboardFeedback::Handled;
             }
-            UiAction::StickPress if !event.repeated => {
+            action if action.any_stick_press() && !event.repeated => {
                 drop(state);
                 self.cue(UiSoundCue::Ok);
                 self.tap_shift();

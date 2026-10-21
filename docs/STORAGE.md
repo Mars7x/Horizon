@@ -31,6 +31,7 @@ config/
   controller.json
   playback.json
   cores/mgba.json
+  cores/melonds-ds.json
   integrations/steam.json
   integrations/steamgriddb.json
 cache/
@@ -87,7 +88,7 @@ pauses playback and allows retry. `.part` captures are invisible until complete.
 No other application's files are scanned or deleted.
 
 `playback.json` owns shared focus freezing and automatic resume; `cores/mgba.json` owns only mGBA
-preferences. Settings load/save on the existing worker. Each action commits one
+preferences and `cores/melonds-ds.json` only melonDS DS ones. Settings load/save on the existing worker. Each action commits one
 owner's file atomically; a failed save does not update the published preferences.
 
 ## Save states

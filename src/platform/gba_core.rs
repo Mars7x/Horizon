@@ -30,6 +30,21 @@ pub struct Presented {
     /// Show at exactly this size in physical pixels, pixelated: the
     /// buffer divides it evenly. None: fit to the window.
     pub exact: Option<(u32, u32)>,
+    /// A DS frame: the top screen's (width, height) at the buffer's top,
+    /// then the bottom screen's below it, each filtered at its own size.
+    pub screens: Option<[(u32, u32); 2]>,
+}
+
+/// The DS screen arrangement shared with the filter thread: the layout's
+/// index, with bit 4 set while the screens are swapped.
+pub fn pack_ds_view(layout: crate::domain::core_settings::DsLayout, swapped: bool) -> u8 {
+    layout.index() | (u8::from(swapped) << 4)
+}
+pub fn unpack_ds_view(value: u8) -> (crate::domain::core_settings::DsLayout, bool) {
+    (
+        crate::domain::core_settings::DsLayout::from_index(value & 0x0F),
+        value & 0x10 != 0,
+    )
 }
 /// The player's size in physical pixels, `width << 32 | height`; 0 unknown.
 pub type DisplaySize = Arc<AtomicU64>;
@@ -41,6 +56,8 @@ pub type AudioBuffer = Arc<super::gba_audio::GameAudio>;
 pub struct DsInput {
     pub pointer: AtomicU64,
     pub stick: AtomicU64,
+    /// The screen arrangement (see `pack_ds_view`), for the filter thread.
+    pub view: std::sync::atomic::AtomicU8,
 }
 
 struct Callbacks {
@@ -425,6 +442,28 @@ impl Drop for Core {
     }
 }
 
+unsafe extern "C" {
+    fn hz_retro_log_set_sink(sink: extern "C" fn(level: u32, message: *const c_char));
+    /// Variadic printf-style; defined in `csrc/horizon_retro_log.c`.
+    fn hz_retro_log(level: u32, format: *const c_char, ...);
+}
+
+/// Core log lines join Horizon's log. Cores are chatty at debug and info,
+/// so those stay at debug and trace; warnings and errors stay visible.
+extern "C" fn core_log(level: u32, message: *const c_char) {
+    if message.is_null() {
+        return;
+    }
+    // SAFETY: the shim passes a NUL-terminated buffer valid for this call.
+    let message = unsafe { std::ffi::CStr::from_ptr(message) }.to_string_lossy();
+    match level {
+        0 => tracing::trace!(target: "horizon::core", "{message}"),
+        1 => tracing::debug!(target: "horizon::core", "{message}"),
+        2 => tracing::warn!(target: "horizon::core", "{message}"),
+        _ => tracing::error!(target: "horizon::core", "{message}"),
+    }
+}
+
 extern "C" fn environment(command: u32, data: *mut c_void) -> bool {
     if data.is_null() {
         return false;
@@ -584,6 +623,15 @@ extern "C" fn environment(command: u32, data: *mut c_void) -> bool {
             }
             true
         } // GET_CAN_DUPE
+        27 => {
+            // GET_LOG_INTERFACE: struct retro_log_callback { retro_log_printf_t log; }.
+            // SAFETY: the shim only formats and forwards to `core_log`.
+            unsafe {
+                hz_retro_log_set_sink(core_log);
+                *data.cast::<unsafe extern "C" fn(u32, *const c_char, ...)>() = hz_retro_log;
+            }
+            true
+        }
         37 => true, // SET_GEOMETRY: software frames carry their actual dimensions.
         8 => true,  // SET_PERFORMANCE_LEVEL (advisory)
         18 | 11 | 35 => true, // options, input descriptors, no-game, controllers

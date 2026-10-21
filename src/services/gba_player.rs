@@ -54,6 +54,8 @@ pub enum Event {
     Ready {
         title: String,
         freeze_when_unfocused: bool,
+        /// A DS game's screen layout; None for other systems.
+        ds_layout: Option<crate::domain::core_settings::DsLayout>,
     },
     Started(String),
     Stopped,
@@ -236,7 +238,11 @@ fn play(
         .map_err(|_| "Could not read playback or core settings".to_owned())?;
     let ds = system == RomSystem::NintendoDs;
     let mut mgba = if ds {
-        Default::default()
+        // DS takes only its filter; its layout is the player's.
+        crate::domain::core_settings::MgbaPreferences {
+            video_filter: preferences.ds.video_filter,
+            ..Default::default()
+        }
     } else {
         preferences.mgba
     };
@@ -266,7 +272,9 @@ fn play(
         mgba,
         Arc::clone(&audio),
         Arc::clone(&buttons),
-        ds_input.map(|input| (input, ds_directory.as_path())),
+        ds_input
+            .clone()
+            .map(|input| (input, ds_directory.as_path())),
     )?;
     // Filtering runs beside the core, so it never slows the game down.
     struct Filter {
@@ -290,7 +298,11 @@ fn play(
                 .name("horizon-frames".into())
                 .spawn({
                     let stage = Arc::clone(&stage);
-                    move || stage.run(mgba, &display, &frame, &*frame_ready)
+                    let ds_input = ds_input.clone();
+                    move || {
+                        let view = ds_input.as_ref().map(|input| &input.view);
+                        stage.run(mgba, view, &display, &frame, &*frame_ready)
+                    }
                 })
                 .map_err(|_| "Could not start the game's video".to_owned())?,
         ),
@@ -347,6 +359,7 @@ fn play(
     let _ = events.send(Event::Ready {
         title: location.title.clone(),
         freeze_when_unfocused: preferences.freeze_when_unfocused,
+        ds_layout: ds.then_some(preferences.ds.layout),
     });
     let result = (|| -> Result<(), String> {
         loop {

@@ -17,9 +17,12 @@ pub enum UiAction {
     /// The X (west) face button, or Delete on a keyboard. Pages give it a
     /// meaning; the Album uses it to delete.
     Secondary,
-    /// Pressing either stick (L3 or R3). The on-screen keyboard uses it as
-    /// Shift.
+    /// Pressing the left stick (L3). The on-screen keyboard uses it as
+    /// Shift; in a game it opens the quick menu.
     StickPress,
+    /// Pressing the right stick (R3). Everywhere it acts as `StickPress`,
+    /// except in a DS game, where it swaps the two screens.
+    RightStickPress,
     /// A mouse's forward button: reopen the page Back last left.
     Forward,
 }
@@ -112,10 +115,16 @@ impl UiAction {
             "LB" => Self::LeftBumper,
             "RB" => Self::RightBumper,
             "X" => Self::Secondary,
-            "L3" | "R3" => Self::StickPress,
+            "L3" => Self::StickPress,
+            "R3" => Self::RightStickPress,
             "+" => Self::Menu,
             _ => return None,
         })
+    }
+
+    /// Either stick press: everywhere but a DS game, L3 and R3 are the same.
+    pub const fn any_stick_press(self) -> bool {
+        matches!(self, Self::StickPress | Self::RightStickPress)
     }
 
     /// Only directional navigation is repeated when a keyboard key is held.

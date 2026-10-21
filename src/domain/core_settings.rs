@@ -6,6 +6,7 @@ pub struct CorePreferences {
     pub freeze_when_unfocused: bool,
     pub resume_last_state: bool,
     pub mgba: MgbaPreferences,
+    pub ds: DsPreferences,
 }
 impl Default for CorePreferences {
     fn default() -> Self {
@@ -13,6 +14,100 @@ impl Default for CorePreferences {
             freeze_when_unfocused: true,
             resume_last_state: true,
             mgba: MgbaPreferences::default(),
+            ds: DsPreferences::default(),
+        }
+    }
+}
+
+/// melonDS DS preferences: how Horizon arranges the two screens, and the
+/// filter each screen gets.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DsPreferences {
+    pub layout: DsLayout,
+    pub video_filter: VideoFilter,
+}
+
+/// How the DS's two 256×192 screens are arranged in the player.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DsLayout {
+    /// Next to each other: fills a wide screen best.
+    #[default]
+    SideBySide,
+    /// One above the other, as on the console.
+    Stacked,
+    /// One large screen with the other a third of its size beside it.
+    LargeAndSmall,
+}
+
+/// A rectangle in the units of the area it was laid out in.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ScreenRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+impl DsLayout {
+    const ALL: [Self; 3] = [Self::SideBySide, Self::Stacked, Self::LargeAndSmall];
+    pub fn step(self, forward: bool) -> Self {
+        let index = Self::ALL
+            .iter()
+            .position(|value| *value == self)
+            .unwrap_or(0);
+        Self::ALL[(index + if forward { 1 } else { Self::ALL.len() - 1 }) % Self::ALL.len()]
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::SideBySide => "Side by side",
+            Self::Stacked => "Stacked",
+            Self::LargeAndSmall => "Large and small",
+        }
+    }
+    pub fn index(self) -> u8 {
+        self as u8
+    }
+    pub fn from_index(index: u8) -> Self {
+        Self::ALL
+            .get(usize::from(index))
+            .copied()
+            .unwrap_or_default()
+    }
+    /// Where the top and bottom screens go in an `area` (any units), fitted
+    /// and centred, keeping each screen's 4:3 shape. `swapped` exchanges the
+    /// screens' places (in Large and small, the bottom screen becomes large).
+    pub fn screens(self, swapped: bool, area: (f64, f64)) -> [ScreenRect; 2] {
+        // Group size in screen-widths: (width, height), and each screen's
+        // place within it as (x, y, scale) in those units, first screen first.
+        let screen = |x: f64, y: f64, scale: f64| (x, y, scale);
+        let (group, first, second) = match self {
+            Self::SideBySide => ((2.0, 0.75), screen(0.0, 0.0, 1.0), screen(1.0, 0.0, 1.0)),
+            Self::Stacked => ((1.0, 1.5), screen(0.0, 0.0, 1.0), screen(0.0, 0.75, 1.0)),
+            // The small screen sits beside the large one, level with its bottom.
+            Self::LargeAndSmall => (
+                (4.0 / 3.0, 0.75),
+                screen(0.0, 0.0, 1.0),
+                screen(1.0, 0.5, 1.0 / 3.0),
+            ),
+        };
+        let scale = (area.0 / group.0).min(area.1 / group.1).max(0.0);
+        let (left, top) = (
+            (area.0 - group.0 * scale) / 2.0,
+            (area.1 - group.1 * scale) / 2.0,
+        );
+        let place = |(x, y, size): (f64, f64, f64)| ScreenRect {
+            x: left + x * scale,
+            y: top + y * scale,
+            width: size * scale,
+            height: size * 0.75 * scale,
+        };
+        let (first, second) = (place(first), place(second));
+        if swapped {
+            [second, first]
+        } else {
+            [first, second]
         }
     }
 }
@@ -207,5 +302,46 @@ mod speed_tests {
         }
         assert!(PlaybackSpeed::try_from(0).is_err());
         assert!(PlaybackSpeed::try_from(5).is_err());
+    }
+}
+
+#[cfg(test)]
+mod ds_layout_tests {
+    use super::*;
+
+    fn rounded(rect: ScreenRect) -> (i64, i64, i64, i64) {
+        (
+            rect.x.round() as i64,
+            rect.y.round() as i64,
+            rect.width.round() as i64,
+            rect.height.round() as i64,
+        )
+    }
+
+    #[test]
+    fn layouts_fit_centre_and_swap() {
+        let wide = (3440.0, 1440.0);
+        // Side by side on an ultrawide: each screen 1720×1290, centred.
+        let [top, bottom] = DsLayout::SideBySide.screens(false, wide);
+        assert_eq!(rounded(top), (0, 75, 1720, 1290));
+        assert_eq!(rounded(bottom), (1720, 75, 1720, 1290));
+        let [top, bottom] = DsLayout::SideBySide.screens(true, wide);
+        assert_eq!((rounded(top).0, rounded(bottom).0), (1720, 0));
+        // Stacked on 16:9: 720×540 each, one above the other.
+        let [top, bottom] = DsLayout::Stacked.screens(false, (1920.0, 1080.0));
+        assert_eq!(rounded(top), (600, 0, 720, 540));
+        assert_eq!(rounded(bottom), (600, 540, 720, 540));
+        // Large and small fills 16:9 exactly: 1440×1080 beside 480×360.
+        let [top, bottom] = DsLayout::LargeAndSmall.screens(false, (1920.0, 1080.0));
+        assert_eq!(rounded(top), (0, 0, 1440, 1080));
+        assert_eq!(rounded(bottom), (1440, 720, 480, 360));
+        // Swapped, the touchscreen is the large one.
+        let [top, bottom] = DsLayout::LargeAndSmall.screens(true, (1920.0, 1080.0));
+        assert_eq!(rounded(bottom), (0, 0, 1440, 1080));
+        assert_eq!(rounded(top), (1440, 720, 480, 360));
+        for layout in DsLayout::ALL {
+            assert_eq!(layout.step(true).step(false), layout);
+            assert_eq!(DsLayout::from_index(layout.index()), layout);
+        }
     }
 }

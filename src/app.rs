@@ -704,6 +704,7 @@ pub fn run() -> Result<(), AppError> {
         move |preferences: ControllerPreferences| {
             input.set_swap_confirm(preferences.swap_confirm);
             input.set_gameplay_bindings(preferences.gba_bindings);
+            input.set_ds_bindings(preferences.ds_bindings);
             if let Some(ui) = glyph_ui.upgrade() {
                 ui.global::<InputGlyphs>()
                     .set_swap_confirm(preferences.hints_swapped());

@@ -55,6 +55,27 @@ export component GamePlayer inherits Rectangle {
     in property <int> focused;
     callback choose(int);
     callback touch(float, float, bool);
+    // A DS game: the frame holds the top screen above the bottom one, each
+    // `*-clip` pixels; `ds-top`/`ds-bottom` place them as fractions of the
+    // player area. Changes (a swap, a new layout) animate.
+    in property <bool> ds;
+    in property <CardRect> ds-top;
+    in property <CardRect> ds-bottom;
+    in property <int> ds-top-clip-width;
+    in property <int> ds-top-clip-height;
+    in property <int> ds-bottom-clip-width;
+    in property <int> ds-bottom-clip-height;
+    private property <float> top-x: root.ds-top.x;
+    private property <float> top-y: root.ds-top.y;
+    private property <float> top-w: root.ds-top.width;
+    private property <float> top-h: root.ds-top.height;
+    private property <float> bottom-x: root.ds-bottom.x;
+    private property <float> bottom-y: root.ds-bottom.y;
+    private property <float> bottom-w: root.ds-bottom.width;
+    private property <float> bottom-h: root.ds-bottom.height;
+    animate top-x, top-y, top-w, top-h, bottom-x, bottom-y, bottom-w, bottom-h {
+        duration: Motion.ds-swap-duration; easing: ease-in-out;
+    }
     visible: root.open;
     background: transparent;
     TouchArea {width:parent.width;height:parent.height;}
@@ -73,6 +94,44 @@ export component GamePlayer inherits Rectangle {
         background: #000;
         border-radius: Metrics.game-shell-radius * (1.0 - max(0.0, min(1.0, root.progress)));
         clip: true;
+        // DS: each screen cut from the frame and placed by the layout, on
+        // whole screen pixels. The bottom screen takes touch.
+        if root.ds : Image {
+            x: round(parent.width * root.top-x / root.screen-pixel) * root.screen-pixel;
+            y: round(parent.height * root.top-y / root.screen-pixel) * root.screen-pixel;
+            width: round(parent.width * root.top-w / root.screen-pixel) * root.screen-pixel;
+            height: round(parent.height * root.top-h / root.screen-pixel) * root.screen-pixel;
+            source: root.frame;
+            source-clip-x: 0; source-clip-y: 0;
+            source-clip-width: root.ds-top-clip-width; source-clip-height: root.ds-top-clip-height;
+            visible: root.has-frame;
+            image-fit: fill;
+            image-rendering: root.smooth ? ImageRendering.smooth : ImageRendering.pixelated;
+        }
+        if root.ds : Image {
+            x: round(parent.width * root.bottom-x / root.screen-pixel) * root.screen-pixel;
+            y: round(parent.height * root.bottom-y / root.screen-pixel) * root.screen-pixel;
+            width: round(parent.width * root.bottom-w / root.screen-pixel) * root.screen-pixel;
+            height: round(parent.height * root.bottom-h / root.screen-pixel) * root.screen-pixel;
+            source: root.frame;
+            source-clip-x: 0; source-clip-y: root.ds-top-clip-height;
+            source-clip-width: root.ds-bottom-clip-width; source-clip-height: root.ds-bottom-clip-height;
+            visible: root.has-frame;
+            image-fit: fill;
+            image-rendering: root.smooth ? ImageRendering.smooth : ImageRendering.pixelated;
+            // melonDS takes touch in its own stacked frame: the bottom half.
+            TouchArea {
+                enabled: root.phase == 2 && !root.paused && !root.busy && !root.failed;
+                moved => { root.touch(self.mouse-x / self.width, 0.5 + 0.5 * self.mouse-y / self.height, self.pressed); }
+                pointer-event(event) => {
+                    if event.button == PointerEventButton.left {
+                        root.touch(self.mouse-x / self.width, 0.5 + 0.5 * self.mouse-y / self.height, event.kind == PointerEventKind.down);
+                    } else if event.kind == PointerEventKind.cancel {
+                        root.touch(0, 0, false);
+                    }
+                }
+            }
+        }
         picture := Image {
             private property <bool> exact: root.exact-width > 0 && root.exact-height > 0;
             // Grows with the zoom like a fitted picture, ending at the exact
@@ -86,29 +145,12 @@ export component GamePlayer inherits Rectangle {
             x: self.exact ? round((parent.width - self.width) / 2 / root.screen-pixel) * root.screen-pixel : 0px;
             y: self.exact ? round((parent.height - self.height) / 2 / root.screen-pixel) * root.screen-pixel : 0px;
             source: root.frame;
-            visible: root.has-frame;
+            visible: root.has-frame && !root.ds;
             image-fit: self.exact ? ImageFit.fill : ImageFit.contain;
             // 1:1 when open; during the card zoom it is shrunk, so smooth.
             image-rendering: self.exact
                 ? (root.progress >= 1.0 ? ImageRendering.pixelated : ImageRendering.smooth)
                 : (root.smooth ? ImageRendering.smooth : ImageRendering.pixelated);
-        }
-    }
-    // Pointer coordinates refer to the fitted composite frame, excluding bars.
-    TouchArea {
-        private property <float> ratio: root.frame.height > 0 ? root.frame.width / root.frame.height : 1.0;
-        width: min(parent.width, parent.height * self.ratio);
-        height: self.width / self.ratio;
-        x: (parent.width - self.width) / 2;
-        y: (parent.height - self.height) / 2;
-        enabled: root.phase == 2 && !root.paused && !root.busy && !root.failed;
-        moved => { root.touch(self.mouse-x / self.width, self.mouse-y / self.height, self.pressed); }
-        pointer-event(event) => {
-            if event.button == PointerEventButton.left {
-                root.touch(self.mouse-x / self.width, self.mouse-y / self.height, event.kind == PointerEventKind.down);
-            } else if event.kind == PointerEventKind.cancel {
-                root.touch(0, 0, false);
-            }
         }
     }
     Rectangle {
@@ -128,7 +170,7 @@ export component GamePlayer inherits Rectangle {
             width: min(Metrics.pause-panel-width, root.width);
             height: root.height;
             shadow-strength: root.pause-reveal;
-            open: root.paused; busy: root.busy; speed: root.speed; speed-forward: root.speed-forward;
+            open: root.paused; busy: root.busy; ds: root.ds; speed: root.speed; speed-forward: root.speed-forward;
             screenshot-preview: root.screenshot-preview;
             screenshot-visible: root.screenshot-visible;
             screenshot-sequence: root.screenshot-sequence;

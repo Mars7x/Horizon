@@ -28,7 +28,17 @@ enum PlayerStage {
 }
 
 const RETURN_TO_HORIZON: i32 = 6;
+/// DS only, shown after Playback speed. Its own number keeps the others'.
+const SWAP_SCREENS: i32 = 7;
 const PAUSE_ACTIONS: [i32; 7] = [0, 1, 2, 3, 4, 5, RETURN_TO_HORIZON];
+const DS_PAUSE_ACTIONS: [i32; 8] = [0, 1, SWAP_SCREENS, 2, 3, 4, 5, RETURN_TO_HORIZON];
+fn pause_actions(ds: bool) -> &'static [i32] {
+    if ds {
+        &DS_PAUSE_ACTIONS
+    } else {
+        &PAUSE_ACTIONS
+    }
+}
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
 enum StateMode {
@@ -37,19 +47,20 @@ enum StateMode {
     Load = 2,
     Overwrite = 3,
 }
-fn pause_step(current: i32, down: bool, repeated: bool) -> i32 {
-    let index = PAUSE_ACTIONS
+fn pause_step(current: i32, down: bool, repeated: bool, ds: bool) -> i32 {
+    let actions = pause_actions(ds);
+    let index = actions
         .iter()
         .position(|&action| action == current)
         .unwrap_or(0);
     let next = crate::navigation::step_with_edge_wrap(
         index as i32,
         0,
-        PAUSE_ACTIONS.len() as i32 - 1,
+        actions.len() as i32 - 1,
         if down { 1 } else { -1 },
         repeated,
     );
-    PAUSE_ACTIONS[next as usize]
+    actions[next as usize]
 }
 
 pub struct GbaPlayer {
@@ -64,6 +75,10 @@ pub struct GbaPlayer {
     pad_ready: Cell<bool>,
     gamepads: CallbackSlot<dyn Fn() -> u16>,
     ds_gamepad: CallbackSlot<dyn Fn() -> (u16, i16, i16)>,
+    /// A DS game's screen layout (None for other systems), and whether its
+    /// screens are swapped for this session.
+    ds_layout: Cell<Option<crate::domain::core_settings::DsLayout>>,
+    ds_swapped: Cell<bool>,
     selected_game: CallbackSlot<dyn Fn() -> Option<i64>>,
     /// The game whose card launched this session.
     launched_game: Cell<Option<i64>>,
@@ -104,6 +119,8 @@ impl GbaPlayer {
             pad_ready: Cell::new(false),
             gamepads: RefCell::new(None),
             ds_gamepad: RefCell::new(None),
+            ds_layout: Cell::new(None),
+            ds_swapped: Cell::new(false),
             selected_game: RefCell::new(None),
             launched_game: Cell::new(None),
             sound: RefCell::new(None),
@@ -450,6 +467,7 @@ impl GbaPlayer {
                     ui.get_player_focus(),
                     event.action == UiAction::Down,
                     event.repeated,
+                    self.ds_layout.get().is_some(),
                 )),
                 UiAction::Left | UiAction::Right
                     if ui.get_player_focus() == 1 && !event.repeated =>
@@ -463,7 +481,15 @@ impl GbaPlayer {
                 UiAction::Back | UiAction::Home if !event.repeated => self.choose(0),
                 _ => {}
             }
-        } else if matches!(event.action, UiAction::Home | UiAction::StickPress) && !event.repeated {
+        } else if event.action == UiAction::RightStickPress
+            && !event.repeated
+            && self.ds_layout.get().is_some()
+        {
+            // R3 swaps a DS game's screens without pausing.
+            self.swap_screens(&ui);
+        } else if (event.action == UiAction::Home || event.action.any_stick_press())
+            && !event.repeated
+        {
             self.pause();
         }
         // Game B/Start and menu repeats never navigate the shell underneath.
@@ -600,7 +626,9 @@ impl GbaPlayer {
             }
             return;
         }
-        if !PAUSE_ACTIONS.contains(&index) || (ui.get_player_busy() && index != RETURN_TO_HORIZON) {
+        if !pause_actions(self.ds_layout.get().is_some()).contains(&index)
+            || (ui.get_player_busy() && index != RETURN_TO_HORIZON)
+        {
             return;
         }
         ui.set_player_focus(index);
@@ -641,6 +669,7 @@ impl GbaPlayer {
                 ui.set_player_restart_focus(0);
                 ui.set_player_message("".into());
             }
+            SWAP_SCREENS => self.swap_screens(&ui),
             RETURN_TO_HORIZON => {
                 self.set_state_mode(&ui, StateMode::Menu);
                 ui.set_player_busy(true);
@@ -780,6 +809,8 @@ impl GbaPlayer {
         self.worker_paused.set(false);
         ui.set_player_frame(Image::default());
         ui.set_player_has_frame(false);
+        ui.set_player_ds(false);
+        self.ds_layout.set(None);
         if self.closing.get()
             && let Err(error) = slint::quit_event_loop()
         {
@@ -821,6 +852,16 @@ impl GbaPlayer {
             self.first_frame_at.set(Some(Instant::now()));
         }
         publish_display(ui, running.as_ref());
+        if let Some([top, bottom]) = frame.screens {
+            let size = |value: u32| i32::try_from(value).unwrap_or(i32::MAX);
+            ui.set_player_ds_top_clip_width(size(top.0));
+            ui.set_player_ds_top_clip_height(size(top.1));
+            ui.set_player_ds_bottom_clip_width(size(bottom.0));
+            ui.set_player_ds_bottom_clip_height(size(bottom.1));
+        }
+        drop(running);
+        self.publish_ds(ui);
+        let running = self.running.borrow();
         ui.set_player_smooth(frame.smooth);
         // xBRZ's output is sized in physical pixels, shown 1:1.
         let (width, height) = frame.exact.unwrap_or_default();
@@ -876,8 +917,13 @@ impl GbaPlayer {
                     Event::Ready {
                         title,
                         freeze_when_unfocused,
+                        ds_layout,
                     } => {
                         self.freeze_when_unfocused.set(freeze_when_unfocused);
+                        self.ds_layout.set(ds_layout);
+                        self.ds_swapped.set(false);
+                        ui.set_player_ds(ds_layout.is_some());
+                        self.publish_ds(&ui);
                         self.sync_pause(&ui);
                         ui.set_player_title(super::titles::game_title(&title).into());
                     }
@@ -1117,6 +1163,48 @@ fn display_period(ui: &AppWindow) -> Duration {
 
 /// Tell the game worker the player's size; it follows window resizes with
 /// the next frame shown.
+impl GbaPlayer {
+    /// Place a DS game's screens for its layout, swap and the window's shape,
+    /// and tell the filter thread the sizes it should filter them at.
+    fn publish_ds(&self, ui: &AppWindow) {
+        let Some(layout) = self.ds_layout.get() else {
+            return;
+        };
+        let swapped = self.ds_swapped.get();
+        if let Some(input) = self
+            .running
+            .borrow()
+            .as_ref()
+            .and_then(|game| game.ds_input.as_ref())
+        {
+            input.view.store(
+                crate::platform::gba_core::pack_ds_view(layout, swapped),
+                Ordering::Release,
+            );
+        }
+        let size = ui.window().size();
+        let area = (f64::from(size.width.max(1)), f64::from(size.height.max(1)));
+        let [top, bottom] = layout.screens(swapped, area);
+        let fraction = |rect: crate::domain::core_settings::ScreenRect| crate::CardRect {
+            x: (rect.x / area.0) as f32,
+            y: (rect.y / area.1) as f32,
+            width: (rect.width / area.0) as f32,
+            height: (rect.height / area.1) as f32,
+        };
+        ui.set_player_ds_top(fraction(top));
+        ui.set_player_ds_bottom(fraction(bottom));
+    }
+
+    /// The DS screens trade places, animated (instant with Reduced Motion).
+    fn swap_screens(&self, ui: &AppWindow) {
+        if self.ds_layout.get().is_none() {
+            return;
+        }
+        self.ds_swapped.set(!self.ds_swapped.get());
+        self.publish_ds(ui);
+    }
+}
+
 fn publish_display(ui: &AppWindow, running: Option<&RunningGame>) {
     if let Some(running) = running {
         let size = ui.window().size();
@@ -1260,6 +1348,7 @@ mod tests {
                 settings: crate::platform::data_paths::CoreSettingsPaths {
                     playback: directory.join("playback.json"),
                     mgba: directory.join("mgba.json"),
+                    ds: directory.join("melonds-ds.json"),
                 },
             },
         );
@@ -1320,6 +1409,21 @@ mod tests {
                         .push(ui.window().take_snapshot().unwrap());
                     live.choose(0);
                     assert!(!ui.get_player_paused());
+                    // R3 swaps the screens without pausing.
+                    let before = ui.get_player_ds_top();
+                    live.handle_action(UiActionEvent::fresh(UiAction::RightStickPress));
+                    assert!(!ui.get_player_paused());
+                    assert_eq!(ui.get_player_ds_bottom().x, before.x);
+                    paused_at.set(Some(Instant::now()));
+                    step.set(6);
+                }
+                6 if paused_at
+                    .get()
+                    .is_some_and(|at| at.elapsed() > Duration::from_millis(600)) =>
+                {
+                    shots
+                        .borrow_mut()
+                        .push(ui.window().take_snapshot().unwrap());
                     live.running
                         .borrow()
                         .as_ref()
@@ -1367,11 +1471,15 @@ mod tests {
 
     #[test]
     fn pause_navigation_includes_states_and_does_not_wrap_on_repeat() {
-        assert_eq!(pause_step(1, true, false), 2);
-        assert_eq!(pause_step(4, false, false), 3);
-        assert_eq!(pause_step(0, false, true), 0);
-        assert_eq!(pause_step(6, true, true), 6);
-        assert_eq!(pause_step(6, true, false), 0);
+        assert_eq!(pause_step(1, true, false, false), 2);
+        assert_eq!(pause_step(4, false, false, false), 3);
+        assert_eq!(pause_step(0, false, true, false), 0);
+        assert_eq!(pause_step(6, true, true, false), 6);
+        assert_eq!(pause_step(6, true, false, false), 0);
+        // DS: Swap screens sits between Playback speed and Save state.
+        assert_eq!(pause_step(1, true, false, true), SWAP_SCREENS);
+        assert_eq!(pause_step(SWAP_SCREENS, true, false, true), 2);
+        assert_eq!(pause_step(2, false, false, true), SWAP_SCREENS);
     }
     #[test]
     fn game_keys_have_separate_start_select_and_shoulders() {
@@ -1429,6 +1537,7 @@ mod runtime_tests {
         let core_paths = crate::platform::data_paths::CoreSettingsPaths {
             playback: directory.join("playback.json"),
             mgba: directory.join("cores/mgba.json"),
+            ds: directory.join("cores/melonds-ds.json"),
         };
         let preferences = crate::domain::core_settings::CorePreferences {
             resume_last_state: false,
@@ -1575,6 +1684,7 @@ mod runtime_tests {
         let core_paths = crate::platform::data_paths::CoreSettingsPaths {
             playback: directory.join("playback.json"),
             mgba: directory.join("cores/mgba.json"),
+            ds: directory.join("cores/melonds-ds.json"),
         };
         let mut preferences = crate::domain::core_settings::CorePreferences::default();
         preferences.mgba.video_filter = serde_json::from_value(serde_json::Value::String(
@@ -1707,6 +1817,7 @@ mod runtime_tests {
         let core_paths = crate::platform::data_paths::CoreSettingsPaths {
             playback: directory.join("playback.json"),
             mgba: directory.join("cores/mgba.json"),
+            ds: directory.join("cores/melonds-ds.json"),
         };
         crate::persistence::core_settings::CoreSettingsStore::new(core_paths.clone())
             .write_fixture(preferences);

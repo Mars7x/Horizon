@@ -1,7 +1,7 @@
 //! Shared playback policy and core preferences are independent atomic files.
 use super::settings::{SettingsStore, SettingsStoreError};
 use crate::{
-    domain::core_settings::{CorePreferences, MgbaPreferences},
+    domain::core_settings::{CorePreferences, DsPreferences, MgbaPreferences},
     platform::data_paths::CoreSettingsPaths,
 };
 use serde::{Deserialize, Serialize};
@@ -31,18 +31,21 @@ impl CoreSettingsStore {
         let playback: PlaybackPreferences =
             SettingsStore::new(self.paths.playback.clone()).load_value()?;
         let mgba: MgbaPreferences = SettingsStore::new(self.paths.mgba.clone()).load_value()?;
+        let ds: DsPreferences = SettingsStore::new(self.paths.ds.clone()).load_value()?;
         Ok(CorePreferences {
             freeze_when_unfocused: playback.freeze_when_unfocused,
             resume_last_state: playback.resume_last_state,
             mgba,
+            ds,
         })
     }
     pub fn save(&self, current: CorePreferences, next: CorePreferences) -> Result<(), String> {
         let playback_changed = current.freeze_when_unfocused != next.freeze_when_unfocused
             || current.resume_last_state != next.resume_last_state;
         let mgba_changed = current.mgba != next.mgba;
+        let ds_changed = current.ds != next.ds;
         // Each UI operation has one owner. Never partially commit two files.
-        if playback_changed && mgba_changed {
+        if u8::from(playback_changed) + u8::from(mgba_changed) + u8::from(ds_changed) > 1 {
             return Err("Change playback and core preferences separately".into());
         }
         if playback_changed {
@@ -55,6 +58,10 @@ impl CoreSettingsStore {
         } else if mgba_changed {
             SettingsStore::new(self.paths.mgba.clone())
                 .save_value(&next.mgba)
+                .map_err(|error| error.to_string())?;
+        } else if ds_changed {
+            SettingsStore::new(self.paths.ds.clone())
+                .save_value(&next.ds)
                 .map_err(|error| error.to_string())?;
         }
         Ok(())
@@ -70,6 +77,9 @@ impl CoreSettingsStore {
         SettingsStore::new(self.paths.mgba.clone())
             .save_value(&values.mgba)
             .unwrap();
+        SettingsStore::new(self.paths.ds.clone())
+            .save_value(&values.ds)
+            .unwrap();
     }
 }
 
@@ -84,6 +94,7 @@ mod tests {
         let paths = CoreSettingsPaths {
             playback: root.join("playback.json"),
             mgba: root.join("mgba.json"),
+            ds: root.join("melonds-ds.json"),
         };
         std::fs::write(&paths.playback, b"{\"freeze_when_unfocused\":false}").unwrap();
         let store = CoreSettingsStore::new(paths.clone());
@@ -108,6 +119,7 @@ mod tests {
         let paths = CoreSettingsPaths {
             playback: root.join("playback.json"),
             mgba: root.join("cores/mgba.json"),
+            ds: root.join("cores/melonds-ds.json"),
         };
         let store = CoreSettingsStore::new(paths.clone());
         let old = CorePreferences::default();
