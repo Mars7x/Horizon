@@ -33,6 +33,9 @@
 | [0218](0218-ds-gpu-upscaling-and-dev-speed.md) | DS GPU upscaling, faster launches, crash-safe resume and representative dev builds |
 | [0219](0219-ds-lid-microphone-language-and-per-game-view.md) | DS lid, microphone, language, imported saves and per-game view |
 | [0220](0220-in-game-shortcuts.md) | In-game shortcuts: fast-forward, quick save/load, screenshot |
+| [0221](0221-visual-rewind.md) | Bounded volatile rewind with a filmstrip timeline and original opening cue |
+| [0222](0222-playback-controls-and-ds-resolution.md) | Two-speed toggle, paired face-button swap and DS scaling through 8× |
+| [0223](0223-image-only-album.md) | Album retains screenshots and animated images; clip playback removed |
 
 Earlier decisions and their supporting phase notes are in
 [history](../history/INDEX.md). Their numbered identifiers remain reserved.

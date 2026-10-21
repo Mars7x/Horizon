@@ -32,19 +32,25 @@ During [GBA playback](GBA_PLAYBACK.md), held buttons and key releases drive the
 core independently of menu repeats. Keyboard: arrows move, Z/X are A/B, A/S are
 L/R, Enter is Start and Backspace is Select. Escape/F10 or Guide opens Pause;
 stick clicks never do. Shortcuts: Tab held fast-forwards, F5 quick saves, F8 quick loads
-and F12 takes a screenshot; controller shortcuts are set in Settings →
+and F12 takes a screenshot; F6 opens rewind. Controller shortcuts are set in Settings →
 Controller → Shortcuts (one button, or a pair such as the default both triggers
 for fast-forward); a single shortcut button never reaches the game, a pair's
 only while both are held. Its vertical menu includes save/load state browsers; Left/Right
-adjusts the focused speed choice. Back continues, or cancels restart confirmation. Focus loss clears and blocks
+turns the focused Fast-forward (2×) toggle off/on. Select toggles it. Back continues, or cancels restart confirmation. Focus loss clears and blocks
 gameplay input without opening this menu; optional background freezing resumes
 automatically, while an explicit pause remains paused.
 Controller face-button conventions follow the device family;
-Start/Back are game Start/Select. Swap Select and Back also exchanges controller gameplay A/B after device-family
+Start/Back are game Start/Select. Swap Select and Back also exchanges controller gameplay A/B and X/Y after device-family
 mapping. [Button mapping](SETTINGS.md) can reassign controller A/B/L/R/Start/Select
 from face buttons, shoulders, triggers and Start/Select; conflicting bindings
 swap assignments. The menu swap applies after that mapping. D-pad/stick directions,
 quick-menu access and keyboard controls remain unchanged. Pause, window deactivation and player entry/exit release held state.
+
+Rewind's filmstrip owns input while open: Left/Right selects a moment without
+wrapping; A/Enter resumes there, B/Escape cancels back to the live moment.
+Clicking thumbnails and the footer hints uses the same Rust handlers. No game
+buttons or touchscreen presses pass through while browsing. See
+[playback](GBA_PLAYBACK.md#rewind).
 
 ## Mouse and touch
 
@@ -78,7 +84,7 @@ above the keyboard. Sound and reduced-motion preferences still apply.
 
 Nintendo DS adds keyboard C/V for X/Y and B for the microphone, and its own
 controller mapping for all four face buttons and the microphone (left trigger),
-still following the shared A/B swap. Its touchscreen accepts
+still following the shared A/B and X/Y swap. Its touchscreen accepts
 mouse press/drag only; controllers have no touch cursor. During a DS game L3
 swaps the screens; in every game Guide opens the quick menu and stick clicks
 never do. See [playback](GBA_PLAYBACK.md).

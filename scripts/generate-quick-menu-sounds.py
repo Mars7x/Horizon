@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Generate Horizon's original UI cues: navigation, quick menu, launch and
-screenshot, OK and Back (stdlib only).
+"""Generate Horizon's original UI cues: navigation, quick menu, launch,
+screenshot, rewind, OK and Back (stdlib only).
 
 SPDX-FileCopyrightText: Horizon contributors
 SPDX-License-Identifier: GPL-3.0-or-later
@@ -168,6 +168,20 @@ def launch() -> bytes:
     return encode_level(samples)
 
 
+def rewind() -> bytes:
+    """A short, soft descending pull-back; an original synthesized cue."""
+    samples = []
+    phase = 0.0
+    for frame in range(round(0.16 * RATE)):
+        t = frame / RATE
+        position = t / 0.16
+        frequency = 280 + 970 * (1 - position) ** 2
+        phase += 2 * math.pi * frequency / RATE
+        envelope = math.sin(math.pi * position) ** 2 * math.exp(-position * 1.7)
+        samples.append(envelope * (math.sin(phase) + 0.16 * math.sin(phase * 1.5)))
+    return encode_level(samples)
+
+
 def encode_level(samples: list[float]) -> bytes:
     """Match the owner-supplied menu cues' loudness (RMS about 0.0095, peak at
     most 0.06), so the latch sits level with navigation, OK and Back."""
@@ -196,7 +210,8 @@ def main() -> None:
                        ("horizon-launch", launch()),
                        ("horizon-quick-menu-open", cue(True)),
                        ("horizon-quick-menu-close", cue(False)),
-                       ("horizon-screenshot", shutter())]:
+                       ("horizon-screenshot", shutter()),
+                       ("horizon-rewind-open", rewind())]:
         path = ROOT / f"ui/assets/{name}.wav"
         if args.check:
             if not path.is_file() or path.read_bytes() != data:

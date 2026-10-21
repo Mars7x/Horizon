@@ -19,14 +19,6 @@ component TickGlyph inherits Path {
     stroke-line-cap: round;
 }
 
-// Small filled play triangle (fonts may lack ▶).
-component PlayGlyph inherits Path {
-    viewbox-width: 10; viewbox-height: 12;
-    commands: "M 0 0 L 10 6 L 0 12 Z";
-    fill: white;
-    stroke-width: 0px;
-}
-
 // A capture in the grid. Same focus language as covers: Home's corner
 // brackets and a slight lift.
 component AlbumTile inherits Rectangle {
@@ -71,7 +63,7 @@ component AlbumTile inherits Rectangle {
         if root.tile.has-thumbnail : Image {
             width: parent.width; height: parent.height;
             source: root.tile.thumbnail;
-            image-rendering: !root.tile.is-video && root.tile.thumbnail.width * 1px < self.width ? ImageRendering.pixelated : ImageRendering.smooth;
+            image-rendering: root.tile.thumbnail.width * 1px < self.width ? ImageRendering.pixelated : ImageRendering.smooth;
             image-fit: shell.letterbox ? ImageFit.contain : ImageFit.cover;
             // Captures that can't be deleted step back while selecting.
             opacity: root.selecting && !root.tile.deletable ? 0.35 : 1.0;
@@ -88,33 +80,12 @@ component AlbumTile inherits Rectangle {
         }
         if root.tile.failed : Text {
             width: parent.width; height: parent.height;
-            text: root.tile.is-video ? "Can't play this video" : "Can't open this image";
+            text: "Can't open this image";
             color: Theme.secondary-foreground;
             font-size: Typography.caption-size;
             horizontal-alignment: center; vertical-alignment: center;
         }
-        // Videos: their length in a pill (a play mark until it is known).
-        if root.tile.is-video : Rectangle {
-            x: parent.width - self.width - 8px;
-            y: parent.height - self.height - 8px;
-            width: root.tile.duration != "" ? duration-text.preferred-width + 20px : 30px;
-            height: 24px;
-            border-radius: 12px;
-            background: #000000a8;
-            duration-text := Text {
-                width: parent.width; height: parent.height;
-                visible: root.tile.duration != "";
-                text: root.tile.duration;
-                color: white;
-                font-size: Typography.label-size;
-                font-weight: Typography.emphasis-weight;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-            if root.tile.duration == "" : PlayGlyph {
-                x: 11px; y: 7px; width: 8px; height: 10px;
-            }
-        }
+
     }
     FocusFrame {
         x: shell.x - Metrics.focus-offset;
@@ -138,14 +109,14 @@ component AlbumTile inherits Rectangle {
     }
 }
 
-// Album: every screenshot and clip, newest first, in a grid; A grows the
+// Album: every image, newest first, in a grid; A grows the
 // selected one to fill the window, where Left/Right slide between captures. Rust owns the
 // order, selection, camera row and which images are decoded; Slint lays out
 // the grid and reports its shape (`grid-columns`, `visible-rows`).
 export component AlbumPage inherits Rectangle {
     in property <[AlbumTileData]> tiles;
     in property <int> total-count: 0;
-    // A Game or Type change: the grid as it was, frozen, and a counter Rust
+    // A Game change: the grid as it was, frozen, and a counter Rust
     // bumps to run the shared grid refresh (components/grid-refresh.slint).
     in property <[AlbumTileData]> previous-tiles;
     in property <int> previous-scroll-row: 0;
@@ -156,7 +127,6 @@ export component AlbumPage inherits Rectangle {
     in property <int> collection-count: 0;
     in property <string> status: "";
     in property <string> game-text: "All games";
-    in property <string> kind-text: "All";
     in property <int> selected-index: 0;
     in property <int> scroll-row: 0;
     in property <int> visit-revision: 0;
@@ -169,7 +139,6 @@ export component AlbumPage inherits Rectangle {
     in property <string> viewer-text: "";
     in property <image> viewer-image;
     in property <bool> viewer-has-image: false;
-    in property <bool> viewer-previous-is-video;
     in property <image> viewer-previous-image;
     in property <bool> viewer-previous-has-image: false;
     // The open capture's grid thumbnail, for landing back in the grid.
@@ -178,56 +147,7 @@ export component AlbumPage inherits Rectangle {
     // Bumped by Rust for each step; `slide-direction` is +1 (next) or -1.
     in property <int> slide-key: 0;
     in property <int> slide-direction: 1;
-    in property <bool> viewer-is-video: false;
-    in property <bool> viewer-playing: false;
     in property <string> viewer-problem: "";
-    // Video clock: a steady clock at real-time speed, so the bar moves
-    // perfectly evenly. Frames (Rust, from the decoder's timestamps) correct
-    // it only when it drifts more than two frames from the picture, or on a
-    // still (start, pause, seek). It never runs more than one and a half
-    // frames past the frame on screen, so a stall (or the start-up while
-    // audio opens) holds the bar instead of running ahead.
-    in property <int> video-position-ms: 0;
-    in property <int> video-duration-ms: 0;
-    in property <int> video-anchor: 0;
-    // Playing and not at the end (Rust), and the last frame came from
-    // running playback rather than a paused still (`video-frame-live`).
-    in property <bool> video-clock-running: false;
-    in property <bool> video-frame-live: false;
-    // How long a frame lasts (from its timestamp): the tolerance unit.
-    in property <int> video-frame-ms: 33;
-    private property <float> base-ms: 0;
-    private property <duration> base-tick: 0ms;
-    private property <bool> base-live: false;
-    changed video-anchor => {
-        let now = animation-tick();
-        let predicted = root.base-ms + (now - root.base-tick) / 1ms;
-        if (!root.video-frame-live || !root.base-live
-                || Math.abs(predicted - root.video-position-ms) > 2 * root.video-frame-ms) {
-            root.base-ms = root.video-position-ms;
-            root.base-tick = now;
-        }
-        root.base-live = root.video-frame-live;
-    }
-    private property <bool> clock-running: root.viewing && root.video-clock-running
-        && root.video-frame-live && root.base-live;
-    private property <float> clock-ms: min(root.video-duration-ms, root.clock-running
-        ? min(root.base-ms + (animation-tick() - root.base-tick) / 1ms,
-              root.video-position-ms + 1.5 * root.video-frame-ms)
-        : root.video-position-ms);
-    private property <float> video-progress: root.video-duration-ms > 0
-        ? max(0.0, min(1.0, root.clock-ms / root.video-duration-ms)) : 0.0;
-    pure function clock-text(ms: float) -> string {
-        let total = Math.floor(ms / 1000);
-        let seconds = Math.mod(total, 60);
-        let minutes = Math.mod(Math.floor(total / 60), 60);
-        let hours = Math.floor(total / 3600);
-        let padded-seconds = (seconds < 10 ? "0" : "") + seconds;
-        return hours > 0
-            ? hours + ":" + (minutes < 10 ? "0" : "") + minutes + ":" + padded-seconds
-            : minutes + ":" + padded-seconds;
-    }
-
     in property <bool> selecting: false;
     in property <bool> can-delete: false;
     in property <bool> dialog-open: false;
@@ -239,11 +159,8 @@ export component AlbumPage inherits Rectangle {
 
     callback choose(int);
     callback cycle-game();
-    callback cycle-kind();
     callback scroll-rows(int);
     callback step(int);
-    callback toggle-play();
-    callback seek(float);
     callback close-viewer();
     // The grid's shape changed (window resize): Rust re-mounts its rows.
     callback layout-changed();
@@ -316,22 +233,17 @@ export component AlbumPage inherits Rectangle {
         width: parent.width;
         title: "Album";
         HorizontalLayout {
-            width: 190px + 130px + Metrics.spacing-sm;
+            width: 190px;
             x: parent.width - Metrics.page-margin - self.width + Metrics.spacing-sm + 2px;
             y: Metrics.page-accessory-y;
             height: Metrics.page-accessory-height;
             spacing: Metrics.spacing-sm;
+
             HeaderValue {
                 width: 190px; label: "Game"; value: root.game-text;
                 interactive: !root.viewing && root.collection-count > 0;
                 button: root.collection-count > 0 ? "LB" : "";
                 clicked => { root.cycle-game(); }
-            }
-            HeaderValue {
-                width: 130px; label: "Type"; value: root.kind-text;
-                interactive: !root.viewing && root.collection-count > 0;
-                button: root.collection-count > 0 ? "RB" : "";
-                clicked => { root.cycle-kind(); }
             }
         }
     }
@@ -461,8 +373,8 @@ export component AlbumPage inherits Rectangle {
         ? root.height * root.aspect : root.width;
     private property <length> fit-height: root.fit-width / root.aspect;
 
-    // Overlay (title, date, hints, timeline): shown on opening and on any
-    // input, fading after three seconds; kept while a video is paused.
+    // Overlay (title, date, hints): shown on opening and on any
+    // input, fading after three seconds.
     in property <int> overlay-revision: 0;
     private property <bool> overlay-awake: false;
     changed overlay-revision => { root.wake-overlay(); }
@@ -477,7 +389,7 @@ export component AlbumPage inherits Rectangle {
         triggered => { self.stop(); root.overlay-awake = false; }
     }
     out property <bool> overlay-shown: root.viewing && (root.overlay-awake
-        || (root.viewer-is-video && !root.viewer-playing) || root.viewer-problem != "");
+        || root.viewer-problem != "");
     private property <float> overlay-opacity: root.overlay-shown ? 1.0 : 0.0;
     animate overlay-opacity { duration: Motion.page-duration; easing: ease-in-out; }
 
@@ -497,7 +409,7 @@ export component AlbumPage inherits Rectangle {
             x: slide.phase >= 2 ? -parent.travel : 0px;
             animate x { duration: slide.phase == 2 ? Motion.page-duration : 0ms; easing: ease-out; }
             source: root.viewer-previous-image;
-            image-rendering: !root.viewer-previous-is-video && root.viewer-previous-image.width * 1px < self.width ? ImageRendering.pixelated : ImageRendering.smooth;
+            image-rendering: root.viewer-previous-image.width * 1px < self.width ? ImageRendering.pixelated : ImageRendering.smooth;
             image-fit: contain;
         }
         frame := Rectangle {
@@ -523,18 +435,17 @@ export component AlbumPage inherits Rectangle {
             clip: true;
             background: transparent;
             // The tile's own thumbnail underneath: closing crossfades onto
-            // it, so the frame lands on exactly what the tile shows (a video
-            // may have stopped far from its poster frame).
+            // it, so the frame lands on exactly what the tile shows.
             if root.viewer-landing-has-image : Image {
                 width: parent.width; height: parent.height;
                 source: root.viewer-landing-image;
-                image-rendering: !root.viewer-is-video && root.viewer-landing-image.width * 1px < self.width ? ImageRendering.pixelated : ImageRendering.smooth;
+                image-rendering: root.viewer-landing-image.width * 1px < self.width ? ImageRendering.pixelated : ImageRendering.smooth;
                 image-fit: cover;
             }
             if root.viewer-has-image : Image {
                 width: parent.width; height: parent.height;
                 source: root.viewer-image;
-                image-rendering: !root.viewer-is-video && root.viewer-image.width * 1px < self.width ? ImageRendering.pixelated : ImageRendering.smooth;
+                image-rendering: root.viewer-image.width * 1px < self.width ? ImageRendering.pixelated : ImageRendering.smooth;
                 image-fit: cover;
                 opacity: root.viewing || !root.viewer-landing-has-image ? 1.0 : root.reveal;
             }
@@ -562,8 +473,7 @@ export component AlbumPage inherits Rectangle {
                     root.step(dx < 0 ? 1 : -1);
                 }
             }
-            // Pointer: moving wakes the overlay; click the capture to play/pause
-            // a video, the edges to browse.
+            // Pointer movement wakes the overlay; the edges browse images.
             TouchArea {
                 width: parent.width; height: parent.height;
                 enabled: root.viewing;
@@ -572,7 +482,6 @@ export component AlbumPage inherits Rectangle {
                 }
                 clicked => {
                     root.wake-overlay();
-                    if (root.viewer-is-video) { root.toggle-play(); }
                 }
             }
             for side in [-1, 1] : edge := TouchArea {
@@ -600,19 +509,6 @@ export component AlbumPage inherits Rectangle {
             }
         }
 
-        if root.viewer-is-video && root.viewer-problem == "" : Rectangle {
-            // Paused: a play button over the frame. Only while viewing:
-            // closing stops the video, and the button must not appear in
-            // the closing fade.
-            width: 80px; height: 80px; border-radius: 40px;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            background: #00000099;
-            opacity: root.viewing && !root.viewer-playing ? 1.0 : 0.0;
-            animate opacity { duration: Motion.focus-duration; easing: ease-in-out; }
-            PlayGlyph { x: 31px; y: 27px; width: 24px; height: 26px; }
-        }
-
         // Top overlay: when, and where in the Album.
         Rectangle {
             x: 0px; y: 0px;
@@ -633,7 +529,7 @@ export component AlbumPage inherits Rectangle {
             }
         }
 
-        // Bottom overlay: video timeline and time. The hint bar (app.slint)
+        // Bottom overlay: the hint bar (app.slint)
         // draws over it, in its on-dark style.
         Rectangle {
             x: 0px; y: parent.height - self.height;
@@ -641,43 +537,7 @@ export component AlbumPage inherits Rectangle {
             opacity: root.overlay-opacity * root.reveal;
             visible: self.opacity > 0.0;
             background: @linear-gradient(180deg, #00000000 0%, #000000b3 100%);
-            if root.viewer-is-video && root.viewer-problem == "" : Rectangle {
-                x: Metrics.page-margin;
-                y: parent.height - Metrics.page-bottom-bar-height;
-                width: parent.width - Metrics.page-margin * 2;
-                height: 4px;
-                border-radius: 2px;
-                background: #ffffff40;
-                Rectangle {
-                    x: 0px; height: parent.height; border-radius: 2px;
-                    width: parent.width * root.video-progress;
-                    background: Theme.accent;
-                }
-                // Playhead.
-                Rectangle {
-                    width: 12px; height: 12px; border-radius: 6px;
-                    x: parent.width * root.video-progress - self.width / 2;
-                    y: (parent.height - self.height) / 2;
-                    background: white;
-                    drop-shadow-blur: 4px;
-                    drop-shadow-color: #00000080;
-                }
-                TouchArea {
-                    y: -10px; height: parent.height + 20px; width: parent.width;
-                    enabled: root.viewing;
-                    clicked => { root.wake-overlay(); root.seek(self.mouse-x / self.width); }
-                }
-            }
-            if root.viewer-is-video && root.video-duration-ms > 0 : Text {
-                x: Metrics.page-margin;
-                y: parent.height - Metrics.hint-row-center-from-bottom - self.height / 2;
-                height: 28px;
-                text: root.clock-text(root.clock-ms) + " / " + root.clock-text(root.video-duration-ms);
-                color: white;
-                font-size: Typography.body-size;
-                font-weight: Typography.emphasis-weight;
-                vertical-alignment: center;
-            }
+
         }
     }
 

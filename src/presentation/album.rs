@@ -1,7 +1,7 @@
 //! Album presentation: the capture grid and the full-screen viewer.
 //!
 //! Everything slow happens elsewhere: scans on a thread per visit, decoding
-//! on `MediaLoader` workers, video on its own decoder and presenter threads. Results come back
+//! on `MediaLoader` workers. Results come back
 //! through one worker channel that wakes the UI thread once per burst, so an idle
 //! Album costs nothing (no polling timer). Only rows near the camera are
 //! mounted, only their thumbnails are requested, and memory is bounded by
@@ -30,7 +30,7 @@ use crate::{
     AlbumTileData, AppRouteView, AppWindow, HintData,
     domain::{
         LibraryGame, SourceGameRef,
-        album::{Capture, CaptureOrigin, MediaKind},
+        album::{Capture, CaptureOrigin},
     },
     input::{UiAction, UiActionEvent},
     navigation::grid::{
@@ -41,8 +41,8 @@ use crate::{
         wake::drain_notify,
     },
     services::album::{
-        AnimationPlayback, HorizonAlbum, MediaLoader, MediaResult, ThumbnailCache, VideoBackend,
-        VideoFrame, VideoPlayback, VideoSink, play_animation, scan_all,
+        AnimationPlayback, HorizonAlbum, MediaLoader, MediaResult, ThumbnailCache, play_animation,
+        scan_all,
     },
     services::worker::{WorkerSender, spawn, worker_channel},
     sources::CaptureSource,
@@ -59,50 +59,12 @@ const THUMBNAIL_MEMORY: usize = 96;
 /// Decoded full-screen photos kept: the open one and its neighbours.
 const DISPLAY_MEMORY: usize = 4;
 const MEDIA_WORKERS: usize = 2;
-const SKIP: Duration = Duration::from_secs(10);
 /// Longer than the route transition, so the leaving page keeps its tiles.
 const RELEASE_AFTER_LEAVING: Duration = Duration::from_secs(1);
 
 enum AlbumEvent {
     Scanned(Vec<Capture>),
     Media(MediaResult),
-    VideoDuration(u64),
-    VideoEnded(u64),
-    VideoFailed(u64, String),
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-enum KindFilter {
-    #[default]
-    All,
-    Photos,
-    Videos,
-}
-
-impl KindFilter {
-    fn next(self) -> Self {
-        match self {
-            Self::All => Self::Photos,
-            Self::Photos => Self::Videos,
-            Self::Videos => Self::All,
-        }
-    }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::All => "All",
-            Self::Photos => "Screenshots",
-            Self::Videos => "Videos",
-        }
-    }
-
-    fn admits(self, kind: MediaKind) -> bool {
-        match self {
-            Self::All => true,
-            Self::Photos => kind == MediaKind::Photo,
-            Self::Videos => kind == MediaKind::Video,
-        }
-    }
 }
 
 /// One "Game" choice: the games that have captures, most recent first.
@@ -120,7 +82,6 @@ struct State {
     games: Vec<GameChoice>,
     /// 0 is "All games"; otherwise `games[game_index - 1]`.
     game_index: usize,
-    kind: KindFilter,
     /// Indices into `captures` that pass the filters, newest first.
     order: Vec<usize>,
     selection: usize,
@@ -138,12 +99,12 @@ struct State {
     notice: Option<String>,
     slide_key: i32,
     visit_revision: i32,
-    /// A Game/Type change waiting for its first publish: the grid refresh
+    /// A Game change waiting for its first publish: the grid refresh
     /// glides tiles that stay and fades the rest.
     glide: Option<Glide>,
 }
 
-/// The grid as it was before a Game or Type change.
+/// The grid as it was before a Game change.
 struct Glide {
     /// The mounted captures, in `previous_tiles` order.
     previous: Vec<PathBuf>,
@@ -168,7 +129,6 @@ impl State {
             .captures
             .iter()
             .enumerate()
-            .filter(|(_, capture)| self.kind.admits(capture.kind()))
             .filter(|(_, capture)| game.as_ref().is_none_or(|g| capture.game() == g.as_ref()))
             .map(|(index, _)| index)
             .collect();
@@ -240,18 +200,10 @@ impl<K: std::hash::Hash + Eq + Clone> ImageMemory<K> {
     }
 }
 
-struct ActiveVideo {
-    path: PathBuf,
-    playback: Box<dyn VideoPlayback>,
-    playing: bool,
-    ended: bool,
-}
-
 pub struct AlbumController {
     horizon: Option<HorizonAlbum>,
     sources: Vec<Arc<dyn CaptureSource>>,
     cache: ThumbnailCache,
-    video: Arc<dyn VideoBackend>,
     loader: MediaLoader,
     titles: RefCell<HashMap<SourceGameRef, String>>,
     /// The hints last published, so the bar only changes when they do.
@@ -259,25 +211,18 @@ pub struct AlbumController {
     sender: WorkerSender<AlbumEvent>,
     receiver: Receiver<AlbumEvent>,
     scan_running: Cell<bool>,
-    warmed_up: Cell<bool>,
     state: RefCell<State>,
     location_changed: crate::presentation::CallbackSlot<dyn Fn(crate::navigation::PageLocation)>,
     published_location: RefCell<crate::navigation::PageLocation>,
     tiles: Rc<VecModel<AlbumTileData>>,
-    /// The grid as it was before a Game or Type change, fading out.
+    /// The grid as it was before a Game change, fading out.
     previous_tiles: Rc<VecModel<AlbumTileData>>,
     thumbnails: RefCell<ImageMemory<PathBuf>>,
-    durations: RefCell<HashMap<PathBuf, Duration>>,
     failed: RefCell<HashSet<PathBuf>>,
     display: RefCell<ImageMemory<(PathBuf, (u32, u32))>>,
-    active_video: RefCell<Option<ActiveVideo>>,
     animation: RefCell<Option<AnimationPlayback>>,
-    /// Which video playback may deliver frames; older ones
-    /// are ignored.
-    video_generation: Arc<AtomicU64>,
-    /// Bumped by every seek: frames decoded before it never move the
-    /// timeline back.
-    seek_epoch: Arc<AtomicU64>,
+    /// Reject frames from a previously viewed animated image.
+    animation_generation: Arc<AtomicU64>,
     ui: slint::Weak<AppWindow>,
     this: std::rc::Weak<Self>,
 }
@@ -290,9 +235,8 @@ impl AlbumController {
         horizon_dir: Option<PathBuf>,
         sources: Vec<Arc<dyn CaptureSource>>,
         cache_dir: Option<PathBuf>,
-        video: Arc<dyn VideoBackend>,
     ) -> Rc<Self> {
-        // Scans, decoded media and video events all land in one channel,
+        // Scans and decoded images land in one channel,
         // drained on the UI thread once per burst.
         let (notify, drain) = drain_notify(Self::drain);
         let (sender, receiver) = worker_channel(notify);
@@ -301,7 +245,6 @@ impl AlbumController {
         let loader = MediaLoader::start(
             MEDIA_WORKERS,
             cache.clone(),
-            Arc::clone(&video),
             Arc::new(move |result| {
                 let _ = media_sender.send(AlbumEvent::Media(result));
             }),
@@ -325,27 +268,22 @@ impl AlbumController {
             horizon: horizon_dir.map(HorizonAlbum::new),
             sources,
             cache,
-            video,
             loader,
             titles: RefCell::new(titles),
             hints: RefCell::new(Vec::new()),
             sender,
             receiver,
             scan_running: Cell::new(false),
-            warmed_up: Cell::new(false),
             state: RefCell::new(State::default()),
             location_changed: RefCell::new(None),
             published_location: RefCell::new(crate::navigation::PageLocation::Root),
             tiles,
             previous_tiles,
             thumbnails: RefCell::new(ImageMemory::new(THUMBNAIL_MEMORY)),
-            durations: RefCell::new(HashMap::new()),
             failed: RefCell::new(HashSet::new()),
             display: RefCell::new(ImageMemory::new(DISPLAY_MEMORY)),
-            active_video: RefCell::new(None),
             animation: RefCell::new(None),
-            video_generation: Arc::new(AtomicU64::new(0)),
-            seek_epoch: Arc::new(AtomicU64::new(0)),
+            animation_generation: Arc::new(AtomicU64::new(0)),
             ui: ui.as_weak(),
             this: this.clone(),
         });
@@ -355,7 +293,7 @@ impl AlbumController {
     }
 
     /// Every Album visit is fresh: the newest capture, scrolled to the top.
-    /// The Game and Type filters are view choices and are kept. The folder
+    /// The Game filter is a view choice and is kept. The folder
     /// is rescanned so new captures appear.
     /// Name captures of games a library reload found. Names of games that
     /// left the library stay: their captures are still theirs.
@@ -372,10 +310,7 @@ impl AlbumController {
     }
 
     pub fn start_new_visit(&self, ui: &AppWindow) {
-        if !self.warmed_up.replace(true) {
-            self.video.warm_up();
-        }
-        self.stop_video(ui);
+        self.stop_animation();
         {
             let mut s = self.state.borrow_mut();
             s.selection = 0;
@@ -389,8 +324,8 @@ impl AlbumController {
     }
 
     /// The route is leaving: nothing keeps playing or decoding behind it.
-    pub fn on_leave(&self, ui: &AppWindow) {
-        self.stop_video(ui);
+    pub fn on_leave(&self, _ui: &AppWindow) {
+        self.stop_animation();
         self.loader.want(Vec::new(), Vec::new());
         self.display.borrow_mut().clear();
         // Once the page has zoomed away, give back the decoded thumbnails.
@@ -416,12 +351,9 @@ impl AlbumController {
     }
 
     /// Horizon lost the foreground (a game started): pause, never play on.
-    pub fn handle_application_active_changed(&self, ui: &AppWindow, active: bool) {
+    pub fn handle_application_active_changed(&self, _ui: &AppWindow, active: bool) {
         if let Some(animation) = self.animation.borrow().as_ref() {
             animation.set_playing(active);
-        }
-        if !active {
-            self.set_playing(ui, false);
         }
     }
 
@@ -456,9 +388,6 @@ impl AlbumController {
                 }
                 AlbumEvent::Media(MediaResult::Thumbnail { path, result }) => match result {
                     Ok(thumbnail) => {
-                        if let Some(duration) = thumbnail.duration {
-                            self.durations.borrow_mut().insert(path.clone(), duration);
-                        }
                         let image = rgba_image(thumbnail.image);
                         self.thumbnails.borrow_mut().insert(path.clone(), image);
                         thumbnails.push(path);
@@ -500,27 +429,6 @@ impl AlbumController {
                         }
                     }
                 },
-                AlbumEvent::VideoEnded(generation) => {
-                    if self.video_generation.load(Ordering::SeqCst) == generation
-                        && let Some(video) = self.active_video.borrow_mut().as_mut()
-                    {
-                        video.playing = false;
-                        video.ended = true;
-                    }
-                    self.publish_video(&ui);
-                }
-                AlbumEvent::VideoDuration(generation) => {
-                    if self.video_generation.load(Ordering::SeqCst) == generation {
-                        self.publish_video(&ui);
-                    }
-                }
-                AlbumEvent::VideoFailed(generation, error) => {
-                    if self.video_generation.load(Ordering::SeqCst) == generation {
-                        warn!(%error, "Album video playback failed");
-                        self.stop_video(&ui);
-                        ui.set_album_viewer_problem("Can't play this video".into());
-                    }
-                }
             }
         }
         if republish {
@@ -529,7 +437,7 @@ impl AlbumController {
         if !thumbnails.is_empty() {
             self.refresh_tiles(&thumbnails);
             // The open capture's thumbnail fills an empty viewer; it never
-            // replaces a sharper photo or a video frame already on screen.
+            // replaces a sharper photo or an animation frame already on screen.
             let s = self.state.borrow();
             if s.viewing
                 && let Some(current) = s.current()
@@ -596,7 +504,6 @@ impl AlbumController {
             UiAction::Up => self.move_vertically(ui, false),
             UiAction::Down => self.move_vertically(ui, true),
             UiAction::LeftBumper if !event.repeated && !selecting => self.cycle_game(ui),
-            UiAction::RightBumper if !event.repeated && !selecting => self.cycle_kind(ui),
             UiAction::Accept if !event.repeated && selecting => return self.toggle_checked(ui),
             UiAction::Accept if !event.repeated => {
                 return feedback(self.open_viewer(ui));
@@ -705,27 +612,12 @@ impl AlbumController {
         if targets.is_empty() {
             return AlbumFeedback::None;
         }
-        let (title, text) = {
-            let s = self.state.borrow();
-            let kind = |path: &PathBuf| {
-                s.captures
-                    .iter()
-                    .find(|c| c.path() == path)
-                    .map(Capture::kind)
-            };
-            match targets.as_slice() {
-                [one] => (
-                    match kind(one) {
-                        Some(MediaKind::Video) => "Delete this video?",
-                        _ => "Delete this screenshot?",
-                    }
-                    .to_owned(),
-                    String::new(),
-                ),
-                many => (format!("Delete {} captures?", many.len()), String::new()),
-            }
+        let title = if targets.len() == 1 {
+            "Delete this screenshot?".to_owned()
+        } else {
+            format!("Delete {} screenshots?", targets.len())
         };
-        self.set_playing(ui, false);
+        let text = String::new();
         ui.set_album_dialog_title(title.into());
         ui.set_album_dialog_text(text.into());
         ui.set_album_dialog_focus(0);
@@ -767,7 +659,7 @@ impl AlbumController {
     fn delete(&self, ui: &AppWindow, targets: &[PathBuf]) {
         let viewing = self.state.borrow().viewing;
         if viewing {
-            self.stop_video(ui);
+            self.stop_animation();
         }
         let mut deleted = HashSet::new();
         let mut failures = 0;
@@ -836,7 +728,6 @@ impl AlbumController {
             });
         }
         for path in &deleted {
-            self.durations.borrow_mut().remove(path);
             self.failed.borrow_mut().remove(path);
         }
         if viewing && self.state.borrow().viewing {
@@ -962,25 +853,6 @@ impl AlbumController {
         self.publish(ui);
     }
 
-    pub fn cycle_kind(&self, ui: &AppWindow) {
-        {
-            let s = self.state.borrow();
-            if s.viewing || s.captures.is_empty() {
-                return;
-            }
-        }
-        self.freeze_grid(ui);
-        {
-            let mut s = self.state.borrow_mut();
-            s.kind = s.kind.next();
-            s.selection = 0;
-            s.scroll_top = 0;
-            s.wheel_scrolled = false;
-            s.rebuild_order();
-        }
-        self.publish(ui);
-    }
-
     pub fn on_layout_changed(&self, ui: &AppWindow) {
         self.publish(ui);
     }
@@ -993,9 +865,6 @@ impl AlbumController {
         match event.action {
             UiAction::Left => self.step(ui, -1),
             UiAction::Right => self.step(ui, 1),
-            UiAction::Accept if !event.repeated => self.toggle_play(ui),
-            UiAction::LeftBumper if !event.repeated => self.skip(ui, false),
-            UiAction::RightBumper if !event.repeated => self.skip(ui, true),
             UiAction::Secondary if !event.repeated => {
                 let target = self
                     .state
@@ -1040,7 +909,7 @@ impl AlbumController {
             s.viewing = false;
             s.wheel_scrolled = false;
         }
-        self.stop_video(ui);
+        self.stop_animation();
         self.display.borrow_mut().clear();
         self.publish(ui);
         true
@@ -1061,11 +930,10 @@ impl AlbumController {
             s.selection = target;
             s.slide_key = s.slide_key.wrapping_add(1);
         }
-        // What is on screen slides out: for a video, its current frame.
+        // The currently displayed image slides out.
         let leaving = ui.get_album_viewer_has_image();
         ui.set_album_viewer_previous_has_image(leaving);
         if leaving {
-            ui.set_album_viewer_previous_is_video(ui.get_album_viewer_is_video());
             ui.set_album_viewer_previous_image(ui.get_album_viewer_image());
         }
         ui.set_album_slide_direction(delta.signum());
@@ -1075,9 +943,9 @@ impl AlbumController {
     }
 
     /// Show the current capture: the sharpest image already decoded, then
-    /// ask for better; start its video.
+    /// ask for better and start any image animation.
     fn present_current(&self, ui: &AppWindow) {
-        self.stop_video(ui);
+        self.stop_animation();
         ui.set_album_viewer_problem("".into());
         let Some(capture) = self.state.borrow().current().cloned() else {
             return;
@@ -1092,25 +960,17 @@ impl AlbumController {
             .or(thumbnail);
         self.show(ui, image);
         if self.failed.borrow().contains(&path) {
-            ui.set_album_viewer_problem(
-                match capture.kind() {
-                    MediaKind::Photo => "Can't open this image",
-                    MediaKind::Video => "Can't play this video",
-                }
-                .into(),
-            );
+            ui.set_album_viewer_problem("Can't open this image".into());
             return;
         }
-        if capture.kind() == MediaKind::Video {
-            self.start_video(ui, &capture);
-        } else if !ui.global::<crate::Motion>().get_reduced_motion() {
+        if !ui.global::<crate::Motion>().get_reduced_motion() {
             self.start_animation(ui, &path);
         }
     }
 
     fn start_animation(&self, ui: &AppWindow, path: &std::path::Path) {
-        let generation = self.video_generation.load(Ordering::SeqCst);
-        let current = Arc::clone(&self.video_generation);
+        let generation = self.animation_generation.load(Ordering::SeqCst);
+        let current = Arc::clone(&self.animation_generation);
         let pending = Arc::new(AtomicBool::new(false));
         let weak = self.ui.clone();
         match play_animation(
@@ -1170,134 +1030,9 @@ impl AlbumController {
         }
     }
 
-    fn start_video(&self, ui: &AppWindow, capture: &Capture) {
-        let generation = self.video_generation.fetch_add(1, Ordering::SeqCst) + 1;
-        let sink = Arc::new(UiVideoSink {
-            generation,
-            current: Arc::clone(&self.video_generation),
-            pending: Arc::new(AtomicBool::new(false)),
-            seek_epoch: Arc::clone(&self.seek_epoch),
-            ui: self.ui.clone(),
-            sender: self.sender.clone(),
-        });
-        // The timeline starts still at 0 and runs once live frames arrive.
-        set_clock(ui, Duration::ZERO, false);
-        match self.video.play(capture.path(), display_size(ui), sink) {
-            Ok(playback) => {
-                playback.set_playing(true);
-                *self.active_video.borrow_mut() = Some(ActiveVideo {
-                    path: capture.path().to_owned(),
-                    playback,
-                    playing: true,
-                    ended: false,
-                });
-            }
-            Err(error) => {
-                warn!(%error, "Album video could not start");
-                ui.set_album_viewer_problem("Can't play this video".into());
-            }
-        }
-        self.publish_video(ui);
-    }
-
-    fn stop_video(&self, ui: &AppWindow) {
-        self.video_generation.fetch_add(1, Ordering::SeqCst);
-        // Dropping the playback stops it and frees the decoder.
-        *self.active_video.borrow_mut() = None;
+    fn stop_animation(&self) {
+        self.animation_generation.fetch_add(1, Ordering::SeqCst);
         *self.animation.borrow_mut() = None;
-        self.publish_video(ui);
-    }
-
-    fn set_playing(&self, ui: &AppWindow, playing: bool) {
-        if let Some(video) = self.active_video.borrow_mut().as_mut()
-            && video.playing != playing
-        {
-            if playing && video.ended {
-                self.seek_epoch.fetch_add(1, Ordering::SeqCst);
-                video.playback.seek(Duration::ZERO);
-                video.ended = false;
-                set_clock(ui, Duration::ZERO, false);
-            }
-            video.playback.set_playing(playing);
-            video.playing = playing;
-        }
-        self.publish_video(ui);
-    }
-
-    pub fn toggle_play(&self, ui: &AppWindow) {
-        let playing = self
-            .active_video
-            .borrow()
-            .as_ref()
-            .map(|video| video.playing);
-        if let Some(playing) = playing {
-            self.set_playing(ui, !playing);
-        }
-    }
-
-    fn skip(&self, ui: &AppWindow, forward: bool) {
-        if let Some(video) = self.active_video.borrow_mut().as_mut() {
-            let position = video.playback.position().unwrap_or_default();
-            let target = if forward {
-                position + SKIP
-            } else {
-                position.saturating_sub(SKIP)
-            };
-            let target = video
-                .playback
-                .duration()
-                .map_or(target, |duration| target.min(duration));
-            self.seek_epoch.fetch_add(1, Ordering::SeqCst);
-            video.playback.seek(target);
-            video.ended = false;
-            set_clock(ui, target, false);
-        }
-        self.publish_video(ui);
-    }
-
-    /// Pointer seek on the timeline, 0..1.
-    pub fn seek_fraction(&self, ui: &AppWindow, fraction: f32) {
-        if let Some(video) = self.active_video.borrow_mut().as_mut()
-            && let Some(duration) = video.playback.duration()
-        {
-            let target = duration.mul_f32(fraction.clamp(0.0, 1.0));
-            self.seek_epoch.fetch_add(1, Ordering::SeqCst);
-            video.playback.seek(target);
-            video.ended = false;
-            set_clock(ui, target, false);
-        }
-        self.publish_video(ui);
-    }
-
-    /// Play state and length. The position itself comes with each frame
-    /// (`UiVideoSink`), so the timeline shows exactly the frame on screen;
-    /// nothing polls the pipeline.
-    fn publish_video(&self, ui: &AppWindow) {
-        self.publish_video_state(ui);
-        self.publish_hints(ui);
-    }
-
-    fn publish_video_state(&self, ui: &AppWindow) {
-        let video = self.active_video.borrow();
-        let Some(video) = video.as_ref() else {
-            // The timeline keeps its place while the viewer fades out; the
-            // next video resets it when it starts.
-            ui.set_album_viewer_playing(false);
-            ui.set_album_video_clock_running(false);
-            return;
-        };
-        let duration = video
-            .playback
-            .duration()
-            .or_else(|| self.durations.borrow().get(&video.path).copied());
-        ui.set_album_viewer_playing(video.playing);
-        ui.set_album_video_clock_running(video.playing && !video.ended);
-        ui.set_album_video_duration_ms(millis(duration.unwrap_or_default()));
-        if video.ended
-            && let Some(duration) = duration
-        {
-            set_clock(ui, duration, false);
-        }
     }
 
     // ----- publishing -------------------------------------------------
@@ -1337,14 +1072,6 @@ impl AlbumController {
                         hints.push(("X", "Delete".to_owned()));
                     }
                     hints.push(("B", "Back".to_owned()));
-                    if capture.kind() == MediaKind::Video {
-                        let playing = self
-                            .active_video
-                            .borrow()
-                            .as_ref()
-                            .is_some_and(|video| video.playing);
-                        hints.push(("A", if playing { "Pause" } else { "Play" }.to_owned()));
-                    }
                 } else {
                     hints.push(("B", "Back".to_owned()));
                 }
@@ -1458,16 +1185,8 @@ impl AlbumController {
             .map_or_else(|| "All games".to_owned(), |choice| choice.title.clone());
         ui.set_album_total_count(count as i32);
         ui.set_album_collection_count(s.captures.len() as i32);
-        ui.set_album_status(
-            if s.scanned {
-                "No screenshots or videos yet"
-            } else {
-                ""
-            }
-            .into(),
-        );
+        ui.set_album_status(if s.scanned { "No screenshots yet" } else { "" }.into());
         ui.set_album_game_text(game_text.into());
-        ui.set_album_kind_text(s.kind.label().into());
         ui.set_album_scroll_row(s.scroll_top as i32);
         ui.set_album_selected_index(s.selection as i32);
         ui.set_album_selected_text(selected_text.into());
@@ -1479,7 +1198,6 @@ impl AlbumController {
                 .clone()
                 .unwrap_or_else(|| when_text(capture.captured_at()));
             ui.set_album_viewer_text(text.into());
-            ui.set_album_viewer_is_video(capture.kind() == MediaKind::Video);
         }
         ui.set_album_slide_key(s.slide_key);
         ui.set_album_viewing(s.viewing);
@@ -1495,18 +1213,10 @@ impl AlbumController {
             has_thumbnail: thumbnail.is_some(),
             thumbnail: thumbnail.unwrap_or_default(),
             failed: self.failed.borrow().contains(&path),
-            is_video: capture.kind() == MediaKind::Video,
             deletable: capture.deletable(),
             checked,
             from_index: -1,
             stays: false,
-            duration: self
-                .durations
-                .borrow()
-                .get(&path)
-                .map(|duration| clock_text(*duration))
-                .unwrap_or_default()
-                .into(),
         }
     }
 
@@ -1556,11 +1266,10 @@ impl AlbumController {
                 if wanted_thumbnail(capture) {
                     thumbnails.push(capture.clone());
                 }
-                if capture.kind() == MediaKind::Photo
-                    && !self
-                        .display
-                        .borrow()
-                        .contains(&(capture.path().to_owned(), size))
+                if !self
+                    .display
+                    .borrow()
+                    .contains(&(capture.path().to_owned(), size))
                 {
                     display.push((capture.clone(), size));
                 }
@@ -1621,18 +1330,6 @@ fn game_choices(captures: &[Capture], titles: &HashMap<SourceGameRef, String>) -
         .collect()
 }
 
-fn millis(duration: Duration) -> i32 {
-    i32::try_from(duration.as_millis()).unwrap_or(i32::MAX)
-}
-
-/// Anchor the timeline at `position`. `live`: it runs on from here until
-/// the next frame (playing); otherwise it holds.
-fn set_clock(ui: &AppWindow, position: Duration, live: bool) {
-    ui.set_album_video_position_ms(millis(position));
-    ui.set_album_video_frame_live(live);
-    ui.set_album_video_anchor(ui.get_album_video_anchor().wrapping_add(1));
-}
-
 fn feedback(ok: bool) -> AlbumFeedback {
     if ok {
         AlbumFeedback::Ok
@@ -1684,120 +1381,13 @@ fn when_text(millis: i64) -> String {
         .unwrap_or_default()
 }
 
-fn clock_text(duration: Duration) -> String {
-    let seconds = duration.as_secs();
-    if seconds >= 3600 {
-        format!(
-            "{}:{:02}:{:02}",
-            seconds / 3600,
-            seconds / 60 % 60,
-            seconds % 60
-        )
-    } else {
-        format!("{}:{:02}", seconds / 60, seconds % 60)
-    }
-}
-
-/// One copy out of the decoder's buffer into Slint's: a single memcpy when
-/// rows are tightly packed (the usual case), never a zero-filled buffer
-/// first.
-fn copy_frame(frame: &VideoFrame<'_>) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
-    let row = frame.width as usize * 4;
-    let height = frame.height as usize;
-    if frame.stride == row {
-        let bytes = frame.data.get(..row * height)?;
-        return Some(SharedPixelBuffer::clone_from_slice(
-            bytes,
-            frame.width,
-            frame.height,
-        ));
-    }
-    if frame.stride < row || frame.data.len() < frame.stride * height.saturating_sub(1) + row {
-        return None;
-    }
-    let mut buffer = SharedPixelBuffer::<Rgba8Pixel>::new(frame.width, frame.height);
-    for (out, line) in buffer
-        .make_mut_bytes()
-        .chunks_exact_mut(row)
-        .zip(frame.data.chunks(frame.stride))
-    {
-        out.copy_from_slice(line.get(..row)?);
-    }
-    Some(buffer)
-}
-
-/// Hands decoded frames to the UI thread, at most one in flight: while a
-/// frame waits to be shown, newer ones are dropped before being copied.
-struct UiVideoSink {
-    generation: u64,
-    current: Arc<AtomicU64>,
-    pending: Arc<AtomicBool>,
-    seek_epoch: Arc<AtomicU64>,
-    ui: slint::Weak<AppWindow>,
-    sender: WorkerSender<AlbumEvent>,
-}
-
-impl UiVideoSink {
-    fn live(&self) -> bool {
-        self.current.load(Ordering::SeqCst) == self.generation
-    }
-}
-
-impl VideoSink for UiVideoSink {
-    fn wants_frame(&self) -> bool {
-        self.live() && !self.pending.load(Ordering::SeqCst)
-    }
-
-    fn frame(&self, frame: VideoFrame<'_>) {
-        let epoch = self.seek_epoch.load(Ordering::SeqCst);
-        let Some(buffer) = copy_frame(&frame) else {
-            return;
-        };
-        self.pending.store(true, Ordering::SeqCst);
-        let pending = Arc::clone(&self.pending);
-        let current = Arc::clone(&self.current);
-        let seek_epoch = Arc::clone(&self.seek_epoch);
-        let generation = self.generation;
-        let (position, live) = (frame.position, frame.live);
-        let frame_ms = frame.frame_duration.map(millis);
-        let _ = self.ui.upgrade_in_event_loop(move |ui| {
-            pending.store(false, Ordering::SeqCst);
-            if current.load(Ordering::SeqCst) != generation {
-                return;
-            }
-            ui.set_album_viewer_image(Image::from_rgba8(buffer));
-            ui.set_album_viewer_has_image(true);
-            // A frame decoded before a seek must not move the timeline back.
-            if let Some(frame_ms) = frame_ms.filter(|ms| *ms > 0) {
-                ui.set_album_video_frame_ms(frame_ms);
-            }
-            if let Some(position) = position
-                && seek_epoch.load(Ordering::SeqCst) == epoch
-            {
-                set_clock(&ui, position, live);
-            }
-        });
-    }
-
-    fn ended(&self) {
-        let _ = self.sender.send(AlbumEvent::VideoEnded(self.generation));
-    }
-
-    fn duration(&self, _duration: Duration) {
-        let _ = self.sender.send(AlbumEvent::VideoDuration(self.generation));
-    }
-
-    fn failed(&self, message: String) {
-        let _ = self
-            .sender
-            .send(AlbumEvent::VideoFailed(self.generation, message));
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{ExternalGameId, SourceId, album::CaptureOrigin};
+    use crate::domain::{
+        ExternalGameId, SourceId,
+        album::{CaptureOrigin, MediaKind},
+    };
 
     fn game(id: &str) -> SourceGameRef {
         SourceGameRef::new(
@@ -1822,7 +1412,7 @@ mod tests {
         let captures = vec![
             capture("a", MediaKind::Photo, Some("20"), 5),
             capture("b", MediaKind::Photo, Some("10"), 4),
-            capture("c", MediaKind::Video, None, 3),
+            capture("c", MediaKind::Photo, None, 3),
             capture("d", MediaKind::Photo, Some("20"), 2),
         ];
         let choices = game_choices(&captures, &titles);
@@ -1831,11 +1421,11 @@ mod tests {
     }
 
     #[test]
-    fn filters_combine_and_keep_newest_first_order() {
+    fn game_filter_keeps_newest_first_order() {
         let mut state = State {
             captures: vec![
                 capture("a", MediaKind::Photo, Some("20"), 5),
-                capture("b", MediaKind::Video, Some("20"), 4),
+                capture("b", MediaKind::Photo, Some("20"), 4),
                 capture("c", MediaKind::Photo, Some("10"), 3),
             ],
             ..State::default()
@@ -1846,13 +1436,9 @@ mod tests {
         state.game_index = 1; // Steam app 20
         state.rebuild_order();
         assert_eq!(state.order, [0, 1]);
-        state.kind = KindFilter::Videos;
+        state.game_index = 2;
         state.rebuild_order();
-        assert_eq!(state.order, [1]);
-        state.game_index = 2; // Steam app 10 has no videos
-        state.rebuild_order();
-        assert!(state.order.is_empty());
-        assert_eq!(state.selection, 0);
+        assert_eq!(state.order, [2]);
     }
 
     #[test]
@@ -1865,13 +1451,6 @@ mod tests {
         assert!(memory.contains(&"a"));
         assert!(!memory.contains(&"b"));
         assert!(memory.contains(&"c"));
-    }
-
-    #[test]
-    fn clock_text_reads_like_a_player() {
-        assert_eq!(clock_text(Duration::from_secs(42)), "0:42");
-        assert_eq!(clock_text(Duration::from_secs(605)), "10:05");
-        assert_eq!(clock_text(Duration::from_secs(3725)), "1:02:05");
     }
 }
 
@@ -1905,14 +1484,7 @@ mod runtime_tests {
         let reduced = std::env::var_os("HORIZON_JXL_TEST_REDUCED").is_some();
         ui.global::<crate::Motion>().set_reduced_motion(reduced);
         ui.set_current_route(AppRouteView::Album);
-        let album = AlbumController::new(
-            &ui,
-            &[],
-            Some(root),
-            Vec::new(),
-            None,
-            Arc::new(crate::services::album::media::NoVideo("test".into())),
-        );
+        let album = AlbumController::new(&ui, &[], Some(root), Vec::new(), None);
         ui.window().set_size(slint::PhysicalSize::new(1280, 720));
         ui.show().unwrap();
         album.start_new_visit(&ui);
@@ -2031,14 +1603,8 @@ mod runtime_tests {
         let ui = AppWindow::new().unwrap();
         ui.global::<crate::Motion>().set_reduced_motion(true);
         ui.set_current_route(AppRouteView::Album);
-        let album = AlbumController::new(
-            &ui,
-            &[],
-            Some(root),
-            Vec::new(),
-            Some(output.join("cache")),
-            Arc::new(crate::services::album::media::NoVideo("Photos only".into())),
-        );
+        let album =
+            AlbumController::new(&ui, &[], Some(root), Vec::new(), Some(output.join("cache")));
         let weak_album = Rc::downgrade(&album);
         let weak_ui = ui.as_weak();
         ui.on_album_layout_changed(move || {

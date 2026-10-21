@@ -7,8 +7,7 @@ Flatpak runtime: `26.08`
 [Cargo.toml](../Cargo.toml) and the
 [Flatpak manifest](../flatpak/io.github.Mars7x.Horizon.yml) are authoritative.
 Use GNOME Builder with that manifest for the normal iterative build. Native
-builds also need SDL3, a C compiler, pkg-config, FFmpeg development libraries
-(libavformat, libavcodec, libavutil, libswscale, libswresample) and PipeWire
+builds also need SDL3, a C compiler, pkg-config, PipeWire
 (libpipewire-0.3) and libjxl (JPEG XL encoding). Slint uses Winit/Skia, not Qt.
 
 ## Checks

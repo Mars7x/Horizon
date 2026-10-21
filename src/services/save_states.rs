@@ -17,9 +17,9 @@ pub const MANUAL_SLOTS: u8 = 4;
 /// Boy game with its border.
 const PREVIEW_SIZES: [(u32, u32); 4] = [(240, 160), (160, 144), (256, 224), (256, 384)];
 
-/// An upscaled frame (DS drawn at 2× to 6×) averaged down to its native
+/// An upscaled frame (DS drawn at 2× to 8×) averaged down to its native
 /// preview size; None when it already is one, or isn't a whole multiple.
-fn preview_size(frame: &Frame) -> Option<Frame> {
+pub(crate) fn preview_size(frame: &Frame) -> Option<Frame> {
     if PREVIEW_SIZES.contains(&(frame.width, frame.height)) {
         return None;
     }

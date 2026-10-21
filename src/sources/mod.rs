@@ -387,7 +387,7 @@ pub trait GameSource: Send + Sync {
     }
 }
 
-/// A screenshot or clip a source made and keeps in its own files.
+/// An image capture a source made and keeps in its own files.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceCapture {
     pub path: PathBuf,

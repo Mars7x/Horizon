@@ -47,8 +47,8 @@ remain on the appropriate main thread; SDL event-pump ownership stays explicit.
   [the shared API boundary](../src/services/steam_account.rs).
 - [SteamGridDB](../src/services/steamgriddb.rs) supplies optional square artwork
   with its own credentials, cache and background workers.
-- Album reads Horizon's own folder. FFmpeg decoding and PipeWire sound use
-  [C shims](../csrc/) behind Rust media interfaces.
+- Album reads Horizon's own images and uses bounded image workers. PipeWire game
+  audio and UI sounds use a [C shim](../csrc/) behind Rust audio interfaces.
 - Normal desktop file choice and browser links use XDG portals. There is no
   shell execution, host launcher adapter or session helper.
 
@@ -75,9 +75,17 @@ rollback on rejected loads. Rust owns slot selection, overwrite confirmation and
 automatic resume policy; Slint receives only row projections and decoded frames.
 See [Storage](STORAGE.md) for the fresh layout and state bundles.
 
+[Rewind history](../src/domain/rewind.rs) is a bounded in-memory sequence of
+state/picture pairs on the same player worker. It samples emulated play and
+evicts by time and byte budget. The worker composes DS previews before delivery;
+Rust presentation owns selection and commits, while the
+[filmstrip](../ui/components/rewind-timeline.slint) only renders intent. Scrubbing
+never restores a core or touches storage. Committing uses the existing restore
+and rollback boundary; see [ADR 0221](adr/0221-visual-rewind.md).
+
 JPEG XL is the stored raster format for screenshots, state previews, profiles and
 normalized artwork/Album caches. The original libjxl shim encodes lossless sRGB
 RGBA frames on workers; shared image services import source formats and decode
-bounded JXL animations through jxl-oxide's frame API. Videos and authored SVGs
-keep their existing boundaries. Versioned state/profile readers preserve older
+bounded JXL animations through jxl-oxide's frame API. Authored SVGs retain
+their existing boundaries. Versioned state/profile readers preserve older
 durable files; only disposable cache versions are invalidated.

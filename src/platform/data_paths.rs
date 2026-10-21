@@ -157,8 +157,8 @@ pub fn save_temporary_path(save: &Path) -> PathBuf {
     name.push(".part");
     PathBuf::from(name)
 }
-pub fn capture_directory(directory: &Path, video: bool) -> PathBuf {
-    directory.join(if video { "recordings" } else { "screenshots" })
+pub fn capture_directory(directory: &Path) -> PathBuf {
+    directory.join("screenshots")
 }
 pub fn unassigned_album_directory(root: &Path) -> PathBuf {
     root.join("horizon")
@@ -317,7 +317,7 @@ pub fn custom_artwork_directory() -> Result<PathBuf, DataPathError> {
     Ok(app_dir(BaseDir::Data)?.join("artwork/custom"))
 }
 
-/// Album thumbnails and video durations.
+/// Album image thumbnails.
 pub fn album_cache_dir(version: &str) -> Option<PathBuf> {
     cache_dir("album", version)
 }

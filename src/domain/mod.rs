@@ -21,3 +21,4 @@ pub mod settings;
 pub mod core_settings;
 
 pub mod controller;
+pub mod rewind;

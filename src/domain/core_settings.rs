@@ -36,7 +36,7 @@ pub struct DsPreferences {
 #[serde(try_from = "u8", into = "u8")]
 pub struct DsResolution(u8);
 impl DsResolution {
-    pub const MAX: u8 = 6;
+    pub const MAX: u8 = 8;
     pub const fn scale(self) -> u8 {
         self.0
     }
@@ -68,7 +68,7 @@ impl TryFrom<u8> for DsResolution {
         if (1..=Self::MAX).contains(&value) {
             Ok(Self(value))
         } else {
-            Err("DS resolution must be 1 to 6")
+            Err("DS resolution must be 1 to 8")
         }
     }
 }
@@ -305,21 +305,19 @@ pub enum PlaybackSpeed {
     #[default]
     Normal = 1,
     Double = 2,
-    Triple = 3,
-    Quadruple = 4,
 }
 impl PlaybackSpeed {
-    pub const ALL: [Self; 4] = [Self::Normal, Self::Double, Self::Triple, Self::Quadruple];
+    pub const ALL: [Self; 2] = [Self::Normal, Self::Double];
     pub fn factor(self) -> u8 {
         self as u8
     }
     pub fn step(self, forward: bool) -> Self {
         Self::ALL[(self.factor() as usize - 1)
             .saturating_add_signed(if forward { 1 } else { -1 })
-            .min(3)]
+            .min(Self::ALL.len() - 1)]
     }
     pub fn cycle(self) -> Self {
-        Self::ALL[self.factor() as usize % 4]
+        Self::ALL[self.factor() as usize % Self::ALL.len()]
     }
 }
 impl TryFrom<u8> for PlaybackSpeed {
@@ -328,8 +326,6 @@ impl TryFrom<u8> for PlaybackSpeed {
         match value {
             1 => Ok(Self::Normal),
             2 => Ok(Self::Double),
-            3 => Ok(Self::Triple),
-            4 => Ok(Self::Quadruple),
             _ => Err("Unsupported playback speed"),
         }
     }
@@ -341,16 +337,15 @@ mod speed_tests {
     #[test]
     fn speed_boundaries_and_cycle() {
         assert_eq!(PlaybackSpeed::Normal.step(false), PlaybackSpeed::Normal);
-        assert_eq!(
-            PlaybackSpeed::Quadruple.step(true),
-            PlaybackSpeed::Quadruple
-        );
+        assert_eq!(PlaybackSpeed::Double.step(true), PlaybackSpeed::Double);
         let mut speed = PlaybackSpeed::Normal;
-        for expected in [2, 3, 4, 1] {
+        for expected in [2, 1, 2, 1] {
             speed = speed.cycle();
             assert_eq!(speed.factor(), expected);
         }
         assert!(PlaybackSpeed::try_from(0).is_err());
+        assert!(PlaybackSpeed::try_from(3).is_err());
+        assert!(PlaybackSpeed::try_from(4).is_err());
         assert!(PlaybackSpeed::try_from(5).is_err());
     }
 }
@@ -358,6 +353,23 @@ mod speed_tests {
 #[cfg(test)]
 mod ds_layout_tests {
     use super::*;
+
+    #[test]
+    fn ds_resolution_supports_native_through_eight_and_retains_saved_values() {
+        for scale in 1..=8 {
+            let value = DsResolution::try_from(scale).unwrap();
+            assert_eq!(value.scale(), scale);
+            assert_eq!(value.step(true).step(false), value);
+            assert_eq!(
+                serde_json::from_str::<DsResolution>(&scale.to_string()).unwrap(),
+                value
+            );
+        }
+        assert_eq!(DsResolution::try_from(8).unwrap().label(), "8× (1536p)");
+        assert_eq!(DsResolution::default().step(false).scale(), 8);
+        assert!(DsResolution::try_from(0).is_err());
+        assert!(DsResolution::try_from(9).is_err());
+    }
 
     fn rounded(rect: ScreenRect) -> (i64, i64, i64, i64) {
         (

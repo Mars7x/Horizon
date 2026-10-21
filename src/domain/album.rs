@@ -1,8 +1,8 @@
-//! Album captures: screenshots and video clips, whoever made them.
+//! Album captures: screenshots and animated images, whoever made them.
 //!
 //! A capture is a file on disk. The file is the record: there is no database
 //! row to keep in step, so a capture deleted outside Horizon simply stops
-//! appearing. Everything else (thumbnails, durations) is rebuildable cache.
+//! appearing. Everything else (thumbnails) is rebuildable cache.
 use std::{cmp::Ordering, path::PathBuf};
 
 use super::{SourceGameRef, SourceId};
@@ -12,16 +12,13 @@ use super::{SourceGameRef, SourceId};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MediaKind {
     Photo,
-    Video,
 }
 
 impl MediaKind {
-    /// Formats Horizon can decode: JXL photos
-    /// through `services::image`, videos through the platform's video backend.
+    /// JPEG XL images decoded through `services::image`.
     pub fn from_extension(extension: &str) -> Option<Self> {
         match extension.to_ascii_lowercase().as_str() {
             "jxl" => Some(Self::Photo),
-            "mp4" | "m4v" | "mkv" | "webm" | "mov" => Some(Self::Video),
             _ => None,
         }
     }
@@ -187,7 +184,7 @@ mod tests {
         assert_eq!(MediaKind::from_extension("JXL"), Some(MediaKind::Photo));
         assert_eq!(MediaKind::from_extension("jxl"), Some(MediaKind::Photo));
         for video in ["mp4", "m4v", "mkv", "webm", "mov"] {
-            assert_eq!(MediaKind::from_extension(video), Some(MediaKind::Video));
+            assert_eq!(MediaKind::from_extension(video), None);
         }
         assert_eq!(MediaKind::from_extension("part"), None);
         assert_eq!(MediaKind::from_extension("vdf"), None);

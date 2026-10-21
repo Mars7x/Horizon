@@ -759,9 +759,11 @@ extern "C" fn environment(command: u32, data: *mut c_void) -> bool {
                             } else {
                                 c"software"
                             }),
-                            b"melonds_opengl_resolution" => [c"1", c"2", c"3", c"4", c"5", c"6"]
-                                .get(usize::from(state.as_ref()?.scale.clamp(1, 6) - 1))
-                                .copied(),
+                            b"melonds_opengl_resolution" => {
+                                [c"1", c"2", c"3", c"4", c"5", c"6", c"7", c"8"]
+                                    .get(usize::from(state.as_ref()?.scale.clamp(1, 8) - 1))
+                                    .copied()
+                            }
                             b"melonds_screen_layout1" => Some(c"top-bottom"),
                             b"melonds_screen_gap" => Some(c"0"),
                             b"melonds_number_of_screen_layouts" => Some(c"1"),

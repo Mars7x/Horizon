@@ -1,5 +1,5 @@
 //! Sound output straight to PipeWire, via Horizon's C shim
-//! (`csrc/horizon_audio.c`). Used for video sound and UI sounds.
+//! (`csrc/horizon_audio.c`). Used for game audio and UI sounds.
 //!
 //! Each stream runs on its own PipeWire thread, which calls the stream's
 //! fill function for every buffer: no queues between Horizon and the
@@ -44,8 +44,6 @@ pub type Fill = Box<dyn FnMut(&mut [f32], Duration) + Send>;
 pub enum Role {
     /// UI feedback sounds.
     Game,
-    /// A video's sound.
-    Movie,
 }
 
 /// A playback stream of float samples.
@@ -85,7 +83,6 @@ impl AudioStream {
         let name = CString::new(name).map_err(|_| "bad stream name".to_owned())?;
         let role = CString::new(match role {
             Role::Game => "Game",
-            Role::Movie => "Movie",
         })
         .map_err(|_| "bad role".to_owned())?;
         let fill = Box::into_raw(Box::new(fill));

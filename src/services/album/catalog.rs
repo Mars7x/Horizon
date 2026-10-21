@@ -1,7 +1,6 @@
 //! Finding captures: Horizon's own folder plus every capture source.
 //!
-//! Game captures live in album/<system>/<readable game folder>/screenshots or
-//! recordings, alongside game.json. Unassigned captures use album/horizon/.
+//! Game captures live in album/<system>/<readable game folder>/screenshots, alongside game.json. Unassigned captures use album/horizon/.
 //! UTC stamps use YYYY-MM-DD_HH-MM-SS-mmm; .part files are unpublished.
 use std::{
     fs,
@@ -34,9 +33,8 @@ impl HorizonAlbum {
         Self { root }
     }
 
-    /// Where a new capture goes, with its folder created. The screenshot and
-    /// recording features call this, write `<path>.part`, then atomically publish
-    /// it as `path`. Never returns an existing file.
+    /// Where a new screenshot goes, with its folder created. The writer uses
+    /// `<path>.part`, then atomically publishes it as `path`. Never returns an existing file.
     pub fn new_capture_path(
         &self,
         game: Option<&SourceGameRef>,
@@ -48,13 +46,13 @@ impl HorizonAlbum {
             platform::data_paths,
             services::game_storage::{GameFolder, ensure_directory},
         };
-        let kind = MediaKind::from_extension(extension)
+        MediaKind::from_extension(extension)
             .ok_or_else(|| std::io::Error::other("unsupported capture format"))?;
         let directory = match game {
             Some(game) => GameFolder::prepare(&self.root, game, title)?.directory,
             None => data_paths::unassigned_album_directory(&self.root),
         };
-        let folder = data_paths::capture_directory(&directory, kind == MediaKind::Video);
+        let folder = data_paths::capture_directory(&directory);
         ensure_directory(&self.root, &folder)?;
         let stamp = format!(
             "{}-{:03}",
@@ -161,11 +159,9 @@ pub fn part_path(path: &Path) -> PathBuf {
 }
 
 fn collect_capture_types(folder: &Path, game: Option<&SourceGameRef>, out: &mut Vec<Capture>) {
-    for video in [false, true] {
-        let path = crate::platform::data_paths::capture_directory(folder, video);
-        if fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_dir()) {
-            collect_files(&path, game, out);
-        }
+    let path = crate::platform::data_paths::capture_directory(folder);
+    if fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_dir()) {
+        collect_files(&path, game, out);
     }
 }
 
@@ -325,13 +321,18 @@ mod tests {
         assert_eq!(second.file_name().unwrap(), "2026-10-10_14-30-12-345-2.jxl");
         fs::write(&second, b"jxl").unwrap();
         // A capture still being written is invisible.
-        let writing = album.new_capture_path(None, "Horizon", "mp4", now).unwrap();
-        assert_eq!(
-            writing,
-            root.join("horizon/recordings/2026-10-10_14-30-12-345.mp4")
-        );
-        fs::write(part_path(&writing), b"mp4").unwrap();
-
+        let pending = album.new_capture_path(None, "Horizon", "jxl", now).unwrap();
+        fs::write(part_path(&pending), b"incomplete image").unwrap();
+        assert!(album.new_capture_path(None, "Horizon", "mp4", now).is_err());
+        let recordings = root.join("horizon/recordings");
+        fs::create_dir_all(&recordings).unwrap();
+        let recording = recordings.join("2026-10-10_14-30-12-345.mp4");
+        fs::write(&recording, b"preserved recording").unwrap();
+        // The retired folder is never scanned, even for a supported extension.
+        let retired_image = recordings.join("unlisted.jxl");
+        fs::write(&retired_image, b"preserved image in retired folder").unwrap();
+        let misplaced_clip = first.parent().unwrap().join("unlisted.mp4");
+        fs::write(&misplaced_clip, b"preserved unsupported format").unwrap();
         // Retired image formats remain untouched but are no longer listed.
         let legacy = first.parent().unwrap().join("legacy.png");
         fs::write(&legacy, b"preserved legacy picture").unwrap();
@@ -348,13 +349,13 @@ mod tests {
         );
         assert!(captures.iter().all(|c| c.origin().is_horizon()));
 
-        fs::rename(part_path(&writing), &writing).unwrap();
-        let finished = album.scan();
-        let video = finished
-            .iter()
-            .find(|c| c.kind() == MediaKind::Video)
-            .expect("finished video");
-        assert_eq!(video.game(), None);
+        assert_eq!(album.scan().len(), 2);
+        assert_eq!(fs::read(&recording).unwrap(), b"preserved recording");
+        assert!(album.delete(&recording).is_err());
+        assert!(album.delete(&retired_image).is_err());
+        assert!(album.delete(&misplaced_clip).is_err());
+        assert!(retired_image.is_file());
+        assert!(misplaced_clip.is_file());
 
         fs::remove_dir_all(root).unwrap();
     }

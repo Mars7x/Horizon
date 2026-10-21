@@ -124,7 +124,7 @@ impl InputManager {
         })
     }
 
-    /// Swap confirm/back and gameplay A/B on controllers (not the keyboard).
+    /// Swap controller A/B and X/Y in menus and gameplay (not the keyboard).
     pub fn set_swap_confirm(&self, swap: bool) {
         self.swap_confirm.set(swap);
     }
@@ -255,13 +255,12 @@ impl InputManager {
     }
 }
 
-/// Libretro joypad A/B follow the same controller preference as menu actions.
+/// Libretro A/B and X/Y follow the same controller face-button preference.
 fn gameplay_mapping(buttons: u16, swapped: bool) -> u16 {
     if !swapped {
         return buttons;
     }
-    const AB: u16 = (1 << 8) | 1;
-    (buttons & !AB) | ((buttons & 1) << 8) | ((buttons >> 8) & 1)
+    crate::domain::controller::swap_face_buttons(buttons)
 }
 
 /// A controller's action as Horizon acts on it: confirm and back exchanged
@@ -385,7 +384,7 @@ mod tests {
     }
 
     #[test]
-    fn swapping_exchanges_only_controller_confirm_and_back() {
+    fn swapping_exchanges_controller_face_pairs_and_preserves_directions() {
         let accept = UiActionEvent::fresh(UiAction::Accept);
         let back = UiActionEvent::fresh(UiAction::Back);
         let up = UiActionEvent::repeated(UiAction::Up);
@@ -394,8 +393,16 @@ mod tests {
         assert_eq!(controller_event(back, true), accept);
         assert_eq!(controller_event(up, true), up);
         assert_eq!(
-            UiAction::Secondary.with_confirm_swapped(),
+            controller_event(UiActionEvent::fresh(UiAction::AlternateSecondary), true).action,
             UiAction::Secondary
+        );
+        assert_eq!(
+            controller_event(UiActionEvent::fresh(UiAction::Secondary), true).action,
+            UiAction::AlternateSecondary
+        );
+        assert_eq!(
+            UiAction::Secondary.with_confirm_swapped(),
+            UiAction::AlternateSecondary
         );
 
         // Enter still confirms on the keyboard.
@@ -424,18 +431,20 @@ mod tests {
 mod gameplay_tests {
     use super::gameplay_mapping;
     #[test]
-    fn swap_exchanges_held_a_b_and_preserves_other_controls() {
+    fn swap_exchanges_both_face_pairs_and_preserves_other_controls() {
         for buttons in 0..=u16::MAX {
             assert_eq!(gameplay_mapping(buttons, false), buttons);
             assert_eq!(
                 gameplay_mapping(gameplay_mapping(buttons, true), true),
                 buttons
             );
-            assert_eq!(gameplay_mapping(buttons, true) & !257, buttons & !257);
+            assert_eq!(gameplay_mapping(buttons, true) & !771, buttons & !771);
         }
         assert_eq!(gameplay_mapping(256, true), 1);
         assert_eq!(gameplay_mapping(1, true), 256);
         assert_eq!(gameplay_mapping(257, true), 257);
+        assert_eq!(gameplay_mapping(512, true), 2);
+        assert_eq!(gameplay_mapping(2, true), 512);
     }
 }
 

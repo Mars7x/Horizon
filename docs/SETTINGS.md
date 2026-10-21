@@ -13,7 +13,7 @@ atomically; a failed save must not silently replace the previous preference.
 Focus is distinct from the selected value. See [UI standards](UI_STANDARDS.md).
 
 Controller has Swap Select and Back, plus Swap Hints. The first changes controller
-menu actions and gameplay A/B; the second determines whether hints follow the swap. Keyboard
+menu actions and gameplay A/B and X/Y; the second determines whether hints follow the swap. Keyboard
 Enter/Escape remains unchanged. Button mapping lists the cores (mGBA, melonDS);
 each opens its mapping, and Back returns to the list, then to Controller. mGBA's
 page covers A, B, L, R, Start and Select, shared by Game Boy, Game Boy Color and GBA
@@ -33,8 +33,8 @@ default, or the first free button. When its rows don't fit the window, the list 
 focus.
 
 Shortcuts is the same page for in-game shortcuts shared by every system:
-Fast-forward (hold; both triggers together by default), Quick save, Quick load
-and Screenshot (not set by default). Each takes one button or two pressed
+Fast-forward (hold; both triggers together by default), Quick save, Quick load,
+Screenshot and Rewind (not set by default). Each takes one button or two pressed
 together: hold them, then let go (more than two asks again). X clears a row. A
 one-button shortcut's button is held back from games; a pair's buttons still
 reach the game alone and are held back only while the whole pair is down, so
@@ -42,9 +42,10 @@ the DS microphone (left trigger) keeps working. A button serves one shortcut:
 giving it to another clears the first. Restore defaults restores the triggers.
 Earlier single-button/null shortcut files retain their assignments; the next
 settings save writes them in the current format that also supports pairs.
+Four-row files retain their shortcuts and gain an unset Rewind row.
 
 Mappings apply to all controllers after family normalization, independently of
-keyboard gameplay. Swap Select and Back exchanges mapped gameplay A/B; the rows
+keyboard gameplay. Swap Select and Back exchanges mapped gameplay A/B and X/Y; the rows
 show the effective assignment. Restore defaults asks for confirmation with Cancel
 focused and preserves the two menu/hint switches and the other system's mapping.
 Values live in `controller.json`.
@@ -80,8 +81,10 @@ timing and developer controls are not exposed.
 
 Cores → melonDS (the melonDS DS libretro core) contains Screen layout (Side by side, Stacked, Large and
 small; default Side by side), Video filter (the same four presets, default
-None) and Internal resolution (Native, then 2× to 6× with their DS line counts;
-default Native). Higher resolutions draw 3D on the graphics card. Swapping the screens is a quick-menu action, not a setting. Layout and swap
+None) and Internal resolution (Native, then 2× to 8× with their DS line counts;
+default Native). Higher resolutions draw 3D on the graphics card. LCD preserves
+that higher-resolution image at every scale. Smooth pixel art is native-only;
+above Native the row explains that Smooth is used to preserve sharper 3D. Swapping the screens is a quick-menu action, not a setting. Layout and swap
 changed from the quick menu are remembered for that game, which then ignores
 this default.
 

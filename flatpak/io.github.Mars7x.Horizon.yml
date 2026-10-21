@@ -20,9 +20,8 @@ finish-args:
   # requests. Flatpak cannot restrict --share=network to a single host.
   - --share=network
   - --socket=wayland
-  # All sound (UI sounds and Album video) is a native PipeWire stream:
-  # low-latency UI sounds, and video timed by PipeWire's own clock. Nothing
-  # uses PulseAudio, so its socket isn't granted. See ADR 0169.
+  # Game audio and UI sounds use native PipeWire streams. Nothing uses
+  # PulseAudio, so its socket is not granted. See ADR 0169.
   - --filesystem=xdg-run/pipewire-0
   # Wayland-only UI. Do not add X11/XWayland socket permissions to work
   # around missing GNOME Wayland clipboard support.

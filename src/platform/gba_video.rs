@@ -42,21 +42,20 @@ pub fn present_ds(raw: &Frame, filter: VideoFilter, targets: [(u32, u32); 2]) ->
         // Not the expected two screens: show it whole rather than guess.
         return present_source(&raw.rgba, (raw.width, raw.height), filter, (0, 0));
     }
-    // An upscaled picture already has its detail: the pixel-art filters
-    // (LCD grid, xBRZ) are for native pixels, so it's scaled smoothly.
-    let filter = if width > 256 && filter != VideoFilter::None {
+    // xBRZ reconstructs native pixel art. Keep higher-resolution 3D intact;
+    // Settings explicitly describes this choice as native-only.
+    let filter = if width > 256 && filter == VideoFilter::Xbrz {
         VideoFilter::Smooth
     } else {
         filter
     };
     let half = (width * height * 4) as usize;
     let [top, bottom] = [0, 1].map(|index| {
-        present_source(
-            &raw.rgba[index * half..(index + 1) * half],
-            (width, height),
-            filter,
-            targets[index],
-        )
+        let source = &raw.rgba[index * half..(index + 1) * half];
+        if filter == VideoFilter::Lcd && width > 256 && width.is_multiple_of(256) {
+            return lcd_upscaled_ds(source, width, height);
+        }
+        present_source(source, (width, height), filter, targets[index])
     });
     let sizes = [&top, &bottom].map(|screen| (screen.pixels.width(), screen.pixels.height()));
     let width = sizes[0].0.max(sizes[1].0);
@@ -76,6 +75,45 @@ pub fn present_ds(raw: &Frame, filter: VideoFilter, targets: [(u32, u32); 2]) ->
         smooth: top.smooth,
         exact: None,
         screens: Some(sizes),
+    }
+}
+
+/// Apply the native LCD pattern without downsampling higher-resolution 3D
+/// or allocating a 3× intermediate. Each source pixel averages the coverage
+/// of the native RGB thirds, so non-multiples of three stay colour-balanced.
+fn lcd_upscaled_ds(source: &[u8], width: u32, height: u32) -> Presented {
+    let scale = width / 256;
+    let overlap = |pixel: u32, band: u32| {
+        ((pixel + 1) * 3)
+            .min((band + 1) * scale)
+            .saturating_sub((pixel * 3).max(band * scale))
+    };
+    let stripes: Vec<[u32; 3]> = (0..scale)
+        .map(|x| std::array::from_fn(|channel| 232 * 3 + 23 * overlap(x, channel as u32)))
+        .collect();
+    let grid: Vec<u32> = (0..scale).map(|y| 255 * 3 - 31 * overlap(y, 2)).collect();
+    let mut pixels = SharedPixelBuffer::<Rgba8Pixel>::new(width, height);
+    for (index, (target, source)) in pixels
+        .make_mut_bytes()
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(source.as_chunks::<4>().0)
+        .enumerate()
+    {
+        let x = index % width as usize % scale as usize;
+        let y = index / width as usize % scale as usize;
+        for channel in 0..3 {
+            target[channel] = (u32::from(source[channel]) * stripes[x][channel] * grid[y]
+                / (255 * 255 * 9)) as u8;
+        }
+        target[3] = source[3];
+    }
+    Presented {
+        pixels,
+        smooth: true,
+        exact: None,
+        screens: None,
     }
 }
 
@@ -146,7 +184,7 @@ pub fn ds_screenshot(
         }
         DsLayout::LargeAndSmall => {
             // The small screen is a third the size, bottom-aligned beside.
-            let up = if width.is_multiple_of(3) { 1 } else { 3 };
+            let up = if width == 256 { 3 } else { 1 };
             let (main_w, main_h) = (width * up, height * up);
             let (small_w, small_h) = (main_w / 3, main_h / 3);
             let (cw, ch) = (main_w + small_w, main_h);
@@ -552,6 +590,78 @@ mod tests {
     use super::*;
 
     #[test]
+    fn upscaled_ds_lcd_keeps_detail_and_separates_screens_at_every_scale() {
+        for scale in 2..=8 {
+            let (width, height) = (256 * scale, 192 * scale);
+            let mut rgba = [210u8, 0, 0, 191].repeat((width * height) as usize);
+            rgba.extend([0u8, 0, 210, 223].repeat((width * height) as usize));
+            // A one-high-resolution-pixel feature must not be averaged away.
+            rgba[4..8].copy_from_slice(&[0, 210, 0, 191]);
+            let raw = Frame {
+                width,
+                height: height * 2,
+                rgba,
+                smooth: false,
+            };
+            let lcd = present_ds(&raw, VideoFilter::Lcd, [(0, 0); 2]);
+            assert_eq!(
+                (lcd.pixels.width(), lcd.pixels.height()),
+                (width, height * 2)
+            );
+            assert_eq!(lcd.screens, Some([(width, height); 2]));
+            let pixels = lcd.pixels.as_bytes();
+            assert!(pixels[0] > 0 && pixels[1] == 0 && pixels[2] == 0);
+            assert!(pixels[4] == 0 && pixels[5] > 0 && pixels[6] == 0);
+            let bottom = (width * height * 4) as usize;
+            assert!(pixels[bottom] == 0 && pixels[bottom + 2] > 0);
+            assert_eq!((pixels[3], pixels[bottom + 3]), (191, 223));
+            assert_ne!(pixels, raw.rgba.as_slice());
+            let smooth = present_ds(&raw, VideoFilter::Smooth, [(0, 0); 2]);
+            let pixel_art = present_ds(&raw, VideoFilter::Xbrz, [(0, 0); 2]);
+            assert_eq!(smooth.pixels.as_bytes(), raw.rgba.as_slice());
+            assert_eq!(pixel_art.pixels.as_bytes(), smooth.pixels.as_bytes());
+        }
+    }
+
+    #[test]
+    fn three_times_ds_lcd_matches_the_native_pattern_without_extra_scaling() {
+        let native = Frame {
+            width: 256,
+            height: 384,
+            rgba: [180u8, 120, 60, 200].repeat(256 * 384),
+            smooth: false,
+        };
+        let upscaled = Frame {
+            width: 768,
+            height: 1152,
+            rgba: [180u8, 120, 60, 200].repeat(768 * 1152),
+            smooth: false,
+        };
+        let expected = present_ds(&native, VideoFilter::Lcd, [(0, 0); 2]);
+        let actual = present_ds(&upscaled, VideoFilter::Lcd, [(0, 0); 2]);
+        assert_eq!(actual.pixels.as_bytes(), expected.pixels.as_bytes());
+    }
+
+    #[test]
+    fn upscaled_lcd_subpixel_coverage_stays_colour_balanced() {
+        for scale in 2..=8 {
+            let width = 256 * scale;
+            let source = [255u8; 4].repeat((width * scale) as usize);
+            let lcd = lcd_upscaled_ds(&source, width, scale);
+            let mut sum = [0i64; 3];
+            for row in lcd.pixels.as_bytes().chunks_exact((width * 4) as usize) {
+                for pixel in row[..(scale * 4) as usize].as_chunks::<4>().0 {
+                    for channel in 0..3 {
+                        sum[channel] += i64::from(pixel[channel]);
+                    }
+                }
+            }
+            let difference = sum.iter().max().unwrap() - sum.iter().min().unwrap();
+            assert!(difference <= i64::from(scale * scale), "{scale}×: {sum:?}");
+        }
+    }
+
+    #[test]
     fn ds_screenshots_follow_the_layout_and_swap() {
         use crate::domain::core_settings::DsLayout;
         // Top screen red, bottom blue, at native size.
@@ -581,6 +691,22 @@ mod tests {
         // The small screen, bottom right; black above it.
         assert_eq!(pixel(&large, 1000, 570), [0, 0, 255]);
         assert_eq!(pixel(&large, 1000, 10), [0, 0, 0]);
+    }
+
+    #[test]
+    fn upscaled_ds_large_small_captures_do_not_triple_high_resolution_frames() {
+        use crate::domain::core_settings::DsLayout;
+        for scale in 2..=8 {
+            let (width, height) = (256 * scale, 192 * scale);
+            let raw = Frame {
+                width,
+                height: height * 2,
+                rgba: [30u8, 60, 90, 255].repeat((width * height * 2) as usize),
+                smooth: true,
+            };
+            let capture = ds_screenshot(&raw, DsLayout::LargeAndSmall, false);
+            assert_eq!((capture.width, capture.height), (width + width / 3, height));
+        }
     }
     /// Test shorthand: the presented frame for `frame`, without correction,
     /// read back as a plain frame.

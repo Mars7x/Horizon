@@ -628,6 +628,7 @@ impl HomeController {
             | UiAction::LeftBumper
             | UiAction::RightBumper
             | UiAction::Secondary
+            | UiAction::AlternateSecondary
             | UiAction::StickPress
             | UiAction::RightStickPress
             | UiAction::Forward => {

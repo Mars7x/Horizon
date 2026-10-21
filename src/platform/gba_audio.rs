@@ -429,19 +429,19 @@ mod tests {
     #[test]
     fn a_core_that_falls_behind_slows_the_audio_instead_of_starving_it() {
         let mut audio = SpeedAudio::default();
-        audio.set_speed(PlaybackSpeed::Quadruple);
-        // The core reaches only 3.2×: one output per 3.2 inputs.
-        audio.set_reached(3.2);
-        assert_eq!(audio.ratio(), 3.2);
-        let produced = (0..32000)
+        audio.set_speed(PlaybackSpeed::Double);
+        // The core reaches only 1.6×: one output per 1.6 inputs.
+        audio.set_reached(1.6);
+        assert_eq!(audio.ratio(), 1.6);
+        let produced = (0..16000)
             .filter(|_| audio.process([0.5, 0.5]).is_some())
             .count();
         assert!((9999..=10001).contains(&produced), "{produced}");
         // Tiny wobbles keep the filter; reaching full speed restores it.
-        audio.set_reached(3.25);
-        assert_eq!(audio.ratio(), 3.2);
-        audio.set_reached(5.0);
-        assert_eq!(audio.ratio(), 4.0);
+        audio.set_reached(1.62);
+        assert_eq!(audio.ratio(), 1.6);
+        audio.set_reached(2.0);
+        assert_eq!(audio.ratio(), 2.0);
         // Normal speed never resamples.
         audio.set_speed(PlaybackSpeed::Normal);
         audio.set_reached(0.5);
@@ -855,7 +855,7 @@ mod queue_tests {
             if next_phase != phase {
                 phase = next_phase;
                 audio.set_paused(true);
-                core.set_speed(PlaybackSpeed::ALL[phase as usize % 4]);
+                core.set_speed(PlaybackSpeed::ALL[phase as usize % PlaybackSpeed::ALL.len()]);
                 audio.clear();
                 settling.store(
                     (elapsed + Duration::from_millis(500)).as_micros() as u64,
@@ -875,7 +875,8 @@ mod queue_tests {
             core.run_frame();
             metrics.max_queue.fetch_max(audio.len(), Ordering::Relaxed);
             frames += 1;
-            deadline += interval / u32::from(PlaybackSpeed::ALL[phase as usize % 4].factor());
+            deadline += interval
+                / u32::from(PlaybackSpeed::ALL[phase as usize % PlaybackSpeed::ALL.len()].factor());
             if Instant::now().saturating_duration_since(deadline) > Duration::from_millis(100) {
                 deadline = Instant::now();
             }

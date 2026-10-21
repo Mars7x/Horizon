@@ -169,15 +169,7 @@ impl NavigationController {
                 album.cycle_game(&ui);
             }
         });
-        let (weak, album, navigation) = (ui.as_weak(), Rc::clone(&controller), Rc::clone(self));
-        ui.on_album_cycle_kind(move || {
-            if let Some(ui) = weak.upgrade()
-                && on_album(&navigation)
-            {
-                navigation.cue(UiSoundCue::Ok);
-                album.cycle_kind(&ui);
-            }
-        });
+
         let (weak, album, navigation) = (ui.as_weak(), Rc::clone(&controller), Rc::clone(self));
         ui.on_album_scroll_rows(move |rows| {
             if let Some(ui) = weak.upgrade()
@@ -198,22 +190,7 @@ impl NavigationController {
                 }
             }
         });
-        let (weak, album, navigation) = (ui.as_weak(), Rc::clone(&controller), Rc::clone(self));
-        ui.on_album_toggle_play(move || {
-            if let Some(ui) = weak.upgrade()
-                && on_album(&navigation)
-            {
-                album.toggle_play(&ui);
-            }
-        });
-        let (weak, album, navigation) = (ui.as_weak(), Rc::clone(&controller), Rc::clone(self));
-        ui.on_album_seek(move |fraction| {
-            if let Some(ui) = weak.upgrade()
-                && on_album(&navigation)
-            {
-                album.seek_fraction(&ui, fraction);
-            }
-        });
+
         let (weak, album, navigation) = (ui.as_weak(), Rc::clone(&controller), Rc::clone(self));
         ui.on_album_close_viewer(move || {
             if let Some(ui) = weak.upgrade()
@@ -239,7 +216,7 @@ impl NavigationController {
         });
     }
 
-    /// Route-local lifecycle for pages that hold resources (Album video).
+    /// Route-local lifecycle for pages that hold resources (Album images).
     fn leave_route(&self, ui: &AppWindow, from: AppRoute) {
         if from == AppRoute::Utility(UtilityPage::Settings) {
             self.settings.on_leave(ui);
@@ -817,6 +794,7 @@ impl NavigationController {
             | UiAction::LeftBumper
             | UiAction::RightBumper
             | UiAction::Secondary
+            | UiAction::AlternateSecondary
             | UiAction::StickPress
             | UiAction::RightStickPress => {
                 debug!(
@@ -1154,9 +1132,6 @@ mod runtime_tests {
             Some(album_dir),
             Vec::new(),
             Some(directory.join("cache")),
-            std::sync::Arc::new(crate::services::album::media::NoVideo(
-                "Test photos only".into(),
-            )),
         );
         navigation.set_album(Rc::clone(&album), &ui);
         ui.global::<crate::Motion>().set_reduced_motion(true);

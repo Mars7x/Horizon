@@ -55,6 +55,10 @@ pub enum Command {
     },
     /// Save the quick slot without pausing (its writing doesn't stall play).
     QuickSave,
+    /// Pause and project volatile history without restoring any core state.
+    OpenRewind,
+    /// Commit a selected point from the paused history.
+    RewindTo(usize),
     /// Refresh the automatic resume point now (Horizon lost focus).
     Autosave,
     /// Close (true) or open the DS lid.
@@ -267,6 +271,10 @@ impl Autosave {
     }
 }
 pub enum Event {
+    RewindOpened(Vec<RewindPoint>),
+    Rewound {
+        lid_closed: bool,
+    },
     Ready {
         title: String,
         freeze_when_unfocused: bool,
@@ -302,6 +310,78 @@ pub enum Event {
     /// A screenshot already confirmed could not be written after all.
     ScreenshotFailed(String),
     ActionFailed(String),
+}
+
+pub struct RewindPoint {
+    pub behind: Duration,
+    pub preview: crate::platform::gba_core::Frame,
+}
+
+struct RewindCapture {
+    frame: crate::platform::gba_core::Frame,
+    lid_closed: bool,
+}
+
+fn record_rewind(
+    core: &Core,
+    history: &mut crate::domain::rewind::History<RewindCapture>,
+    at: Duration,
+    lid_closed: bool,
+) -> Result<(), String> {
+    let state = core.serialize_state()?;
+    let raw = core.capture_frame()?;
+    let preview = crate::services::save_states::preview_size(&raw).unwrap_or(raw);
+    let cost = preview.rgba.len();
+    // A useful history must fit a prior point and the exact paused moment.
+    if state.len().saturating_add(cost) > crate::domain::rewind::MEMORY_LIMIT / 2 {
+        return Err("This game's rewind states are too large for the memory limit".into());
+    }
+    if history.push(
+        at,
+        state,
+        RewindCapture {
+            frame: preview,
+            lid_closed,
+        },
+        cost,
+    ) {
+        Ok(())
+    } else {
+        Err("This game's rewind state exceeds the memory limit".into())
+    }
+}
+
+/// Compose on the game worker, in the current DS layout, at bounded preview size.
+fn rewind_picture(
+    frame: &crate::platform::gba_core::Frame,
+    view: Option<(crate::domain::core_settings::DsLayout, bool)>,
+) -> crate::platform::gba_core::Frame {
+    let frame = match view {
+        Some((layout, swapped)) => {
+            crate::platform::gba_video::ds_screenshot(frame, layout, swapped)
+        }
+        None => frame.clone(),
+    };
+    if frame.width <= 512 && frame.height <= 384 {
+        return frame;
+    }
+    let size = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba.clone());
+    let Some(size) = size else {
+        return frame;
+    };
+    let scale = (512.0 / f64::from(frame.width)).min(384.0 / f64::from(frame.height));
+    let resized = image::imageops::resize(
+        &size,
+        (f64::from(frame.width) * scale).round() as u32,
+        (f64::from(frame.height) * scale).round() as u32,
+        image::imageops::FilterType::Triangle,
+    );
+    crate::platform::gba_core::Frame {
+        width: resized.width(),
+        height: resized.height(),
+        rgba: resized.into_raw(),
+        smooth: frame.smooth,
+    }
 }
 pub struct RunningGame {
     pub commands: Sender<Command>,
@@ -643,6 +723,10 @@ fn play(
         played: Duration::ZERO,
     };
     let writer = Writer::new(events.clone());
+    let mut rewind = crate::domain::rewind::History::default();
+    let mut rewind_clock = Duration::ZERO;
+    let mut rewind_since = Duration::ZERO;
+    let mut rewind_enabled = core.supports_states();
     let mut last_tick = Instant::now();
     let mut lid_closed = false;
     let mut view_writer: Option<JoinHandle<()>> = None;
@@ -712,6 +796,77 @@ fn play(
                     writer.wait();
                 }
                 match command {
+                    Command::OpenRewind => {
+                        let result = if rewind_enabled {
+                            record_rewind(&core, &mut rewind, rewind_clock, lid_closed)
+                        } else {
+                            Err("Rewind is unavailable for this game".into())
+                        };
+                        if let Err(error) = result {
+                            let _ = events.send(Event::ActionFailed(error));
+                            continue;
+                        }
+                        if rewind.len() < 2 {
+                            let _ = events.send(Event::ActionFailed(
+                                "Play a little longer to build rewind history".into(),
+                            ));
+                            continue;
+                        }
+                        paused = true;
+                        audio.set_paused(true);
+                        buttons.store(0, Ordering::Release);
+                        let view = ds_input.as_ref().map(|input| {
+                            crate::platform::gba_core::unpack_ds_view(
+                                input.view.load(Ordering::Acquire),
+                            )
+                        });
+                        let points = rewind
+                            .iter()
+                            .map(|point| RewindPoint {
+                                behind: rewind_clock.saturating_sub(point.at),
+                                preview: rewind_picture(&point.preview.frame, view),
+                            })
+                            .collect();
+                        let _ = events.send(Event::RewindOpened(points));
+                    }
+                    Command::RewindTo(index) => {
+                        if !paused {
+                            continue;
+                        }
+                        let Some(point) = rewind.get(index) else {
+                            let _ = events.send(Event::ActionFailed(
+                                "That rewind moment is no longer available".into(),
+                            ));
+                            continue;
+                        };
+                        writer.wait();
+                        if let Err(error) = save_current(&core, &save_path, &mut last_save) {
+                            let _ = events.send(Event::ActionFailed(error));
+                            continue;
+                        }
+                        buttons.store(0, Ordering::Release);
+                        if let Some(input) = ds_input.as_ref() {
+                            input.pointer.store(0, Ordering::Release);
+                        }
+                        core.restore_state(&point.state)?;
+                        lid_closed = point.preview.lid_closed;
+                        rewind_clock = point.at;
+                        rewind_since = Duration::ZERO;
+                        rewind.truncate_after(index);
+                        core.set_speed(speed);
+                        audio.clear();
+                        core.run_frame();
+                        rewind_clock += Duration::from_secs_f64(1.0 / fps);
+                        present(&core);
+                        audio.clear();
+                        pacer =
+                            crate::platform::gba_audio::FramePacer::new(rate, fps, speed.factor());
+                        deadline = Instant::now();
+                        checkpoint = Instant::now();
+                        checkpoint_frames = 0;
+                        work = 0.0;
+                        let _ = events.send(Event::Rewound { lid_closed });
+                    }
                     Command::Pause(value) => {
                         paused = value;
                         buttons.store(0, Ordering::Release);
@@ -822,6 +977,9 @@ fn play(
                             buttons.store(0, Ordering::Release);
                             audio.clear();
                             core.restore_state(&snapshot.bytes)?;
+                            rewind.clear();
+                            rewind_clock = Duration::ZERO;
+                            rewind_since = Duration::ZERO;
                             lid_closed = false; // A fresh or loaded console has its lid open.
                             core.set_speed(speed);
                             core.run_frame();
@@ -854,6 +1012,9 @@ fn play(
                             continue;
                         }
                         core.restart();
+                        rewind.clear();
+                        rewind_clock = Duration::ZERO;
+                        rewind_since = Duration::ZERO;
                         lid_closed = false; // A fresh or loaded console has its lid open.
                         core.set_speed(speed);
                         if !last_save.is_empty()
@@ -924,6 +1085,18 @@ fn play(
                 core.run_frame();
                 let pushed = audio.written().wrapping_sub(before);
                 present(&core);
+                let elapsed = Duration::from_secs_f64(1.0 / fps);
+                rewind_clock += elapsed;
+                rewind_since += elapsed;
+                if rewind_enabled && rewind_since >= crate::domain::rewind::INTERVAL {
+                    rewind_since = Duration::ZERO;
+                    if let Err(error) = record_rewind(&core, &mut rewind, rewind_clock, lid_closed)
+                    {
+                        rewind_enabled = false;
+                        rewind.clear();
+                        let _ = events.send(Event::Notice(format!("Rewind unavailable: {error}")));
+                    }
+                }
                 if speed != PlaybackSpeed::Normal {
                     // How fast the core could go, from how long its frames
                     // take: fast-forward audio follows it, with a margin, so
@@ -1213,6 +1386,59 @@ fn write_save_bounded(path: &Path, bytes: &[u8], maximum: usize) -> Result<(), S
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "requires the built pinned mGBA core (HORIZON_GBA_CORE)"]
+    fn real_core_rewind_previews_do_not_restore_until_commit() {
+        let path = std::env::var_os("HORIZON_GBA_CORE").unwrap();
+        let mut core = Core::load(
+            Path::new(&path),
+            &crate::platform::gba_core::test_rom(),
+            Default::default(),
+            Arc::new(crate::platform::gba_audio::GameAudio::default()),
+            Arc::new(AtomicU16::new(0)),
+        )
+        .unwrap();
+        let mut history = crate::domain::rewind::History::default();
+        for i in 0..3 {
+            for _ in 0..30 {
+                core.run_frame();
+            }
+            record_rewind(&core, &mut history, Duration::from_millis(i * 500), false).unwrap();
+        }
+        // mGBA's state frame counter: compare machine progress, not audio bookkeeping.
+        let counter = |bytes: &[u8]| u32::from_le_bytes(bytes[0x1fc..0x200].try_into().unwrap());
+        let live = counter(&core.serialize_state().unwrap());
+        let point = history.get(0).unwrap();
+        let earlier = counter(&point.state);
+        assert!(earlier < live);
+        let preview = rewind_picture(&point.preview.frame, None);
+        assert_eq!((preview.width, preview.height), (240, 160));
+        assert_eq!(counter(&core.serialize_state().unwrap()), live);
+        assert_eq!(history.len(), 3);
+        core.restore_state(&point.state).unwrap();
+        assert_eq!(counter(&core.serialize_state().unwrap()), earlier);
+        history.truncate_after(0);
+        assert_eq!(history.len(), 1);
+    }
+
+    #[test]
+    fn rewind_ds_previews_follow_the_current_view_and_bound_upscaled_images() {
+        use crate::{domain::core_settings::DsLayout, platform::gba_core::Frame};
+        let mut rgba = [255, 0, 0, 255].repeat(256 * 192);
+        rgba.extend([0, 0, 255, 255].repeat(256 * 192));
+        let raw = Frame {
+            width: 256,
+            height: 384,
+            rgba,
+            smooth: false,
+        };
+        let side = rewind_picture(&raw, Some((DsLayout::SideBySide, true)));
+        assert_eq!((side.width, side.height), (512, 192));
+        assert_eq!(&side.rgba[..4], &[0, 0, 255, 255]);
+        let large = rewind_picture(&raw, Some((DsLayout::LargeAndSmall, false)));
+        assert!(large.width <= 512 && large.height <= 384);
+        assert_eq!(&large.rgba[..4], &[255, 0, 0, 255]);
+    }
     fn directory(name: &str) -> PathBuf {
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

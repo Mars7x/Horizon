@@ -233,7 +233,7 @@ impl SdlGamepadInput {
             .map(|pad| pad.family)
     }
 
-    /// Device-family held state for the embedded game; InputManager applies the saved A/B swap.
+    /// Device-family held state for the embedded game; InputManager applies the saved A/B and X/Y swap.
     pub fn gameplay_buttons(&self) -> u16 {
         self.gameplay_snapshot().map_or(0, |(buttons, _)| buttons)
     }
@@ -823,10 +823,11 @@ pub const fn action_for_button(button: Button, family: ControllerFamily) -> Opti
         Button::South if nintendo => Some(UiAction::Back),
         Button::East if nintendo => Some(UiAction::Accept),
         Button::North if nintendo => Some(UiAction::Secondary),
-        Button::West if nintendo => None,
+        Button::West if nintendo => Some(UiAction::AlternateSecondary),
         Button::South => Some(UiAction::Accept),
         Button::East => Some(UiAction::Back),
         Button::West => Some(UiAction::Secondary),
+        Button::North => Some(UiAction::AlternateSecondary),
         Button::Start => Some(UiAction::Menu),
         Button::LeftStick => Some(UiAction::StickPress),
         Button::RightStick => Some(UiAction::RightStickPress),
@@ -1130,7 +1131,10 @@ mod tests {
             action_for_button(Button::North, nintendo),
             Some(UiAction::Secondary)
         );
-        assert_eq!(action_for_button(Button::West, nintendo), None);
+        assert_eq!(
+            action_for_button(Button::West, nintendo),
+            Some(UiAction::AlternateSecondary)
+        );
         assert_eq!(
             action_for_button(Button::LeftShoulder, nintendo),
             Some(UiAction::LeftBumper)

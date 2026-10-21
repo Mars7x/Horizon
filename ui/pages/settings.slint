@@ -117,6 +117,7 @@ export component SettingsPage inherits Rectangle {
     in property <string> core-filter: "None";
     in property <string> ds-layout: "Side by side";
     in property <string> ds-filter: "None";
+    in property <string> ds-filter-note;
     in property <string> ds-resolution: "Native";
     in property <int> core-sunlight;
     in property <string> core-feedback;
@@ -558,7 +559,7 @@ export component SettingsPage inherits Rectangle {
             y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 1;
             width: parent.width;
             title: "Video filter";
-            subtitle: "Sharp, LCD, smooth scaling or smooth pixel art";
+            subtitle: root.ds-filter-note;
             trailing: root.core-filter; value-forward: root.core-value-forward;
             enabled: root.view == 7 && root.core-ready;
             focused: root.view == 7 && root.selection == 1;
@@ -717,7 +718,7 @@ export component SettingsPage inherits Rectangle {
             x: 0px; y: Metrics.breadcrumb-height + Metrics.spacing-sm;
             width: parent.width;
             title: "Swap Select and Back";
-            subtitle: "Swap menu buttons and gameplay A/B";
+            subtitle: "Swap A/B and X/Y in menus and games";
             toggle: true;
             checked: root.swap-confirm;
             focused: root.view == 5 && root.selection == 0;
@@ -741,7 +742,7 @@ export component SettingsPage inherits Rectangle {
         }
         SettingsRow {
             x: 0px; y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 3;
-            width: parent.width; title: "Shortcuts"; subtitle: "Fast-forward, quick save and load, screenshot"; trailing: "Open";
+            width: parent.width; title: "Shortcuts"; subtitle: "Fast-forward, quick save and load, screenshot, rewind"; trailing: "Open";
             focused: root.view == 5 && root.selection == 3;
             activated => { if (root.view == 5 && !root.binding-open) {root.activate(3);} }
         }

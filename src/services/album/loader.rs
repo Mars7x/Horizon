@@ -12,7 +12,7 @@ use std::{
 
 use image::RgbaImage;
 
-use super::media::{Thumbnail, ThumbnailCache, VideoBackend, decode_photo};
+use super::media::{Thumbnail, ThumbnailCache, decode_photo};
 use crate::domain::album::Capture;
 
 pub enum MediaResult {
@@ -83,18 +83,16 @@ impl MediaLoader {
     pub fn start(
         workers: usize,
         cache: ThumbnailCache,
-        video: Arc<dyn VideoBackend>,
         deliver: Arc<dyn Fn(MediaResult) + Send + Sync>,
     ) -> Self {
         let shared: Shared = Arc::default();
         for index in 0..workers.max(1) {
             let shared = Arc::clone(&shared);
             let cache = cache.clone();
-            let video = Arc::clone(&video);
             let deliver = Arc::clone(&deliver);
             let spawned = thread::Builder::new()
                 .name(format!("album-media-{index}"))
-                .spawn(move || work(&shared, &cache, video.as_ref(), deliver.as_ref()));
+                .spawn(move || work(&shared, &cache, deliver.as_ref()));
             if let Err(error) = spawned {
                 tracing::warn!(%error, "Album media worker could not start");
             }
@@ -123,12 +121,7 @@ impl Drop for MediaLoader {
     }
 }
 
-fn work(
-    shared: &Shared,
-    cache: &ThumbnailCache,
-    video: &dyn VideoBackend,
-    deliver: &(dyn Fn(MediaResult) + Send + Sync),
-) {
+fn work(shared: &Shared, cache: &ThumbnailCache, deliver: &(dyn Fn(MediaResult) + Send + Sync)) {
     let (lock, wake) = &**shared;
     loop {
         let job = {
@@ -147,9 +140,7 @@ fn work(
         let result = match job {
             Job::Thumbnail(capture) => MediaResult::Thumbnail {
                 path: capture.path().to_owned(),
-                result: cache
-                    .thumbnail(&capture, video)
-                    .map_err(|error| error.to_string()),
+                result: cache.thumbnail(&capture).map_err(|error| error.to_string()),
             },
             Job::Display(capture, max) => MediaResult::Display {
                 path: capture.path().to_owned(),
@@ -168,10 +159,7 @@ fn work(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        domain::album::{CaptureOrigin, MediaKind},
-        services::album::media::NoVideo,
-    };
+    use crate::domain::album::{CaptureOrigin, MediaKind};
     use std::{sync::mpsc, time::Duration};
 
     #[test]
@@ -216,12 +204,7 @@ mod tests {
                 };
                 let _ = sender.lock().unwrap().send(label);
             };
-            work(
-                &shared,
-                &ThumbnailCache::new(None),
-                &NoVideo("none".into()),
-                &deliver,
-            );
+            work(&shared, &ThumbnailCache::new(None), &deliver);
         });
         let order: Vec<String> = (0..3)
             .map(|_| receiver.recv_timeout(Duration::from_secs(10)).unwrap())

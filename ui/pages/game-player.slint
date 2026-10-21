@@ -1,5 +1,7 @@
 import { SaveStateRow } from "../models/save-state.slint";
 import { PausePanel } from "../components/pause-panel.slint";
+import { RewindRow } from "../models/rewind.slint";
+import { RewindTimeline } from "../components/rewind-timeline.slint";
 import { CardRect } from "../models/game-card.slint";
 import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { ActionButton } from "../components/action-button.slint";
@@ -22,15 +24,23 @@ export component GamePlayer inherits Rectangle {
     in property <bool> screenshot-visible: false;
     in property <int> screenshot-sequence: 0;
     in property <int> speed: 1;
-    in property <bool> speed-forward: true;
     in property <int> state-mode;
     in property <int> state-focus;
     in property <[SaveStateRow]> state-rows;
     callback state-choose(int);
+    in property <bool> rewind-open;
+    in property <[RewindRow]> rewind-rows;
+    in property <int> rewind-selected;
+    in property <image> rewind-preview;
+    in property <string> rewind-position;
+    in property <string> rewind-duration;
+    callback rewind-select(int);
+    callback rewind-scrub(float);
+    callback rewind-answer(bool);
     in property <bool> restart-confirm;
     in property <int> restart-focus;
     callback restart-answer(int);
-    private property <float> pause-reveal: root.paused && !root.failed && !root.saving && root.phase == 2 ? 1.0 : 0.0;
+    private property <float> pause-reveal: root.paused && !root.rewind-open && !root.failed && !root.saving && root.phase == 2 ? 1.0 : 0.0;
     animate pause-reveal {
         duration: root.paused ? Motion.pause-open-duration : Motion.dialog-duration;
         easing: root.paused ? ease-out-quart : ease-out;
@@ -249,7 +259,7 @@ export component GamePlayer inherits Rectangle {
     }
     Rectangle {
         width: parent.width; height: parent.height;
-        visible: root.phase == 2 && !root.failed && (root.paused || root.pause-reveal > 0.001);
+        visible: root.phase == 2 && !root.failed && !root.rewind-open && (root.paused || root.pause-reveal > 0.001);
         background: transparent;
         clip: true;
         Rectangle {
@@ -264,7 +274,7 @@ export component GamePlayer inherits Rectangle {
             width: min(Metrics.pause-panel-width, root.width);
             height: root.height;
             shadow-strength: root.pause-reveal;
-            open: root.paused; busy: root.busy; ds: root.ds; ds-lid-closed: root.ds-lid-closed; ds-layout: root.ds-layout; ds-layout-forward: root.ds-layout-forward; speed: root.speed; speed-forward: root.speed-forward;
+            open: root.paused && !root.rewind-open; busy: root.busy; ds: root.ds; ds-lid-closed: root.ds-lid-closed; ds-layout: root.ds-layout; ds-layout-forward: root.ds-layout-forward; speed: root.speed;
             screenshot-preview: root.screenshot-preview;
             screenshot-visible: root.screenshot-visible;
             screenshot-sequence: root.screenshot-sequence;
@@ -275,6 +285,16 @@ export component GamePlayer inherits Rectangle {
             choose(index) => { root.choose(index); }
             restart-answer(choice) => { root.restart-answer(choice); }
         }
+    }
+    RewindTimeline {
+        width: parent.width; height: parent.height;
+        open: root.rewind-open && root.phase == 2 && !root.failed && !root.exiting;
+        busy: root.busy; rows: root.rewind-rows; selected: root.rewind-selected;
+        preview: root.rewind-preview; position: root.rewind-position;
+        duration: root.rewind-duration; message: root.message;
+        select(index) => { root.rewind-select(index); }
+        scrub(position) => { root.rewind-scrub(position); }
+        answer(resume) => { root.rewind-answer(resume); }
     }
     if root.phase == 2 : ModalDialog {
         open: root.failed || (root.busy && !root.paused && root.live && !root.exiting);

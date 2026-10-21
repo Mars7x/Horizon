@@ -65,12 +65,13 @@ saving and skips the decorative return animation.
 | L / R (GBA only) | A / S | Left / right shoulder |
 | Start / Select | Enter / Backspace | Start / Back |
 | Pause | Escape or F10 | Guide (stick clicks never pause) |
-| Fast-forward (hold, 4×) | Tab | Both triggers together (Shortcuts) |
+| Fast-forward (hold, 2×) | Tab | Both triggers together (Shortcuts) |
 | Quick save / quick load | F5 / F8 | Not set (Shortcuts) |
 | Screenshot | F12 | Not set (Shortcuts) |
+| Rewind timeline | F6 | Not set (Shortcuts); also in the quick menu |
 
 Shortcuts work during play without opening the quick menu. Fast-forward plays
-at 4× while held and returns to the chosen speed, silently; opening the quick
+at 2× while held and returns to the chosen speed, silently; opening the quick
 menu or leaving Horizon ends it. Quick save writes slot 1 ("Slot 1 · Quick" in
 the state lists) without asking (the previous state stays in the state
 backups) and quick load loads it; both, and screenshots, show a short notice
@@ -95,11 +96,11 @@ shared 180 ms forward/back zoom and crossfade inside the stationary drawer;
 Reduced Motion switches views immediately. Saving stays paused; a successful load continues
 the game and clears queued audio/input, respecting background freeze.
 
-The menu never scrolls: when a small window can't fit every row (DS has nine
-actions), the rows shrink slightly, down to 36 px, and larger windows keep
+The menu never scrolls: when a small window can't fit every row (DS has eleven
+actions), the rows shrink slightly, down to 36 px, and gaps tighten if needed; larger windows keep
 their full size.
 
-DS games add Screen layout, Swap screens and Close lid after Playback speed.
+DS games add Screen layout, Swap screens and Close lid after Fast-forward.
 Screen layout steps through the layouts with Left/Right (Select cycles); Swap
 screens exchanges them. Both keep the menu open, move the screens animated and
 are remembered for that game (`view.json` in its save folder); Settings' layout
@@ -108,24 +109,15 @@ the game sees it (games ask for this, such as Phantom Hourglass); the row then
 reads Open lid. Restarting or loading a state opens it. melonDS toggles its lid
 on L2 + Y, so the game also sees Y for that one frame.
 
-Playback speed offers 1×, 2×, 3× and 4× for this loaded game. When the core
-can't reach the chosen speed (some DS games manage about 3.6× here), the worker
-measures how long its frames take and plays the game, and its audio, at about
-92% of what it can reach, so the sound stays continuous at a slightly lower
-pitch instead of breaking up (`real_ds_player_fast_forward_audio_report`). The
-worker logs the speed fast-forward reached every five seconds. Unoptimised
-builds once halved the reachable speed; development builds now optimise
-dependencies fully and Horizon lightly (see `Cargo.toml`), and the frame
-conversion is one tight loop per pixel format. Left/Right steps
-between the limits; Select cycles through all four. The worker multiplies its
-frame pace and plays audio at the corresponding faster, higher pitch. Only the newest frame is
-filtered, once per frame shown, so frames fast-forward skips over are never filtered. On a 175 Hz
-display, 4× shows about 175 frames a second with Smooth pixel art (`real_player_frame_rate_report`). A stereo
-low-pass filter matched to the factor prevents aliasing before integer decimation
-back to the output sample rate. Buffered audio is cleared on speed changes and
-kept to at most 50 ms in the application queue. Speed is shown only in the pause
-panel, with a directional 180 ms slide/crossfade when the value changes
-(immediate with Reduced Motion). Returning to 1× clears queued audio before playback resumes.
+Fast-forward is a shared toggle: off runs at 1×, on requests 2× for this loaded
+game. Left turns it off, Right turns it on, and Select/click toggles it. Held
+fast-forward also requests 2× and returns to the selected setting on release.
+When a core cannot reach 2×, the worker measures its frame time and adjusts the
+audio to the reachable pace. It logs the reached speed every five seconds.
+Only the newest frame is filtered once per frame shown. A stereo low-pass filter
+prevents aliasing before decimation back to the output sample rate. Speed changes
+clear buffered audio, which remains bounded to 50 ms in the application queue.
+The toggle uses the shared animated track/thumb and respects Reduced Motion.
 
 The game worker publishes atomic stereo frames to a bounded queue; PipeWire does
 not lock against core filtering or allocate. Playback builds about 31 ms of
@@ -182,7 +174,7 @@ and automatically resumes on reactivation. Turning it off keeps the game and
 audio running in the background, with gameplay input blocked. A manually opened
 pause menu remains paused on return. Startup can produce its first frame before
 freezing; restart follows the same background policy. Swap Select and Back also exchanges controller
-gameplay A/B; keyboard bindings stay unchanged. Home/Library focus and route are retained.
+gameplay A/B and X/Y; keyboard bindings stay unchanged. Home/Library focus and route are retained.
 
 ## Core preferences
 
@@ -265,7 +257,44 @@ Observed Activity sessions begin after the core produces a frame, include time
 while the loaded game is paused, and finish after normal shutdown. Failed sessions
 are interrupted; no session is invented for a failed load. No source lifetime
 counter is added. Loading a state or restarting does not start another session.
-Rewind, custom cores and RetroAchievements remain future work.
+Custom cores and RetroAchievements remain future work.
+
+## Rewind
+
+Rewind opens a full-shell filmstrip: the game pauses, a large preview shows
+the selected moment, and the thumbnails retain their original aspect ratio.
+Left/Right moves through checkpoints without wrapping; click a thumbnail or
+drag the scrub bar to select it. A/Enter resumes from that moment, while B/Escape resumes the current
+game without changing it. Opening from the quick menu or F6 has the same result;
+Controller → Shortcuts can assign a button or pair. Its default is unset.
+One soft, original descending sound marks a successful open and follows UI
+Sounds; selecting moments uses the quiet navigation sound. Reduced Motion
+removes the entrance and camera animation.
+
+The worker captures a state and native-sized picture every half-second of
+emulated play. History stays in memory, with a 30-second window and 128 MiB
+limit for retained states/pictures. The UI shows the actual available time;
+large DS states can shorten it. DS previews follow the current layout and swap,
+independently of GPU internal resolution. No save slots or files are created.
+Newly started games need time to collect history; unsupported or failed state
+capture reports why rewind is unavailable.
+
+Scrubbing never restores the core or writes saves. Resume waits for the writer,
+preserves the current cartridge save, restores the chosen state, clears held
+input and stale audio, resets pacing and discards later rewind points only
+after a successful restore. Saved slots and the automatic resume file are
+retained. Restart or loading a state clears rewind history; closing releases
+it. Activity remains one observed session. Deactivation keeps the timeline
+paused even with background freezing off; closing while browsing saves the
+live game rather than the preview. See [ADR 0221](adr/0221-visual-rewind.md).
+
+The opt-in `real_core_rewind_previews_do_not_restore_until_commit` test uses
+generated original homebrew and `HORIZON_GBA_CORE` to compare live/selected
+machine counters before and after restore. The opt-in
+`rewind_timeline_owns_input_cancels_and_plays_its_opening_cue_once` test needs
+the Wayland backend and checks selection, focus loss, cancel and semantic sound
+delivery. Native/GPU DS performance, real controllers, audible quality and
+window-size/theme runtime review remain separate checks.
 
 ## Development
 
@@ -285,7 +314,7 @@ original homebrew, never personal ROMs or the production database. See
 
 The ignored `real_core_pipewire_audio_soak` test runs generated tone homebrew
 through the actual core, audio queue and PipeWire callbacks for ten minutes.
-It cycles through 1×/2×/3×/4× each minute and pauses/resumes every fifteen seconds.
+It cycles through 1×/2× each minute and pauses/resumes every fifteen seconds.
 `HORIZON_AUDIO_SOAK_SECONDS` can set a shorter diagnostic run (10–3600 seconds).
 It reports queue size, callback gaps, unexpected silence/underruns, invalid
 samples and pause/resume failures. Its quiet test tone and callback measurements
@@ -310,7 +339,7 @@ Mouse press/drag touches the touchscreen wherever the layout places it, and so
 does a touchscreen (Slint delivers both as the same pointer events; a real
 touchscreen is untested). Controllers have no touch cursor, and the core draws
 none. Controllers use the DS button mapping (A, B, X, Y, L, R, Start, Select,
-Microphone; Settings → Controller), which follows the global A/B swap and is independent of
+Microphone; Settings → Controller), which follows the global A/B and X/Y swap and is independent of
 the Game Boy mapping. Guide opens the quick menu; stick clicks don't (L3 swaps
 the screens, R3 does nothing). Keyboard Z/X are A/B, C/V are X/Y, A/S are shoulders, arrows are
 directions, Enter is Start, Backspace is Select and B is the microphone.
@@ -346,18 +375,19 @@ exit wait for it. Exits still write the resume point and the save as before.
 Four manual slots and automatic resume use `states/melonds-ds` and JXL previews;
 existing mGBA states stay in `states/mgba`. A core reporting no serializable
 state can still exit after saving available cartridge memory.
-Settings → Cores → melonDS → Internal resolution draws the DS's 3D at 2× to 6×
-(384p to 1152p) with melonDS's OpenGL renderer on the graphics card; Native (the
+Settings → Cores → melonDS → Internal resolution draws the DS's 3D at 2× to 8×
+(384p to 1536p) with melonDS's OpenGL renderer on the graphics card; Native (the
 default) keeps its software renderer. Horizon gives the core a hidden OpenGL 3.2
 core context on the game worker (EGL from the system driver, loaded at run
 time, Mesa's surfaceless platform first; `platform/gl_context.rs`) and reads
 frames back only when the screen can show one. 2D graphics stay at the DS's own
-resolution, as in melonDS. An upscaled picture is scaled smoothly: the LCD and
-Smooth pixel art filters are for native pixels, so they act as Smooth there.
+resolution, as in melonDS. LCD works at every internal resolution: its native
+subpixel/grid pattern overlays the higher-resolution pixels without downsampling
+the 3D image or expanding its buffer. Smooth pixel art requires Native resolution;
+above Native it uses Smooth, explained beside the filter in Settings.
 States and touch are unchanged; state previews are averaged down to 256×384,
 and screenshots keep the full resolution. Without a usable GPU context the game
-plays at Native and logs why. Black 2 runs at about 7.5× at 4× resolution here,
-faster than Native, since the GPU draws its 3D. Other cores remain software only.
+plays at Native and logs why. Other cores remain software only.
 Generated core support files are contained
 in the game folder’s `core-data/melonDS DS` directory; no BIOS manager is exposed.
 
@@ -365,3 +395,6 @@ The ignored `real_ds_core_frames_states_and_restart` test uses an original,
 logo-free test cartridge and `HORIZON_DS_CORE` pointing to the packaged library.
 It verifies both screens, save/restore and restart without downloading a game.
 See [ADR 0216](adr/0216-nintendo-ds-playback.md).
+
+See [ADR 0222](adr/0222-playback-controls-and-ds-resolution.md) for the two-speed toggle,
+higher-resolution DS filters and paired face-button swapping.

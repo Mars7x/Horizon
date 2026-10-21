@@ -1,5 +1,10 @@
 # Storage
 
+Rewind history is volatile memory only: a maximum 30-second window of state and
+native picture pairs with a 128 MiB retained payload budget. It creates no
+files, slots or migration, and closing the game releases it. Durable manual and
+automatic state bundles remain independent. See [playback](GBA_PLAYBACK.md#rewind).
+
 [Data paths](../src/platform/data_paths.rs) selects every storage location.
 Startup passes paths to workers; services do not resolve HOME/XDG roots.
 Under Flatpak, its private data/config/cache roots are used directly. Native
@@ -18,7 +23,6 @@ data/
   album/<system>/<game>/
     game.json
     screenshots/<UTC timestamp>.jxl
-    recordings/<UTC timestamp>.<extension>
   album/horizon/screenshots/                 # captures without a game
   profile/
     profile.json
@@ -143,3 +147,6 @@ and release, preventing cross-core loads. Both DS screens are retained in the
 256×384 JXL preview. No migration or deletion of existing game data is performed.
 
 Generated DS support files stay under each game’s `core-data/melonDS DS` folder.
+
+Album scans image captures only. Existing recording folders and files are left
+untouched and are not listed, decoded or deleted by Album.

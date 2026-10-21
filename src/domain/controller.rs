@@ -20,9 +20,32 @@ pub const DS_ACTION_NAMES: [&str; 9] = [
 /// The DS defaults: the same buttons, and the left trigger blows.
 const DS_DEFAULTS: [u8; 9] = [8, 0, 9, 1, 10, 11, 3, 2, 12];
 
+/// The face-button preference is applied after per-core mappings.
+pub fn swap_face_buttons(buttons: u16) -> u16 {
+    const FACES: u16 = (1 << 8) | 1 | (1 << 9) | (1 << 1);
+    (buttons & !FACES) | ((buttons & 3) << 8) | ((buttons >> 8) & 3)
+}
+
+fn effective_row(row: usize, swapped: bool, actions: &[u8]) -> usize {
+    if !swapped {
+        return row;
+    }
+    let opposite = match actions.get(row) {
+        Some(8) => 0,
+        Some(0) => 8,
+        Some(9) => 1,
+        Some(1) => 9,
+        _ => return row,
+    };
+    actions
+        .iter()
+        .position(|&action| action == opposite)
+        .unwrap_or(row)
+}
+
 /// One system's mapping: for each of its actions (in `$actions` order), the
-/// controller button that presses it. A and B lead, so the global swap can
-/// exchange them.
+/// controller button that presses it. The global face swap exchanges A/B
+/// and, for systems that have them, X/Y; shoulder rows stay unchanged.
 macro_rules! bindings {
     ($(#[$serde:meta])* $name:ident, $count:literal, $actions:ident, $defaults:ident) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -55,14 +78,14 @@ macro_rules! bindings {
         impl $name {
             pub fn source(self, row: usize, swapped: bool) -> Option<u8> {
                 self.0
-                    .get(if swapped && row < 2 { 1 - row } else { row })
+                    .get(effective_row(row, swapped, &$actions))
                     .copied()
             }
             pub fn assign(mut self, row: usize, source: u8, swapped: bool) -> Self {
                 if row >= $actions.len() || !SOURCES.contains(&source) {
                     return self;
                 }
-                let row = if swapped && row < 2 { 1 - row } else { row };
+                let row = effective_row(row, swapped, &$actions);
                 if let Some(other) = self.0.iter().position(|v| *v == source) {
                     self.0.swap(row, other);
                 } else {
@@ -129,7 +152,13 @@ pub struct ControllerPreferences {
     pub shortcuts: Shortcuts,
 }
 
-pub const SHORTCUT_NAMES: [&str; 4] = ["Fast-forward", "Quick save", "Quick load", "Screenshot"];
+pub const SHORTCUT_NAMES: [&str; 5] = [
+    "Fast-forward",
+    "Quick save",
+    "Quick load",
+    "Screenshot",
+    "Rewind",
+];
 
 /// In-game shortcuts, shared by every system: one or two controller buttons
 /// (`SOURCES`) for each, or none. A one-button shortcut's button is held back
@@ -138,7 +167,7 @@ pub const SHORTCUT_NAMES: [&str; 4] = ["Fast-forward", "Quick save", "Quick load
 /// Fast-forward works while held; the others act once per press.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "SavedShortcuts", into = "Vec<Vec<u8>>")]
-pub struct Shortcuts([u16; 4]);
+pub struct Shortcuts([u16; 5]);
 
 /// Keep the original single-button/null settings readable when adding pairs.
 /// Writes always use the current list-of-buttons format.
@@ -168,15 +197,19 @@ impl Default for Shortcuts {
     /// Both triggers fast-forward: a pair, so either trigger alone still
     /// reaches the game (the DS microphone is the left trigger).
     fn default() -> Self {
-        Self([1 << 12 | 1 << 13, 0, 0, 0])
+        Self([1 << 12 | 1 << 13, 0, 0, 0, 0])
     }
 }
 impl TryFrom<Vec<Vec<u8>>> for Shortcuts {
     type Error = &'static str;
-    fn try_from(rows: Vec<Vec<u8>>) -> Result<Self, Self::Error> {
-        let mut masks = [0u16; 4];
+    fn try_from(mut rows: Vec<Vec<u8>>) -> Result<Self, Self::Error> {
+        // Earlier single-button and pair files have no Rewind assignment.
+        if rows.len() == 4 {
+            rows.push(Vec::new());
+        }
+        let mut masks = [0u16; 5];
         if rows.len() != masks.len() {
-            return Err("Shortcuts have four rows");
+            return Err("Shortcuts have five rows");
         }
         for (mask, row) in masks.iter_mut().zip(&rows) {
             if row.len() > 2 || row.iter().any(|v| !SOURCES.contains(v)) {
@@ -213,6 +246,7 @@ impl Shortcuts {
     pub const QUICK_SAVE: usize = 1;
     pub const QUICK_LOAD: usize = 2;
     pub const SCREENSHOT: usize = 3;
+    pub const REWIND: usize = 4;
     /// `row`'s buttons, in `SOURCES` order (none, one or two).
     pub fn buttons(self, row: usize) -> Vec<u8> {
         let mask = self.0.get(row).copied().unwrap_or(0);
@@ -288,6 +322,23 @@ impl ControllerPreferences {
 mod tests {
     use super::*;
     #[test]
+    fn face_swap_is_reversible_and_does_not_touch_shoulders_or_directions() {
+        for buttons in 0..=u16::MAX {
+            assert_eq!(swap_face_buttons(swap_face_buttons(buttons)), buttons);
+            assert_eq!(swap_face_buttons(buttons) & !771, buttons & !771);
+        }
+        assert_eq!(swap_face_buttons(1 << 8), 1);
+        assert_eq!(swap_face_buttons(1 << 9), 2);
+        let ds = DsBindings::default();
+        assert_eq!(ds.source(2, true), Some(1));
+        assert_eq!(ds.source(3, true), Some(9));
+        let custom = ds.assign(2, 13, true);
+        assert_eq!(custom.source(2, true), Some(13));
+        assert_eq!(swap_face_buttons(custom.apply(1 << 13)), 1 << 9);
+        assert_eq!(GameplayBindings::default().source(2, true), Some(10));
+        assert_eq!(GameplayBindings::default().source(3, true), Some(11));
+    }
+    #[test]
     fn remapping_swaps_conflicts_and_respects_global_swap() {
         let defaults = GameplayBindings::default();
         let map = defaults.assign(0, 0, false);
@@ -336,7 +387,7 @@ mod tests {
         assert_eq!(old.shortcuts.buttons(Shortcuts::QUICK_LOAD), vec![9]);
         assert_eq!(old.shortcuts.buttons(Shortcuts::SCREENSHOT), vec![0]);
         let saved = serde_json::to_string(&old).unwrap();
-        assert!(saved.contains(r#""shortcuts":[[13],[],[9],[0]]"#));
+        assert!(saved.contains(r#""shortcuts":[[13],[],[9],[0],[]]"#));
         assert_eq!(
             serde_json::from_str::<ControllerPreferences>(&saved).unwrap(),
             old
@@ -350,6 +401,13 @@ mod tests {
         }
         let pairs: Shortcuts = serde_json::from_str("[[12,13],[],[9],[0]]").unwrap();
         assert_eq!(pairs.buttons(Shortcuts::FAST_FORWARD), vec![12, 13]);
+        assert!(!pairs.is_set(Shortcuts::REWIND));
+        let rewind = pairs.assign(Shortcuts::REWIND, 1 << 10);
+        let serialized = serde_json::to_string(&rewind).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Shortcuts>(&serialized).unwrap(),
+            rewind
+        );
     }
 
     #[test]

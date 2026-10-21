@@ -19,7 +19,7 @@ these guides describe the current contracts. The root README is intentionally bl
 | [ROM import](ROM_IMPORT.md) | Folder selection, automatic import and GB/GBC/GBA/DS recognition |
 | [Playback](GBA_PLAYBACK.md) | Embedded mGBA and melonDS DS, gameplay controls, battery saves, save states and lifecycle |
 | [Activity](ACTIVITY.md) | Observed sessions, lifetime records and history |
-| [Album](ALBUM.md) | Horizon-owned media, playback and deletion |
+| [Album](ALBUM.md) | Horizon-owned images, viewer and deletion |
 | [Settings](SETTINGS.md) | Appearance, controllers, core preferences and third-party configuration |
 | [Profile](PROFILE.md) | Local profile, Steam pictures and read-only friends |
 | [Artwork](ARTWORK.md) | Square-image contract, SteamGridDB, caches and provenance |

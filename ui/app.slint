@@ -2,6 +2,8 @@ import { ControllerBindingRow } from "models/controller.slint";
 export { ControllerBindingRow }
 import { SaveStateRow } from "models/save-state.slint";
 export { SaveStateRow }
+import { RewindRow } from "models/rewind.slint";
+export { RewindRow }
 import { OnboardingPage } from "pages/onboarding.slint";
 import { GamePlayer } from "pages/game-player.slint";
 import { RomSetupDialog } from "components/rom-setup.slint";
@@ -245,7 +247,6 @@ export component AppWindow inherits Window {
     in property <int> album-collection-count: 0;
     in property <string> album-status: "";
     in property <string> album-game-text: "All games";
-    in property <string> album-kind-text: "All";
     in property <int> album-selected-index: 0;
     in property <int> album-scroll-row: 0;
     in property <int> album-visit-revision: 0;
@@ -254,15 +255,12 @@ export component AppWindow inherits Window {
     in property <string> album-viewer-text: "";
     in property <image> album-viewer-image;
     in property <bool> album-viewer-has-image: false;
-    in property <bool> album-viewer-previous-is-video;
     in property <image> album-viewer-previous-image;
     in property <bool> album-viewer-previous-has-image: false;
     in property <image> album-viewer-landing-image;
     in property <bool> album-viewer-landing-has-image: false;
     in property <int> album-slide-key: 0;
     in property <int> album-slide-direction: 1;
-    in property <bool> album-viewer-is-video: false;
-    in property <bool> album-viewer-playing: false;
     in property <string> album-viewer-problem: "";
     // Deleting (Horizon's own captures only). `selecting` is the grid's
     // multi-select; the dialog confirms. Focus is Rust-owned.
@@ -273,24 +271,14 @@ export component AppWindow inherits Window {
     in property <string> album-dialog-text: "";
     in property <int> album-dialog-focus: 0;
     callback album-dialog-choose(int);
-    // Video clock: position at the last anchor; Slint advances it per frame.
-    in property <int> album-video-position-ms: 0;
-    in property <int> album-video-duration-ms: 0;
-    in property <int> album-video-anchor: 0;
-    in property <bool> album-video-clock-running: false;
-    in property <bool> album-video-frame-live: false;
-    in property <int> album-video-frame-ms: 33;
-    // Bumped by Rust on every viewer input: shows the fullscreen overlay.
+    // Bumped by Rust on viewer input to show the fullscreen overlay.
     in property <int> album-overlay-revision: 0;
     out property <int> album-grid-columns: album-page.grid-columns;
     out property <int> album-visible-rows: album-page.visible-rows;
     callback album-choose(int);
     callback album-cycle-game();
-    callback album-cycle-kind();
     callback album-scroll-rows(int);
     callback album-step(int);
-    callback album-toggle-play();
-    callback album-seek(float);
     callback album-close-viewer();
     callback album-layout-changed();
     in-out property <int> activity-pressed-index: -1;
@@ -338,6 +326,7 @@ export component AppWindow inherits Window {
     in property <string> settings-core-filter: "None";
     in property <string> settings-ds-layout: "Side by side";
     in property <string> settings-ds-filter: "None";
+    in property <string> settings-ds-filter-note;
     in property <string> settings-ds-resolution: "Native";
     in property <int> settings-core-sunlight: 0;
     in property <string> settings-core-feedback: "";
@@ -428,11 +417,19 @@ export component AppWindow inherits Window {
     in property <bool> player-screenshot-visible: false;
     in property <int> player-screenshot-sequence: 0;
     in property <int> player-speed: 1;
-    in property <bool> player-speed-forward: true;
     in property <int> player-state-mode: 0;
     in property <int> player-state-focus: -1;
     in property <[SaveStateRow]> player-state-rows;
     callback player-state-choose(int);
+    in property <bool> player-rewind-open;
+    in property <[RewindRow]> player-rewind-rows;
+    in property <int> player-rewind-selected;
+    in property <image> player-rewind-preview;
+    in property <string> player-rewind-position;
+    in property <string> player-rewind-duration;
+    callback player-rewind-select(int);
+    callback player-rewind-scrub(float);
+    callback player-rewind-answer(bool);
     callback player-touch(float, float, bool);
     in property <bool> player-ds;
     in property <bool> player-ds-lid-closed;
@@ -743,7 +740,6 @@ export component AppWindow inherits Window {
                     collection-count: root.album-collection-count;
                     status: root.album-status;
                     game-text: root.album-game-text;
-                    kind-text: root.album-kind-text;
                     selected-index: root.album-selected-index;
                     scroll-row: root.album-scroll-row;
                     visit-revision: root.album-visit-revision;
@@ -753,14 +749,11 @@ export component AppWindow inherits Window {
                     viewer-image: root.album-viewer-image;
                     viewer-has-image: root.album-viewer-has-image;
                     viewer-previous-image: root.album-viewer-previous-image;
-                    viewer-previous-is-video: root.album-viewer-previous-is-video;
                     viewer-previous-has-image: root.album-viewer-previous-has-image;
                     viewer-landing-image: root.album-viewer-landing-image;
                     viewer-landing-has-image: root.album-viewer-landing-has-image;
                     slide-key: root.album-slide-key;
                     slide-direction: root.album-slide-direction;
-                    viewer-is-video: root.album-viewer-is-video;
-                    viewer-playing: root.album-viewer-playing;
                     viewer-problem: root.album-viewer-problem;
                     overlay-revision: root.album-overlay-revision;
                     selecting: root.album-selecting;
@@ -770,19 +763,10 @@ export component AppWindow inherits Window {
                     dialog-text: root.album-dialog-text;
                     dialog-focus: root.album-dialog-focus;
                     dialog-choose(choice) => { if (root.current-route == AppRouteView.album) { root.album-dialog-choose(choice); } }
-                    video-position-ms: root.album-video-position-ms;
-                    video-duration-ms: root.album-video-duration-ms;
-                    video-anchor: root.album-video-anchor;
-                    video-clock-running: root.album-video-clock-running;
-                    video-frame-live: root.album-video-frame-live;
-                    video-frame-ms: root.album-video-frame-ms;
                     choose(index) => { if (root.current-route == AppRouteView.album) { root.album-choose(index); } }
                     cycle-game => { if (root.current-route == AppRouteView.album) { root.album-cycle-game(); } }
-                    cycle-kind => { if (root.current-route == AppRouteView.album) { root.album-cycle-kind(); } }
                     scroll-rows(rows) => { if (root.current-route == AppRouteView.album) { root.album-scroll-rows(rows); } }
                     step(direction) => { if (root.current-route == AppRouteView.album) { root.album-step(direction); } }
-                    toggle-play => { if (root.current-route == AppRouteView.album) { root.album-toggle-play(); } }
-                    seek(fraction) => { if (root.current-route == AppRouteView.album) { root.album-seek(fraction); } }
                     close-viewer => { if (root.current-route == AppRouteView.album) { root.album-close-viewer(); } }
                     layout-changed => { root.album-layout-changed(); }
                 }
@@ -972,6 +956,7 @@ export component AppWindow inherits Window {
                     core-filter: root.settings-core-filter;
                     ds-layout: root.settings-ds-layout;
                     ds-filter: root.settings-ds-filter;
+                    ds-filter-note: root.settings-ds-filter-note;
                     ds-resolution: root.settings-ds-resolution;
                     core-color: root.settings-core-color;
                     core-palette: root.settings-core-palette;
@@ -1159,13 +1144,19 @@ export component AppWindow inherits Window {
             player-surface := GamePlayer {
                 z: 30; width: parent.width; height: parent.height;
                 phase: root.player-phase; origin: root.player-origin;
-                speed: root.player-speed; speed-forward: root.player-speed-forward;
+                speed: root.player-speed;
                 screenshot-preview: root.player-screenshot-preview;
                 screenshot-visible: root.player-screenshot-visible;
                 screenshot-sequence: root.player-screenshot-sequence;
                 state-mode: root.player-state-mode; state-focus: root.player-state-focus;
                 state-rows: root.player-state-rows;
                 state-choose(slot) => { root.player-state-choose(slot); }
+                rewind-open: root.player-rewind-open; rewind-rows: root.player-rewind-rows;
+                rewind-selected: root.player-rewind-selected; rewind-preview: root.player-rewind-preview;
+                rewind-position: root.player-rewind-position; rewind-duration: root.player-rewind-duration;
+                rewind-select(index) => { root.player-rewind-select(index); }
+                rewind-scrub(position) => { root.player-rewind-scrub(position); }
+                rewind-answer(resume) => { root.player-rewind-answer(resume); }
                 touch(x, y, pressed) => { root.player-touch(x, y, pressed); }
                 loading-frame: root.player-loading-frame; loading-picture: root.player-loading-picture; saving: root.player-saving; notice: root.player-notice; notice-shown: root.player-notice-shown; exiting: root.player-exiting;
                 ds: root.player-ds; ds-lid-closed: root.player-ds-lid-closed; ds-layout: root.player-ds-layout; ds-layout-forward: root.player-ds-layout-forward; ds-top: root.player-ds-top; ds-bottom: root.player-ds-bottom;

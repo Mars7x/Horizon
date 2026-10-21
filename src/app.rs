@@ -1,7 +1,6 @@
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
-    sync::Arc,
     time::Duration,
 };
 
@@ -25,7 +24,6 @@ use crate::{
     platform::{
         data_paths, slint_backend,
         system_status::{StatusMonitor, SystemStatus},
-        video::FfmpegVideo,
     },
     presentation::{
         activity::{
@@ -46,7 +44,7 @@ use crate::{
     },
     services::{
         activity::{ActivityService, ActivitySessionTransition, LaunchActivitySink},
-        album::{ALBUM_CACHE_VERSION, NoVideo, VideoBackend},
+        album::ALBUM_CACHE_VERSION,
         artwork::{self, ArtworkService},
         controller_settings::ControllerPreferences,
         import::{SourceImportOutcome, SourceImportService},
@@ -386,13 +384,6 @@ pub fn run() -> Result<(), AppError> {
     let keyboard_sound = Rc::clone(&navigation_sound);
     keyboard.set_sound(Rc::new(move |cue| keyboard_sound.borrow_mut().play(cue)));
     navigation.set_keyboard(Rc::clone(&keyboard));
-    let video: Arc<dyn VideoBackend> = match FfmpegVideo::new() {
-        Ok(video) => Arc::new(video),
-        Err(error) => {
-            warn!(%error, "video playback unavailable; Album lists videos without playing them");
-            Arc::new(NoVideo(error))
-        }
-    };
     let capture_sources = production_capture_sources().unwrap_or_else(|error| {
         warn!(%error, "capture sources unavailable; Album shows Horizon's own captures only");
         Vec::new()
@@ -406,7 +397,6 @@ pub fn run() -> Result<(), AppError> {
         album_dir,
         capture_sources,
         data_paths::album_cache_dir(ALBUM_CACHE_VERSION),
-        video,
     );
     navigation.set_album(Rc::clone(&album), &ui);
     navigation.set_activity_details(Rc::clone(&activity_details));

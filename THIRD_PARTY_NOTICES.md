@@ -219,22 +219,17 @@ The existing Apache-2.0 and MIT license texts cover these dual-licensed dependen
 
 The existing MIT license text is included as `LICENSES/MIT.txt`.
 
-### Video and sound libraries (not bundled)
+### Sound library (not bundled)
 
-- **FFmpeg** (`libavformat`, `libavcodec`, `libavutil`, `libswscale`, `libswresample`)
-  - Upstream: https://ffmpeg.org/
-  - License: LGPL-2.1-or-later, or GPL-2.0-or-later for builds with GPL parts
-  - Use in Horizon: decodes Album videos, their poster frames and their sound.
 - **PipeWire** (`libpipewire-0.3`)
   - Upstream: https://pipewire.org/
   - License: MIT
-  - Use in Horizon: plays UI sounds and video sound.
+  - Use in Horizon: plays UI sounds and embedded game audio.
 
-Horizon bundles neither. It links dynamically against the copies the Flatpak
-runtime (`org.freedesktop.Platform`) ships, including FFmpeg's full codec set
-from the runtime's `codecs-extra` extension, under their own licenses; all are
-compatible with Horizon's GPL-3.0-or-later. Horizon's own C shims over them
-(`csrc/`) are part of Horizon. The build uses the **cc** and **pkg-config**
+Horizon does not bundle PipeWire. It links dynamically against the copy the
+Flatpak runtime (`org.freedesktop.Platform`) ships under its own license,
+compatible with Horizon's GPL-3.0-or-later. Horizon's own C shim
+(`csrc/horizon_audio.c`) is part of Horizon. The build uses the **cc** and **pkg-config**
 crates (MIT OR Apache-2.0), consumed as Cargo build dependencies without
 modification.
 
@@ -341,7 +336,7 @@ only on explicit Save; key content and clipboard data must not be logged.
 
 ## Original UI audio
 
-- **Assets:** `ui/assets/horizon-navigation.wav`, `ui/assets/horizon-ok.wav`, `ui/assets/horizon-back.wav`, `ui/assets/horizon-quick-menu-open.wav`, `ui/assets/horizon-quick-menu-close.wav`, `ui/assets/horizon-launch.wav`, `ui/assets/horizon-screenshot.wav`
+- **Assets:** `ui/assets/horizon-navigation.wav`, `ui/assets/horizon-ok.wav`, `ui/assets/horizon-back.wav`, `ui/assets/horizon-quick-menu-open.wav`, `ui/assets/horizon-quick-menu-close.wav`, `ui/assets/horizon-launch.wav`, `ui/assets/horizon-screenshot.wav`, `ui/assets/horizon-rewind-open.wav`
 - **Author/license:** Horizon contributors, GPL-3.0-or-later; see `LICENSE` and
   `LICENSES/GPL-3.0-or-later.txt`. Asset annotations are in `REUSE.toml`.
 - **Source:** `scripts/generate-quick-menu-sounds.py` synthesizes the original
@@ -349,7 +344,8 @@ only on explicit Save; key content and clipboard data must not be logged.
   low-passed noise), the navigation snap (a warm, soft-edged transient with a
   short body), OK (two warm snaps 24 ms apart, the second with a short A6 note), Back (the warm
   snap with two quick notes stepping down, E6 to A5), the launch (a low swelling tone) and the shutter
-  (one tight click and a short second click), using Python's standard library,
+  (one tight click and a short second click) and rewind opening
+  (a soft descending tone), using Python's standard library,
   with no recordings, external samples or third-party synthesis. PCM16 mono,
   48 kHz; navigation 50 ms, OK 68 ms, Back 70 ms, menu 90 ms each, launch 150 ms,
   shutter 60 ms. The owner-supplied navigation, OK and Back WAVs these replace

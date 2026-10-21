@@ -15,8 +15,8 @@ export global InputGlyphs {
 // Button glyph in the same style as Home's footer "A": filled foreground
 // shape, symbol in the background colour. `button` is the logical button
 // ("A" confirm, "B" back, "X" secondary, "LB"/"RB", "+" menu, "L3"/"R3");
-// the glyph drawn is that button on the device in use (A and B trade
-// places on a controller when confirm and back are swapped): Enter/Esc/Del/Q/E
+// the glyph drawn is that button on the device in use (A/B and X/Y trade
+// places on a controller when the face-button preference is enabled): Enter/Esc/Del/Q/E
 // key caps, ✕ ○ □ on PlayStation, L1/R1 or L/R shoulders (the Odin 3:
 // Nintendo's letters, L1/R1). Face buttons are
 // circles, shoulders pills, keys rounded squares. `compact` is the small
@@ -30,7 +30,8 @@ export component ButtonGlyph inherits Rectangle {
     // The controller button that does it: confirm and back trade places when
     // the user swapped them.
     private property <string> face: root.key || !InputGlyphs.swap-confirm ? root.button
-        : root.button == "A" ? "B" : root.button == "B" ? "A" : root.button;
+        : root.button == "A" ? "B" : root.button == "B" ? "A"
+        : root.button == "X" ? "Y" : root.button == "Y" ? "X" : root.button;
     private property <bool> shoulder: root.button == "LB" || root.button == "RB";
     // PlayStation face buttons are drawn shapes, not letters.
     private property <bool> ps-face: root.family == GlyphFamily.playstation

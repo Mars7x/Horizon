@@ -12,6 +12,7 @@ required_assets=(
   "horizon-quick-menu-open.wav"
   "horizon-quick-menu-close.wav"
   "horizon-screenshot.wav"
+  "horizon-rewind-open.wav"
   "controllers/controller_xbox360.svg"
   "controllers/controller_xboxseries.svg"
   "controllers/controller_playstation3.svg"
@@ -59,7 +60,6 @@ grep -Fq "rusqlite / libsqlite3-sys" "$notice" || { echo "rusqlite provenance mi
 grep -Fq "SQLite core" "$notice" || { echo "SQLite provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
 grep -Fq "serde 1.x / serde_json 1.x" "$notice" || { echo "Serde provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
 grep -Fq "zbus 5.x" "$notice" || { echo "zbus provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
-grep -Fq "**FFmpeg**" "$notice" || { echo "FFmpeg provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
 grep -Fq "**PipeWire**" "$notice" || { echo "PipeWire provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
 grep -Fq "**jxl-oxide 0.12.x**" "$notice" || { echo "jxl-oxide provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }
 grep -Fq "## JPEG XL screenshot encoder" "$notice" || { echo "libjxl encoder provenance missing from THIRD_PARTY_NOTICES.md" >&2; exit 1; }

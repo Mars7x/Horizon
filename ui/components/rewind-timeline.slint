@@ -1,0 +1,135 @@
+import { RewindRow } from "../models/rewind.slint";
+import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
+import { PageHeader } from "page-header.slint";
+import { SelectionFocusSurface } from "selection-focus-surface.slint";
+import { HintBar } from "hint-bar.slint";
+
+// Rust owns the selected checkpoint and all restore/cancel decisions.
+export component RewindTimeline inherits Rectangle {
+    in property <bool> open;
+    in property <bool> busy;
+    in property <[RewindRow]> rows;
+    in property <int> selected;
+    in property <image> preview;
+    in property <string> position;
+    in property <string> duration;
+    in property <string> message;
+    callback select(int);
+    callback scrub(float);
+    callback answer(bool);
+    private property <float> reveal: root.open ? 1.0 : 0.0;
+    animate reveal { duration: Motion.page-duration; easing: ease-out; }
+    background: Theme.background;
+    opacity: root.reveal;
+    visible: root.open || root.reveal > 0.001;
+    PageHeader { width: parent.width; title: "Rewind"; }
+    Text {
+        x: Metrics.page-margin; y: Metrics.page-title-y;
+        width: parent.width - Metrics.page-margin * 2; height: Metrics.page-title-height;
+        text: root.position; color: Theme.secondary-foreground;
+        font-size: Typography.body-size; horizontal-alignment: right; vertical-alignment: center;
+    }
+    picture := Rectangle {
+        y: Metrics.page-header-height; width: parent.width;
+        height: max(0px, parent.height - self.y - Metrics.rewind-strip-height - Metrics.page-bottom-bar-height);
+        background: #000;
+        Image {
+            x: Metrics.spacing-lg; y: Metrics.spacing-md;
+            width: parent.width - Metrics.spacing-lg * 2; height: parent.height - Metrics.spacing-md * 2;
+            source: root.preview; image-fit: contain; image-rendering: pixelated;
+        }
+    }
+    strip := Rectangle {
+        x: Metrics.page-margin; y: picture.y + picture.height + Metrics.spacing-sm;
+        width: parent.width - Metrics.page-margin * 2;
+        height: Metrics.rewind-strip-height - Metrics.spacing-sm;
+        background: transparent;
+        Text {
+            width: parent.width; height: Metrics.compact-title-height;
+            text: root.busy ? "Preparing rewind…" : root.duration;
+            color: Theme.secondary-foreground; font-size: Typography.caption-size;
+        }
+        Text {
+            width: parent.width; height: Metrics.compact-title-height;
+            text: "Now"; horizontal-alignment: right;
+            color: Theme.secondary-foreground; font-size: Typography.caption-size;
+        }
+        frames := Rectangle {
+            y: Metrics.compact-title-height; width: parent.width;
+            height: Metrics.rewind-thumbnail-height + Metrics.compact-title-height + Metrics.spacing-sm;
+            background: transparent; clip: true;
+            private property <int> columns: root.width < Metrics.design-width * 0.6 ? 5 : 7;
+            private property <length> step: (self.width + Metrics.spacing-sm) / self.columns;
+            private property <length> camera: max(0px, min((root.selected - floor(self.columns / 2)) * self.step, (root.rows.length - self.columns) * self.step));
+            animate camera { duration: Motion.scroll-duration; easing: ease-out; }
+            for row in root.rows : Rectangle {
+                x: row.index * frames.step - frames.camera;
+                y: Metrics.spacing-xs;
+                width: frames.step - Metrics.spacing-sm;
+                height: Metrics.rewind-thumbnail-height;
+                background: #000; border-radius: Metrics.radius-sm;
+                Image {
+                    x: Metrics.spacing-xs; y: Metrics.spacing-xs;
+                    width: parent.width - Metrics.spacing-xs * 2; height: parent.height - Metrics.spacing-xs * 2;
+                    source: row.preview; image-fit: contain; image-rendering: pixelated;
+                }
+                SelectionFocusSurface {
+                    width: parent.width; height: parent.height;
+                    corner-radius: Metrics.radius-sm; focused: root.selected == row.index;
+                }
+                Text {
+                    y: parent.height + Metrics.spacing-xs;
+                    width: parent.width; height: Metrics.compact-title-height;
+                    text: row.label; color: root.selected == row.index ? Theme.foreground : Theme.secondary-foreground;
+                    font-size: Typography.caption-size; horizontal-alignment: center;
+                }
+                TouchArea {
+                    width: parent.width; height: parent.height + Metrics.compact-title-height;
+                    enabled: root.open && !root.busy;
+                    clicked => { root.select(row.index); }
+                }
+            }
+        }
+        scrubber := TouchArea {
+            y: frames.y + frames.height; width: parent.width;
+            height: Metrics.compact-row-height;
+            enabled: root.open && !root.busy;
+            moved => { if self.pressed { root.scrub(self.mouse-x / max(1px, self.width)); } }
+            pointer-event(event) => {
+                if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                    root.scrub(self.mouse-x / max(1px, self.width));
+                }
+            }
+            Rectangle {
+                y: (parent.height - self.height) / 2;
+                width: parent.width; height: Metrics.spacing-xs;
+                background: Theme.divider; border-radius: Metrics.spacing-xs;
+            }
+            Rectangle {
+                y: (parent.height - self.height) / 2;
+                x: (parent.width - self.width) * root.selected / max(1, root.rows.length - 1);
+                width: Metrics.spacing-md; height: self.width; border-radius: self.width / 2;
+                background: Theme.accent;
+            }
+        }
+    }
+    Text {
+        x: Metrics.page-margin; y: root.height - Metrics.page-bottom-bar-height - Metrics.compact-title-height;
+        width: root.width - Metrics.page-margin * 2; height: Metrics.compact-title-height;
+        text: root.message; color: Theme.secondary-foreground; font-size: Typography.caption-size;
+        overflow: elide;
+    }
+    Text {
+        x: Metrics.page-margin; y: parent.height - Metrics.hint-row-center-from-bottom - Metrics.hint-row-height / 2;
+        width: parent.width / 2 - Metrics.page-margin; height: Metrics.hint-row-height;
+        text: "← →  Choose a moment"; color: Theme.secondary-foreground;
+        font-size: Typography.body-size; vertical-alignment: center;
+    }
+    HintBar {
+        x: root.width / 2; y: parent.height - Metrics.hint-row-center-from-bottom - Metrics.hint-row-height / 2;
+        width: root.width / 2 - Metrics.page-margin; height: Metrics.hint-row-height;
+        hints: root.busy ? [] : [{ button: "B", label: "Cancel" }, { button: "A", label: "Resume here" }];
+        interactive: root.open && !root.busy;
+        activated(button) => { root.answer(button == "A"); }
+    }
+}

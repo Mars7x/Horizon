@@ -1019,7 +1019,7 @@ impl SettingsController {
                 "Remove"
             }
             (SettingsView::SteamAccount, 0) if self.steam_account.borrow().saved() => "Disconnect",
-            (SettingsView::Shortcuts, 0..=3)
+            (SettingsView::Shortcuts, 0..=4)
                 if self.controller.get().shortcuts.is_set(row as usize) =>
             {
                 "Clear"
@@ -1455,6 +1455,17 @@ impl SettingsController {
         ui.set_settings_core_border(self.core_values.get().mgba.sgb_border);
         ui.set_settings_ds_layout(self.core_values.get().ds.layout.label().into());
         ui.set_settings_ds_filter(self.core_values.get().ds.video_filter.label().into());
+        let ds = self.core_values.get().ds;
+        ui.set_settings_ds_filter_note(
+            if ds.resolution.scale() > 1
+                && ds.video_filter == crate::domain::core_settings::VideoFilter::Xbrz
+            {
+                "Smooth pixel art needs Native resolution; using Smooth to preserve sharper 3D"
+            } else {
+                "LCD works at every resolution; Smooth pixel art is for Native resolution"
+            }
+            .into(),
+        );
         ui.set_settings_ds_resolution(self.core_values.get().ds.resolution.label().into());
         ui.set_settings_core_freeze(self.core_values.get().freeze_when_unfocused);
         ui.set_settings_core_resume(self.core_values.get().resume_last_state);
@@ -1568,7 +1579,7 @@ fn selection_count(view: SettingsView) -> i32 {
         SettingsView::MappingCores => 2,
         SettingsView::GameBindings => 7,
         SettingsView::DsBindings => 10,
-        SettingsView::Shortcuts => 5,
+        SettingsView::Shortcuts => crate::domain::controller::SHORTCUT_NAMES.len() as i32 + 1,
         SettingsView::ThirdParty => 2,
         SettingsView::SteamGridDb => 3,
         SettingsView::SteamAccount => 2,
@@ -1726,6 +1737,7 @@ mod editor_navigation_tests {
         assert_eq!(super::selection_count(SettingsView::Controller), 4);
         assert_eq!(super::selection_count(SettingsView::Cores), 4);
         assert_eq!(super::selection_count(SettingsView::DsBindings), 10);
+        assert_eq!(super::selection_count(SettingsView::Shortcuts), 6);
         assert_eq!(
             super::settings_parent(SettingsView::MelonDs),
             Some((SettingsView::Cores, 1))
@@ -2428,10 +2440,10 @@ mod mapping_runtime_tests {
                             (ui.get_settings_view(), ui.get_settings_selection()),
                             (5, 2)
                         );
-                        // Shortcuts: same page, four rows, X clears one.
+                        // Shortcuts: same page, five rows, X clears one.
                         ui.invoke_settings_activate(3);
                         assert_eq!(ui.get_settings_view(), 11);
-                        assert_eq!(ui.get_settings_binding_rows().row_count(), 4);
+                        assert_eq!(ui.get_settings_binding_rows().row_count(), 5);
                         // A pair: both held, then let go.
                         snapshot.set(Some((0, 7)));
                         ui.invoke_settings_activate(1);

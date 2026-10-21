@@ -42,6 +42,16 @@ a single Cancel action and suppresses page hints/navigation underneath it;
 Restore defaults uses ConfirmDialog with Cancel initially focused. Pending
 writes retain the existing row instances, focus and previous values until saved.
 
+Rewind uses a full-shell timeline above the paused game: the shared header and
+footer, a large aspect-preserving preview and a horizontal filmstrip with the
+shared selection outline. The camera follows selected checkpoints; edge input
+never wraps. Rust owns selection, restore, cancel and input priority. Preview
+changes are immediate rather than blending unrelated moments. Its entrance
+fades over the shared page duration; Reduced Motion removes entrance/camera
+animation. A distinct original descending cue plays only for a successful open,
+through UI Sounds at the shared loudness. Scrubbing uses Navigation; resume and
+cancel use OK and Back. The quick menu stays hidden beneath it.
+
 ## Shared components
 
 | Element | Contract | Implementation |
@@ -64,13 +74,13 @@ semantic tokens. Do not set hand cursors; hover color communicates clickability.
 ## Motion and scrolling
 
 Changing text values use shared ValueText: a 180 ms horizontal slide/fade,
-matching quick-menu speed, header pickers, core settings and controller bindings.
+used by header pickers, core settings and controller bindings.
 Outgoing text fades before incoming text appears, avoiding doubled long labels.
-The row, label, focus and click target remain still. Core settings and quick-menu speed pass
-the actual change direction from Rust. Initial/empty values appear immediately;
+The row, label, focus and click target remain still. Core settings pass the actual change direction from Rust. Initial/empty values appear immediately;
 rapid changes replace the current transition without queuing stale values.
 Reduced Motion presents the new value immediately. Toggles retain their animated
-track/thumb; row focus keeps its shared 140 ms fade.
+track/thumb, including the quick-menu Fast-forward (2×) switch; row focus keeps
+its shared 140 ms fade.
 
 
 Use shared TransitionDriver/TransitionLayer for forward/back zoom and crossfade.

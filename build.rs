@@ -3,20 +3,12 @@ fn main() {
     native_media();
 }
 
-/// Builds Horizon's small C shims over FFmpeg, PipeWire, JPEG XL and the
+/// Builds Horizon's small C shims over PipeWire, JPEG XL and the
 /// libretro log callback (`csrc/`),
 /// against the libraries the Flatpak runtime ships. Struct layouts stay in
 /// C, compiled with the SDK's headers, so no bindings are generated.
 fn native_media() {
-    let libraries = [
-        "libavformat",
-        "libavcodec",
-        "libavutil",
-        "libswscale",
-        "libswresample",
-        "libpipewire-0.3",
-        "libjxl",
-    ];
+    let libraries = ["libpipewire-0.3", "libjxl"];
     let mut build = cc::Build::new();
     let mut found = Vec::new();
     for name in libraries {
@@ -30,7 +22,6 @@ fn native_media() {
         found.push(library);
     }
     build
-        .file("csrc/horizon_media.c")
         .file("csrc/horizon_audio.c")
         .file("csrc/horizon_jxl.c")
         .file("csrc/horizon_retro_log.c")

@@ -33,7 +33,8 @@ const MENU_OPEN_WAV: &[u8] = include_bytes!("../ui/assets/horizon-quick-menu-ope
 const MENU_CLOSE_WAV: &[u8] = include_bytes!("../ui/assets/horizon-quick-menu-close.wav");
 const SCREENSHOT_WAV: &[u8] = include_bytes!("../ui/assets/horizon-screenshot.wav");
 const LAUNCH_WAV: &[u8] = include_bytes!("../ui/assets/horizon-launch.wav");
-const CUE_COUNT: usize = 7;
+const REWIND_OPEN_WAV: &[u8] = include_bytes!("../ui/assets/horizon-rewind-open.wav");
+const CUE_COUNT: usize = 8;
 
 /// Every cue plays at one standard loudness, whatever level its file has:
 /// its loudest 30 ms is brought to about -32 dBFS, and its peak never above
@@ -43,7 +44,7 @@ const PEAK_CEILING: f32 = 0.158;
 /// Per-cue adjustment after levelling, in `UiSoundCue::index` order.
 /// Navigation plays on every focus move, many times a second when a
 /// direction is held, so it sits about 7 dB below the decisions.
-const CUE_TRIM: [f32; CUE_COUNT] = [0.45, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
+const CUE_TRIM: [f32; CUE_COUNT] = [0.45, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
 const LOUDNESS_WINDOW: usize = 1440;
 const CANCEL_CUE: u8 = u8::MAX;
 
@@ -68,6 +69,8 @@ pub enum UiSoundCue {
     Screenshot,
     /// A game starting, as its card zooms into the player.
     Launch,
+    /// The visual rewind timeline actually opening.
+    RewindOpen,
 }
 
 impl UiSoundCue {
@@ -80,6 +83,7 @@ impl UiSoundCue {
             Self::QuickMenuClose => 4,
             Self::Screenshot => 5,
             Self::Launch => 6,
+            Self::RewindOpen => 7,
         }
     }
 }
@@ -130,6 +134,7 @@ impl UiSounds {
             MENU_CLOSE_WAV,
             SCREENSHOT_WAV,
             LAUNCH_WAV,
+            REWIND_OPEN_WAV,
         ];
         let samples = std::array::from_fn(|index| {
             let mut samples = level(
@@ -380,6 +385,7 @@ mod tests {
             (UiSoundCue::QuickMenuClose, MENU_CLOSE_WAV, 4320),
             (UiSoundCue::Screenshot, SCREENSHOT_WAV, 2880),
             (UiSoundCue::Launch, LAUNCH_WAV, 7200),
+            (UiSoundCue::RewindOpen, REWIND_OPEN_WAV, 7680),
         ] {
             assert_eq!(decode_pcm16_mono_48k(wav).unwrap().len(), frames);
             assert!(cue.index() < CUE_COUNT);
@@ -402,6 +408,32 @@ mod tests {
                 .unwrap();
             assert!((1500..=2000).contains(&peak));
         }
+    }
+
+    #[test]
+    fn rewind_open_is_a_distinct_quiet_tone_with_silent_boundaries() {
+        for other in [
+            NAVIGATION_WAV,
+            OK_WAV,
+            BACK_WAV,
+            MENU_OPEN_WAV,
+            MENU_CLOSE_WAV,
+            SCREENSHOT_WAV,
+            LAUNCH_WAV,
+        ] {
+            assert_ne!(REWIND_OPEN_WAV, other);
+        }
+        let samples = decode_pcm16_mono_48k(REWIND_OPEN_WAV).unwrap();
+        assert_eq!(samples.len(), 7680);
+        assert_eq!(samples.first(), Some(&0));
+        assert_eq!(samples.last(), Some(&0));
+        let peak = samples
+            .iter()
+            .map(|sample| i32::from(*sample).abs())
+            .max()
+            .unwrap();
+        // The longer tone has a lower crest factor than the short latch clicks.
+        assert!((1..=2000).contains(&peak));
     }
 
     #[test]

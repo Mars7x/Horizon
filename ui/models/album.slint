@@ -4,11 +4,8 @@ export struct AlbumTileData {
     absolute-index: int,
     thumbnail: image,
     has-thumbnail: bool,
-    // The thumbnail could not be made (unreadable file, no video support).
+    // The thumbnail could not be made (unreadable file).
     failed: bool,
-    is-video: bool,
-    // "0:42"; empty while unknown.
-    duration: string,
     // Horizon's own capture: can be deleted. Source captures (Steam) cannot.
     deletable: bool,
     // Ticked in the grid's multi-select.

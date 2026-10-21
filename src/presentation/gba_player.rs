@@ -33,10 +33,12 @@ const SWAP_SCREENS: i32 = 7;
 const SCREEN_LAYOUT: i32 = 8;
 /// Closes or opens the DS lid, then continues so the game sees it.
 const LID: i32 = 9;
-const PAUSE_ACTIONS: [i32; 7] = [0, 1, 2, 3, 4, 5, RETURN_TO_HORIZON];
-const DS_PAUSE_ACTIONS: [i32; 10] = [
+const REWIND: i32 = 10;
+const PAUSE_ACTIONS: [i32; 8] = [0, 1, REWIND, 2, 3, 4, 5, RETURN_TO_HORIZON];
+const DS_PAUSE_ACTIONS: [i32; 11] = [
     0,
     1,
+    REWIND,
     SCREEN_LAYOUT,
     SWAP_SCREENS,
     LID,
@@ -85,6 +87,9 @@ pub struct GbaPlayer {
     state_mode: Cell<StateMode>,
     state_focus: Cell<i32>,
     state_entries: RefCell<Vec<crate::services::save_states::Entry>>,
+    rewind_rows: RefCell<Vec<crate::RewindRow>>,
+    rewind_requested: Cell<bool>,
+    rewind_from_menu: Cell<bool>,
     keyboard: Cell<u16>,
     pad_ready: Cell<bool>,
     gamepads: CallbackSlot<dyn Fn() -> u16>,
@@ -94,6 +99,7 @@ pub struct GbaPlayer {
     shortcut_buttons: CallbackSlot<dyn Fn() -> u16>,
     shortcuts: Cell<crate::domain::controller::Shortcuts>,
     shortcuts_held: Cell<u16>,
+    shortcuts_ready: Cell<bool>,
     keyboard_fast_forward: Cell<bool>,
     speed_before_fast_forward: Cell<Option<PlaybackSpeed>>,
     quick_loading: Cell<bool>,
@@ -144,12 +150,16 @@ impl GbaPlayer {
             state_mode: Cell::new(StateMode::Menu),
             state_focus: Cell::new(-1),
             state_entries: RefCell::new(Vec::new()),
+            rewind_rows: RefCell::new(Vec::new()),
+            rewind_requested: Cell::new(false),
+            rewind_from_menu: Cell::new(false),
             keyboard: Cell::new(0),
             pad_ready: Cell::new(false),
             gamepads: RefCell::new(None),
             shortcut_buttons: RefCell::new(None),
             shortcuts: Cell::default(),
             shortcuts_held: Cell::new(0),
+            shortcuts_ready: Cell::new(false),
             keyboard_fast_forward: Cell::new(false),
             speed_before_fast_forward: Cell::new(None),
             quick_loading: Cell::new(false),
@@ -223,6 +233,27 @@ impl GbaPlayer {
             }
         });
         let weak = Rc::downgrade(&player);
+        ui.on_player_rewind_select(move |index| {
+            if let Some(player) = weak.upgrade() {
+                player.select_rewind(index);
+            }
+        });
+        let weak = Rc::downgrade(&player);
+        ui.on_player_rewind_scrub(move |position| {
+            if let Some(player) = weak.upgrade()
+                && position.is_finite()
+            {
+                let last = player.rewind_rows.borrow().len().saturating_sub(1);
+                player.select_rewind((position.clamp(0.0, 1.0) * last as f32).round() as i32);
+            }
+        });
+        let weak = Rc::downgrade(&player);
+        ui.on_player_rewind_answer(move |resume| {
+            if let Some(player) = weak.upgrade() {
+                player.answer_rewind(resume);
+            }
+        });
+        let weak = Rc::downgrade(&player);
         ui.on_player_restart_answer(move |choice| {
             if let Some(player) = weak.upgrade() {
                 player.restart_answer(choice);
@@ -277,6 +308,7 @@ impl GbaPlayer {
         let leaving = self.foreground.replace(active) && !active;
         self.keyboard.set(0);
         self.pad_ready.set(false);
+        self.shortcuts_ready.set(false);
         if let Some(ui) = self.ui.upgrade() {
             if let Some(game) = self.running.borrow().as_ref() {
                 game.buttons.store(0, Ordering::Release);
@@ -317,6 +349,7 @@ impl GbaPlayer {
             return;
         }
         ui.set_player_paused(true);
+        self.shortcuts_ready.set(false);
         self.set_state_mode(&ui, StateMode::Menu);
         ui.set_player_restart_confirm(false);
         ui.set_player_focus(0);
@@ -342,6 +375,149 @@ impl GbaPlayer {
         }
     }
 
+    fn open_rewind(&self, ui: &AppWindow) {
+        if ui.get_player_busy()
+            || ui.get_player_rewind_open()
+            || ui.get_player_failed()
+            || !self.foreground.get()
+            || self.stage.get() != PlayerStage::Playing
+        {
+            return;
+        }
+        self.rewind_from_menu.set(ui.get_player_paused());
+        self.rewind_requested.set(true);
+        self.shortcuts_ready.set(false);
+        self.rewind_rows.borrow_mut().clear();
+        ui.set_player_rewind_rows(Default::default());
+        ui.set_player_rewind_position("".into());
+        ui.set_player_rewind_duration("".into());
+        self.clear_screenshot(ui);
+        self.keyboard.set(0);
+        self.keyboard_fast_forward.set(false);
+        self.fast_forward(ui, false);
+        self.pad_ready.set(false);
+        ui.set_player_paused(true);
+        ui.set_player_rewind_open(true);
+        ui.set_player_rewind_preview(ui.get_player_frame());
+        ui.set_player_busy(true);
+        ui.set_player_message("".into());
+        self.sync_pause(ui);
+        if let Some(game) = self.running.borrow().as_ref() {
+            game.buttons.store(0, Ordering::Release);
+            if let Some(extra) = &game.ds_input {
+                extra.pointer.store(0, Ordering::Release);
+            }
+            if game.commands.send(Command::OpenRewind).is_err() {
+                self.rewind_requested.set(false);
+                ui.set_player_rewind_open(false);
+                ui.set_player_busy(false);
+                ui.set_player_failed(true);
+                ui.set_player_message("The game stopped unexpectedly".into());
+            }
+        }
+    }
+
+    fn publish_rewind(
+        &self,
+        ui: &AppWindow,
+        points: Vec<crate::services::gba_player::RewindPoint>,
+    ) {
+        if !self.rewind_requested.replace(false) || self.closing.get() {
+            return;
+        }
+        let duration = points.first().map_or(Duration::ZERO, |point| point.behind);
+        let rows: Vec<_> = points
+            .into_iter()
+            .enumerate()
+            .map(|(index, point)| crate::RewindRow {
+                index: index as i32,
+                label: rewind_label(point.behind).into(),
+                preview: Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                    &point.preview.rgba,
+                    point.preview.width,
+                    point.preview.height,
+                )),
+            })
+            .collect();
+        let selected = rows.len().saturating_sub(1);
+        if let Some(row) = rows.get(selected) {
+            ui.set_player_rewind_preview(row.preview.clone());
+            ui.set_player_rewind_position(row.label.clone());
+        }
+        ui.set_player_rewind_selected(selected as i32);
+        ui.set_player_rewind_duration(
+            format!("{:.1} seconds available", duration.as_secs_f64()).into(),
+        );
+        ui.set_player_rewind_rows(Rc::new(slint::VecModel::from(rows.clone())).into());
+        *self.rewind_rows.borrow_mut() = rows;
+        ui.set_player_busy(false);
+        self.worker_paused.set(true);
+        self.cue(UiSoundCue::RewindOpen);
+    }
+
+    fn select_rewind(&self, index: i32) {
+        let Some(ui) = self.ui.upgrade() else {
+            return;
+        };
+        if !ui.get_player_rewind_open() || ui.get_player_busy() || !self.foreground.get() {
+            return;
+        }
+        let rows = self.rewind_rows.borrow();
+        let Some(row) = usize::try_from(index)
+            .ok()
+            .and_then(|index| rows.get(index))
+        else {
+            return;
+        };
+        let changed = index != ui.get_player_rewind_selected();
+        ui.set_player_rewind_selected(index);
+        ui.set_player_rewind_preview(row.preview.clone());
+        ui.set_player_rewind_position(row.label.clone());
+        if changed {
+            self.cue(UiSoundCue::Navigation);
+        }
+    }
+
+    fn answer_rewind(&self, resume: bool) {
+        let Some(ui) = self.ui.upgrade() else {
+            return;
+        };
+        if !ui.get_player_rewind_open() || ui.get_player_busy() || !self.foreground.get() {
+            return;
+        }
+        if resume
+            && (ui.get_player_rewind_selected() as usize) + 1 < self.rewind_rows.borrow().len()
+        {
+            ui.set_player_busy(true);
+            ui.set_player_message("".into());
+            if let Some(game) = self.running.borrow().as_ref() {
+                let _ = game
+                    .commands
+                    .send(Command::RewindTo(ui.get_player_rewind_selected() as usize));
+            }
+        } else {
+            self.leave_rewind(&ui, resume);
+        }
+    }
+
+    fn leave_rewind(&self, ui: &AppWindow, resumed: bool) {
+        self.rewind_requested.set(false);
+        ui.set_player_rewind_open(false);
+        ui.set_player_busy(false);
+        ui.set_player_paused(false);
+        ui.set_player_message("".into());
+        self.keyboard.set(0);
+        self.pad_ready.set(false);
+        self.shortcuts_ready.set(false);
+        self.set_state_mode(ui, StateMode::Menu);
+        self.sync_pause(ui);
+        self.cue(if resumed {
+            UiSoundCue::Ok
+        } else {
+            UiSoundCue::Back
+        });
+    }
+
     pub fn keyboard(&self, text: &str, repeated: bool, pressed: bool) -> bool {
         let Some(ui) = self.ui.upgrade() else {
             return false;
@@ -357,6 +533,10 @@ impl GbaPlayer {
             && (text == slint::SharedString::from(slint::platform::Key::Escape).as_str()
                 || text == slint::SharedString::from(slint::platform::Key::F10).as_str())
         {
+            if ui.get_player_rewind_open() {
+                self.answer_rewind(false);
+                return true;
+            }
             if ui.get_player_busy() {
                 if !ui.get_player_paused() {
                     self.choose(RETURN_TO_HORIZON);
@@ -388,6 +568,10 @@ impl GbaPlayer {
             return true;
         }
         for (key, row) in [
+            (
+                slint::platform::Key::F6,
+                crate::domain::controller::Shortcuts::REWIND,
+            ),
             (
                 slint::platform::Key::F5,
                 crate::domain::controller::Shortcuts::QUICK_SAVE,
@@ -464,6 +648,23 @@ impl GbaPlayer {
             ) && !event.repeated
             {
                 self.choose(0);
+            }
+            return true;
+        }
+        if ui.get_player_rewind_open() {
+            match event.action {
+                UiAction::Left | UiAction::Right => {
+                    let last = self.rewind_rows.borrow().len().saturating_sub(1) as i32;
+                    let delta = if event.action == UiAction::Left {
+                        -1
+                    } else {
+                        1
+                    };
+                    self.select_rewind((ui.get_player_rewind_selected() + delta).clamp(0, last));
+                }
+                UiAction::Accept if !event.repeated => self.answer_rewind(true),
+                UiAction::Back | UiAction::Home if !event.repeated => self.answer_rewind(false),
+                _ => {}
             }
             return true;
         }
@@ -725,7 +926,7 @@ impl GbaPlayer {
             return;
         }
         ui.set_player_focus(index);
-        if ![0, 1, 4, RETURN_TO_HORIZON].contains(&index) {
+        if ![0, 1, 4, REWIND, RETURN_TO_HORIZON].contains(&index) {
             self.cue(UiSoundCue::Ok);
         }
         match index {
@@ -739,6 +940,7 @@ impl GbaPlayer {
                 self.sync_pause(&ui);
             }
             1 => self.set_speed(&ui, current_speed(&ui).cycle()),
+            REWIND => self.open_rewind(&ui),
             2 | 3 => {
                 self.set_state_mode(
                     &ui,
@@ -775,6 +977,8 @@ impl GbaPlayer {
                 }
             }
             RETURN_TO_HORIZON => {
+                self.rewind_requested.set(false);
+                ui.set_player_rewind_open(false);
                 self.set_state_mode(&ui, StateMode::Menu);
                 ui.set_player_busy(true);
                 self.exit_since.set(Some(Instant::now()));
@@ -802,7 +1006,7 @@ impl GbaPlayer {
             .map_or(0, |source| source());
         let shortcuts = self.shortcuts.get();
         // Rows whose buttons are all down now; a press is a row newly held.
-        let held = (0..4).fold(0u16, |rows, row| {
+        let held = (0..crate::domain::controller::SHORTCUT_NAMES.len()).fold(0u16, |rows, row| {
             rows | u16::from(shortcuts.held(row, raw)) << row
         });
         let pressed = held & !self.shortcuts_held.replace(held);
@@ -812,15 +1016,27 @@ impl GbaPlayer {
             && !ui.get_player_busy()
             && !ui.get_player_failed();
         if !playing {
+            self.shortcuts_ready.set(false);
             self.keyboard_fast_forward
                 .set(self.keyboard_fast_forward.get() && self.foreground.get());
             self.fast_forward(ui, false);
             return;
         }
+        // A button that closed a menu or returned focus must be released
+        // before it can also trigger a gameplay shortcut (including Rewind).
+        if !self.shortcuts_ready.get() {
+            if raw == 0 {
+                self.shortcuts_ready.set(true);
+            } else {
+                self.fast_forward(ui, false);
+                return;
+            }
+        }
         for row in [
             Shortcuts::QUICK_SAVE,
             Shortcuts::QUICK_LOAD,
             Shortcuts::SCREENSHOT,
+            Shortcuts::REWIND,
         ] {
             if pressed & (1 << row) != 0 {
                 self.shortcut(ui, row);
@@ -828,7 +1044,9 @@ impl GbaPlayer {
         }
         self.fast_forward(
             ui,
-            shortcuts.held(Shortcuts::FAST_FORWARD, raw) || self.keyboard_fast_forward.get(),
+            !ui.get_player_rewind_open()
+                && (shortcuts.held(Shortcuts::FAST_FORWARD, raw)
+                    || self.keyboard_fast_forward.get()),
         );
     }
 
@@ -861,19 +1079,23 @@ impl GbaPlayer {
                 }
             }
             Shortcuts::SCREENSHOT => Command::Screenshot,
+            Shortcuts::REWIND => {
+                self.open_rewind(ui);
+                return;
+            }
             _ => return,
         };
         let _ = game.send(command);
     }
 
-    /// Hold to play at 4×; let go to return to the chosen speed. Quiet: no
+    /// Hold to play at 2×; let go to return to the chosen speed. Quiet: no
     /// sound, and the quick menu's own speed is what it returns to.
     fn fast_forward(&self, ui: &AppWindow, on: bool) {
         let before = self.speed_before_fast_forward.get();
         let target = match (on, before) {
             (true, None) => {
                 self.speed_before_fast_forward.set(Some(current_speed(ui)));
-                PlaybackSpeed::Quadruple
+                PlaybackSpeed::Double
             }
             (false, Some(speed)) => {
                 self.speed_before_fast_forward.set(None);
@@ -1030,6 +1252,11 @@ impl GbaPlayer {
         self.keyboard_fast_forward.set(false);
         self.notice_until.set(None);
         ui.set_player_notice_shown(false);
+        self.rewind_requested.set(false);
+        self.rewind_rows.borrow_mut().clear();
+        ui.set_player_rewind_open(false);
+        ui.set_player_rewind_rows(Default::default());
+        ui.set_player_rewind_preview(Image::default());
         ui.set_player_ds(false);
         self.ds_layout.set(None);
         if self.closing.get()
@@ -1180,18 +1407,26 @@ impl GbaPlayer {
                         ui.set_player_message("".into());
                     }
                     Event::Stopped => close = true,
+                    Event::RewindOpened(points) => self.publish_rewind(&ui, points),
+                    Event::Rewound { lid_closed } => {
+                        ui.set_player_ds_lid_closed(lid_closed);
+                        if !self.closing.get() {
+                            self.leave_rewind(&ui, true);
+                        }
+                    }
                     Event::Failed(error) => {
+                        self.rewind_requested.set(false);
+                        ui.set_player_rewind_open(false);
                         ui.set_player_focus(0);
                         ui.set_player_failed(true);
                         ui.set_player_busy(false);
                         ui.set_player_message(error.into());
                     }
                     Event::SpeedChanged(speed) => {
-                        ui.set_player_speed_forward(
-                            i32::from(speed.factor()) > ui.get_player_speed(),
-                        );
                         ui.set_player_speed(i32::from(speed.factor()));
-                        ui.set_player_busy(false);
+                        if !self.rewind_requested.get() {
+                            ui.set_player_busy(false);
+                        }
                         ui.set_player_message("".into());
                     }
                     Event::States(entries) => {
@@ -1298,6 +1533,14 @@ impl GbaPlayer {
                         self.pad_ready.set(false);
                     }
                     Event::ActionFailed(error) => {
+                        if self.rewind_requested.replace(false) && !self.closing.get() {
+                            ui.set_player_rewind_open(false);
+                            if !self.rewind_from_menu.get() {
+                                ui.set_player_paused(false);
+                                self.sync_pause(&ui);
+                                self.notice(&ui, &error);
+                            }
+                        }
                         if self.state_mode.get() == StateMode::Overwrite {
                             self.set_state_mode(&ui, StateMode::Save);
                         }
@@ -1330,6 +1573,8 @@ impl GbaPlayer {
                 }
             }
             if game.finished() && !ui.get_player_failed() && !close {
+                self.rewind_requested.set(false);
+                ui.set_player_rewind_open(false);
                 ui.set_player_failed(true);
                 ui.set_player_busy(false);
                 ui.set_player_message("The game stopped unexpectedly".into());
@@ -1626,6 +1871,14 @@ fn current_speed(ui: &AppWindow) -> PlaybackSpeed {
         .unwrap_or_default()
 }
 
+fn rewind_label(behind: Duration) -> String {
+    if behind.is_zero() {
+        "Now".into()
+    } else {
+        format!("−{:.1} s", behind.as_secs_f64())
+    }
+}
+
 fn keyboard_button(text: &str) -> Option<u32> {
     use slint::{SharedString, platform::Key};
     for (key, bit) in [
@@ -1852,14 +2105,14 @@ mod tests {
                     step.set(11);
                 }
                 11 if ui.get_player_notice() == "Loaded slot 1" => {
-                    // Holding fast-forward plays at 4×, letting go returns.
+                    // Holding fast-forward plays at 2×, letting go returns.
                     ui.window()
                         .dispatch_event(slint::platform::WindowEvent::KeyPressed {
                             text: slint::platform::Key::Tab.into(),
                         });
                     step.set(12);
                 }
-                12 if ui.get_player_speed() == 4 => {
+                12 if ui.get_player_speed() == 2 => {
                     ui.window()
                         .dispatch_event(slint::platform::WindowEvent::KeyReleased {
                             text: slint::platform::Key::Tab.into(),
@@ -2045,7 +2298,7 @@ mod tests {
         let shots = Cell::new(0u32);
         let shot_directory = directory.clone();
         let timer = Timer::default();
-        // Eight seconds at normal speed, then 4× for twenty; the worker logs
+        // Eight seconds at normal speed, then 2× for twenty; the worker logs
         // audio gaps every five seconds.
         timer.start(TimerMode::Repeated, Duration::from_millis(100), move || {
             let ui = weak.upgrade().unwrap();
@@ -2085,8 +2338,8 @@ mod tests {
             assert!(!ui.get_player_failed(), "{}", ui.get_player_message());
             let elapsed = started.elapsed();
             if elapsed > Duration::from_secs(8) && current_speed(&ui) == PlaybackSpeed::Normal {
-                eprintln!("DS fast-forward: 4x");
-                live.set_speed(&ui, PlaybackSpeed::Quadruple);
+                eprintln!("DS fast-forward: 2x");
+                live.set_speed(&ui, PlaybackSpeed::Double);
             }
             if elapsed > Duration::from_secs(29)
                 && live.is_open()
@@ -2103,18 +2356,102 @@ mod tests {
 
     #[test]
     fn pause_navigation_includes_states_and_does_not_wrap_on_repeat() {
-        assert_eq!(pause_step(1, true, false, false), 2);
+        assert_eq!(pause_step(1, true, false, false), REWIND);
+        assert_eq!(pause_step(REWIND, true, false, false), 2);
         assert_eq!(pause_step(4, false, false, false), 3);
         assert_eq!(pause_step(0, false, true, false), 0);
         assert_eq!(pause_step(6, true, true, false), 6);
         assert_eq!(pause_step(6, true, false, false), 0);
         // DS: Screen layout, Swap screens and the lid sit between Playback
         // speed and Save state.
-        assert_eq!(pause_step(1, true, false, true), SCREEN_LAYOUT);
+        assert_eq!(pause_step(1, true, false, true), REWIND);
+        assert_eq!(pause_step(REWIND, true, false, true), SCREEN_LAYOUT);
         assert_eq!(pause_step(SCREEN_LAYOUT, true, false, true), SWAP_SCREENS);
         assert_eq!(pause_step(SWAP_SCREENS, true, false, true), LID);
         assert_eq!(pause_step(LID, true, false, true), 2);
         assert_eq!(pause_step(2, false, false, true), LID);
+    }
+    #[test]
+    fn rewind_positions_show_the_actual_available_time() {
+        assert_eq!(rewind_label(Duration::ZERO), "Now");
+        assert_eq!(rewind_label(Duration::from_millis(1500)), "−1.5 s");
+    }
+    #[test]
+    #[ignore = "requires the Slint Wayland backend"]
+    fn rewind_timeline_owns_input_cancels_and_plays_its_opening_cue_once() {
+        let ui = AppWindow::new().unwrap();
+        let player = GbaPlayer::new(
+            &ui,
+            PlayerPaths {
+                database: Default::default(),
+                core: Default::default(),
+                ds_core: Default::default(),
+                saves: Default::default(),
+                album: Default::default(),
+                settings: crate::platform::data_paths::CoreSettingsPaths {
+                    playback: Default::default(),
+                    mgba: Default::default(),
+                    ds: Default::default(),
+                },
+            },
+        );
+        let sounds = Rc::new(RefCell::new(Vec::new()));
+        let heard = Rc::clone(&sounds);
+        player.set_sound(Rc::new(move |cue| heard.borrow_mut().push(cue)));
+        ui.set_player_open(true);
+        ui.set_player_paused(true);
+        ui.set_player_rewind_open(true);
+        player.set_stage(&ui, PlayerStage::Playing);
+        player.rewind_requested.set(true);
+        let points = (0..3)
+            .map(|index| crate::services::gba_player::RewindPoint {
+                behind: Duration::from_secs(2 - index),
+                preview: crate::platform::gba_core::Frame {
+                    width: 2,
+                    height: 2,
+                    rgba: [index as u8, 0, 0, 255].repeat(4),
+                    smooth: false,
+                },
+            })
+            .collect();
+        player.publish_rewind(&ui, points);
+        assert_eq!(ui.get_player_rewind_selected(), 2);
+        assert_eq!(sounds.borrow().as_slice(), &[UiSoundCue::RewindOpen]);
+        player.publish_rewind(&ui, Vec::new());
+        assert_eq!(sounds.borrow().len(), 1);
+        player.handle_action(UiActionEvent::fresh(UiAction::Left));
+        assert_eq!(ui.get_player_rewind_selected(), 1);
+        assert_eq!(ui.get_player_rewind_position(), "−1.0 s");
+        player.set_active(false);
+        player.handle_action(UiActionEvent::fresh(UiAction::Right));
+        assert_eq!(ui.get_player_rewind_selected(), 1);
+        assert!(ui.get_player_paused());
+        player.set_active(true);
+        player.handle_action(UiActionEvent::fresh(UiAction::Back));
+        assert!(!ui.get_player_rewind_open());
+        assert!(!ui.get_player_paused());
+        let held = Rc::new(Cell::new(1u16));
+        let source = Rc::clone(&held);
+        player.set_shortcuts(
+            crate::domain::controller::Shortcuts::default()
+                .assign(crate::domain::controller::Shortcuts::REWIND, 1),
+        );
+        player.set_shortcut_buttons(Rc::new(move || source.get()));
+        player.poll_shortcuts(&ui);
+        assert!(!player.shortcuts_ready.get());
+        held.set(0);
+        player.poll_shortcuts(&ui);
+        assert!(player.shortcuts_ready.get());
+        assert_eq!(sounds.borrow().last(), Some(&UiSoundCue::Back));
+        assert_eq!(player.rewind_rows.borrow().len(), 3);
+        assert_eq!(
+            sounds
+                .borrow()
+                .iter()
+                .filter(|cue| **cue == UiSoundCue::RewindOpen)
+                .count(),
+            1
+        );
     }
     #[test]
     fn game_keys_have_separate_start_select_and_shoulders() {
@@ -2292,7 +2629,7 @@ mod runtime_tests {
         }
     }
 
-    /// Frames shown per second at 1× and 4×, in a real window (default
+    /// Frames shown per second at 1× and 2×, in a real window (default
     /// 3440×1440) with the chosen filter (default Smooth pixel art).
     #[test]
     #[ignore = "requires Wayland, PipeWire, built mGBA core and HORIZON_GBA_TEST_DIR"]
@@ -2380,11 +2717,11 @@ mod runtime_tests {
                 1500..1600 => mark.set(Some((Instant::now(), live.shown.get()))),
                 4500..4600 => {
                     measure("1x");
-                    live.set_speed(&ui, PlaybackSpeed::Quadruple);
+                    live.set_speed(&ui, PlaybackSpeed::Double);
                 }
                 5000..5100 => mark.set(Some((Instant::now(), live.shown.get()))),
                 8000..8100 => {
-                    measure("4x");
+                    measure("2x");
                     slint::quit_event_loop().unwrap();
                 }
                 _ => {}
@@ -2761,14 +3098,13 @@ mod runtime_tests {
                     progress.set(40);
                 }
                 40 if !ui.get_player_busy() => {
-                    assert_eq!(ui.get_player_speed(), 3);
-                    snapshot("gba-speed-3");
+                    assert_eq!(ui.get_player_speed(), 2);
+                    snapshot("gba-speed-2-clamped");
                     tap(slint::platform::Key::RightArrow);
                     progress.set(41);
                 }
                 41 if !ui.get_player_busy() => {
-                    assert_eq!(ui.get_player_speed(), 4);
-                    snapshot("gba-speed-4");
+                    assert_eq!(ui.get_player_speed(), 2);
                     tap(slint::platform::Key::RightArrow);
                     assert!(!ui.get_player_busy());
                     tap(slint::platform::Key::Return);
@@ -2783,6 +3119,8 @@ mod runtime_tests {
                     assert_eq!(ui.get_player_speed(), 2);
                     assert!(ui.get_player_message().is_empty());
                     snapshot("gba-speed");
+                    tap(slint::platform::Key::DownArrow);
+                    assert_eq!(ui.get_player_focus(), REWIND);
                     tap(slint::platform::Key::DownArrow);
                     assert_eq!(ui.get_player_focus(), 2);
                     tap(slint::platform::Key::Return);

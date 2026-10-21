@@ -17,6 +17,9 @@ pub enum UiAction {
     /// The X (west) face button, or Delete on a keyboard. Pages give it a
     /// meaning; the Album uses it to delete.
     Secondary,
+    /// The other X/Y face position. Exchanged with Secondary by the
+    /// controller face-swap preference; unassigned in menus by default.
+    AlternateSecondary,
     /// Pressing the left stick (L3). The on-screen keyboard uses it as
     /// Shift; in a game it opens the quick menu.
     StickPress,
@@ -89,11 +92,13 @@ impl UiActionEvent {
 
 impl UiAction {
     /// The action with confirm and back exchanged, for controllers when the
-    /// "Swap A and B" setting is on.
+    /// face-swap setting is on, including the two X/Y positions.
     pub const fn with_confirm_swapped(self) -> Self {
         match self {
             Self::Accept => Self::Back,
             Self::Back => Self::Accept,
+            Self::Secondary => Self::AlternateSecondary,
+            Self::AlternateSecondary => Self::Secondary,
             other => other,
         }
     }
@@ -174,5 +179,29 @@ mod tests {
         assert!(UiAction::Forward.is_global());
         assert!(!UiAction::Accept.is_global());
         assert!(!UiAction::Left.is_global());
+    }
+}
+
+#[cfg(test)]
+mod face_swap_tests {
+    use super::UiAction;
+
+    #[test]
+    fn face_preference_exchanges_both_pairs_and_is_reversible() {
+        for (left, right) in [
+            (UiAction::Accept, UiAction::Back),
+            (UiAction::Secondary, UiAction::AlternateSecondary),
+        ] {
+            assert_eq!(left.with_confirm_swapped(), right);
+            assert_eq!(right.with_confirm_swapped(), left);
+        }
+        for action in [
+            UiAction::Up,
+            UiAction::Down,
+            UiAction::Left,
+            UiAction::Right,
+        ] {
+            assert_eq!(action.with_confirm_swapped(), action);
+        }
     }
 }
