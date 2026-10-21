@@ -22,7 +22,7 @@ selecting either side changes the same
 assignment. Select a row, release held controls, then
 press a face button, shoulder, trigger, Start or Select. A binding already used by
 another action swaps those two assignments. D-pad/stick directions and the
-Guide/stick-click quick-menu controls stay fixed (R3 swaps DS screens). Stick click, Guide, Escape or
+Guide/stick-click quick-menu controls stay fixed (in DS games L3 swaps the screens instead). Stick click, Guide, Escape or
 the dialog's Cancel button cancels capture. Capture times out after ten seconds;
 disconnect, device changes and focus loss cancel it without saving.
 DS button mapping is the same page for the DS's A, B, X, Y, L, R, Start and

@@ -646,7 +646,7 @@ pub fn run() -> Result<(), AppError> {
     let gameplay_input = Rc::clone(&input);
     player.set_gamepads(Rc::new(move || gameplay_input.gameplay_buttons()));
     let ds_input = Rc::clone(&input);
-    player.set_ds_gamepad(Rc::new(move || ds_input.ds_input()));
+    player.set_ds_gamepad(Rc::new(move || ds_input.ds_buttons()));
     {
         let (home, library, weak) = (
             Rc::clone(&home),

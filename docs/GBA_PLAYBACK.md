@@ -47,7 +47,7 @@ saving and skips the decorative return animation.
 | A / B | Z / X | Device-family A/B equivalents |
 | L / R (GBA only) | A / S | Left / right shoulder |
 | Start / Select | Enter / Backspace | Start / Back |
-| Pause | Escape or F10 | Guide or stick click (L3 only for DS) |
+| Pause | Escape or F10 | Guide or stick click (Guide only for DS) |
 
 Pause slides a square-edged, full-height panel in from the left edge over the
 dimmed game, with no floating margins, over 120 ms; it leaves over 180 ms.
@@ -65,10 +65,16 @@ shared 180 ms forward/back zoom and crossfade inside the stationary drawer;
 Reduced Motion switches views immediately. Saving stays paused; a successful load continues
 the game and clears queued audio/input, respecting background freeze.
 
-DS games add Swap screens after Playback speed; it swaps the screens and keeps
-the menu open.
+DS games add Screen layout and Swap screens after Playback speed. Screen
+layout steps through the layouts with Left/Right (Select cycles) for this
+session only; Settings keeps the layout each launch starts with. Swap screens
+exchanges them. Both keep the menu open and move the screens animated.
 
-Playback speed offers 1×, 2×, 3× and 4× for this loaded game. Left/Right steps
+Playback speed offers 1×, 2×, 3× and 4× for this loaded game. When the core
+can't reach the chosen speed (some DS games manage about 3.6× here), the worker
+measures how long its frames take and plays the game, and its audio, at about
+92% of what it can reach, so the sound stays continuous at a slightly lower
+pitch instead of breaking up (`real_ds_player_fast_forward_audio_report`). Left/Right steps
 between the limits; Select cycles through all four. The worker multiplies its
 frame pace and plays audio at the corresponding faster, higher pitch. Only the newest frame is
 filtered, once per frame shown, so frames fast-forward skips over are never filtered. On a 175 Hz
@@ -246,17 +252,18 @@ by side (default), Stacked, and Large and small (one screen at full height, the
 other a third of its size beside it, bottom-aligned). Each screen is filtered on
 its own at the size it is shown, using the DS's own Video filter (None, LCD,
 Smooth or Smooth pixel art); mGBA's colour correction does not apply.
-Swap screens in the quick menu, or R3 during play without pausing, exchanges
-the two screens with a short slide (instant under Reduced Motion). The swap lasts
+Swap screens in the quick menu, or L3 during play without pausing, exchanges
+the two screens with a 150 ms slide (instant under Reduced Motion). The swap lasts
 for the session; every launch starts with the touchscreen second.
 Built-in BIOS/firmware replacements and direct boot avoid a firmware setup step.
 No DSi, network play, virtual SD cards or slot-2 content is exposed.
 
-Mouse press/drag touches the touchscreen wherever the layout places it. The
-right stick moves the touch cursor; R2 presses it. Controllers use the DS button
-mapping (A, B, X, Y, L, R, Start, Select; Settings → Controller), which follows
-the global A/B swap and is independent of the Game Boy mapping. L3 or Guide opens
-the quick menu. Keyboard Z/X are A/B, C/V are X/Y, A/S are shoulders, arrows are
+Mouse press/drag touches the touchscreen wherever the layout places it; it is
+the only way to touch. Controllers have no touch cursor, and the core draws
+none. Controllers use the DS button mapping (A, B, X, Y, L, R, Start, Select;
+Settings → Controller), which follows the global A/B swap and is independent of
+the Game Boy mapping. Guide opens the quick menu; stick clicks don't (L3 swaps
+the screens, R3 does nothing). Keyboard Z/X are A/B, C/V are X/Y, A/S are shoulders, arrows are
 directions, Enter is Start and Backspace is Select. Escape opens the quick menu.
 Screenshots include both screens.
 

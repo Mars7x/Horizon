@@ -308,9 +308,14 @@ impl AudioReader {
 
 const TAPS: usize = 63;
 
+/// Plays fast-forwarded audio at the speed the game actually reaches: it
+/// keeps one output sample per `ratio` input samples, after a low-pass that
+/// prevents aliasing. The ratio is the chosen speed, or lower when the core
+/// can't keep up, so the sound stays continuous instead of running dry.
 pub(super) struct SpeedAudio {
     factor: usize,
-    phase: usize,
+    ratio: f64,
+    phase: f64,
     position: usize,
     history: [[f32; 2]; TAPS],
     coefficients: [f32; TAPS],
@@ -320,7 +325,8 @@ impl Default for SpeedAudio {
     fn default() -> Self {
         Self {
             factor: 1,
-            phase: 0,
+            ratio: 1.0,
+            phase: 0.0,
             position: 0,
             history: [[0.0; 2]; TAPS],
             coefficients: [0.0; TAPS],
@@ -330,10 +336,36 @@ impl Default for SpeedAudio {
 impl SpeedAudio {
     pub fn set_speed(&mut self, speed: PlaybackSpeed) {
         self.factor = usize::from(speed.factor());
-        self.phase = 0;
+        self.phase = 0.0;
         self.position = 0;
         self.history.fill([0.0; 2]);
-        let cutoff = 0.44 / self.factor as f64;
+        self.design(self.factor as f64);
+    }
+
+    /// Follow the speed the game reaches, between normal and the chosen
+    /// speed. Small changes are ignored, so the filter isn't redesigned
+    /// every frame.
+    pub fn set_reached(&mut self, speed: f64) {
+        if self.factor == 1 {
+            return;
+        }
+        let ratio = speed.clamp(1.0, self.factor as f64);
+        if (ratio - self.ratio).abs() / self.ratio > 0.02 || ratio == self.factor as f64 {
+            self.design(ratio);
+        }
+    }
+
+    #[cfg(test)]
+    pub fn ratio(&self) -> f64 {
+        self.ratio
+    }
+
+    fn design(&mut self, ratio: f64) {
+        if ratio == self.ratio && ratio != 1.0 {
+            return;
+        }
+        self.ratio = ratio;
+        let cutoff = 0.44 / ratio;
         for (index, coefficient) in self.coefficients.iter_mut().enumerate() {
             let offset = index as f64 - (TAPS / 2) as f64;
             let sinc = if offset == 0.0 {
@@ -358,10 +390,11 @@ impl SpeedAudio {
         }
         self.history[self.position] = stereo;
         self.position = (self.position + 1) % TAPS;
-        self.phase = (self.phase + 1) % self.factor;
-        if self.phase != 0 {
+        self.phase += 1.0;
+        if self.phase < self.ratio {
             return None;
         }
+        self.phase -= self.ratio;
         let mut output = [0.0; 2];
         let mut cursor = self.position;
         for coefficient in self.coefficients {
@@ -391,6 +424,28 @@ mod tests {
         audio.set_speed(PlaybackSpeed::Double);
         assert_eq!(audio.process([0.0, 0.0]), None);
         assert_eq!(audio.process([0.0, 0.0]), Some([0.0, 0.0]));
+    }
+
+    #[test]
+    fn a_core_that_falls_behind_slows_the_audio_instead_of_starving_it() {
+        let mut audio = SpeedAudio::default();
+        audio.set_speed(PlaybackSpeed::Quadruple);
+        // The core reaches only 3.2×: one output per 3.2 inputs.
+        audio.set_reached(3.2);
+        assert_eq!(audio.ratio(), 3.2);
+        let produced = (0..32000)
+            .filter(|_| audio.process([0.5, 0.5]).is_some())
+            .count();
+        assert!((9999..=10001).contains(&produced), "{produced}");
+        // Tiny wobbles keep the filter; reaching full speed restores it.
+        audio.set_reached(3.25);
+        assert_eq!(audio.ratio(), 3.2);
+        audio.set_reached(5.0);
+        assert_eq!(audio.ratio(), 4.0);
+        // Normal speed never resamples.
+        audio.set_speed(PlaybackSpeed::Normal);
+        audio.set_reached(0.5);
+        assert_eq!(audio.process([0.25, 0.5]), Some([0.25, 0.5]));
     }
 
     #[test]

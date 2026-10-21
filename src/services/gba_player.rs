@@ -348,6 +348,9 @@ fn play(
     let mut checkpoint = Instant::now();
     let mut paused = false;
     let mut speed = PlaybackSpeed::Normal;
+    // Seconds of work per frame while fast-forwarding, averaged. Starting
+    // at zero tries the chosen speed first.
+    let mut work = 0.0f64;
     let mut pending = None;
     let mut session = None;
     let mut frame_attempts = 0u32;
@@ -481,9 +484,18 @@ fn play(
             }
             if !paused {
                 let before = audio.written();
+                let started = Instant::now();
                 core.run_frame();
                 let pushed = audio.written().wrapping_sub(before);
                 present(&core);
+                if speed != PlaybackSpeed::Normal {
+                    // How fast the core could go, from how long its frames
+                    // take: fast-forward audio follows it, with a margin, so
+                    // a core that can't reach the chosen speed sounds slower
+                    // rather than breaking up.
+                    work += (started.elapsed().as_secs_f64() - work) / 30.0;
+                    core.set_reached_speed(0.92 / (work * fps).max(f64::EPSILON));
+                }
                 frame_attempts = frame_attempts.saturating_add(1);
                 if frame_attempts >= 120 && core.frames.load(Ordering::Acquire) == 0 {
                     return Err("mGBA could not produce a game frame".into());

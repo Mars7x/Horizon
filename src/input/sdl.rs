@@ -237,19 +237,6 @@ impl SdlGamepadInput {
     pub fn gameplay_buttons(&self) -> u16 {
         self.gameplay_snapshot().map_or(0, |(buttons, _)| buttons)
     }
-    pub fn ds_stick(&self) -> (i16, i16) {
-        let Some((_, id)) = self.gameplay_snapshot() else {
-            return (0, 0);
-        };
-        let state = self.state.borrow();
-        state
-            .open_gamepads
-            .iter()
-            .find(|pad| pad.id().is_ok_and(|value| u64::from(value.raw()) == id))
-            .map_or((0, 0), |pad| {
-                (pad.axis(Axis::RightX), pad.axis(Axis::RightY))
-            })
-    }
     pub fn gameplay_snapshot(&self) -> Option<(u16, u64)> {
         let state = self.state.borrow();
         if !state.enabled {

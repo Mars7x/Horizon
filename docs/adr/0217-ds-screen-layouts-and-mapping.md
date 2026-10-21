@@ -13,8 +13,12 @@ exact size it is shown. Side by side is the default.
 Layout and video filter are melonDS DS preferences in `cores/melonds-ds.json`,
 a new file owned only by that core; older installs get the defaults. The swap
 is session state, not a preference: it resets each launch and never races a
-Settings write. Swap screens is a DS-only quick-menu action; during a DS game
-R3 swaps without pausing and L3 alone opens the quick menu.
+Settings write. Screen layout (stepping the layout for the session) and Swap
+screens are DS-only quick-menu actions; during a DS game L3 swaps without
+pausing, R3 does nothing and only Guide opens the quick menu.
+
+Touch is by mouse only. Controllers have no touch cursor: a stick-driven cursor
+was tried and rejected by the user, and the core's own cursor is disabled.
 
 DS gets its own eight-action controller mapping (A, B, X, Y, L, R, Start,
 Select) in `controller.json`, beside the unchanged Game Boy mapping. Old files

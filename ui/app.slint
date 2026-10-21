@@ -434,6 +434,8 @@ export component AppWindow inherits Window {
     callback player-state-choose(int);
     callback player-touch(float, float, bool);
     in property <bool> player-ds;
+    in property <string> player-ds-layout;
+    in property <bool> player-ds-layout-forward: true;
     in property <CardRect> player-ds-top;
     in property <CardRect> player-ds-bottom;
     in property <int> player-ds-top-clip-width;
@@ -1156,7 +1158,7 @@ export component AppWindow inherits Window {
                 state-rows: root.player-state-rows;
                 state-choose(slot) => { root.player-state-choose(slot); }
                 touch(x, y, pressed) => { root.player-touch(x, y, pressed); }
-                ds: root.player-ds; ds-top: root.player-ds-top; ds-bottom: root.player-ds-bottom;
+                ds: root.player-ds; ds-layout: root.player-ds-layout; ds-layout-forward: root.player-ds-layout-forward; ds-top: root.player-ds-top; ds-bottom: root.player-ds-bottom;
                 ds-top-clip-width: root.player-ds-top-clip-width; ds-top-clip-height: root.player-ds-top-clip-height;
                 ds-bottom-clip-width: root.player-ds-bottom-clip-width; ds-bottom-clip-height: root.player-ds-bottom-clip-height;
                 restart-confirm: root.player-restart-confirm; restart-focus: root.player-restart-focus;

@@ -135,20 +135,16 @@ impl InputManager {
         self.gamepad_input.as_ref()?.gameplay_snapshot()
     }
 
-    pub fn ds_input(&self) -> (u16, i16, i16) {
-        let Some(input) = self.gamepad_input.as_ref() else {
-            return (0, 0, 0);
-        };
-        let (x, y) = input.ds_stick();
+    pub fn ds_buttons(&self) -> u16 {
+        let buttons = self
+            .gamepad_input
+            .as_ref()
+            .map_or(0, SdlGamepadInput::gameplay_buttons);
         // DS has four face buttons, so it has its own mapping; the global
         // confirm/back swap still applies.
-        (
-            gameplay_mapping(
-                self.ds_bindings.get().apply(input.gameplay_buttons()),
-                self.swap_confirm.get(),
-            ),
-            x,
-            y,
+        gameplay_mapping(
+            self.ds_bindings.get().apply(buttons),
+            self.swap_confirm.get(),
         )
     }
 

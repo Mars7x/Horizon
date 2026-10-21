@@ -51,11 +51,10 @@ pub type DisplaySize = Arc<AtomicU64>;
 pub type LatestFrame = Arc<Mutex<Option<Presented>>>;
 pub type AudioBuffer = Arc<super::gba_audio::GameAudio>;
 
-/// Packed snapshots keep pointer and right-stick coordinates coherent across threads.
+/// A packed snapshot keeps the pointer's coordinates and press coherent across threads.
 #[derive(Default)]
 pub struct DsInput {
     pub pointer: AtomicU64,
-    pub stick: AtomicU64,
     /// The screen arrangement (see `pack_ds_view`), for the filter thread.
     pub view: std::sync::atomic::AtomicU8,
 }
@@ -354,6 +353,14 @@ impl Core {
             }
         });
     }
+    /// The speed the core is managing, for fast-forward audio (see SpeedAudio).
+    pub fn set_reached_speed(&mut self, speed: f64) {
+        CALLBACKS.with(|state| {
+            if let Some(state) = state.borrow_mut().as_mut() {
+                state.audio_speed.set_reached(speed);
+            }
+        });
+    }
     pub fn capture_frame(&self) -> Result<Frame, String> {
         CALLBACKS
             .with(|state| {
@@ -565,7 +572,10 @@ extern "C" fn environment(command: u32, data: *mut c_void) -> bool {
                             b"melonds_screen_layout1" => Some(c"top-bottom"),
                             b"melonds_screen_gap" => Some(c"0"),
                             b"melonds_number_of_screen_layouts" => Some(c"1"),
-                            b"melonds_touch_mode" => Some(c"auto"),
+                            // Only the mouse touches; the controller has no
+                            // cursor, and the core draws none.
+                            b"melonds_touch_mode" => Some(c"touch"),
+                            b"melonds_show_cursor" => Some(c"disabled"),
                             b"melonds_network_mode"
                             | b"melonds_homebrew_sdcard"
                             | b"melonds_dsi_sdcard" => Some(c"disabled"),
@@ -640,19 +650,13 @@ extern "C" fn environment(command: u32, data: *mut c_void) -> bool {
 }
 extern "C" fn input_poll() {}
 extern "C" fn input_state(port: u32, device: u32, index: u32, id: u32) -> i16 {
-    if port == 0 && ((device == 5 && index == 1 && id < 2) || (device == 6 && index == 0 && id < 3))
-    {
+    if port == 0 && device == 6 && index == 0 && id < 3 {
         return CALLBACKS.with(|state| {
             let state = state.borrow();
             let Some(s) = state.as_ref().filter(|s| s.ds) else {
                 return 0;
             };
-            let packed = if device == 5 {
-                &s.extra.stick
-            } else {
-                &s.extra.pointer
-            }
-            .load(Ordering::Acquire);
+            let packed = s.extra.pointer.load(Ordering::Acquire);
             if id == 2 {
                 ((packed >> 32) & 1) as i16
             } else {
@@ -964,6 +968,44 @@ mod tests {
             core.run_frame();
         }
         assert_eq!(core.capture_frame().unwrap().height, 384);
+        drop(core);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    #[ignore = "measurement; requires HORIZON_DS_CORE and a real cartridge in HORIZON_DS_ROM"]
+    fn real_ds_core_speed_report() {
+        let path = std::env::var_os("HORIZON_DS_CORE").unwrap();
+        let rom = std::fs::read(std::env::var_os("HORIZON_DS_ROM").unwrap()).unwrap();
+        let directory =
+            std::env::temp_dir().join(format!("horizon-ds-speed-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let audio = Arc::new(super::super::gba_audio::GameAudio::default());
+        let mut core = Core::load_system(
+            Path::new(&path),
+            &rom,
+            MgbaPreferences::default(),
+            Arc::clone(&audio),
+            Arc::new(AtomicU16::new(0)),
+            Some((Arc::new(DsInput::default()), &directory)),
+        )
+        .unwrap();
+        for _ in 0..600 {
+            core.run_frame();
+            audio.clear();
+        }
+        for round in 0..3 {
+            let started = std::time::Instant::now();
+            for _ in 0..600 {
+                core.run_frame();
+                audio.clear();
+            }
+            let rate = 600.0 / started.elapsed().as_secs_f64();
+            eprintln!(
+                "DS speed round {round}: {rate:.0} frames/s ({:.2}x)",
+                rate / 59.83
+            );
+        }
         drop(core);
         std::fs::remove_dir_all(directory).unwrap();
     }

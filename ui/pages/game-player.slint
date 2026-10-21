@@ -59,6 +59,8 @@ export component GamePlayer inherits Rectangle {
     // `*-clip` pixels; `ds-top`/`ds-bottom` place them as fractions of the
     // player area. Changes (a swap, a new layout) animate.
     in property <bool> ds;
+    in property <string> ds-layout;
+    in property <bool> ds-layout-forward: true;
     in property <CardRect> ds-top;
     in property <CardRect> ds-bottom;
     in property <int> ds-top-clip-width;
@@ -170,7 +172,7 @@ export component GamePlayer inherits Rectangle {
             width: min(Metrics.pause-panel-width, root.width);
             height: root.height;
             shadow-strength: root.pause-reveal;
-            open: root.paused; busy: root.busy; ds: root.ds; speed: root.speed; speed-forward: root.speed-forward;
+            open: root.paused; busy: root.busy; ds: root.ds; ds-layout: root.ds-layout; ds-layout-forward: root.ds-layout-forward; speed: root.speed; speed-forward: root.speed-forward;
             screenshot-preview: root.screenshot-preview;
             screenshot-visible: root.screenshot-visible;
             screenshot-sequence: root.screenshot-sequence;
