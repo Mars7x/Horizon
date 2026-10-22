@@ -155,6 +155,8 @@ const SETPOINT: f64 = 0.62;
 pub struct FramePacer {
     rate: f64,
     per_frame: f64,
+    /// Selected emulation pace, independent of adaptive audio resampling.
+    frame_interval: std::time::Duration,
     /// The queue's fill as a share of its limit, averaged over about 16
     /// frames. Above the reader's setpoint frames slow a little (at most 5%),
     /// below it they quicken, so a change of pace (a game starting to toggle
@@ -166,6 +168,7 @@ impl FramePacer {
         let mut pacer = Self {
             rate: f64::from(rate.max(1)),
             per_frame: 0.0,
+            frame_interval: std::time::Duration::ZERO,
             fill: SETPOINT,
         };
         pacer.reset(fps, speed);
@@ -173,9 +176,24 @@ impl FramePacer {
     }
     /// A new speed or a discontinuity: start again from the nominal frame.
     pub fn reset(&mut self, fps: f64, speed: u8) {
-        self.per_frame = self.rate / fps.max(1.0) / f64::from(speed.max(1));
+        let seconds = 1.0 / fps.max(1.0) / f64::from(speed.max(1));
+        self.frame_interval = std::time::Duration::from_secs_f64(seconds);
+        self.per_frame = self.rate * seconds;
         self.fill = SETPOINT;
     }
+    /// DS fast-forward keeps the selected emulation target even when adaptive
+    /// audio emits more samples to avoid gaps. Otherwise those samples feed
+    /// back into pacing and can silently turn a 2× request back into 1×.
+    pub fn fast_forward_interval(
+        &mut self,
+        pushed: usize,
+        queued: usize,
+        limit: usize,
+    ) -> std::time::Duration {
+        self.interval(pushed, queued, limit)
+            .min(self.frame_interval)
+    }
+
     /// How long to wait after a frame that pushed `pushed` stereo frames,
     /// with the queue now holding `queued` of at most `limit`.
     pub fn interval(&mut self, pushed: usize, queued: usize, limit: usize) -> std::time::Duration {
@@ -517,6 +535,26 @@ mod pacer_tests {
     use super::FramePacer;
 
     #[test]
+    fn ds_fast_forward_does_not_fall_back_to_normal_pacing_with_adaptive_audio() {
+        let fps = 59.8261;
+        let mut paced = FramePacer::new(32768, fps, 2);
+        let target = 1.0 / fps / 2.0;
+        // A slow core/rewind spike makes adaptive audio approach a 1× ratio.
+        // Even a full queue must not turn the frame target into normal speed.
+        for _ in 0..300 {
+            let interval = paced.fast_forward_interval(548, 1638, 1638);
+            assert!(interval.as_secs_f64() <= target + 1e-9);
+        }
+        // Switching back to normal restores ordinary audio-clocked pacing.
+        paced.reset(fps, 1);
+        for _ in 0..300 {
+            paced.interval(548, 1015, 1638);
+        }
+        let normal = paced.interval(548, 1015, 1638).as_secs_f64();
+        assert!((normal / (1.0 / fps) - 1.0).abs() < 0.01);
+    }
+
+    #[test]
     fn game_boy_blocks_pace_like_the_audio_without_jitter() {
         let mut pacer = FramePacer::new(32768, 59.7275, 1);
         let nominal = 1.0 / 59.7275;
@@ -563,8 +601,8 @@ mod pacer_tests {
         assert!((slow / nominal - 1.05).abs() < 0.005, "{slow}");
         assert!((fast / nominal - 0.95).abs() < 0.005, "{fast}");
         // Fast-forward pushes decimated audio; reset starts from its pace.
-        let mut pacer = FramePacer::new(32768, 59.7275, 4);
-        assert!((pacer.interval(137, 1015, 1638).as_secs_f64() * 4.0 / nominal - 1.0).abs() < 0.01);
+        let mut pacer = FramePacer::new(32768, 59.7275, 2);
+        assert!((pacer.interval(274, 1015, 1638).as_secs_f64() * 2.0 / nominal - 1.0).abs() < 0.01);
     }
 }
 
@@ -1075,7 +1113,7 @@ mod queue_tests {
     }
     #[test]
     fn bounded_headroom_absorbs_brief_frame_jitter_at_both_speeds() {
-        for speed in [1, 2, 3, 4] {
+        for speed in [1, 2] {
             let rate = 32768;
             let audio = Arc::new(GameAudio::default());
             audio.configure(rate);

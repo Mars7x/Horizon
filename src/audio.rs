@@ -67,7 +67,7 @@ pub enum UiSoundCue {
     QuickMenuOpen,
     QuickMenuClose,
     Screenshot,
-    /// A game starting, as its card zooms into the player.
+    /// An accepted game launch, before loading or the card zoom waits.
     Launch,
     /// The visual rewind timeline actually opening.
     RewindOpen,

@@ -1,4 +1,4 @@
-import { Theme, Typography, Motion } from "../theme/theme.slint";
+import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { ValueText } from "value-text.slint";
 import { ListRow } from "list-row.slint";
 
@@ -15,9 +15,11 @@ export component SettingsRow inherits ListRow {
     in property <bool> value-forward: true;
     in property <bool> toggle: false;
     in property <bool> checked: false;
+    // Dense drawers share the switch styling at a smaller, aligned size.
+    in property <bool> compact-toggle: false;
     in property <string> secondary: "";
     callback secondary-activated();
-    trailing-width: root.toggle ? 130px : root.secondary != "" ? 360px : 230px;
+    trailing-width: root.toggle ? (root.compact-toggle ? Metrics.compact-toggle-width + Metrics.spacing-lg * 2 : 130px) : root.secondary != "" ? 360px : 230px;
     accessible-checkable: root.toggle;
     accessible-checked: root.checked;
 
@@ -38,17 +40,21 @@ export component SettingsRow inherits ListRow {
     // the whole row remains one controller/pointer target.
     Rectangle {
         visible: root.toggle;
-        x: parent.width - 94px; y: (parent.height - 34px) / 2;
-        width: 62px; height: 34px;
-        border-radius: 17px;
+        private property <length> inset: root.compact-toggle ? Metrics.compact-toggle-inset : 4px;
+        x: parent.width - self.width - (root.compact-toggle ? Metrics.spacing-lg : 32px);
+        y: (parent.height - self.height) / 2;
+        width: root.compact-toggle ? Metrics.compact-toggle-width : 62px;
+        height: root.compact-toggle ? Metrics.compact-toggle-height : 34px;
+        border-radius: self.height / 2;
         border-width: 1px;
         border-color: root.checked ? Theme.accent : Theme.divider;
         background: root.checked ? Theme.accent : Theme.divider;
         animate background, border-color { duration: Motion.value-swap-duration; easing: ease-in-out; }
         Rectangle {
-            x: root.checked ? parent.width - 30px : 4px;
-            y: 4px; width: 26px; height: 26px;
-            border-radius: 13px;
+            x: root.checked ? parent.width - self.width - parent.inset : parent.inset;
+            y: parent.inset;
+            width: parent.height - parent.inset * 2; height: self.width;
+            border-radius: self.height / 2;
             background: #ffffff; // Consistently white thumb in both states.
             animate x { duration: Motion.value-swap-duration; easing: ease-out; }
         }

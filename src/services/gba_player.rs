@@ -875,6 +875,7 @@ fn play(
                     }
                     Command::Speed(next) => {
                         speed = next;
+                        work = 0.0;
                         core.set_speed(next);
                         pacer.reset(fps, next.factor());
                         audio.set_paused(true);
@@ -1122,7 +1123,11 @@ fn play(
                     );
                     let _ = events.send(Event::Started(location.title.clone()));
                 }
-                deadline += pacer.interval(pushed, audio.len(), audio.limit());
+                deadline += if ds && speed != PlaybackSpeed::Normal {
+                    pacer.fast_forward_interval(pushed, audio.len(), audio.limit())
+                } else {
+                    pacer.interval(pushed, audio.len(), audio.limit())
+                };
                 if Instant::now().saturating_duration_since(deadline) > Duration::from_millis(100) {
                     deadline = Instant::now();
                 }

@@ -49,6 +49,19 @@ pub fn present_ds(raw: &Frame, filter: VideoFilter, targets: [(u32, u32); 2]) ->
     } else {
         filter
     };
+    if matches!(filter, VideoFilter::None | VideoFilter::Smooth) {
+        // No per-screen treatment is needed: one copy keeps both screens in
+        // their original positions. At 8× this avoids two temporary 12 MiB
+        // images and the extra 24 MiB assembly copy for every shown frame.
+        return Presented {
+            pixels: SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                &raw.rgba, raw.width, raw.height,
+            ),
+            smooth: filter == VideoFilter::Smooth,
+            exact: None,
+            screens: Some([(width, height); 2]),
+        };
+    }
     let half = (width * height * 4) as usize;
     let [top, bottom] = [0, 1].map(|index| {
         let source = &raw.rgba[index * half..(index + 1) * half];
@@ -588,6 +601,32 @@ pub(super) fn correct_color(rgba: &mut [u8]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ds_none_and_smooth_keep_every_pixel_and_both_screen_bounds() {
+        for scale in 1..=8 {
+            let (width, height) = (256 * scale, 192 * scale);
+            let mut rgba = [210, 0, 0, 191].repeat((width * height) as usize);
+            rgba.extend([0, 0, 210, 223].repeat((width * height) as usize));
+            rgba[4..8].copy_from_slice(&[0, 210, 0, 77]);
+            let raw = Frame {
+                width,
+                height: height * 2,
+                rgba,
+                smooth: false,
+            };
+            for filter in [VideoFilter::None, VideoFilter::Smooth] {
+                let presented = present_ds(&raw, filter, [(0, 0); 2]);
+                assert_eq!(presented.pixels.as_bytes(), raw.rgba);
+                assert_eq!(
+                    (presented.pixels.width(), presented.pixels.height()),
+                    (width, height * 2)
+                );
+                assert_eq!(presented.screens, Some([(width, height); 2]));
+                assert_eq!(presented.smooth, filter == VideoFilter::Smooth);
+            }
+        }
+    }
 
     #[test]
     fn upscaled_ds_lcd_keeps_detail_and_separates_screens_at_every_scale() {

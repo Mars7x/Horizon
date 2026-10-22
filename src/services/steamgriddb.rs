@@ -673,6 +673,24 @@ mod tests {
                 "pokemon%20emerald%20version",
                 34971,
             ),
+            (
+                "Pokemon - Gold Version (USA, Europe) (SGB Enhanced) (GB Compatible)",
+                r#"{"success":true,"data":[{"id":36203,"name":"Pokémon Gold Version"}]}"#,
+                "pokemon%20gold%20version",
+                36203,
+            ),
+            (
+                "Pokemon - Black Version 2 (USA, Europe) (NDSi Enhanced)",
+                r#"{"success":true,"data":[{"id":34483,"name":"Pokémon Black Version 2"},{"id":33,"name":"Pokémon Black Version"}]}"#,
+                "pokemon%20black%20version%202",
+                34483,
+            ),
+            (
+                "Pokemon - Recharged Yellow",
+                r#"{"success":true,"data":[{"id":5437529,"name":"Pokémon Recharged Yellow"},{"id":34,"name":"Pokémon Yellow Version"}]}"#,
+                "pokemon%20recharged%20yellow",
+                5437529,
+            ),
         ] {
             let reference = game(title, "gba", "sha1:example");
             let lookup = SteamGridDbLookup::for_game(&reference, &registry);

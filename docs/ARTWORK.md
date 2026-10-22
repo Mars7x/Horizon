@@ -6,8 +6,8 @@ width equals height before presentation; fallback covers are procedural and do
 not imply downloaded content.
 
 [ArtworkService](../src/services/artwork.rs) selects/decodes candidates behind
-the generic source boundary. No production game adapters currently supply local
-art or launch cover jobs. User-selected/cached files and provenance remain;
+the generic source boundary. Imported games enqueue SteamGridDB jobs when enabled; production cartridge
+adapters do not supply local art. User-selected/cached files and provenance remain;
 cleanup must not discard them or reintroduce Steam installation scanning.
 
 ## SteamGridDB
@@ -17,8 +17,10 @@ cleanup must not discard them or reintroduce Steam installation scanning.
 perform lookup, downloading and refresh off the UI thread. Registered adapters
 may provide authoritative external catalog IDs; otherwise lookup uses conservative
 title matching. Do not infer Steam AppIDs from another provider's numeric IDs.
-GBA lookup omits known trailing region/language and numeric revision tags, without
-changing library titles or ROM recognition. Search and comparison fold Unicode
+GB/GBC/GBA/DS lookup shares the display-name annotation classifier and omits
+known trailing region/language, numeric revision/version, hardware compatibility
+and enhancement tags (including SGB Enhanced, GB Compatible and NDSi Enhanced).
+Original library names and ROM recognition remain intact. Search and comparison fold Unicode
 diacritics, case, whitespace and colon/dash separators. A single matching catalog
 ID is required; editions, hacks, sequels and unknown tags remain distinct. See
 [ADR 0196](adr/0196-rom-artwork-title-matching.md).
@@ -29,7 +31,10 @@ Eligible square grids rank by score with deterministic ties, not upload recency.
 Requests and public-image URLs use explicit HTTPS host validation, bounded
 responses and no credential-bearing UI/log errors. Missing/ambiguous matches,
 network failures or invalid art use a neutral fallback and allow later retry;
-never fabricate a catalog identity. SteamGridDB is independent of Steam Account.
+never fabricate a catalog identity. Miss markers use policy version 8 so earlier
+annotation-related misses are retried without discarding successful artwork.
+Misspelled custom titles still require an explicit artwork match; fuzzy matching
+must not substitute the base game for a ROM hack. SteamGridDB is independent of Steam Account.
 
 ## Rendering and cache
 

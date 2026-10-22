@@ -1663,10 +1663,6 @@ impl GbaPlayer {
                 // Capture the live camera position at the rebound, not at Accept.
                 ui.set_player_origin(ui.invoke_player_capture_origin());
                 Self::release_card(&ui);
-                // Not for a failed load: it shows its error instead.
-                if !ui.get_player_failed() {
-                    self.cue(UiSoundCue::Launch);
-                }
                 self.set_stage(&ui, PlayerStage::Entering);
             }
         }
@@ -1859,6 +1855,9 @@ impl LaunchExecutor for GbaPlayer {
             self.state_focus.set(-1);
             ui.set_player_state_rows(slint::ModelRc::default());
             ui.set_player_open(true);
+            // Feedback belongs to the accepted request, not a first-frame or
+            // resume-preview wait that can add hundreds of milliseconds.
+            self.cue(UiSoundCue::Launch);
             Ok(())
         })();
         result.map_err(|error| LaunchExecutionError::new(std::io::Error::other(error)))
@@ -2882,6 +2881,16 @@ mod runtime_tests {
         ui.show().unwrap();
         home.handle_action(&ui, UiActionEvent::fresh(UiAction::Accept));
         assert!(ui.get_player_open());
+        assert_eq!(player.stage.get(), PlayerStage::Waiting);
+        assert_eq!(
+            sounds
+                .borrow()
+                .iter()
+                .filter(|cue| **cue == UiSoundCue::Launch)
+                .count(),
+            1,
+            "launch feedback must precede the first-frame/animation wait"
+        );
         if std::env::var_os("HORIZON_TEST_DEACTIVATE_LAUNCH").is_some() {
             player.set_active(false);
         }

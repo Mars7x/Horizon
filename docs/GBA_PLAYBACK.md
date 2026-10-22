@@ -24,7 +24,8 @@ The Super Game Boy border is off by default, so every Game Boy picture stays
 
 ## Launch and return motion
 
-The selected Home or Library card keeps its press/rebound. Once a real frame is
+An accepted launch plays its cue immediately, before waiting for core loading,
+a resume preview or the first frame. The selected Home or Library card keeps its press/rebound. Once a real frame is
 ready, the rebound releases after a 125 ms press hold and the player expands
 from that card to the full viewport over 230 ms. While a game loads, the worker
 first sends the picture of the state it will resume (from any core release,
@@ -113,19 +114,26 @@ Fast-forward is a shared toggle: off runs at 1×, on requests 2× for this loade
 game. Left turns it off, Right turns it on, and Select/click toggles it. Held
 fast-forward also requests 2× and returns to the selected setting on release.
 When a core cannot reach 2×, the worker measures its frame time and adjusts the
-audio to the reachable pace. It logs the reached speed every five seconds.
+audio to the reachable pace. DS fast-forward retains its selected frame deadline
+(2× the core's reported rate); slower adaptive audio must not feed back into
+that deadline and silently pace the game at 1×. A speed change resets the work
+estimate. Actual throughput still depends on the core/GPU budget at the selected
+resolution. It logs the reached speed every five seconds.
 Only the newest frame is filtered once per frame shown. A stereo low-pass filter
 prevents aliasing before decimation back to the output sample rate. Speed changes
 clear buffered audio, which remains bounded to 50 ms in the application queue.
-The toggle uses the shared animated track/thumb and respects Reduced Motion.
+The toggle uses a shared compact 40×22 track/thumb, centered in the row and
+aligned with its other trailing values; the whole row remains the input target.
+Its motion respects Reduced Motion.
 
 The game worker publishes atomic stereo frames to a bounded queue; PipeWire does
 not lock against core filtering or allocate. Playback builds about 31 ms of
 headroom on startup and after a real underrun (anything queued beyond that before
 the first sample is heard is trimmed), with short ramps at audio boundaries.
-Each frame waits as long as the audio it produced lasts (averaged over about 32
-frames), not a fixed frame interval, plus a gentle correction of at most 5% from
-how full the queue is. GBA frames are all one length, but a Game Boy frame is
+At normal speed, each frame waits as long as the audio it produced lasts
+(averaged over about 32 frames), plus a gentle correction of at most 5% from
+how full the queue is. mGBA retains that audio-clocked policy at both speeds;
+DS fast-forward caps this interval at its selected frame deadline. GBA frames are all one length, but a Game Boy frame is
 shorter or longer whenever a game switches its screen off or on (common while
 loading), and mGBA hands Game Boy audio over in 512-frame blocks; pacing by
 frames made such games run up to ~9% fast in audio terms and drop samples, and
@@ -398,3 +406,8 @@ See [ADR 0216](adr/0216-nintendo-ds-playback.md).
 
 See [ADR 0222](adr/0222-playback-controls-and-ds-resolution.md) for the two-speed toggle,
 higher-resolution DS filters and paired face-button swapping.
+
+DS None/Smooth presentation copies the original stacked image directly into its
+output buffer, retaining both screen bounds and every source pixel. It avoids
+per-screen intermediate buffers and reassembly, especially costly at 8×. See
+[ADR 0225](adr/0225-ds-fast-forward-pacing-and-compact-toggle.md).

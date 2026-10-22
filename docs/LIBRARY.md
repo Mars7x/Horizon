@@ -34,3 +34,7 @@ header elevation follows camera offset; it is absent at zero. Empty filters have
 a distinct no-results message. Artwork changes propagate through the shared card
 observer. Retired identities are not active games; they remain only in
 [historical persistence](DATABASE.md).
+
+Display names omit known catalog region, language, revision/version, system and
+hardware-enhancement annotations through the shared ROM title formatter. Stored
+catalog names, ROM identities and meaningful editions/hack names remain intact.

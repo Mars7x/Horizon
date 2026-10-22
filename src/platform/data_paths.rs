@@ -270,7 +270,7 @@ pub fn steamgriddb_cache_dir(version: &str) -> Option<PathBuf> {
     cache_dir("artwork/steamgriddb", version)
 }
 
-/// Horizon's own screenshots and clips. Data, not cache: captures cannot be
+/// Horizon's own screenshots and animated images. Data, not cache: captures cannot be
 /// rebuilt. The folder is created when the first capture is written.
 pub fn album_dir() -> Result<PathBuf, DataPathError> {
     Ok(app_dir(BaseDir::Data)?.join(ALBUM_DIR))

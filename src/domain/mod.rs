@@ -22,3 +22,5 @@ pub mod core_settings;
 
 pub mod controller;
 pub mod rewind;
+
+pub mod rom_titles;

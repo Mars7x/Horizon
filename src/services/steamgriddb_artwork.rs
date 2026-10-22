@@ -428,8 +428,8 @@ fn read_cache(root: &Path) -> Option<(SquareArtwork, bool)> {
 }
 
 fn recent_miss(root: &Path) -> bool {
-    // v7 retries misses after release-tag and Unicode title normalization.
-    fs::metadata(root.with_extension("miss-v7"))
+    // v8 retries misses after shared hardware/language/release-tag cleanup.
+    fs::metadata(root.with_extension("miss-v8"))
         .and_then(|m| m.modified())
         .ok()
         .and_then(|modified| SystemTime::now().duration_since(modified).ok())
@@ -440,7 +440,7 @@ fn write_miss(root: &Path) {
     if let Some(parent) = root.parent()
         && fs::create_dir_all(parent).is_ok()
     {
-        let _ = fs::write(root.with_extension("miss-v7"), b"");
+        let _ = fs::write(root.with_extension("miss-v8"), b"");
     }
 }
 
@@ -474,7 +474,7 @@ fn write_cache(
         // Metadata is the final commit marker; a mismatch checksum rejects any
         // interrupted write that left mixed JXL/JSON versions.
         fs::rename(&tmp_json, &json)?;
-        let _ = fs::remove_file(root.with_extension("miss-v7"));
+        let _ = fs::remove_file(root.with_extension("miss-v8"));
         Ok(())
     })();
     if result.is_err() {
@@ -565,6 +565,7 @@ mod tests {
         fs::write(root.with_extension("miss-v4"), b"").unwrap();
         fs::write(root.with_extension("miss-v5"), b"").unwrap();
         fs::write(root.with_extension("miss-v6"), b"").unwrap();
+        fs::write(root.with_extension("miss-v7"), b"").unwrap();
         assert!(!recent_miss(&root));
         write_miss(&root);
         assert!(recent_miss(&root));

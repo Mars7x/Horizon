@@ -16,9 +16,11 @@ The right edge uses the shared header-bar shadow turned sideways, with strength
 following the slide; the panel has no edge outline.
 The panel uses Theme.background (true black in Black), shared typography/marquee,
 spacing and focus animation; hints share Home's footer baseline. Pointer and
-keyboard/controller actions use the same UI sound boundary. Pending actions preserve row styling, focus and footer hints. Speed changes update
-only the pause-panel value with the shared value-swap duration and a directional
-slide/fade, with no gameplay badge or progress/success text; only failures need feedback. Save/load state browsers use shared ListRows with native-pixel previews and
+keyboard/controller actions use the same UI sound boundary. Pending actions preserve row styling, focus and footer hints. Fast-forward uses
+the shared SettingsRow switch's compact 40×22 variant, vertically centered with
+the same trailing inset as other quick-menu values. Its whole row stays one
+input target; the normal Settings switch size remains unchanged. The switch uses
+the shared value-swap motion, without gameplay badges or success messages. Save/load state browsers use shared ListRows with native-pixel previews and
 timestamps. Internal quick-menu views use shared TransitionDriver/TransitionLayer
 forward/back zoom/crossfade, clipped inside the stationary drawer; header, shadow
 and footer stay fixed. Reduced Motion makes view/value changes immediate. Empty/unavailable load slots never take focus. Save replacement and
@@ -125,7 +127,8 @@ close sound to finish instead of replaying when the panel next opens. Focus
 movement plays a warm, soft-edged snap (its ring kept below the 3-5 kHz band
 ears are most sensitive to); OK plays two quick warm snaps, the second with a short A6 note,
 and Back the snap with two quick notes stepping down; a game starting plays a low
-swelling tone as its card zooms in (not for a failed load). Every cue plays at
+swelling tone immediately when the player accepts the request, before loading
+or animation waits. Synchronously rejected requests stay silent. Every cue plays at
 one standard loudness, applied when it loads: its loudest 30 ms at about
 -32 dBFS, its peak at most -16 dBFS. Navigation, heard on every focus move,
 then sits about 7 dB below the rest. All cues are original and reproducible with

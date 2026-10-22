@@ -118,7 +118,7 @@ export component PausePanel inherits Rectangle {
                 height: self.row-size * self.rows + self.gap * (self.rows + 1) + Metrics.spacing-sm * 2;
                 spacing: self.gap;
                 PauseAction { row-height: menu.row-size; title: "Continue"; focused: root.view == 0 && root.focused == 0; enabled: root.open && root.view == 0; activated => { root.activate(0); } }
-                SettingsRow { height: menu.row-size; compact: true; title: "Fast-forward (2×)"; toggle: true; checked: root.speed == 2; focused: root.view == 0 && root.focused == 1; enabled: root.open && root.view == 0; activated => { root.activate(1); } }
+                SettingsRow { height: menu.row-size; compact: true; title: "Fast-forward (2×)"; toggle: true; compact-toggle: true; checked: root.speed == 2; focused: root.view == 0 && root.focused == 1; enabled: root.open && root.view == 0; activated => { root.activate(1); } }
                 PauseAction { row-height: menu.row-size; title: "Rewind"; focused: root.view == 0 && root.focused == 10; enabled: root.open && root.view == 0; activated => { root.activate(10); } }
                 if root.ds : PauseAction { row-height: menu.row-size; title: "Screen layout"; value: root.ds-layout; value-width: Metrics.spacing-xxl * 3.5; forward: root.ds-layout-forward; focused: root.view == 0 && root.focused == 8; enabled: root.open && root.view == 0; activated => { root.activate(8); } }
                 if root.ds : PauseAction { row-height: menu.row-size; title: "Swap screens"; focused: root.view == 0 && root.focused == 7; enabled: root.open && root.view == 0; activated => { root.activate(7); } }
