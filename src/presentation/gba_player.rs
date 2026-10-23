@@ -3400,7 +3400,7 @@ mod runtime_tests {
                         b"exit-state obstruction",
                     )
                     .unwrap();
-                    for _ in 0..6 {
+                    for _ in 1..pause_actions(false).len() {
                         live.handle_action(UiActionEvent::fresh(UiAction::Down));
                     }
                     assert_eq!(ui.get_player_focus(), RETURN_TO_HORIZON);
