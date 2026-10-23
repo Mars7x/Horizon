@@ -5,6 +5,8 @@ Date: 2026-10-23
 ## Status
 
 Accepted at the user’s request for a clean + menu on a game.
+The command list is amended by [ADR 0230](0230-manual-save-management.md),
+which replaces Play with Manage save data.
 
 ## Decision
 

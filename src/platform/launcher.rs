@@ -12,6 +12,8 @@ pub enum PortalLaunchError {
     InvalidUri(String),
     #[error("could not create portal runtime: {0}")]
     Runtime(#[from] std::io::Error),
+    #[error("could not access the folder: {0}")]
+    Directory(std::io::Error),
     #[error("OpenURI portal request failed: {0}")]
     Portal(#[from] ashpd::Error),
 }
@@ -44,6 +46,21 @@ pub fn open_uri(value: &str) -> Result<(), PortalLaunchError> {
     runtime.block_on(async {
         OpenFileRequest::default()
             .send_uri(&uri)
+            .await?
+            .response()?;
+        Ok(())
+    })
+}
+
+/// Ask the desktop file manager to reveal an app-owned folder. Worker only.
+pub fn open_directory(path: &std::path::Path) -> Result<(), PortalLaunchError> {
+    let directory = std::fs::File::open(path).map_err(PortalLaunchError::Directory)?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async {
+        ashpd::desktop::open_uri::OpenDirectoryRequest::default()
+            .send(&directory)
             .await?
             .response()?;
         Ok(())

@@ -1071,7 +1071,7 @@ export component AppWindow inherits Window {
             game-menu := GameContextMenu {
                 z: 12;
                 area-width: parent.width; area-height: parent.height;
-                open: root.game-menu-open && root.game-menu-view != 2;
+                open: root.game-menu-open && root.game-menu-view != 2 && root.game-menu-view != 5;
                 anchor-x: root.game-menu-x; anchor-y: root.game-menu-y;
                 game: root.game-menu-game; view: root.game-menu-view;
                 selected: root.game-menu-selected; hidden-game: root.game-menu-hidden;
@@ -1085,12 +1085,14 @@ export component AppWindow inherits Window {
             ConfirmDialog {
                 z: 13;
                 area-width: parent.width; area-height: parent.height;
-                open: root.game-menu-open && root.game-menu-view == 2;
-                title: root.game-menu-busy ? "Uninstalling…" : "Uninstall game?";
+                open: root.game-menu-open && (root.game-menu-view == 2 || root.game-menu-view == 5);
+                title: root.game-menu-view == 5
+                    ? (root.game-menu-busy ? "Deleting save data…" : "Delete save data?")
+                    : (root.game-menu-busy ? "Uninstalling…" : "Uninstall game?");
                 text: root.game-menu-confirm-text;
-                text-height: 136px;
+                text-height: root.game-menu-view == 5 ? 176px : 136px;
                 busy: root.game-menu-busy;
-                action: "Uninstall";
+                action: root.game-menu-view == 5 ? "Delete" : "Uninstall";
                 selected: root.game-menu-selected;
                 choose(index) => { root.game-menu-choose(index); }
             }

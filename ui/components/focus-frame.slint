@@ -1,7 +1,6 @@
 import { Metrics, Motion, Theme } from "../theme/theme.slint";
 
-// 3DS-inspired focus: four crisp native vector corners, without PNG glow
-// masks, continuous moving glints, or artwork/shell movement.
+// Four crisp native vector corners with no glow layer.
 export component FocusFrame inherits Rectangle {
     in property <float> scale-factor: 1.0;
     in property <bool> active: true;
@@ -25,61 +24,6 @@ export component FocusFrame inherits Rectangle {
         Theme.focus-highlight,
         1.0 - Motion.focus-idle-highlight-strength * root.motion-strength * root.cursor-cycle);
 
-    // A true Gaussian emission of the SAME four bracket strokes. Only the
-    // native Path elements below create a sharp edge; the SVG assets provide
-    // blurred alpha masks, tinted with the live accent color at render time.
-    // Unlike an extra widened Path, these cannot form a second crisp outline.
-    private property <float> glow-opacity: root.motion-strength
-        * (0.22 + 0.11 * root.cursor-cycle);
-    private property <length> glow-margin: 12px * root.scale-factor;
-    private property <length> glow-size: (Metrics.focus-arm + 24px) * root.scale-factor;
-
-    Image {
-        x: -root.cursor-outset - root.glow-margin;
-        y: -root.cursor-outset - root.glow-margin;
-        width: root.glow-size; height: root.glow-size;
-        source: @image-url("../assets/focus/glow-top-left.svg");
-        image-fit: fill;
-        colorize: Theme.focus;
-        opacity: root.glow-opacity;
-        accessible-role: none;
-    }
-    Image {
-        x: parent.width - Metrics.focus-arm * root.scale-factor
-            + root.cursor-outset - root.glow-margin;
-        y: -root.cursor-outset - root.glow-margin;
-        width: root.glow-size; height: root.glow-size;
-        source: @image-url("../assets/focus/glow-top-right.svg");
-        image-fit: fill;
-        colorize: Theme.focus;
-        opacity: root.glow-opacity;
-        accessible-role: none;
-    }
-    Image {
-        x: -root.cursor-outset - root.glow-margin;
-        y: parent.height - Metrics.focus-arm * root.scale-factor
-            + root.cursor-outset - root.glow-margin;
-        width: root.glow-size; height: root.glow-size;
-        source: @image-url("../assets/focus/glow-bottom-left.svg");
-        image-fit: fill;
-        colorize: Theme.focus;
-        opacity: root.glow-opacity;
-        accessible-role: none;
-    }
-    Image {
-        x: parent.width - Metrics.focus-arm * root.scale-factor
-            + root.cursor-outset - root.glow-margin;
-        y: parent.height - Metrics.focus-arm * root.scale-factor
-            + root.cursor-outset - root.glow-margin;
-        width: root.glow-size; height: root.glow-size;
-        source: @image-url("../assets/focus/glow-bottom-right.svg");
-        image-fit: fill;
-        colorize: Theme.focus;
-        opacity: root.glow-opacity;
-        accessible-role: none;
-    }
-
-    // The four original crisp bracket paths are not modified.
     Path {
         x: -root.cursor-outset; y: -root.cursor-outset;
         width: Metrics.focus-arm * root.scale-factor;

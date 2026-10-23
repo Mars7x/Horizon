@@ -694,6 +694,7 @@ fn play(
     let save_path = game_folder.save_path();
     // A game new to Horizon may have a save from another emulator beside it.
     if !save_path.exists()
+        && !crate::platform::data_paths::save_reset_marker(&game_folder.directory).exists()
         && let Some((found, bytes)) = save_beside(&location.path, ds, core.max_save_size())
     {
         match write_save_bounded(&save_path, &bytes, core.max_save_size()) {

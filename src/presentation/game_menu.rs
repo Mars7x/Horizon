@@ -24,11 +24,13 @@ use std::{
 enum Reply {
     Details(u64, Result<GameDetails, ManagementError>),
     Mutation(u64, Result<UninstallOutcome, ManagementError>),
+    Save(u64, Result<String, String>),
 }
 
 pub struct GameMenuController {
     ui: slint::Weak<AppWindow>,
     database: PathBuf,
+    saves: PathBuf,
     catalog: SharedCatalog,
     home: Rc<HomeController>,
     reloader: Rc<LibraryReloader>,
@@ -46,6 +48,7 @@ impl GameMenuController {
     pub fn new(
         ui: &AppWindow,
         database: PathBuf,
+        saves: PathBuf,
         catalog: SharedCatalog,
         home: Rc<HomeController>,
         reloader: Rc<LibraryReloader>,
@@ -55,6 +58,7 @@ impl GameMenuController {
         let controller = Rc::new(Self {
             ui: ui.as_weak(),
             database,
+            saves,
             catalog,
             home,
             reloader,
@@ -79,7 +83,7 @@ impl GameMenuController {
             if let Some(controller) = weak.upgrade()
                 && let Some(ui) = controller.ui.upgrade()
                 && ui.get_game_menu_open()
-                && ui.get_game_menu_view() == 0
+                && matches!(ui.get_game_menu_view(), 0 | 4)
                 && !ui.get_game_menu_busy()
                 && (0..4).contains(&index)
             {
@@ -152,17 +156,14 @@ impl GameMenuController {
         ui.set_game_menu_offset(0.0);
         ui.set_game_menu_details("Loading game details…".into());
         ui.set_game_menu_message("".into());
-        ui.set_game_menu_open(true);
         self.reposition(&ui);
+        ui.set_game_menu_open(true);
         self.load_details(id);
         self.cue(UiSoundCue::Ok);
         true
     }
 
     pub fn reposition(&self, ui: &AppWindow) {
-        if !ui.get_game_menu_open() {
-            return;
-        }
         let anchor = ui.invoke_player_capture_origin();
         let (x, y) = popup_position(
             anchor,
@@ -239,11 +240,10 @@ impl GameMenuController {
         match ui.get_game_menu_view() {
             0 => match index {
                 0 => {
-                    let slot = self.catalog.borrow().position(id);
-                    self.close();
-                    if let Some(slot) = slot {
-                        self.home.launch_from_library(&ui, slot);
-                    }
+                    ui.set_game_menu_view(4);
+                    ui.set_game_menu_selected(0);
+                    ui.set_game_menu_message("".into());
+                    self.cue(UiSoundCue::Ok);
                 }
                 1 => {
                     ui.set_game_menu_view(1);
@@ -285,7 +285,71 @@ impl GameMenuController {
                 _ => {}
             },
             3 => self.back(),
+            4 => match index {
+                0 | 1 => self.manage_saves(id, index),
+                2 => {
+                    let title = ui
+                        .get_game_menu_game()
+                        .title
+                        .chars()
+                        .take(80)
+                        .collect::<String>();
+                    ui.set_game_menu_confirm_text(format!("{title}\n\nDeletes the battery save, manual save states and automatic resume point. Existing manual backups, ROMs, screenshots and history stay. Back up first to keep your progress.").into());
+                    ui.set_game_menu_view(5);
+                    ui.set_game_menu_selected(0);
+                    self.cue(UiSoundCue::Ok);
+                }
+                3 => self.back(),
+                _ => {}
+            },
+            5 => match index {
+                0 => self.back(),
+                1 => self.manage_saves(id, 2),
+                _ => {}
+            },
             _ => {}
+        }
+    }
+
+    fn manage_saves(&self, id: GameId, action: i32) {
+        let Some(ui) = self.ui.upgrade() else { return };
+        let database = self.database.clone();
+        let saves = self.saves.clone();
+        let generation = self.next_generation();
+        let sender = self.sender.clone();
+        ui.set_game_menu_busy(true);
+        ui.set_game_menu_message("Working…".into());
+        let started = std::thread::Builder::new().name("save-management".into()).spawn(move || {
+            let result = (|| {
+                let folder = crate::services::save_data::folder(&database, &saves, id)?;
+                match action {
+                    0 => {
+                        crate::platform::launcher::open_directory(&folder.directory)
+                            .map_err(|e| format!("Could not open the save folder: {e}"))?;
+                        Ok("Save folder opened.".into())
+                    }
+                    1 => {
+                        let backup = crate::services::save_data::backup(&folder)
+                            .map_err(|e| format!("Could not back up save data: {e}"))?;
+                        Ok(format!("Backup saved in {}", backup.display()))
+                    }
+                    2 => {
+                        crate::services::save_data::delete(&folder)
+                            .map_err(|e| format!("Could not finish deleting save data: {e}. Any remaining files were kept."))?;
+                        Ok("Save data deleted. The next launch starts fresh.".into())
+                    }
+                    _ => Err("Unknown save operation.".into()),
+                }
+            })();
+            let _ = sender.send(Reply::Save(generation, result));
+        });
+        match started {
+            Ok(worker) => *self.mutation.borrow_mut() = Some(worker),
+            Err(_) => {
+                ui.set_game_menu_busy(false);
+                ui.set_game_menu_view(4);
+                self.error("Could not start managing save data. Try again.");
+            }
         }
     }
 
@@ -357,6 +421,26 @@ impl GameMenuController {
                         }
                     }
                 }
+                Reply::Save(generation, result) if generation == self.generation.get() => {
+                    ui.set_game_menu_busy(false);
+                    ui.set_game_menu_view(4);
+                    ui.set_game_menu_selected(0);
+                    match result {
+                        Ok(message) => {
+                            ui.set_game_menu_message(message.into());
+                            self.cue(UiSoundCue::Ok);
+                            if self.close_requested.replace(false)
+                                && let Err(error) = slint::quit_event_loop()
+                            {
+                                tracing::warn!(%error, "could not finish the requested close");
+                            }
+                        }
+                        Err(error) => {
+                            self.close_requested.set(false);
+                            self.error(&error);
+                        }
+                    }
+                }
                 Reply::Mutation(generation, result) if generation == self.generation.get() => {
                     ui.set_game_menu_busy(false);
                     match result {
@@ -410,7 +494,7 @@ impl GameMenuController {
             UiAction::Up | UiAction::Down if ui.get_game_menu_view() == 1 => {
                 self.scroll(if event.action == UiAction::Up { -1 } else { 1 })
             }
-            UiAction::Up | UiAction::Down if ui.get_game_menu_view() == 0 => {
+            UiAction::Up | UiAction::Down if matches!(ui.get_game_menu_view(), 0 | 4) => {
                 let next = (ui.get_game_menu_selected()
                     + if event.action == UiAction::Up { -1 } else { 1 })
                 .clamp(0, 3);
@@ -419,7 +503,7 @@ impl GameMenuController {
                     self.cue(UiSoundCue::Navigation);
                 }
             }
-            UiAction::Left | UiAction::Right if ui.get_game_menu_view() == 2 => {
+            UiAction::Left | UiAction::Right if matches!(ui.get_game_menu_view(), 2 | 5) => {
                 let next = if event.action == UiAction::Left { 0 } else { 1 };
                 if next != ui.get_game_menu_selected() {
                     ui.set_game_menu_selected(next);
@@ -528,6 +612,48 @@ fn properties_text(details: &GameDetails) -> String {
 #[cfg(test)]
 mod placement_tests {
     use super::*;
+    #[test]
+    #[ignore = "requires a real Wayland/Slint window"]
+    fn first_popup_open_animates_only_its_small_local_offset() {
+        use slint::{ComponentHandle, Timer, TimerMode};
+        use std::time::Duration;
+        let ui = AppWindow::new().unwrap();
+        ui.window().set_size(slint::PhysicalSize::new(1280, 720));
+        ui.show().unwrap();
+        let ticks = Rc::new(Cell::new(0));
+        let count = Rc::clone(&ticks);
+        let weak = ui.as_weak();
+        let timer = Timer::default();
+        timer.start(TimerMode::Repeated, Duration::from_millis(16), move || {
+            let ui = weak.upgrade().unwrap();
+            let tick = count.get() + 1;
+            count.set(tick);
+            if tick == 1 || tick == 40 {
+                ui.set_game_menu_x(if tick == 1 { 400.0 } else { 600.0 });
+                ui.set_game_menu_y(if tick == 1 { 250.0 } else { 350.0 });
+                ui.set_game_menu_open(true);
+            }
+            if (1..20).contains(&tick) || (40..60).contains(&tick) {
+                let rect = ui.get_game_menu_popup_rect();
+                let anchor = if tick < 40 { 250.0 } else { 350.0 };
+                assert!(
+                    rect.y >= anchor - 0.01 && rect.y <= anchor + 6.01,
+                    "frame {tick}: popup y {} moved beyond its local rise around {anchor}",
+                    rect.y
+                );
+                assert_eq!(rect.x, if tick < 40 { 400.0 } else { 600.0 });
+            }
+            if tick == 20 {
+                ui.set_game_menu_open(false);
+            }
+            if tick == 60 {
+                slint::quit_event_loop().unwrap();
+            }
+        });
+        slint::run_event_loop().unwrap();
+        assert_eq!(ticks.get(), 60);
+    }
+
     #[test]
     fn placement_follows_the_game_and_flips_at_screen_edges() {
         let at = |x, y, w| crate::CardRect {

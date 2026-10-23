@@ -1226,11 +1226,19 @@ mod runtime_tests {
         let menu = crate::presentation::game_menu::GameMenuController::new(
             &ui,
             directory.join("library.sqlite3"),
+            directory.join("saves"),
             Rc::clone(&catalog),
             Rc::clone(&navigation.home),
             Rc::clone(&reloader),
         );
         navigation.set_game_menu(menu);
+        let save_fixture = crate::services::save_data::folder(
+            &directory.join("library.sqlite3"),
+            &directory.join("saves"),
+            game,
+        )
+        .unwrap();
+        std::fs::write(save_fixture.save_path(), b"saved progress").unwrap();
         ui.global::<crate::Motion>().set_reduced_motion(true);
         ui.show().unwrap();
         let stage = Rc::new(Cell::new(20));
@@ -1336,6 +1344,76 @@ mod runtime_tests {
                             !ui.get_game_menu_open(),
                             "closing properties must dismiss options"
                         );
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Menu));
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Accept));
+                        assert_eq!(ui.get_game_menu_view(), 4);
+                        assert_eq!(
+                            launches.get(),
+                            0,
+                            "first command manages saves; it must never launch"
+                        );
+                        progress.set(220);
+                    }
+                    220 => {
+                        let image = ui.window().take_snapshot().unwrap();
+                        image::save_buffer(
+                            output.join("manage-save-data.png"),
+                            image.as_bytes(),
+                            image.width(),
+                            image.height(),
+                            image::ColorType::Rgba8,
+                        )
+                        .unwrap();
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Down));
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Accept));
+                        assert!(ui.get_game_menu_busy());
+                        progress.set(221);
+                    }
+                    221 if !ui.get_game_menu_busy() => {
+                        assert!(
+                            ui.get_game_menu_message().starts_with("Backup saved in"),
+                            "{}",
+                            ui.get_game_menu_message()
+                        );
+                        assert!(save_fixture.save_path().exists());
+                        ui.invoke_game_menu_choose(2);
+                        assert_eq!(ui.get_game_menu_view(), 5);
+                        assert_eq!(ui.get_game_menu_selected(), 0);
+                        progress.set(222);
+                    }
+                    222 => {
+                        let image = ui.window().take_snapshot().unwrap();
+                        image::save_buffer(
+                            output.join("delete-save-data.png"),
+                            image.as_bytes(),
+                            image.width(),
+                            image.height(),
+                            image::ColorType::Rgba8,
+                        )
+                        .unwrap();
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Accept));
+                        assert!(!ui.get_game_menu_open());
+                        assert!(
+                            save_fixture.save_path().exists(),
+                            "Cancel must keep progress"
+                        );
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Menu));
+                        ui.invoke_game_menu_choose(0);
+                        ui.invoke_game_menu_choose(2);
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Right));
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Accept));
+                        progress.set(223);
+                    }
+                    223 if !ui.get_game_menu_busy() => {
+                        assert_eq!(ui.get_game_menu_view(), 4);
+                        assert!(ui.get_game_menu_message().starts_with("Save data deleted"));
+                        assert!(!save_fixture.save_path().exists());
+                        let backups = crate::platform::data_paths::manual_save_backup_root(
+                            &save_fixture.directory,
+                        );
+                        assert_eq!(std::fs::read_dir(backups).unwrap().count(), 1);
+                        back();
+                        assert!(!ui.get_game_menu_open());
                         navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Menu));
                         navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Down));
                         navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Down));

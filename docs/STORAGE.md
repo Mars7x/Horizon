@@ -19,7 +19,9 @@ data/
     game.json
     view.json                 (DS: remembered layout and swap)
     <game name>.sav
+    save-reset                (explicit reset disables beside-ROM save import)
     backups/<game name>.previous.sav
+    backups/manual/<timestamp>/  (battery save, states and identity snapshot)
   album/<system>/<game>/
     game.json
     screenshots/<UTC timestamp>.jxl
@@ -91,7 +93,9 @@ valid save under `backups/`. Invalid/unreadable saves, occupied partial paths an
 failed writes preserve existing files and surface an error. A failed game save
 pauses playback and allows retry. `.part` captures are invisible until complete.
 Only confirmed [game uninstall](GAME_OPTIONS.md#uninstall) deletes imported ROM files;
-saves, states and captures are preserved. No other application's files are scanned or deleted. The one exception is reading a same-named save beside a game file, in the folder the user chose for games, once, when Horizon has none (ADR 0219).
+saves, states and captures are preserved. Explicit save reset through Manage save
+data deletes only the current battery save and state tree; manual snapshots and
+previous battery backups are retained. No other application's files are scanned or deleted. The one exception is reading a same-named save beside a game file, in the folder the user chose for games, once, when Horizon has none (ADR 0219).
 
 `playback.json` owns shared focus freezing and automatic resume; `cores/mgba.json` owns only mGBA
 preferences and `cores/melonds-ds.json` only melonDS DS ones. Settings load/save on the existing worker. Each action commits one

@@ -42,6 +42,7 @@
 | [0227](0227-remove-achievements-utility.md) | Three Home utilities; remove inactive Achievements and Activity Milestones |
 | [0228](0228-shared-game-options.md) | Shared game context menu, persistent hiding and confirmed ROM-only uninstall |
 | [0229](0229-ds-viewport-readback.md) | GPU viewport sampling before DS presentation readback |
+| [0230](0230-manual-save-management.md) | Confirmed progress reset and manual save snapshots |
 
 Earlier decisions and their supporting phase notes are in
 [history](../history/INDEX.md). Their numbered identifiers remain reserved.

@@ -141,6 +141,16 @@ pub fn game_view_temporary_path(directory: &Path, nonce: u64) -> PathBuf {
 pub fn game_save_path(directory: &Path, stem: &str) -> PathBuf {
     directory.join(format!("{stem}.sav"))
 }
+/// Manual save snapshots are separate from automatic replacement backups.
+pub fn manual_save_backup_root(game: &Path) -> PathBuf {
+    game.join("backups/manual")
+}
+pub fn manual_save_backup_path(game: &Path, name: &str) -> PathBuf {
+    manual_save_backup_root(game).join(name)
+}
+pub fn save_reset_marker(game: &Path) -> PathBuf {
+    game.join("save-reset")
+}
 pub fn save_backup_path(save: &Path) -> std::io::Result<PathBuf> {
     let parent = save
         .parent()

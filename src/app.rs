@@ -438,6 +438,7 @@ pub fn run() -> Result<(), AppError> {
     let game_menu = crate::presentation::game_menu::GameMenuController::new(
         &ui,
         database_path.clone(),
+        data_paths::gba_save_directory()?,
         Rc::clone(&catalog),
         Rc::clone(&home),
         Rc::clone(&reloader),

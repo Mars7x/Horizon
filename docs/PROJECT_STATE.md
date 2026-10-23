@@ -28,8 +28,10 @@ import and Ready. Completed setup is skipped; unfinished confirmed steps resume.
 Utilities are **Album, Activity, Settings**, in that order.
 Steam account setup uses a SteamID64 and Web API key; interactive Steam login
 is not implemented. SteamGridDB is independent of Steam account features.
-Game options on +/Start/F10 provide Play, properties, persistent Hide/Unhide and
-confirmed ROM uninstall; saves, states, captures and history are retained.
+Game options on +/Start/F10 provide save management, properties, persistent
+Hide/Unhide and confirmed ROM uninstall. Save management opens the save folder,
+backs up progress or explicitly resets battery saves and states with confirmation.
+ROM uninstall retains saves, states, captures and history.
 RetroAchievements is intended future work, not an available backend.
 
 Storage uses the fresh [purpose-first layout](STORAGE.md), with readable game

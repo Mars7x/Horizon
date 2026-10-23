@@ -28,8 +28,8 @@ covers.
 
 ## Focus, title and media
 
-Corner brackets track the animated selected card, not the grid slot. Utility
-focus has the established ring and coupled lift. Do not recolor authored utility
+Crisp corner brackets without a glow track the animated selected card, not the
+grid slot. Utility focus has the established ring and coupled lift. Do not recolor authored utility
 SVGs or replace their scale-aware rendering. Only selected long titles marquee;
 others clip with soft edges. Respect reduced motion and high contrast.
 

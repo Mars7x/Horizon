@@ -12,8 +12,9 @@ Pointer movement highlights a command; clicking outside dismisses without
 activating the underlying page. It uses the shared palette and reduced-motion
 timing, compact ListRows and shared Surface styling. The popup contains only action labels, with no title,
 helper text or status caption. Properties, failures and uninstall confirmation
-use separate detail dialogs.
-Up/Down selects Play, Game properties, Hide/Unhide or Uninstall. A/Enter activates;
+use separate detail dialogs. The opening rise is a local offset from the cover
+anchor, so the first opening never animates from the screen origin.
+Up/Down selects Manage save data, Game properties, Hide/Unhide or Uninstall. A/Enter activates;
 B/Escape or + backs out. Closing retains the background page’s selection, filter
 and scroll. Global Home closes options and performs its normal navigation reset.
 Reduced Motion presents modal changes immediately.
@@ -30,6 +31,28 @@ file sizes, SHA-256 identities and title provenance. These are saved import
 records, not a claim that the files are currently accessible or unchanged.
 Up/Down and the wheel scroll long details. Closing properties or cancelling
 uninstall dismisses options entirely, returning to the selected game.
+
+## Manage save data
+
+Manage save data opens a shared dialog with Open save file location, Back up save
+data, Delete save data and Back. The first action asks the desktop file manager
+to open the identity-bound save folder through XDG OpenDirectory; no host command
+or extra sandbox permission is used. Backup copies the battery save and complete
+state tree (manual slots, automatic resume and state fallback backups) to a new
+timestamped folder under `backups/manual/`, with its identity document. Only a
+fully synced snapshot receives its final name; an interrupted copy stays `.part`.
+The dialog reports success or failure and never overwrites a previous snapshot.
+
+Delete requires a second confirmation with Cancel initially selected. It deletes
+the battery save and state tree, including automatic resume and state fallback
+backups. Manual snapshots, previous battery backups, game identity, DS view,
+ROMs, captures and history stay. A persistent reset marker prevents a future
+launch from silently importing an old save beside the ROM. Links and invalid
+paths stop the operation before removal; changes or filesystem failures during
+removal are reported without claiming that the reset completed. Save operations
+run on a joined worker while gameplay is closed. Back/Cancel closes the entire
+options flow rather than bringing back the floating popup. See
+[ADR 0230](adr/0230-manual-save-management.md).
 
 ## Uninstall
 

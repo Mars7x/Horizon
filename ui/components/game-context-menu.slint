@@ -6,7 +6,7 @@ import { ActionButton } from "action-button.slint";
 import { ListRow, Surface } from "list-row.slint";
 import { HintBar } from "hint-bar.slint";
 
-// Floating game commands; only Properties opens a larger, centered dialog.
+// Floating game commands; details and save management use shared dialogs.
 // Rust chooses placement, identity, focus and operations. The page stays visible.
 export component GameContextMenu inherits Rectangle {
     in property <bool> open: false;
@@ -29,8 +29,10 @@ export component GameContextMenu inherits Rectangle {
     callback back();
     callback scroll(int);
     width: root.area-width; height: root.area-height;
-    visible: root.open || popup.opacity > 0.01 || properties-dialog.opacity > 0.01 || error-dialog.opacity > 0.01;
+    visible: root.open || popup.opacity > 0.01 || properties-dialog.opacity > 0.01 || error-dialog.opacity > 0.01 || saves-dialog.opacity > 0.01;
     background: transparent;
+    private property <length> popup-rise: root.open && root.view == 0 ? 0px : Motion.dialog-rise / 2;
+    animate popup-rise { duration: Motion.dialog-duration; easing: ease-out; }
 
     // Dismiss without activating anything on the page behind the menu.
     TouchArea {
@@ -41,16 +43,16 @@ export component GameContextMenu inherits Rectangle {
     }
     popup := Surface {
         x: root.anchor-x;
-        y: root.anchor-y + (root.open && root.view == 0 ? 0px : Motion.dialog-rise / 2);
+        y: root.anchor-y + root.popup-rise;
         width: min(Metrics.game-context-width, root.area-width - Metrics.spacing-xl);
         height: min(root.area-height - Metrics.spacing-xl, Metrics.game-context-height);
         opacity: root.open && root.view == 0 ? 1.0 : 0.0;
         visible: (root.open && root.view == 0) || self.opacity > 0.01;
-        animate opacity, y { duration: Motion.dialog-duration; easing: ease-out; }
+        animate opacity { duration: Motion.dialog-duration; easing: ease-out; }
         background: Theme.surface-raised;
         drop-shadow-color: Theme.shadow.with-alpha(Theme.is-dark ? 0.42 : 0.18);
         drop-shadow-blur: 20px; drop-shadow-offset-y: 5px;
-        for label[index] in ["Play", "Game properties", root.hidden-game ? "Unhide game" : "Hide game", "Uninstall game"] : ListRow {
+        for label[index] in ["Manage save data", "Game properties", root.hidden-game ? "Unhide game" : "Hide game", "Uninstall game"] : ListRow {
             x: Metrics.spacing-sm;
             y: Metrics.spacing-sm + index * (Metrics.compact-row-height + Metrics.spacing-xs) + (index == 3 ? Metrics.spacing-sm : 0px);
             width: parent.width - Metrics.spacing-md;
@@ -63,6 +65,46 @@ export component GameContextMenu inherits Rectangle {
             activated => { root.choose(index); }
         }
         Rectangle { x: Metrics.spacing-md; y: 164px; width: parent.width - Metrics.spacing-xl; height: 1px; background: Theme.divider; }
+    }
+    saves-dialog := ModalDialog {
+        area-width: root.area-width; area-height: root.area-height;
+        open: root.open && root.view == 4;
+        card-width: 504px; card-height: 464px;
+        dismissed => { root.back(); }
+        Text {
+            x: Metrics.spacing-lg; y: Metrics.spacing-lg;
+            width: parent.width - Metrics.spacing-xxl; height: 28px;
+            text: "Manage save data"; color: Theme.foreground;
+            font-size: Typography.heading-size; font-weight: Typography.heading-weight;
+        }
+        Text {
+            x: Metrics.spacing-lg; y: 58px;
+            width: parent.width - Metrics.spacing-xxl; height: 50px;
+            text: root.game.title + "\nBattery save, save states and automatic resume";
+            color: Theme.secondary-foreground; font-size: Typography.caption-size;
+            wrap: word-wrap; overflow: elide;
+        }
+        Surface {
+            x: Metrics.spacing-lg; y: 120px;
+            width: parent.width - Metrics.spacing-xxl; height: 220px;
+            for label[index] in ["Open save file location", "Back up save data", "Delete save data", "Back"] : ListRow {
+                x: Metrics.spacing-sm;
+                y: Metrics.spacing-xs + index * (Metrics.compact-row-height + Metrics.spacing-xs);
+                width: parent.width - Metrics.spacing-md;
+                compact: true; title: label; trailing-width: Metrics.spacing-lg;
+                focused: root.selected == index;
+                enabled: root.open && root.view == 4 && !root.busy;
+                hovered => { root.hover-row(index); }
+                activated => { root.choose(index); }
+            }
+        }
+        Text {
+            x: Metrics.spacing-lg; y: 356px;
+            width: parent.width - Metrics.spacing-xxl; height: 84px;
+            text: root.message == "" ? "Backups stay in this game's save folder. Deleting save data requires confirmation." : root.message;
+            color: Theme.secondary-foreground; font-size: Typography.caption-size;
+            wrap: word-wrap; overflow: elide;
+        }
     }
     error-dialog := ModalDialog {
         area-width: root.area-width; area-height: root.area-height;
