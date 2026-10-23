@@ -13,6 +13,7 @@ export component HomePage inherits Rectangle {
     in property <int> previous-count: 0;
     in property <int> reorder-sequence: 0;
     in property <bool> reorder-delayed: false;
+    in property <bool> player-covered: false;
     in property <int> selected-index: 0;
     in property <string> selected-title;
     in property <int> launching-game-index: -1;
@@ -69,6 +70,7 @@ export component HomePage inherits Rectangle {
             previous-count: root.previous-count;
             reorder-sequence: root.reorder-sequence;
             reorder-delayed: root.reorder-delayed;
+            player-covered: root.player-covered;
             selected-index: root.selected-index;
             selected-title: root.selected-title;
             launching-game-index: root.launching-game-index;

@@ -667,6 +667,18 @@ pub fn run() -> Result<(), AppError> {
             }
         }));
     }
+    {
+        let home = Rc::clone(&home);
+        let activity = Rc::clone(&activity_service);
+        let weak = ui.as_weak();
+        player.set_before_return(Rc::new(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            match activity.recent_game_ids(HOME_RECENT_LIMIT) {
+                Ok(ids) => home.refresh_recent_games(&ui, &ids),
+                Err(error) => warn!(%error, "Home recent history refresh failed"),
+            }
+        }));
+    }
     let window_active = Rc::new(Cell::new(true));
     let player_sound = Rc::clone(&navigation_sound);
     let player_active = Rc::clone(&window_active);

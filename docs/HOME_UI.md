@@ -19,9 +19,12 @@ recognized drags keep the existing scroll, inertia and catch behavior.
 
 When active games exist, Home shows at most 15: recently played or newly added
 games lead, with unplayed alphabetical fallback. Ordering comes from persisted
-facts, never guessed lifetime totals. Changes glide while retaining a valid
-selection. Imported GBA games populate these slots; the Library tile also remains
-available without active covers.
+facts, never guessed lifetime totals. Recent-play ordering updates instantly
+under gameplay, retaining the selected game. Before returning, Home refreshes
+that order so the played title is already in its recent position; no reorder
+animation replays on reveal. Catalog/import changes retain their glide. Imported
+games populate these slots; the Library tile also remains available without active
+covers.
 
 ## Focus, title and media
 

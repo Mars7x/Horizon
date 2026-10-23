@@ -25,6 +25,7 @@ export component ListRow inherits Rectangle {
     // Width kept free on the right for the trailing children.
     in property <length> trailing-width: 48px;
     callback activated();
+    callback hovered();
     // A scroll event over the row, passed on to its list's camera (which
     // never moves selection).
     callback wheel(length);
@@ -73,6 +74,7 @@ export component ListRow inherits Rectangle {
         width: parent.width; height: parent.height;
         enabled: root.enabled;
         clicked => { root.activated(); }
+        pointer-event(event) => { if (event.kind == PointerEventKind.move) { root.hovered(); } }
         scroll-event(event) => {
             if event.delta-y != 0px {
                 root.wheel(event.delta-y);

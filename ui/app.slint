@@ -206,6 +206,8 @@ export component AppWindow inherits Window {
     in property <bool> game-menu-open: false;
     in property <length> game-menu-x;
     in property <length> game-menu-y;
+    out property <length> game-menu-placement-width: Metrics.game-context-width;
+    out property <length> game-menu-placement-height: Metrics.game-context-height;
     out property <CardRect> game-menu-popup-rect: game-menu.popup-rect;
     callback game-menu-focus(int);
     callback home-game-options(int);
@@ -646,6 +648,7 @@ export component AppWindow inherits Window {
                     previous-count: root.home-previous-count;
                     reorder-sequence: root.home-reorder-sequence;
                     reorder-delayed: root.home-reorder-delayed;
+                    player-covered: root.player-open && root.player-phase >= 2;
                     selected-index: root.selected-index;
                     selected-title: root.selected-title;
                     launching-game-index: root.launching-game-index;

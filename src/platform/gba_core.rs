@@ -92,6 +92,8 @@ struct Hardware {
     stencil: bool,
     /// The size of a frame the core drew and Horizon hasn't read back yet.
     pending: Option<(u32, u32)>,
+    presentation: Frame,
+    viewport_failed: bool,
 }
 // What the core calls during `retro_run`, while CALLBACKS may be in use.
 thread_local! {
@@ -219,6 +221,8 @@ impl Core {
                     destroy: None,
                     stencil: false,
                     pending: None,
+                    presentation: Frame { width: 0, height: 0, rgba: Vec::new(), smooth: false },
+                    viewport_failed: false,
                 }),
                 Err(error) => {
                     tracing::warn!(%error, "DS upscaling unavailable; playing at native resolution");
@@ -477,7 +481,7 @@ impl Core {
     }
     /// Hands the newest frame to the filter stage, once. False when the core
     /// has not drawn a new one since.
-    pub fn hand_off(&self, stage: &super::gba_present::FrameStage) -> bool {
+    pub fn hand_off(&self, stage: &super::gba_present::FrameStage, display: &DisplaySize) -> bool {
         CALLBACKS.with(|state| {
             let Ok(mut state) = state.try_borrow_mut() else {
                 return false;
@@ -492,6 +496,33 @@ impl Core {
             if state.hardware.is_some() {
                 if !stage.wanted() {
                     return false;
+                }
+                if state.preferences.video_filter == crate::domain::core_settings::VideoFilter::None {
+                    let size = display.load(Ordering::Acquire);
+                    let (layout, swapped) = unpack_ds_view(state.extra.view.load(Ordering::Acquire));
+                    let targets = layout.screens(swapped, ((size >> 32) as u32 as f64, size as u32 as f64))
+                        .map(|rect| (rect.width.round() as u32, rect.height.round() as u32));
+                    let raw_size = state.raw_frame.as_ref().map(|raw| (raw.width, raw.height));
+                    if let Some(hardware) = state.hardware.as_mut()
+                        && !hardware.viewport_failed
+                        && let Some(source) = hardware.pending.or(raw_size)
+                        && let Some(screens) = super::gba_video::ds_viewport_sizes(source, targets)
+                    {
+                        match hardware.gl.read_viewport(source, screens, &mut hardware.presentation.rgba) {
+                            Ok(()) => {
+                                hardware.presentation.width = screens[0].0.max(screens[1].0);
+                                hardware.presentation.height = screens[0].1 + screens[1].1;
+                                stage.submit_viewport(&hardware.presentation, screens);
+                                state.fresh = false;
+                                // Keep the full GPU frame pending for captures/rewind.
+                                return true;
+                            }
+                            Err(error) => {
+                                hardware.viewport_failed = true;
+                                tracing::warn!(%error, "DS viewport readback unavailable; retaining full-resolution presentation");
+                            }
+                        }
+                    }
                 }
                 state.read_back();
             }
@@ -1247,6 +1278,58 @@ mod tests {
             core.run_frame();
         }
         assert_eq!(core.capture_frame().unwrap().height, 384);
+        drop(core);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires pinned melonDS DS and packaged EGL/OpenGL driver"]
+    fn real_ds_gpu_viewport_keeps_full_resolution_captures() {
+        let path = std::env::var_os("HORIZON_DS_CORE").unwrap();
+        let directory =
+            std::env::temp_dir().join(format!("horizon-ds-viewport-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let audio = Arc::new(super::super::gba_audio::GameAudio::default());
+        let mut core = Core::load_system(
+            Path::new(&path),
+            &test_ds_rom(),
+            MgbaPreferences {
+                video_filter: crate::domain::core_settings::VideoFilter::None,
+                ..Default::default()
+            },
+            Arc::clone(&audio),
+            Arc::new(AtomicU16::new(0)),
+            Some((Arc::new(DsInput::default()), &directory, 8)),
+        )
+        .unwrap();
+        for _ in 0..120 {
+            core.run_frame();
+            audio.clear();
+        }
+        let stage = super::super::gba_present::FrameStage::new();
+        let display = Arc::new(AtomicU64::new((1280u64 << 32) | 720));
+        assert!(core.hand_off(&stage, &display));
+        CALLBACKS.with(|state| {
+            let state = state.borrow();
+            let hardware = state.as_ref().unwrap().hardware.as_ref().unwrap();
+            assert!(!hardware.viewport_failed);
+            assert_eq!(
+                (hardware.presentation.width, hardware.presentation.height),
+                (640, 960)
+            );
+            assert_eq!(hardware.pending, Some((2048, 3072)));
+        });
+        let frame = core.capture_frame().unwrap();
+        assert_eq!((frame.width, frame.height), (2048, 3072));
+        assert!(frame.rgba[0] >= 248 && frame.rgba[1] == 0 && frame.rgba[2] == 0);
+        assert!(frame.rgba[2048 * 1536 * 4 + 2] >= 248);
+        let saved = core.serialize_state().unwrap();
+        core.run_frame();
+        core.restore_state(&saved).unwrap();
+        core.run_frame();
+        stage.want();
+        assert!(core.hand_off(&stage, &display));
+        assert_eq!(core.capture_frame().unwrap().width, 2048);
         drop(core);
         std::fs::remove_dir_all(directory).unwrap();
     }

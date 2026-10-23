@@ -49,17 +49,10 @@ pub fn present_ds(raw: &Frame, filter: VideoFilter, targets: [(u32, u32); 2]) ->
     } else {
         filter
     };
-    if width > 256
-        && filter == VideoFilter::None
-        && targets
-            .iter()
-            .all(|&(w, h)| w > 0 && h > 0 && w <= width && h <= height)
-        && targets.iter().any(|&(w, h)| w < width || h < height)
+    if filter == VideoFilter::None
+        && let Some(sizes) = ds_viewport_sizes((raw.width, raw.height), targets)
     {
-        // Rendering stays at the selected internal resolution. Sample the
-        // nearest pixels that the viewport can actually show before upload,
-        // instead of making Slint upload two 8× textures just to shrink them.
-        return ds_viewport_pixels(raw, targets);
+        return ds_viewport_pixels(raw, sizes);
     }
     if matches!(filter, VideoFilter::None | VideoFilter::Smooth) {
         // No per-screen treatment is needed: one copy keeps both screens in
@@ -103,15 +96,34 @@ pub fn present_ds(raw: &Frame, filter: VideoFilter, targets: [(u32, u32); 2]) ->
     }
 }
 
-fn ds_viewport_pixels(raw: &Frame, targets: [(u32, u32); 2]) -> Presented {
-    let (width, height) = (raw.width, raw.height / 2);
-    let sizes = targets.map(|(w, h)| {
+/// Exact screen sizes for viewport-only nearest presentation. Capture/rewind
+/// frames retain the core's full dimensions. Unknown/enlarging targets fall back.
+pub(super) fn ds_viewport_sizes(
+    (width, stacked_height): (u32, u32),
+    targets: [(u32, u32); 2],
+) -> Option<[(u32, u32); 2]> {
+    let height = stacked_height / 2;
+    if width <= 256
+        || width * 3 != height * 4
+        || !stacked_height.is_multiple_of(2)
+        || !targets
+            .iter()
+            .all(|&(w, h)| w > 0 && h > 0 && w <= width && h <= height)
+        || !targets.iter().any(|&(w, h)| w < width || h < height)
+    {
+        return None;
+    }
+    Some(targets.map(|(w, h)| {
         let scale = (f64::from(w) / f64::from(width)).min(f64::from(h) / f64::from(height));
         (
             (f64::from(width) * scale).round().max(1.0) as u32,
             (f64::from(height) * scale).round().max(1.0) as u32,
         )
-    });
+    }))
+}
+
+fn ds_viewport_pixels(raw: &Frame, sizes: [(u32, u32); 2]) -> Presented {
+    let (width, height) = (raw.width, raw.height / 2);
     let stride = sizes[0].0.max(sizes[1].0);
     let mut pixels = SharedPixelBuffer::<Rgba8Pixel>::new(stride, sizes[0].1 + sizes[1].1);
     let output = pixels.make_mut_bytes();

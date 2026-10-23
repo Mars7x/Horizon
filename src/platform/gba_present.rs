@@ -11,6 +11,8 @@ use std::sync::{Condvar, Mutex, PoisonError, atomic::Ordering};
 struct Pending {
     /// The newest raw frame not yet filtered; newer frames replace it.
     raw: Option<Frame>,
+    /// Already sampled on the GPU; preserve each screen’s exact viewport size.
+    screens: Option<[(u32, u32); 2]>,
     /// The screen can take another frame.
     wanted: bool,
     stop: bool,
@@ -35,7 +37,16 @@ impl FrameStage {
 
     /// The core's newest frame. Cheap: one native-size copy into a reused buffer.
     pub fn submit(&self, frame: &Frame) {
+        self.submit_frame(frame, None);
+    }
+
+    pub fn submit_viewport(&self, frame: &Frame, screens: [(u32, u32); 2]) {
+        self.submit_frame(frame, Some(screens));
+    }
+
+    fn submit_frame(&self, frame: &Frame, screens: Option<[(u32, u32); 2]>) {
         let mut pending = self.pending.lock().unwrap_or_else(PoisonError::into_inner);
+        pending.screens = screens;
         match pending.raw.as_mut() {
             Some(raw) => {
                 raw.width = frame.width;
@@ -85,7 +96,7 @@ impl FrameStage {
     ) {
         let mut scratch = Scratch::default();
         loop {
-            let raw = {
+            let (raw, screens) = {
                 let mut pending = self
                     .wake
                     .wait_while(
@@ -97,14 +108,23 @@ impl FrameStage {
                     return;
                 }
                 pending.wanted = false;
-                pending.raw.take()
+                (pending.raw.take(), pending.screens.take())
             };
             let Some(raw) = raw else {
                 continue;
             };
             let size = display.load(Ordering::Acquire);
             let window = ((size >> 32) as u32, size as u32);
-            let presented = if let Some(view) = ds_view {
+            let presented = if let Some(screens) = screens {
+                super::gba_core::Presented {
+                    pixels: slint::SharedPixelBuffer::clone_from_slice(
+                        &raw.rgba, raw.width, raw.height,
+                    ),
+                    smooth: false,
+                    exact: None,
+                    screens: Some(screens),
+                }
+            } else if let Some(view) = ds_view {
                 // Each screen is filtered at the size the layout shows it.
                 let (layout, swapped) = unpack_ds_view(view.load(Ordering::Acquire));
                 let rects = layout.screens(swapped, (f64::from(window.0), f64::from(window.1)));
@@ -182,8 +202,30 @@ mod tests {
         wait(2);
         let latest = output.lock().unwrap().take().unwrap();
         assert_eq!(latest.pixels.as_bytes()[0], 3);
+        let viewport = Frame {
+            width: 3,
+            height: 3,
+            rgba: vec![42; 36],
+            smooth: false,
+        };
+        let screens = [(3, 2), (1, 1)];
+        stage.submit_viewport(&viewport, screens);
+        stage.want();
+        wait(3);
+        let latest = output.lock().unwrap().take().unwrap();
+        assert_eq!(latest.screens, Some(screens));
+        assert_eq!(latest.pixels.as_bytes(), viewport.rgba);
+        stage.submit(&frame(4));
+        stage.want();
+        wait(4);
+        let latest = output.lock().unwrap().take().unwrap();
+        assert_eq!(
+            latest.screens, None,
+            "full-source fallback must discard viewport metadata"
+        );
+        assert_eq!(latest.pixels.as_bytes()[0], 4);
         stage.stop();
         worker.join().unwrap();
-        assert_eq!(shown.load(Ordering::SeqCst), 2);
+        assert_eq!(shown.load(Ordering::SeqCst), 4);
     }
 }

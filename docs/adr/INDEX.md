@@ -41,6 +41,7 @@
 | [0226](0226-fixed-ratio-fast-forward-audio.md) | Fixed selected audio ratio; no frame-cost feedback into pitch or pacing |
 | [0227](0227-remove-achievements-utility.md) | Three Home utilities; remove inactive Achievements and Activity Milestones |
 | [0228](0228-shared-game-options.md) | Shared game context menu, persistent hiding and confirmed ROM-only uninstall |
+| [0229](0229-ds-viewport-readback.md) | GPU viewport sampling before DS presentation readback |
 
 Earlier decisions and their supporting phase notes are in
 [history](../history/INDEX.md). Their numbered identifiers remain reserved.

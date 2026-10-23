@@ -110,6 +110,7 @@ pub struct GbaPlayer {
     ds_layout: Cell<Option<crate::domain::core_settings::DsLayout>>,
     ds_swapped: Cell<bool>,
     selected_game: CallbackSlot<dyn Fn() -> Option<i64>>,
+    before_return: CallbackSlot<dyn Fn()>,
     /// The game whose card launched this session.
     launched_game: Cell<Option<i64>>,
     sound: CallbackSlot<dyn Fn(UiSoundCue)>,
@@ -168,6 +169,7 @@ impl GbaPlayer {
             ds_layout: Cell::new(None),
             ds_swapped: Cell::new(false),
             selected_game: RefCell::new(None),
+            before_return: RefCell::new(None),
             launched_game: Cell::new(None),
             sound: RefCell::new(None),
             timer: Timer::default(),
@@ -294,6 +296,10 @@ impl GbaPlayer {
     /// tell whether the card it launched from is still there.
     pub fn set_selected_game(&self, source: Rc<dyn Fn() -> Option<i64>>) {
         *self.selected_game.borrow_mut() = Some(source);
+    }
+    /// Settle the underlying page before capturing the return destination.
+    pub fn set_before_return(&self, callback: Rc<dyn Fn()>) {
+        *self.before_return.borrow_mut() = Some(callback);
     }
     fn selected_game(&self) -> Option<i64> {
         self.selected_game
@@ -1204,6 +1210,9 @@ impl GbaPlayer {
         if self.closing.get() || self.stage.get() == PlayerStage::Waiting {
             self.finish_close(ui);
             return;
+        }
+        if let Some(before_return) = self.before_return.borrow().as_ref() {
+            before_return();
         }
         // The game can leave the library while it runs (its file deleted):
         // then fade out in place rather than shrink into another game's card.
@@ -2626,6 +2635,146 @@ mod runtime_tests {
             )
             .unwrap();
         }
+    }
+
+    /// A short launch from a later Home slot must return to the same game's
+    /// new first slot, without waiting for the three-second history poll.
+    #[test]
+    #[ignore = "requires Wayland, PipeWire, built mGBA core and HORIZON_GBA_TEST_DIR"]
+    fn real_player_returns_to_settled_recent_card() {
+        let directory = PathBuf::from(std::env::var_os("HORIZON_GBA_TEST_DIR").unwrap());
+        std::fs::create_dir_all(&directory).unwrap();
+        let playing = directory.join("Playing.gba");
+        std::fs::write(&playing, crate::platform::gba_core::test_rom()).unwrap();
+        let mut other = crate::platform::gba_core::test_rom();
+        other[1023] = 1;
+        std::fs::write(directory.join("Other.gba"), other).unwrap();
+        let database = directory.join("library.sqlite3");
+        let mut repository = SqliteLibraryRepository::open(&database).unwrap();
+        let scan = rom_import::scan_folder(&directory, None).unwrap();
+        repository
+            .save_rom_import(&RomSetup::default(), &scan.candidates)
+            .unwrap();
+        let games = repository.list_games().unwrap();
+        let launched = games
+            .iter()
+            .find(|g| g.game().title().as_str() == "Playing")
+            .unwrap()
+            .game()
+            .id();
+        let core_paths = crate::platform::data_paths::CoreSettingsPaths {
+            playback: directory.join("playback.json"),
+            mgba: directory.join("cores/mgba.json"),
+            ds: directory.join("cores/melonds-ds.json"),
+        };
+        let preferences = crate::domain::core_settings::CorePreferences {
+            resume_last_state: false,
+            ..Default::default()
+        };
+        crate::persistence::core_settings::CoreSettingsStore::new(core_paths.clone())
+            .write_fixture(preferences);
+        let ui = AppWindow::new().unwrap();
+        let player = GbaPlayer::new(
+            &ui,
+            PlayerPaths {
+                database: database.clone(),
+                core: std::env::var_os("HORIZON_GBA_CORE").unwrap().into(),
+                ds_core: crate::platform::data_paths::ds_core_path(),
+                saves: directory.join("saves"),
+                settings: core_paths,
+                album: directory.join("album"),
+            },
+        );
+        let catalog = crate::presentation::catalog::Catalog::shared(games);
+        let registry = Rc::new(crate::sources::production_source_registry().unwrap());
+        let artwork =
+            crate::services::artwork::ArtworkService::new(Rc::clone(&registry), None, None);
+        let activity = Rc::new(crate::services::activity::ActivityService::new(Rc::new(
+            RefCell::new(repository),
+        )));
+        let launch = Rc::new(crate::services::launch::GameLaunchService::new(
+            Rc::clone(&registry),
+            player.clone(),
+        ));
+        let home = crate::presentation::home::HomeController::new(
+            &ui,
+            Rc::clone(&catalog),
+            &[],
+            &artwork,
+            &registry,
+            launch,
+            activity.clone(),
+        );
+        let selected = Rc::clone(&home);
+        player.set_selected_game(Rc::new(move || selected.selected_game_id()));
+        let returned = Rc::new(Cell::new(false));
+        let refreshed = Rc::clone(&returned);
+        let recent_home = Rc::clone(&home);
+        let weak = ui.as_weak();
+        player.set_before_return(Rc::new(move || {
+            let ui = weak.upgrade().unwrap();
+            let ids = activity.recent_game_ids(15).unwrap();
+            assert_eq!(ids.first(), Some(&launched));
+            recent_home.refresh_recent_games(&ui, &ids);
+            refreshed.set(true);
+        }));
+        ui.show().unwrap();
+        home.handle_action(&ui, UiActionEvent::fresh(UiAction::Right));
+        assert_eq!(ui.get_selected_index(), 1);
+        assert_eq!(home.selected_game_id(), Some(launched.get()));
+        home.handle_action(&ui, UiActionEvent::fresh(UiAction::Accept));
+        let original = ui.get_player_origin();
+        let started = Instant::now();
+        let step = Rc::new(Cell::new(0));
+        let progress = Rc::clone(&step);
+        let live = Rc::clone(&player);
+        let weak = ui.as_weak();
+        let folder = directory.clone();
+        let timer = Timer::default();
+        timer.start(TimerMode::Repeated, Duration::from_millis(20), move || {
+            let ui = weak.upgrade().unwrap();
+            assert!(started.elapsed() < Duration::from_secs(20));
+            assert!(!ui.get_player_failed(), "{}", ui.get_player_message());
+            match progress.get() {
+                0 if ui.get_player_phase() == 2 && ui.get_player_has_frame() => {
+                    assert!(!returned.get());
+                    assert_eq!(ui.get_selected_index(), 1);
+                    live.choose(RETURN_TO_HORIZON);
+                    progress.set(1);
+                }
+                1 if ui.get_player_phase() == 3 => {
+                    assert!(returned.get());
+                    assert_eq!(home.selected_game_id(), Some(launched.get()));
+                    assert_eq!(ui.get_selected_index(), 0);
+                    assert_eq!(ui.get_launching_game_index(), 0);
+                    assert_eq!(ui.get_home_reorder_sequence(), 0);
+                    let destination = ui.get_player_origin();
+                    assert!(destination.x < original.x);
+                    assert!(destination.width > 0.0 && destination.width < 1.0);
+                    home.reveal_row_changes(&ui);
+                    assert_eq!(ui.get_home_reorder_sequence(), 0);
+                    progress.set(2);
+                }
+                2 if !ui.get_player_open() => {
+                    assert_eq!(ui.get_selected_index(), 0);
+                    assert_eq!(home.selected_game_id(), Some(launched.get()));
+                    let pixels = ui.window().take_snapshot().unwrap();
+                    image::save_buffer(
+                        folder.join("home-return.png"),
+                        pixels.as_bytes(),
+                        pixels.width(),
+                        pixels.height(),
+                        image::ColorType::Rgba8,
+                    )
+                    .unwrap();
+                    progress.set(3);
+                    slint::quit_event_loop().unwrap();
+                }
+                _ => {}
+            }
+        });
+        slint::run_event_loop().unwrap();
+        assert_eq!(step.get(), 3);
     }
 
     /// Frames shown per second at 1× and 2×, in a real window (default

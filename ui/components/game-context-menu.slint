@@ -3,6 +3,7 @@ import { GameCardData, CardRect } from "../models/game-card.slint";
 import { ModalDialog } from "modal-dialog.slint";
 import { FallbackCover } from "fallback-cover.slint";
 import { ActionButton } from "action-button.slint";
+import { ListRow, Surface } from "list-row.slint";
 import { HintBar } from "hint-bar.slint";
 
 // Floating game commands; only Properties opens a larger, centered dialog.
@@ -28,7 +29,7 @@ export component GameContextMenu inherits Rectangle {
     callback back();
     callback scroll(int);
     width: root.area-width; height: root.area-height;
-    visible: root.open || popup.opacity > 0.01 || properties-dialog.opacity > 0.01;
+    visible: root.open || popup.opacity > 0.01 || properties-dialog.opacity > 0.01 || error-dialog.opacity > 0.01;
     background: transparent;
 
     // Dismiss without activating anything on the page behind the menu.
@@ -38,53 +39,46 @@ export component GameContextMenu inherits Rectangle {
         clicked => { root.back(); }
         pointer-event(event) => { if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) { root.back(); } }
     }
-    popup := Rectangle {
+    popup := Surface {
         x: root.anchor-x;
         y: root.anchor-y + (root.open && root.view == 0 ? 0px : Motion.dialog-rise / 2);
-        width: min(304px, root.area-width - 32px);
-        height: min(root.area-height - 32px, root.message != "" || root.busy ? 292px : 232px);
+        width: min(Metrics.game-context-width, root.area-width - Metrics.spacing-xl);
+        height: min(root.area-height - Metrics.spacing-xl, Metrics.game-context-height);
         opacity: root.open && root.view == 0 ? 1.0 : 0.0;
         visible: (root.open && root.view == 0) || self.opacity > 0.01;
         animate opacity, y { duration: Motion.dialog-duration; easing: ease-out; }
         background: Theme.surface-raised;
-        border-radius: Metrics.radius-md;
-        border-width: Theme.high-contrast ? 2px : 1px;
-        border-color: Theme.divider;
         drop-shadow-color: Theme.shadow.with-alpha(Theme.is-dark ? 0.42 : 0.18);
         drop-shadow-blur: 20px; drop-shadow-offset-y: 5px;
+        for label[index] in ["Play", "Game properties", root.hidden-game ? "Unhide game" : "Hide game", "Uninstall game"] : ListRow {
+            x: Metrics.spacing-sm;
+            y: Metrics.spacing-sm + index * (Metrics.compact-row-height + Metrics.spacing-xs) + (index == 3 ? Metrics.spacing-sm : 0px);
+            width: parent.width - Metrics.spacing-md;
+            compact: true;
+            title: label;
+            trailing-width: Metrics.spacing-lg;
+            focused: root.selected == index;
+            enabled: root.open && !root.busy && root.view == 0;
+            hovered => { root.hover-row(index); }
+            activated => { root.choose(index); }
+        }
+        Rectangle { x: Metrics.spacing-md; y: 164px; width: parent.width - Metrics.spacing-xl; height: 1px; background: Theme.divider; }
+    }
+    error-dialog := ModalDialog {
+        area-width: root.area-width; area-height: root.area-height;
+        open: root.open && root.view == 3;
+        card-height: 232px;
+        dismissed => { root.back(); }
         Text {
-            x: 16px; y: 11px; width: parent.width - 32px; height: 22px;
-            text: root.game.title; overflow: elide;
-            color: Theme.secondary-foreground; font-size: Typography.caption-size;
+            x: Metrics.spacing-lg; y: Metrics.spacing-lg;
+            width: parent.width - Metrics.spacing-xxl; height: 116px;
+            text: root.message; color: Theme.foreground;
+            font-size: Typography.body-size; wrap: word-wrap;
         }
-        Rectangle { x: 12px; y: 40px; width: parent.width - 24px; height: 1px; background: Theme.divider; }
-        for label[index] in ["Play", "Game properties", root.hidden-game ? "Unhide game" : "Hide game", "Uninstall game"] : Rectangle {
-            x: 6px; y: 48px + index * 40px + (index == 3 ? 9px : 0px);
-            width: parent.width - 12px; height: 38px;
-            border-radius: Metrics.radius-sm;
-            background: root.selected == index ? Theme.accent-subtle : transparent;
-            border-width: root.selected == index && Theme.high-contrast ? 2px : 0px;
-            border-color: Theme.focus;
-            animate background { duration: Motion.hover-duration; }
-            accessible-role: button; accessible-label: label;
-            accessible-enabled: root.open && !root.busy && root.view == 0;
-            Text {
-                x: 12px; width: parent.width - 24px; height: parent.height;
-                text: label; color: Theme.foreground; font-size: Typography.body-size;
-                vertical-alignment: center;
-            }
-            TouchArea {
-                width: parent.width; height: parent.height;
-                enabled: root.open && !root.busy && root.view == 0;
-                pointer-event(event) => { if (event.kind == PointerEventKind.move) { root.hover-row(index); } }
-                clicked => { root.choose(index); }
-            }
-        }
-        Rectangle { x: 12px; y: 169px; width: parent.width - 24px; height: 1px; background: Theme.divider; }
-        if root.message != "" || root.busy : Text {
-            x: 16px; y: 232px; width: parent.width - 32px; height: 48px;
-            text: root.busy ? "Saving…" : root.message;
-            color: Theme.secondary-foreground; font-size: Typography.caption-size; wrap: word-wrap;
+        ActionButton {
+            x: parent.width - 124px; y: parent.height - 60px; width: 100px; height: 36px;
+            label: "Close"; enabled: root.open && root.view == 3;
+            activated => { root.back(); }
         }
     }
     properties-dialog := ModalDialog {
@@ -131,12 +125,12 @@ export component GameContextMenu inherits Rectangle {
         }
         HintBar {
             x: 28px; y: parent.height - 48px; width: 260px; height: 22px;
-            hints: [{ button: "B", label: "Back" }];
+            hints: [{ button: "B", label: "Close" }];
             activated(button) => { root.back(); }
         }
         ActionButton {
             x: parent.width - 124px; y: parent.height - 58px; width: 100px; height: 36px;
-            label: "Back"; enabled: root.open && root.view == 1;
+            label: "Close"; enabled: root.open && root.view == 1;
             activated => { root.back(); }
         }
     }

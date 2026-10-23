@@ -10,7 +10,9 @@ The compact floating menu opens beside the selected cover, flips left near the
 right edge and stays inside the viewport. The background remains undimmed.
 Pointer movement highlights a command; clicking outside dismisses without
 activating the underlying page. It uses the shared palette and reduced-motion
-timing; properties and uninstall confirmation retain separate detail dialogs.
+timing, compact ListRows and shared Surface styling. The popup contains only action labels, with no title,
+helper text or status caption. Properties, failures and uninstall confirmation
+use separate detail dialogs.
 Up/Down selects Play, Game properties, Hide/Unhide or Uninstall. A/Enter activates;
 B/Escape or + backs out. Closing retains the background page’s selection, filter
 and scroll. Global Home closes options and performs its normal navigation reset.
@@ -26,7 +28,8 @@ preferences are keyed by durable GameId and survive restarts and folder rescans.
 Properties displays the imported title, system, registered ROM paths, imported
 file sizes, SHA-256 identities and title provenance. These are saved import
 records, not a claim that the files are currently accessible or unchanged.
-Up/Down and the wheel scroll long details; Back returns to the options row.
+Up/Down and the wheel scroll long details. Closing properties or cancelling
+uninstall dismisses options entirely, returning to the selected game.
 
 ## Uninstall
 

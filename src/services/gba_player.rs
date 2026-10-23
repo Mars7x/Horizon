@@ -682,6 +682,7 @@ fn play(
                 .spawn({
                     let stage = Arc::clone(&stage);
                     let ds_input = ds_input.clone();
+                    let display = Arc::clone(&display);
                     move || {
                         let view = ds_input.as_ref().map(|input| &input.view);
                         stage.run(mgba, view, &display, &frame, &*frame_ready)
@@ -731,6 +732,19 @@ fn play(
     let mut rewind_clock = Duration::ZERO;
     let mut rewind_since = Duration::ZERO;
     let mut rewind_enabled = core.supports_states();
+    if ds
+        && preferences.ds.resolution.scale() > 1
+        && rewind_enabled
+        && mgba.video_filter == crate::domain::core_settings::VideoFilter::None
+    {
+        // Viewport presentation no longer warms full-resolution capture memory.
+        // Prime serialization/readback/preview work before audible playback, then
+        // discard this boot picture (it may precede an automatic state restore).
+        if let Err(error) = record_rewind(&core, &mut rewind, Duration::ZERO, false) {
+            tracing::debug!(%error, "rewind warmup deferred until gameplay");
+        }
+        rewind.clear();
+    }
     let mut last_tick = Instant::now();
     let mut lid_closed = false;
     let mut view_writer: Option<JoinHandle<()>> = None;
@@ -779,7 +793,7 @@ fn play(
     let mut frame_attempts = 0u32;
     // Hand each new frame to the filter thread, which shows the newest one
     // whenever the screen has drawn the last.
-    let present = |core: &Core| core.hand_off(&stage);
+    let present = |core: &Core| core.hand_off(&stage, &display);
     let _ = events.send(Event::Ready {
         title: location.title.clone(),
         freeze_when_unfocused: preferences.freeze_when_unfocused,

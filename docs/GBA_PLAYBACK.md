@@ -323,6 +323,23 @@ the Wayland backend and checks selection, focus loss, cancel and semantic sound
 delivery. Native/GPU DS performance, real controllers, audible quality and
 window-size/theme runtime review remain separate checks.
 
+With None filtering, GPU-rendered DS pictures larger than the viewport are
+nearest-sampled on the GPU before readback, copying only the pixels needed for
+presentation. Each layout/swap/resize uses the physical screen sizes; native,
+other filters and unavailable GPU targets retain their existing pipeline.
+Internal rendering stays at the selected resolution. Full-resolution capture
+and rewind readbacks stay separate and unchanged. Exact nearest texel-boundary
+ties may choose either adjacent source texel on different drivers. The full
+rewind capture work is warmed before audio begins; its boot preview is discarded
+and playback retains the existing audio queue and latency settings.
+
+GPU readback keeps full-resolution pictures for captures and rewind. Its CPU
+normalization flips rows and applies opacity to whole RGBA pixels, allowing
+compiler vectorization without architecture-specific intrinsics or changing RGB
+values. At high DS resolutions, GPU readback and presentation can cost more
+than emulation; selected speed, emulated frame rate and displayed frame rate
+are separate measurements.
+
 ## Development
 
 The Flatpak manifest builds and installs a checksum-pinned mGBA core at

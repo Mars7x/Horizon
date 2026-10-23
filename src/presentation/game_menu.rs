@@ -168,6 +168,10 @@ impl GameMenuController {
             anchor,
             ui.get_logical_viewport_width_px(),
             ui.get_logical_viewport_height_px(),
+            (
+                ui.get_game_menu_placement_width(),
+                ui.get_game_menu_placement_height(),
+            ),
         );
         ui.set_game_menu_x(x);
         ui.set_game_menu_y(y);
@@ -204,14 +208,7 @@ impl GameMenuController {
         if !ui.get_game_menu_open() || ui.get_game_menu_busy() {
             return;
         }
-        if ui.get_game_menu_view() != 0 {
-            let previous = ui.get_game_menu_view();
-            ui.set_game_menu_view(0);
-            ui.set_game_menu_selected(if previous == 2 { 3 } else { 1 });
-            ui.set_game_menu_message("".into());
-        } else {
-            self.close();
-        }
+        self.close();
         self.cue(UiSoundCue::Back);
     }
 
@@ -287,6 +284,7 @@ impl GameMenuController {
                 1 => self.mutate(id, true),
                 _ => {}
             },
+            3 => self.back(),
             _ => {}
         }
     }
@@ -332,6 +330,10 @@ impl GameMenuController {
     fn error(&self, text: &str) {
         if let Some(ui) = self.ui.upgrade() {
             ui.set_game_menu_message(text.into());
+            if ui.get_game_menu_view() == 0 {
+                ui.set_game_menu_view(3);
+                ui.set_game_menu_selected(0);
+            }
         }
     }
 
@@ -443,8 +445,13 @@ impl Drop for GameMenuController {
 }
 
 /// Keep the compact commands next to their game, flipping left at the right
-/// edge. Reserve the maximum error/busy height so a failure never leaves screen.
-fn popup_position(anchor: crate::CardRect, width: f32, height: f32) -> (f32, f32) {
+/// edge. Use the shared popup size; errors open a separate dialog.
+fn popup_position(
+    anchor: crate::CardRect,
+    width: f32,
+    height: f32,
+    menu_size: (f32, f32),
+) -> (f32, f32) {
     let width = if width.is_finite() {
         width.max(32.0)
     } else {
@@ -455,8 +462,8 @@ fn popup_position(anchor: crate::CardRect, width: f32, height: f32) -> (f32, f32
     } else {
         720.0
     };
-    let menu_width = 304.0_f32.min((width - 32.0).max(0.0));
-    let menu_height = 292.0_f32.min((height - 32.0).max(0.0));
+    let menu_width = menu_size.0.min((width - 32.0).max(0.0));
+    let menu_height = menu_size.1.min((height - 32.0).max(0.0));
     let x = if anchor.x.is_finite() {
         anchor.x * width
     } else {
@@ -530,17 +537,17 @@ mod placement_tests {
             height: 0.3,
         };
         assert_eq!(
-            popup_position(at(0.1, 0.2, 0.2), 1280.0, 720.0),
+            popup_position(at(0.1, 0.2, 0.2), 1280.0, 720.0, (320.0, 228.0)),
             (396.0, 144.0)
         );
         assert_eq!(
-            popup_position(at(0.8, 0.8, 0.15), 1280.0, 720.0),
-            (708.0, 412.0)
+            popup_position(at(0.8, 0.8, 0.15), 1280.0, 720.0, (320.0, 228.0)),
+            (692.0, 476.0)
         );
         for (width, height) in [(800.0, 600.0), (1280.0, 720.0), (3440.0, 1440.0)] {
-            let (x, y) = popup_position(at(0.99, 0.99, 0.2), width, height);
-            assert!(x >= 16.0 && x + 304.0 <= width - 16.0);
-            assert!(y >= 16.0 && y + 292.0 <= height - 16.0);
+            let (x, y) = popup_position(at(0.99, 0.99, 0.2), width, height, (320.0, 228.0));
+            assert!(x >= 16.0 && x + 320.0 <= width - 16.0);
+            assert!(y >= 16.0 && y + 228.0 <= height - 16.0);
         }
     }
 }

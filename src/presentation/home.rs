@@ -372,7 +372,7 @@ impl HomeController {
         if *self.home_order.borrow() == order {
             return;
         }
-        self.show_home_order(ui, order);
+        self.show_home_order(ui, order, false);
     }
 
     /// The shared catalog was reloaded: make cards for new games, reread
@@ -420,7 +420,7 @@ impl HomeController {
 
         let order = ordered_home_indices(&self.catalog.borrow(), recent_game_ids);
         if *self.home_order.borrow() != order {
-            self.show_home_order(ui, order);
+            self.show_home_order(ui, order, true);
         } else {
             self.publish_selection(ui, self.state.borrow().selected_index);
         }
@@ -430,7 +430,7 @@ impl HomeController {
     }
 
     /// Show `order`, keeping the selected game selected when it's still there.
-    fn show_home_order(&self, ui: &AppWindow, order: Vec<usize>) {
+    fn show_home_order(&self, ui: &AppWindow, order: Vec<usize>, animate: bool) {
         let previous = self.state.borrow().selected_index as usize;
         let previous_catalog_index = self.home_order.borrow().get(previous).copied();
         let next_selection = previous_catalog_index
@@ -453,7 +453,15 @@ impl HomeController {
                 .collect::<Vec<_>>(),
         );
         *self.home_order.borrow_mut() = order;
-        if ui.get_current_route() == crate::AppRouteView::Home {
+        if !animate {
+            // Recency settles under gameplay; never replay it on Home's reveal.
+            let order = self.home_order.borrow().clone();
+            self.home_from.set_vec(home_from_indices(&order, &order));
+            ui.set_home_previous_count(order.len() as i32);
+            ui.set_home_reorder_sequence(0);
+            ui.set_home_reorder_delayed(false);
+            *self.seen_order.borrow_mut() = order;
+        } else if ui.get_current_route() == crate::AppRouteView::Home {
             self.play_reorder(ui, false);
         }
         self.state

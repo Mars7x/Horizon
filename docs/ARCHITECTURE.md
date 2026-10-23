@@ -8,7 +8,9 @@ the same worker; this remains a narrow two-core host rather than a plugin framew
 [ADR 0218](adr/0218-ds-gpu-upscaling-and-dev-speed.md) adds the only GPU path:
 melonDS's OpenGL renderer drawing into a hidden context owned by the worker
 ([gl_context](../src/platform/gl_context.rs)), read back into the same software
-picture pipeline.
+picture pipeline. With None filtering, oversized DS pictures are sampled to the
+physical viewport on the GPU before transfer; captures/rewind still read the
+full core image. See [ADR 0229](adr/0229-ds-viewport-readback.md).
 [ADR 0198](adr/0198-first-gba-playback.md) and
 [ADR 0209](adr/0209-game-boy-and-game-boy-color.md) record the decision.
 

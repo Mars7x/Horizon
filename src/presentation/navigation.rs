@@ -1296,10 +1296,11 @@ mod runtime_tests {
                         let game_rect = ui.invoke_player_capture_origin();
                         assert!(popup.x >= (game_rect.x + game_rect.width) * 1280.0 + 11.0);
                         assert!(popup.x + popup.width <= 1264.0 && popup.y + popup.height <= 704.0);
-                        assert_eq!(popup.width, 304.0);
+                        assert_eq!(popup.width, 320.0);
+                        assert_eq!(popup.height, 228.0);
                         use slint::platform::WindowEvent;
                         ui.window().dispatch_event(WindowEvent::PointerMoved {
-                            position: slint::LogicalPosition::new(popup.x + 24.0, popup.y + 147.0),
+                            position: slint::LogicalPosition::new(popup.x + 24.0, popup.y + 136.0),
                         });
                         assert_eq!(ui.get_game_menu_selected(), 2);
                         navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Up));
@@ -1331,8 +1332,12 @@ mod runtime_tests {
                         navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Down));
                         assert!(ui.get_game_menu_offset() > 0.0);
                         back();
-                        assert_eq!(ui.get_game_menu_view(), 0);
-                        assert_eq!(ui.get_game_menu_selected(), 1);
+                        assert!(
+                            !ui.get_game_menu_open(),
+                            "closing properties must dismiss options"
+                        );
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Menu));
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Down));
                         navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Down));
                         navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Accept));
                         progress.set(23);
@@ -1379,9 +1384,12 @@ mod runtime_tests {
                         )
                         .unwrap();
                         ui.invoke_game_menu_choose(0);
-                        assert_eq!(ui.get_game_menu_view(), 0);
-                        assert_eq!(ui.get_game_menu_selected(), 3);
+                        assert!(!ui.get_game_menu_open(), "cancel must dismiss options");
                         assert!(output.join("homebrew.gba").exists());
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Menu));
+                        progress.set(261);
+                    }
+                    261 if ui.get_game_menu_details().contains("SHA-256") => {
                         ui.invoke_game_menu_choose(3);
                         navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Right));
                         navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Accept));

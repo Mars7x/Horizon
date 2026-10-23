@@ -73,6 +73,13 @@ spacing, sizes and animation timing. No ad-hoc layout constants or local font
 families. Authored SVG geometry/colors stay intact; generated chrome uses
 semantic tokens. Do not set hand cursors; hover color communicates clickability.
 
+Game options use a compact floating Surface beside the selected cover and shared
+compact ListRows, including the shared focus outline, hover, typography and
+Reduced Motion behavior. The background remains undimmed. Properties and uninstall
+confirmation use shared dialogs; dismissing either returns to the game rather
+than reopening the popup. The popup contains only action labels; titles, helper text and status captions
+stay out of it. Failures use a separate shared dialog.
+
 ## Motion and scrolling
 
 Changing text values use shared ValueText: a 180 ms horizontal slide/fade,

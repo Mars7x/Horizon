@@ -24,6 +24,12 @@ const EGL_PLATFORM_SURFACELESS_MESA: u32 = 0x31DD;
 
 const GL_FRAMEBUFFER: u32 = 0x8D40;
 const GL_READ_FRAMEBUFFER: u32 = 0x8CA8;
+const GL_DRAW_FRAMEBUFFER: u32 = 0x8CA9;
+const GL_READ_FRAMEBUFFER_BINDING: u32 = 0x8CAA;
+const GL_DRAW_FRAMEBUFFER_BINDING: u32 = 0x8CA6;
+const GL_TEXTURE_BINDING_2D: u32 = 0x8069;
+const GL_SCISSOR_TEST: u32 = 0x0C11;
+const GL_COLOR_BUFFER_BIT: u32 = 0x4000;
 const GL_RENDERBUFFER: u32 = 0x8D41;
 const GL_TEXTURE_2D: u32 = 0x0DE1;
 const GL_RGBA8: i32 = 0x8058;
@@ -50,6 +56,11 @@ struct Egl {
 }
 
 struct Gl {
+    get_integerv: unsafe extern "C" fn(u32, *mut i32),
+    is_enabled: unsafe extern "C" fn(u32) -> u8,
+    enable: unsafe extern "C" fn(u32),
+    disable: unsafe extern "C" fn(u32),
+    blit_framebuffer: unsafe extern "C" fn(i32, i32, i32, i32, i32, i32, i32, i32, u32, u32),
     gen_framebuffers: unsafe extern "C" fn(i32, *mut u32),
     delete_framebuffers: unsafe extern "C" fn(i32, *const u32),
     bind_framebuffer: unsafe extern "C" fn(u32, u32),
@@ -69,6 +80,13 @@ struct Gl {
     read_pixels: unsafe extern "C" fn(i32, i32, i32, i32, u32, u32, *mut c_void),
 }
 
+#[derive(Default)]
+struct ReadbackTarget {
+    framebuffer: u32,
+    texture: u32,
+    size: (u32, u32),
+}
+
 pub struct GlContext {
     egl: Egl,
     gl: Gl,
@@ -78,6 +96,7 @@ pub struct GlContext {
     texture: u32,
     depth: u32,
     size: (u32, u32),
+    viewport: ReadbackTarget,
     // Last: the driver's code must outlive every pointer above.
     _library: Library,
 }
@@ -203,6 +222,7 @@ impl GlContext {
                 texture: 0,
                 depth: 0,
                 size: (0, 0),
+                viewport: ReadbackTarget::default(),
                 _library: library,
             })
         }
@@ -310,15 +330,155 @@ impl GlContext {
             );
             (self.gl.bind_framebuffer)(GL_READ_FRAMEBUFFER, 0);
         }
-        // GL's first row is the bottom one.
-        for top in 0..height / 2 {
-            let bottom = height - 1 - top;
-            let (upper, lower) = rgba.split_at_mut(bottom * row);
-            upper[top * row..][..row].swap_with_slice(&mut lower[..row]);
+        normalize_readback(rgba, width, height);
+    }
+
+    /// Sample each DS screen on the GPU at its actual presentation size.
+    /// The core's framebuffer is untouched; captures can still read it in full.
+    pub fn read_viewport(
+        &mut self,
+        source: (u32, u32),
+        screens: [(u32, u32); 2],
+        rgba: &mut Vec<u8>,
+    ) -> Result<(), String> {
+        let size = (screens[0].0.max(screens[1].0), screens[0].1 + screens[1].1);
+        if source.0 == 0
+            || source.1 == 0
+            || source.0 > self.size.0
+            || source.1 > self.size.1
+            || size.0 == 0
+            || size.1 == 0
+            || size.0 > source.0
+            || size.1 > source.1
+            || screens
+                .iter()
+                .any(|&(w, h)| w == 0 || h == 0 || h > source.1 / 2)
+        {
+            return Err("Invalid DS presentation dimensions".into());
         }
-        for alpha in rgba.iter_mut().skip(3).step_by(4) {
-            *alpha = 255;
+        // The core owns its GL state. Restore every binding/state we touch,
+        // including on incomplete-target failures or window/layout changes.
+        // SAFETY: this context is current on its worker; GL 3.2 entry points
+        // and buffer sizes were checked when loaded/above.
+        unsafe {
+            let (mut read, mut draw, mut texture, mut pack) = (0, 0, 0, 0);
+            (self.gl.get_integerv)(GL_READ_FRAMEBUFFER_BINDING, &mut read);
+            (self.gl.get_integerv)(GL_DRAW_FRAMEBUFFER_BINDING, &mut draw);
+            (self.gl.get_integerv)(GL_TEXTURE_BINDING_2D, &mut texture);
+            (self.gl.get_integerv)(GL_PACK_ALIGNMENT, &mut pack);
+            let scissor = (self.gl.is_enabled)(GL_SCISSOR_TEST) != 0;
+            (self.gl.disable)(GL_SCISSOR_TEST);
+            let result = (|| {
+                self.prepare_viewport(size)?;
+                (self.gl.bind_framebuffer)(GL_READ_FRAMEBUFFER, self.framebuffer);
+                (self.gl.bind_framebuffer)(GL_DRAW_FRAMEBUFFER, self.viewport.framebuffer);
+                let (w, h) = (size.0 as i32, size.1 as i32);
+                // Initialize the entire target, including the unused right
+                // margin beside a smaller screen. Equal screens need one blit.
+                (self.gl.blit_framebuffer)(
+                    0,
+                    0,
+                    source.0 as i32,
+                    source.1 as i32,
+                    0,
+                    0,
+                    w,
+                    h,
+                    GL_COLOR_BUFFER_BIT,
+                    GL_NEAREST as u32,
+                );
+                if screens[0] != screens[1] {
+                    for (screen, (width, height)) in screens.into_iter().enumerate() {
+                        let source_y = if screen == 0 { source.1 / 2 } else { 0 };
+                        let target_y = if screen == 0 { screens[1].1 } else { 0 };
+                        (self.gl.blit_framebuffer)(
+                            0,
+                            source_y as i32,
+                            source.0 as i32,
+                            (source_y + source.1 / 2) as i32,
+                            0,
+                            target_y as i32,
+                            width as i32,
+                            (target_y + height) as i32,
+                            GL_COLOR_BUFFER_BIT,
+                            GL_NEAREST as u32,
+                        );
+                    }
+                }
+                rgba.resize(size.0 as usize * size.1 as usize * 4, 0);
+                (self.gl.bind_framebuffer)(GL_READ_FRAMEBUFFER, self.viewport.framebuffer);
+                (self.gl.pixel_storei)(GL_PACK_ALIGNMENT, 1);
+                (self.gl.read_pixels)(
+                    0,
+                    0,
+                    w,
+                    h,
+                    GL_RGBA,
+                    GL_UNSIGNED_BYTE,
+                    rgba.as_mut_ptr().cast(),
+                );
+                normalize_readback(rgba, size.0 as usize, size.1 as usize);
+                Ok(())
+            })();
+            (self.gl.bind_texture)(GL_TEXTURE_2D, texture as u32);
+            (self.gl.pixel_storei)(GL_PACK_ALIGNMENT, pack);
+            (self.gl.bind_framebuffer)(GL_READ_FRAMEBUFFER, read as u32);
+            (self.gl.bind_framebuffer)(GL_DRAW_FRAMEBUFFER, draw as u32);
+            if scissor {
+                (self.gl.enable)(GL_SCISSOR_TEST);
+            }
+            result
         }
+    }
+
+    fn prepare_viewport(&mut self, size: (u32, u32)) -> Result<(), String> {
+        if self.viewport.size == size {
+            return Ok(());
+        }
+        self.release_viewport();
+        // SAFETY: current worker context, bounded nonzero dimensions.
+        unsafe {
+            let gl = &self.gl;
+            (gl.gen_textures)(1, &mut self.viewport.texture);
+            (gl.bind_texture)(GL_TEXTURE_2D, self.viewport.texture);
+            (gl.tex_parameteri)(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            (gl.tex_parameteri)(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            (gl.tex_image_2d)(
+                GL_TEXTURE_2D,
+                0,
+                GL_RGBA8,
+                size.0 as i32,
+                size.1 as i32,
+                0,
+                GL_RGBA,
+                GL_UNSIGNED_BYTE,
+                std::ptr::null(),
+            );
+            (gl.gen_framebuffers)(1, &mut self.viewport.framebuffer);
+            (gl.bind_framebuffer)(GL_DRAW_FRAMEBUFFER, self.viewport.framebuffer);
+            (gl.framebuffer_texture_2d)(
+                GL_DRAW_FRAMEBUFFER,
+                GL_COLOR_ATTACHMENT0,
+                GL_TEXTURE_2D,
+                self.viewport.texture,
+                0,
+            );
+            if (gl.check_framebuffer_status)(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE {
+                self.release_viewport();
+                return Err("The DS presentation framebuffer is incomplete".into());
+            }
+        }
+        self.viewport.size = size;
+        Ok(())
+    }
+
+    fn release_viewport(&mut self) {
+        // SAFETY: names created by this worker's current context; zero is ignored.
+        unsafe {
+            (self.gl.delete_framebuffers)(1, &self.viewport.framebuffer);
+            (self.gl.delete_textures)(1, &self.viewport.texture);
+        }
+        self.viewport = ReadbackTarget::default();
     }
 
     fn release_framebuffer(&mut self) {
@@ -339,8 +499,26 @@ impl GlContext {
     }
 }
 
+/// GL returns bottom-up rows; game pictures are top-down and opaque.
+fn normalize_readback(rgba: &mut [u8], width: usize, height: usize) {
+    let row = width * 4;
+    for top in 0..height / 2 {
+        let bottom = height - 1 - top;
+        let (upper, lower) = rgba.split_at_mut(bottom * row);
+        upper[top * row..][..row].swap_with_slice(&mut lower[..row]);
+    }
+    // Whole-pixel operations let LLVM vectorize this pass. A strided byte
+    // write costs significantly more on the 24 MiB frames produced at 8×.
+    // Native-endian conversion keeps the alpha mask correct on either endian.
+    let opaque = u32::from_ne_bytes([0, 0, 0, 255]);
+    for pixel in rgba.as_chunks_mut::<4>().0 {
+        *pixel = (u32::from_ne_bytes(*pixel) | opaque).to_ne_bytes();
+    }
+}
+
 impl Drop for GlContext {
     fn drop(&mut self) {
+        self.release_viewport();
         self.release_framebuffer();
         // SAFETY: the context and display this value created, on its thread.
         unsafe {
@@ -370,6 +548,11 @@ unsafe fn load_gl(get_proc_address: ProcAddress) -> Result<Gl, String> {
     // SAFETY: each name is paired with its GL 3.2 core signature.
     unsafe {
         Ok(Gl {
+            get_integerv: get(get_proc_address, c"glGetIntegerv")?,
+            is_enabled: get(get_proc_address, c"glIsEnabled")?,
+            enable: get(get_proc_address, c"glEnable")?,
+            disable: get(get_proc_address, c"glDisable")?,
+            blit_framebuffer: get(get_proc_address, c"glBlitFramebuffer")?,
             gen_framebuffers: get(get_proc_address, c"glGenFramebuffers")?,
             delete_framebuffers: get(get_proc_address, c"glDeleteFramebuffers")?,
             bind_framebuffer: get(get_proc_address, c"glBindFramebuffer")?,
@@ -388,5 +571,184 @@ unsafe fn load_gl(get_proc_address: ProcAddress) -> Result<Gl, String> {
             pixel_storei: get(get_proc_address, c"glPixelStorei")?,
             read_pixels: get(get_proc_address, c"glReadPixels")?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_readback;
+
+    #[test]
+    fn readback_preserves_rgb_flips_rows_and_makes_every_pixel_opaque() {
+        // Odd heights exercise the middle row; narrow/odd widths exercise
+        // vector tails. Transparent source alpha must never leak into the UI.
+        for width in [1, 3, 16, 257] {
+            for height in [1, 2, 3, 4, 385] {
+                let mut rgba = Vec::new();
+                for y in 0..height {
+                    for x in 0..width {
+                        rgba.extend_from_slice(&[x as u8, y as u8, (x ^ y) as u8, 0]);
+                    }
+                }
+                normalize_readback(&mut rgba, width, height);
+                for y in 0..height {
+                    for x in 0..width {
+                        let source_y = height - y - 1;
+                        assert_eq!(
+                            &rgba[(y * width + x) * 4..][..4],
+                            &[x as u8, source_y as u8, (x ^ source_y) as u8, 255],
+                        );
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    #[ignore = "requires the packaged EGL/OpenGL driver"]
+    fn gpu_viewport_matches_cpu_sampling_and_preserves_full_frame_and_gl_state() {
+        use crate::domain::core_settings::VideoFilter;
+        let mut gl = super::GlContext::new(3, 2).unwrap();
+        let source = (2048, 3072);
+        let fbo = gl.framebuffer(source, false).unwrap();
+        let input: Vec<u8> = (0..source.0 * source.1)
+            .flat_map(|i| {
+                let (x, y) = (i % source.0, i / source.0);
+                [
+                    (x % 251) as u8,
+                    (y % 241) as u8,
+                    (((x / 7) ^ (y / 11)) % 239) as u8,
+                    0,
+                ]
+            })
+            .collect();
+        // SAFETY: this test's current context and exact source-sized RGBA buffer.
+        unsafe {
+            (gl.gl.bind_texture)(super::GL_TEXTURE_2D, gl.texture);
+            (gl.gl.tex_image_2d)(
+                super::GL_TEXTURE_2D,
+                0,
+                super::GL_RGBA8,
+                source.0 as i32,
+                source.1 as i32,
+                0,
+                super::GL_RGBA,
+                super::GL_UNSIGNED_BYTE,
+                input.as_ptr().cast(),
+            );
+        }
+        let mut full = Vec::new();
+        gl.read(source, &mut full);
+        let frame = crate::platform::gba_core::Frame {
+            width: source.0,
+            height: source.1,
+            rgba: full.clone(),
+            smooth: false,
+        };
+        for targets in [
+            [(640, 480); 2],
+            [(1024, 768), (341, 256)],
+            [(513, 385), (257, 193)],
+            [(800, 600); 2],
+        ] {
+            let screens = crate::platform::gba_video::ds_viewport_sizes(source, targets).unwrap();
+            let expected =
+                crate::platform::gba_video::present_ds(&frame, VideoFilter::None, targets);
+            let mut actual = Vec::new();
+            // Exercise scissor restoration and distinct prior framebuffer bindings.
+            unsafe {
+                (gl.gl.bind_framebuffer)(super::GL_READ_FRAMEBUFFER, fbo);
+                (gl.gl.bind_framebuffer)(super::GL_DRAW_FRAMEBUFFER, 0);
+                (gl.gl.enable)(super::GL_SCISSOR_TEST);
+                (gl.gl.pixel_storei)(super::GL_PACK_ALIGNMENT, 8);
+            }
+            gl.read_viewport(source, screens, &mut actual).unwrap();
+            let stride = screens[0].0.max(screens[1].0) as usize * 4;
+            let mut first = 0;
+            for (screen, (w, h)) in screens.into_iter().enumerate() {
+                for y in 0..h as usize {
+                    for x in 0..w as usize {
+                        let start = (first + y) * stride + x * 4;
+                        let pixel = &actual[start..start + 4];
+                        let reference = &expected.pixels.as_bytes()[start..start + 4];
+                        if pixel == reference {
+                            continue;
+                        }
+                        // GL nearest may choose either adjacent texel at an
+                        // exact texel boundary. Verify only those legal ties,
+                        // never permit arbitrary one-pixel coordinate errors.
+                        let x_num = (x * 2 + 1) * source.0 as usize;
+                        let y_num = (y * 2 + 1) * (source.1 / 2) as usize;
+                        let (sx, sy) = (x_num / (w as usize * 2), y_num / (h as usize * 2));
+                        let xs = if x_num.is_multiple_of(w as usize * 2) {
+                            vec![sx - 1, sx]
+                        } else {
+                            vec![sx]
+                        };
+                        let ys = if y_num.is_multiple_of(h as usize * 2) {
+                            vec![sy - 1, sy]
+                        } else {
+                            vec![sy]
+                        };
+                        assert!(
+                            ys.iter().any(|&yy| xs.iter().any(|&xx| {
+                                let at = ((screen * (source.1 / 2) as usize + yy)
+                                    * source.0 as usize
+                                    + xx)
+                                    * 4;
+                                pixel == &frame.rgba[at..at + 4]
+                            })),
+                            "GPU sampling differs outside a legal nearest tie at {targets:?}, screen {screen}, ({x},{y}): {pixel:?} vs {reference:?}"
+                        );
+                    }
+                }
+                first += h as usize;
+            }
+            unsafe {
+                let mut binding = 0;
+                (gl.gl.get_integerv)(super::GL_READ_FRAMEBUFFER_BINDING, &mut binding);
+                assert_eq!(binding as u32, fbo);
+                (gl.gl.get_integerv)(super::GL_DRAW_FRAMEBUFFER_BINDING, &mut binding);
+                assert_eq!(binding, 0);
+                (gl.gl.get_integerv)(super::GL_PACK_ALIGNMENT, &mut binding);
+                assert_eq!(binding, 8);
+                assert_ne!((gl.gl.is_enabled)(super::GL_SCISSOR_TEST), 0);
+                (gl.gl.disable)(super::GL_SCISSOR_TEST);
+            }
+            let mut retained = Vec::new();
+            gl.read(source, &mut retained);
+            assert_eq!(
+                retained, full,
+                "presentation must not change capture pixels"
+            );
+        }
+        let targets = [(640, 480); 2];
+        for round in 0..3 {
+            let mut raw = frame.clone();
+            let at = std::time::Instant::now();
+            for _ in 0..30 {
+                gl.read(source, &mut raw.rgba);
+                std::hint::black_box(crate::platform::gba_video::present_ds(
+                    &raw,
+                    VideoFilter::None,
+                    targets,
+                ));
+            }
+            let before = at.elapsed().as_secs_f64() * 1000.0 / 30.0;
+            let mut rgba = Vec::new();
+            let at = std::time::Instant::now();
+            for _ in 0..30 {
+                gl.read_viewport(source, targets, &mut rgba).unwrap();
+                std::hint::black_box(
+                    slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
+                        &rgba, 640, 960,
+                    ),
+                );
+            }
+            let after = at.elapsed().as_secs_f64() * 1000.0 / 30.0;
+            eprintln!(
+                "DS viewport round {round}: full readback + CPU preparation {before:.3} ms; GPU viewport readback + preparation {after:.3} ms (24 MiB → {:.3} MiB)",
+                rgba.len() as f64 / 1_048_576.0
+            );
+        }
     }
 }
