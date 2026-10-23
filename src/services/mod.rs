@@ -27,3 +27,5 @@ pub mod core_settings;
 pub mod game_storage;
 
 pub mod save_states;
+
+pub mod game_management;

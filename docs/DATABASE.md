@@ -1,6 +1,6 @@
 # Database
 
-Latest schema: `13`
+Latest schema: `14`
 
 [SqliteLibraryRepository](../src/persistence/sqlite.rs) owns SQL and the shared
 connection. Data lives in `library/library.sqlite3` at the location chosen by
@@ -29,6 +29,8 @@ checksums. Never “fix” a deployed file or its checksum to bypass a failure.
 | 0010 | Archive Heroic identities without deleting games/history |
 | 0011 | Reviewed ROM content, file locations and import preferences |
 | 0012 | Confirmed first-run setup progress and completion |
+| 0013 | DS-size ROM file limit |
+| 0014 | Durable per-game visibility preference |
 
 ## Identities and membership
 
@@ -69,3 +71,7 @@ At startup, exact bundled SHA-1/size matches can replace earlier unverified
 filename titles and record catalog provenance in one transaction. Existing
 verified titles and unknown/conflicting hashes are preserved; GameIds, paths,
 sessions and source identities do not change. No schema change is needed.
+
+`game_preferences` stores the hidden flag by GameId. It survives ROM retirement
+and reimport. Confirmed uninstall removes only exact `rom_files` records and
+archives the last active source membership; games and activity records remain.

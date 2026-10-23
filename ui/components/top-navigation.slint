@@ -3,7 +3,7 @@ import { SelectionFocusSurface } from "selection-focus-surface.slint";
 import { ProfileAvatar } from "profile-avatar.slint";
 import { ProfileFrameData } from "../models/profile.slint";
 import { BatteryIndicator, NetworkIndicator } from "status-glyphs.slint";
-import { AlbumIcon, ActivityIcon, AchievementsIcon, SettingsIcon } from "utility-icons.slint";
+import { AlbumIcon, ActivityIcon, SettingsIcon } from "utility-icons.slint";
 
 component StatusCluster inherits Rectangle {
     in property <int> network-kind: 0; // 0 offline, 1 Ethernet, 2 Wi-Fi, 3 other
@@ -160,19 +160,6 @@ export component TopNavigation inherits Rectangle {
         UtilityFocusSurface {
             width: 40px; height: 40px;
             focused: root.utility-focus-visible && root.focused-utility-index == 2;
-            AchievementsIcon {
-                render-scale: root.icon-render-scale;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2 + parent.focus-lift;
-                width: Metrics.utility-cell-size;
-                height: Metrics.utility-cell-size;
-                animate y { duration: Motion.focus-duration; easing: ease-in-out; }
-            }
-            TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(2); } }
-        }
-        UtilityFocusSurface {
-            width: 40px; height: 40px;
-            focused: root.utility-focus-visible && root.focused-utility-index == 3;
             SettingsIcon {
                 render-scale: root.icon-render-scale;
                 x: (parent.width - self.width) / 2;
@@ -181,7 +168,7 @@ export component TopNavigation inherits Rectangle {
                 height: Metrics.utility-cell-size;
                 animate y { duration: Motion.focus-duration; easing: ease-in-out; }
             }
-            TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(3); } }
+            TouchArea { width: parent.width; height: parent.height; clicked => { root.utility-activated(2); } }
         }
     }
 

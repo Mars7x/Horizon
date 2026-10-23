@@ -8,7 +8,7 @@ state and page actions to Slint.
 
 - Home alone uses persistent shell chrome.
 - Library is full-shell with its own grid, Source/Sort controls and focus.
-- Album, Activity, Achievements and Settings are four utility destinations.
+- Album, Activity and Settings are three utility destinations.
 - Profile is a full-shell route opened from Home's avatar, not a utility.
 
 Back first closes temporary dialogs/editors, otherwise steps through the shared
@@ -18,7 +18,8 @@ multiple steps; dialogs, text drafts and multi-select are not history entries.
 Album sibling slides replace the current viewer address, so Back returns to the
 grid and Forward reopens its last capture. New navigation clears Forward.
 Global Home clears both stacks and returns to the first Home item. Menu/Start,
-including a controller's + button, does not open Library; use Home's Library tile.
+including a controller's + button, opens [game options](GAME_OPTIONS.md) on a
+selected Home/Library game. It does not open Library; use Home's Library tile.
 
 ## Entry and focus
 
@@ -35,9 +36,6 @@ transitions participate in the same history. Profile
 visits close editors and restart the friends viewport. Its avatar is a separate
 Home focus slot and is included in focus snapshots. All outgoing pages reject
 pointer intent. Route-local restoration is separate from the global Home reset.
-
-Achievements has no provider or controller: its preserved layout displays an
-unavailable state and Back only. Opening it does not trigger network/cache work.
 
 ## Input arbitration
 

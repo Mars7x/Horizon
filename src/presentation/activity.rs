@@ -112,6 +112,9 @@ impl ActivityShowcaseController {
             let Some(index) = self.catalog.borrow().position(summary.game_id()) else {
                 continue;
             };
+            if self.catalog.borrow()[index].hidden() {
+                continue;
+            }
             let Some(game) = self.home.card_at(index) else {
                 continue;
             };

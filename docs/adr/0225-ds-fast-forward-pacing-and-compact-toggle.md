@@ -3,6 +3,10 @@
 Status: Accepted. The user reported Mario 64 DS remaining at 30 FPS with 2×
 selected and requested a smaller, aligned quick-menu switch.
 
+The adaptive-audio/work-estimate policy below is superseded by
+[0226](0226-fixed-ratio-fast-forward-audio.md). The DS deadline cap and compact
+control remain current.
+
 DS fast-forward must retain the selected emulation frame target. Adaptive audio
 can emit more samples per frame when the core/rewind work temporarily runs slow;
 feeding that larger sample count back into the audio-clocked pacer can turn a

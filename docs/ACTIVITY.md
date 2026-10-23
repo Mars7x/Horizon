@@ -31,6 +31,5 @@ and no ellipsis. Cover focus follows selected scaling. Session-history rows are
 read-only and unfocusable: Up/Down scrolls the viewport, and wheel input moves
 the camera without choosing rows. No invented Horizon playtime challenges.
 
-Milestones retains its panel with “Achievements unavailable”. There is no Steam
-achievement request/cache reader or active achievement provider. RetroAchievements
-is a future direction requiring a separate implementation.
+The weekly playtime chart spans the content width. There is no Milestones panel
+or Achievements utility. RetroAchievements remains unimplemented.

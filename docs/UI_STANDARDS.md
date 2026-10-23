@@ -82,7 +82,9 @@ The row, label, focus and click target remain still. Core settings pass the actu
 rapid changes replace the current transition without queuing stale values.
 Reduced Motion presents the new value immediately. Toggles retain their animated
 track/thumb, including the quick-menu Fast-forward (2×) switch; row focus keeps
-its shared 140 ms fade.
+its shared 140 ms fade. Toggle thumbs use the shared luminance-contrast resolver
+to choose black or white against the accent track when on and the divider track
+when off, including high-contrast themes.
 
 
 Use shared TransitionDriver/TransitionLayer for forward/back zoom and crossfade.

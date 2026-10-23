@@ -552,11 +552,15 @@ fn play(
         .map_err(|e| e.to_string())?;
     let mut failure =
         "This game has no available imported ROM. Choose its folder again.".to_owned();
-    let audio: AudioBuffer = Arc::new(crate::platform::gba_audio::GameAudio::default());
+    let ds = system == RomSystem::NintendoDs;
+    // DS state serialization and GPU readback can take 30–50 ms at 8×.
+    // Its 100 ms queue starts around 62 ms; mGBA retains 31 ms headroom.
+    let audio: AudioBuffer = Arc::new(crate::platform::gba_audio::GameAudio::with_buffer_ms(
+        if ds { 100 } else { 50 },
+    ));
     let preferences = crate::persistence::core_settings::CoreSettingsStore::new(paths.settings)
         .load()
         .map_err(|_| "Could not read playback or core settings".to_owned())?;
-    let ds = system == RomSystem::NintendoDs;
     let mut mgba = if ds {
         // DS takes only its filter; its layout is the player's.
         crate::domain::core_settings::MgbaPreferences {
@@ -734,6 +738,8 @@ fn play(
         Arc::clone(&audio),
         core.av.sample_rate.round() as u32,
     );
+    let output_started = Arc::new(AtomicBool::new(false));
+    let output_ready = Arc::clone(&output_started);
     // Keep the PipeWire graph connected until this session ends. Pauses gate
     // the reader instead of paying device/graph activation latency on resume.
     let _stream = AudioStream::open(
@@ -742,9 +748,13 @@ fn play(
         core.av.sample_rate.round() as u32,
         2,
         256,
-        Box::new(move |output, _| audio_reader.render(output)),
+        Box::new(move |output, _| {
+            audio_reader.render(output);
+            output_ready.store(true, Ordering::Release);
+        }),
     )
     .map_err(|_| "Could not open game audio. Check the audio output and try again.".to_owned())?;
+    let audio_opened = Instant::now();
     let (fps, rate) = (core.av.fps, core.av.sample_rate.round() as u32);
     let ms = |at: Duration| at.as_millis();
     tracing::info!(
@@ -764,17 +774,12 @@ fn play(
     let mut checkpoint_frames = 0u64;
     let mut paused = false;
     let mut speed = PlaybackSpeed::Normal;
-    // Seconds of work per frame while fast-forwarding, averaged. Starting
-    // at zero tries the chosen speed first.
-    let mut work = 0.0f64;
     let mut pending = None;
     let mut session = None;
     let mut frame_attempts = 0u32;
     // Hand each new frame to the filter thread, which shows the newest one
     // whenever the screen has drawn the last.
-    let present = |core: &Core| {
-        core.hand_off(&stage);
-    };
+    let present = |core: &Core| core.hand_off(&stage);
     let _ = events.send(Event::Ready {
         title: location.title.clone(),
         freeze_when_unfocused: preferences.freeze_when_unfocused,
@@ -784,6 +789,11 @@ fn play(
     let result = (|| -> Result<(), String> {
         loop {
             while let Some(command) = pending.take().or_else(|| commands.try_recv().ok()) {
+                // No more frames will be produced while waiting for exit saves.
+                // Gate output before that wait, capture and serialization.
+                if matches!(command, Command::Stop | Command::Shutdown) {
+                    audio.set_paused(true);
+                }
                 // States are touched here only after an autosave finished.
                 if matches!(
                     command,
@@ -863,8 +873,7 @@ fn play(
                             crate::platform::gba_audio::FramePacer::new(rate, fps, speed.factor());
                         deadline = Instant::now();
                         checkpoint = Instant::now();
-                        checkpoint_frames = 0;
-                        work = 0.0;
+                        checkpoint_frames = core.frames.load(Ordering::Acquire);
                         let _ = events.send(Event::Rewound { lid_closed });
                     }
                     Command::Pause(value) => {
@@ -875,7 +884,6 @@ fn play(
                     }
                     Command::Speed(next) => {
                         speed = next;
-                        work = 0.0;
                         core.set_speed(next);
                         pacer.reset(fps, next.factor());
                         audio.set_paused(true);
@@ -1070,6 +1078,23 @@ fn play(
                     }
                 }
             }
+            // Opening is asynchronous. Do not fill (and overflow) the queue
+            // while PipeWire is still connecting its first consumer. Remain
+            // responsive to stop/pause commands and fail visibly if it stalls.
+            if !output_started.load(Ordering::Acquire) {
+                if audio_opened.elapsed() >= Duration::from_secs(2) {
+                    return Err(
+                        "Game audio did not start. Check the audio output and try again.".into(),
+                    );
+                }
+                match commands.recv_timeout(Duration::from_millis(5)) {
+                    Ok(command) => pending = Some(command),
+                    Err(mpsc::RecvTimeoutError::Disconnected) => pending = Some(Command::Shutdown),
+                    Err(mpsc::RecvTimeoutError::Timeout) => {}
+                }
+                deadline = Instant::now();
+                continue;
+            }
             let now = Instant::now();
             if !paused {
                 autosave.played += now
@@ -1082,14 +1107,20 @@ fn play(
             }
             if !paused {
                 let before = audio.written();
-                let started = Instant::now();
                 core.run_frame();
                 let pushed = audio.written().wrapping_sub(before);
-                present(&core);
+                let presented = present(&core);
                 let elapsed = Duration::from_secs_f64(1.0 / fps);
                 rewind_clock += elapsed;
                 rewind_since += elapsed;
-                if rewind_enabled && rewind_since >= crate::domain::rewind::INTERVAL {
+                // Reuse the GPU readback of a frame already being shown.
+                // At 2×, taking an extra full-resolution readback just for
+                // rewind can stall audio. In the background, still retain
+                // history even when the display stops requesting frames.
+                if rewind_enabled
+                    && rewind_since >= crate::domain::rewind::INTERVAL
+                    && (!ds || presented || rewind_since >= crate::domain::rewind::INTERVAL * 2)
+                {
                     rewind_since = Duration::ZERO;
                     if let Err(error) = record_rewind(&core, &mut rewind, rewind_clock, lid_closed)
                     {
@@ -1098,13 +1129,11 @@ fn play(
                         let _ = events.send(Event::Notice(format!("Rewind unavailable: {error}")));
                     }
                 }
-                if speed != PlaybackSpeed::Normal {
-                    // How fast the core could go, from how long its frames
-                    // take: fast-forward audio follows it, with a margin, so
-                    // a core that can't reach the chosen speed sounds slower
-                    // rather than breaking up.
-                    work += (started.elapsed().as_secs_f64() - work) / 30.0;
-                    core.set_reached_speed(0.92 / (work * fps).max(f64::EPSILON));
+                // The first GPU readback can warm shaders for longer than a
+                // frame. That is startup, not emulation time to catch up in
+                // an audio-overfilling burst after the first picture.
+                if frame_attempts == 0 {
+                    deadline = Instant::now();
                 }
                 frame_attempts = frame_attempts.saturating_add(1);
                 if frame_attempts >= 120 && core.frames.load(Ordering::Acquire) == 0 {

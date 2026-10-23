@@ -145,11 +145,25 @@ impl SourceGameRef {
 pub struct LibraryGame {
     game: Game,
     sources: Vec<SourceGameRef>,
+    hidden: bool,
 }
 
 impl LibraryGame {
     pub fn new(game: Game, sources: Vec<SourceGameRef>) -> Self {
-        Self { game, sources }
+        Self {
+            game,
+            sources,
+            hidden: false,
+        }
+    }
+
+    pub fn with_hidden(mut self, hidden: bool) -> Self {
+        self.hidden = hidden;
+        self
+    }
+
+    pub fn hidden(&self) -> bool {
+        self.hidden
     }
 
     pub fn game(&self) -> &Game {

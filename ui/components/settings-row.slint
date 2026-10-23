@@ -55,7 +55,7 @@ export component SettingsRow inherits ListRow {
             y: parent.inset;
             width: parent.height - parent.inset * 2; height: self.width;
             border-radius: self.height / 2;
-            background: #ffffff; // Consistently white thumb in both states.
+            background: root.checked ? Theme.accent-foreground : Theme.toggle-off-foreground;
             animate x { duration: Motion.value-swap-duration; easing: ease-out; }
         }
     }

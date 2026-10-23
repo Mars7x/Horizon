@@ -95,17 +95,19 @@ impl LibrarySort {
 fn sorted_catalog_indices(
     catalog: &Catalog,
     source: Option<&str>,
+    hidden: bool,
     sort: LibrarySort,
     metrics: &BTreeMap<i64, LibrarySortMetrics>,
 ) -> Vec<usize> {
     let mut order: Vec<usize> = catalog
         .iter()
         .filter(|(_, game)| {
-            source.is_none_or(|filter| {
-                game.sources()
-                    .iter()
-                    .any(|entry| entry.source_id().as_str() == filter)
-            })
+            game.hidden() == hidden
+                && source.is_none_or(|filter| {
+                    game.sources()
+                        .iter()
+                        .any(|entry| entry.source_id().as_str() == filter)
+                })
         })
         .map(|(i, _)| i)
         .collect();
@@ -308,13 +310,18 @@ impl LibraryController {
         let sources = library_sources(&self.catalog.borrow());
         {
             let mut s = self.state.borrow_mut();
+            let hidden = s.source_index == self.sources.borrow().len() + 1;
             let current = s
                 .source_index
                 .checked_sub(1)
                 .and_then(|index| self.sources.borrow().get(index).cloned());
-            s.source_index = current
-                .and_then(|source| sources.iter().position(|known| *known == source))
-                .map_or(0, |index| index + 1);
+            s.source_index = if hidden {
+                sources.len() + 1
+            } else {
+                current
+                    .and_then(|source| sources.iter().position(|known| *known == source))
+                    .map_or(0, |index| index + 1)
+            };
         }
         *self.sources.borrow_mut() = sources;
         self.refresh_metrics();
@@ -375,6 +382,7 @@ impl LibraryController {
     fn rebuild(&self, ui: &AppWindow, preferred_id: Option<i64>) {
         let mut s = self.state.borrow_mut();
         let sources = self.sources.borrow();
+        let hidden = s.source_index == sources.len() + 1;
         let source = s
             .source_index
             .checked_sub(1)
@@ -383,6 +391,7 @@ impl LibraryController {
         let order = sorted_catalog_indices(
             &self.catalog.borrow(),
             source,
+            hidden,
             s.sort,
             &self.metrics.borrow(),
         );
@@ -492,16 +501,20 @@ impl LibraryController {
                 )
             })
             .unwrap_or_default();
-        let filter = s
-            .source_index
-            .checked_sub(1)
-            .and_then(|index| {
-                self.sources
-                    .borrow()
-                    .get(index)
-                    .map(|source| self.source_title(source))
-            })
-            .unwrap_or_else(|| "All sources".to_owned());
+        let hidden = s.source_index == self.sources.borrow().len() + 1;
+        let filter = if s.source_index == self.sources.borrow().len() + 1 {
+            "Hidden games".to_owned()
+        } else {
+            s.source_index
+                .checked_sub(1)
+                .and_then(|index| {
+                    self.sources
+                        .borrow()
+                        .get(index)
+                        .map(|source| self.source_title(source))
+                })
+                .unwrap_or_else(|| "All sources".to_owned())
+        };
         let sort = s.sort.label();
         let selection = s.selection;
         let top = s.scroll_top;
@@ -541,9 +554,16 @@ impl LibraryController {
         // Publish after both metadata strings so Slint captures a coherent pair.
         ui.set_library_metadata_sequence(metadata_sequence);
         ui.set_library_filter_text(filter.into());
+        ui.set_library_hidden_view(hidden);
         ui.set_library_sort_text(sort.into());
         ui.set_library_total_count(count as i32);
-        ui.set_library_collection_count(self.catalog.borrow().len() as i32);
+        ui.set_library_collection_count(
+            self.catalog
+                .borrow()
+                .iter()
+                .filter(|(_, game)| game.hidden() == hidden)
+                .count() as i32,
+        );
     }
 
     pub fn on_card_updated(&self, original: usize, card: crate::GameCardData) {
@@ -562,6 +582,14 @@ impl LibraryController {
     }
 
     pub fn select_on_page(&self, ui: &AppWindow, index: i32) {
+        self.select(ui, index, true);
+    }
+
+    pub fn select_for_context(&self, ui: &AppWindow, index: i32) {
+        self.select(ui, index, false);
+    }
+
+    fn select(&self, ui: &AppWindow, index: i32, launch_if_selected: bool) {
         if index < 0 {
             return;
         }
@@ -583,7 +611,7 @@ impl LibraryController {
         drop(s);
         self.publish(ui);
         // An already-selected cover behaves as the primary launch action.
-        if let Some(original) = original {
+        if launch_if_selected && let Some(original) = original {
             self.home.launch_from_library(ui, original);
         }
     }
@@ -645,14 +673,11 @@ impl LibraryController {
 
     pub fn cycle_filter(&self, ui: &AppWindow) {
         let source_count = self.sources.borrow().len();
-        if source_count == 0 {
-            return;
-        }
         let selected_id = self.selection_game_id();
         self.capture_previous_grid(ui);
         {
             let mut s = self.state.borrow_mut();
-            s.source_index = (s.source_index + 1) % (source_count + 1);
+            s.source_index = (s.source_index + 1) % (source_count + 2);
             s.browse_sequence = s.browse_sequence.wrapping_add(1);
         }
         self.rebuild(ui, selected_id);
@@ -710,7 +735,7 @@ mod tests {
         sort: LibrarySort,
         metrics: &BTreeMap<i64, crate::services::activity::LibrarySortMetrics>,
     ) -> Vec<usize> {
-        super::sorted_catalog_indices(&Catalog::new(games.to_vec()), source, sort, metrics)
+        super::sorted_catalog_indices(&Catalog::new(games.to_vec()), source, false, sort, metrics)
     }
 
     #[test]
@@ -721,6 +746,7 @@ mod tests {
             super::sorted_catalog_indices(
                 &catalog,
                 None,
+                false,
                 LibrarySort::Alphabetical,
                 &BTreeMap::new()
             ),
@@ -779,6 +805,36 @@ mod tests {
         assert_eq!(wheel_scroll_top(3, 24, 4, 3, 2), 3); // bottom
         assert_eq!(wheel_scroll_top(0, 2, 4, 3, 1), 0); // all visible
         assert_eq!(wheel_scroll_top(0, 24, 4, 3, -1), 0);
+    }
+
+    #[test]
+    fn hidden_filter_recovers_games_without_changing_catalog_indices() {
+        let catalog = Catalog::new(vec![
+            game(1, "Visible", "gba"),
+            game(2, "Hidden", "gba").with_hidden(true),
+        ]);
+        let metrics = BTreeMap::new();
+        assert_eq!(
+            super::sorted_catalog_indices(
+                &catalog,
+                None,
+                false,
+                LibrarySort::Alphabetical,
+                &metrics
+            ),
+            vec![0]
+        );
+        assert_eq!(
+            super::sorted_catalog_indices(
+                &catalog,
+                None,
+                true,
+                LibrarySort::Alphabetical,
+                &metrics
+            ),
+            vec![1]
+        );
+        assert_eq!(catalog.position(GameId::new(2).unwrap()), Some(1));
     }
 
     #[test]

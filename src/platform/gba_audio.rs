@@ -15,6 +15,7 @@ pub struct GameAudio {
     read: AtomicUsize,
     write: AtomicUsize,
     limit: AtomicUsize,
+    buffer_ms: u16,
     epoch: AtomicU64,
     paused: AtomicBool,
     /// Times the output ran dry and had to rebuild headroom (an audible gap).
@@ -24,19 +25,30 @@ pub struct GameAudio {
 }
 impl Default for GameAudio {
     fn default() -> Self {
+        Self::with_buffer_ms(50)
+    }
+}
+impl GameAudio {
+    /// Bounded headroom for synchronous core work; mGBA keeps its 50 ms queue.
+    pub fn with_buffer_ms(buffer_ms: u16) -> Self {
         Self {
             slots: (0..CAPACITY).map(|_| AtomicU64::new(0)).collect(),
             read: AtomicUsize::new(0),
             write: AtomicUsize::new(0),
-            limit: AtomicUsize::new(32768 / 20),
+            limit: AtomicUsize::new(Self::frame_limit(32768, buffer_ms)),
+            buffer_ms,
             epoch: AtomicU64::new(0),
             paused: AtomicBool::new(false),
             gaps: AtomicU64::new(0),
             dropped: AtomicU64::new(0),
         }
     }
-}
-impl GameAudio {
+    fn frame_limit(rate: u32, buffer_ms: u16) -> usize {
+        (rate as usize)
+            .saturating_mul(usize::from(buffer_ms))
+            .saturating_div(1000)
+            .clamp(1, CAPACITY)
+    }
     /// Silence the live output without consuming the frozen game's timeline.
     /// Keeping its bounded headroom avoids re-priming on an ordinary resume.
     pub fn set_paused(&self, paused: bool) {
@@ -44,7 +56,7 @@ impl GameAudio {
     }
     pub fn configure(&self, rate: u32) {
         self.limit
-            .store((rate as usize / 20).clamp(1, CAPACITY), Ordering::Release);
+            .store(Self::frame_limit(rate, self.buffer_ms), Ordering::Release);
     }
     pub fn len(&self) -> usize {
         // Read head before tail: only the worker advances tail; clearing and
@@ -155,7 +167,7 @@ const SETPOINT: f64 = 0.62;
 pub struct FramePacer {
     rate: f64,
     per_frame: f64,
-    /// Selected emulation pace, independent of adaptive audio resampling.
+    /// Selected emulation pace, independent of audio batch boundaries.
     frame_interval: std::time::Duration,
     /// The queue's fill as a share of its limit, averaged over about 16
     /// frames. Above the reader's setpoint frames slow a little (at most 5%),
@@ -181,9 +193,9 @@ impl FramePacer {
         self.per_frame = self.rate * seconds;
         self.fill = SETPOINT;
     }
-    /// DS fast-forward keeps the selected emulation target even when adaptive
-    /// audio emits more samples to avoid gaps. Otherwise those samples feed
-    /// back into pacing and can silently turn a 2× request back into 1×.
+    /// DS fast-forward keeps the selected emulation target when audio
+    /// arrives in larger batches. Otherwise those batches can feed back into
+    /// pacing and turn a 2× request back into 1×.
     pub fn fast_forward_interval(
         &mut self,
         pushed: usize,
@@ -225,12 +237,13 @@ const CORRECTION_SPACING: u32 = 8;
 impl AudioReader {
     pub fn new(audio: Arc<GameAudio>, rate: u32) -> Self {
         let epoch = audio.epoch.load(Ordering::Acquire);
+        let target = (GameAudio::frame_limit(rate, audio.buffer_ms) * 62 / 100).max(1);
         Self {
             audio,
             epoch,
             // Start at the steady band's level (see `render`), so the next
             // frame's burst does not push the queue to its limit.
-            target: ((rate as usize / 20).clamp(1, CAPACITY) * 62 / 100).max(1),
+            target,
             priming: true,
             fade: 0,
             last: [0.0; 2],
@@ -326,10 +339,9 @@ impl AudioReader {
 
 const TAPS: usize = 63;
 
-/// Plays fast-forwarded audio at the speed the game actually reaches: it
-/// keeps one output sample per `ratio` input samples, after a low-pass that
-/// prevents aliasing. The ratio is the chosen speed, or lower when the core
-/// can't keep up, so the sound stays continuous instead of running dry.
+/// Decimates at the selected speed, independent of CPU/GPU work estimates.
+/// Retuning from individual frame costs changes pitch and feeds extra audio
+/// back into pacing even when the emulator is already reaching its target.
 pub(super) struct SpeedAudio {
     factor: usize,
     ratio: f64,
@@ -358,24 +370,6 @@ impl SpeedAudio {
         self.position = 0;
         self.history.fill([0.0; 2]);
         self.design(self.factor as f64);
-    }
-
-    /// Follow the speed the game reaches, between normal and the chosen
-    /// speed. Small changes are ignored, so the filter isn't redesigned
-    /// every frame.
-    pub fn set_reached(&mut self, speed: f64) {
-        if self.factor == 1 {
-            return;
-        }
-        let ratio = speed.clamp(1.0, self.factor as f64);
-        if (ratio - self.ratio).abs() / self.ratio > 0.02 || ratio == self.factor as f64 {
-            self.design(ratio);
-        }
-    }
-
-    #[cfg(test)]
-    pub fn ratio(&self) -> f64 {
-        self.ratio
     }
 
     fn design(&mut self, ratio: f64) {
@@ -445,25 +439,21 @@ mod tests {
     }
 
     #[test]
-    fn a_core_that_falls_behind_slows_the_audio_instead_of_starving_it() {
+    fn double_speed_keeps_exact_output_rate_across_uneven_batches() {
         let mut audio = SpeedAudio::default();
         audio.set_speed(PlaybackSpeed::Double);
-        // The core reaches only 1.6×: one output per 1.6 inputs.
-        audio.set_reached(1.6);
-        assert_eq!(audio.ratio(), 1.6);
-        let produced = (0..16000)
-            .filter(|_| audio.process([0.5, 0.5]).is_some())
-            .count();
-        assert!((9999..=10001).contains(&produced), "{produced}");
-        // Tiny wobbles keep the filter; reaching full speed restores it.
-        audio.set_reached(1.62);
-        assert_eq!(audio.ratio(), 1.6);
-        audio.set_reached(2.0);
-        assert_eq!(audio.ratio(), 2.0);
-        // Normal speed never resamples.
+        let (mut input, mut output) = (0usize, 0usize);
+        // Odd-sized and bursty batches keep the same 2:1 ratio. A long
+        // frame or snapshot must not retune the filter or its output rate.
+        for batch in [547, 548, 1095, 1, 513, 2048].into_iter().cycle().take(300) {
+            for _ in 0..batch {
+                output += usize::from(audio.process([0.5, -0.5]).is_some());
+            }
+            input += batch;
+            assert_eq!(output, input / 2);
+        }
         audio.set_speed(PlaybackSpeed::Normal);
-        audio.set_reached(0.5);
-        assert_eq!(audio.process([0.25, 0.5]), Some([0.25, 0.5]));
+        assert_eq!(audio.process([0.25, -0.5]), Some([0.25, -0.5]));
     }
 
     #[test]
@@ -505,6 +495,28 @@ mod problem_tests {
     use super::*;
 
     #[test]
+    fn ds_headroom_absorbs_a_snapshot_stall_without_changing_mgba_latency() {
+        for (buffer_ms, expected_gaps) in [(50, 1), (100, 0)] {
+            let audio = Arc::new(GameAudio::with_buffer_ms(buffer_ms));
+            audio.configure(32768);
+            let mut reader = AudioReader::new(Arc::clone(&audio), 32768);
+            assert_eq!(audio.limit(), 32768 * usize::from(buffer_ms) / 1000);
+            for _ in 0..reader.target {
+                audio.push([0.25, -0.25]);
+            }
+            // Six 256-frame callbacks consume about 47 ms while the worker
+            // serializes a state, reads the GPU and reduces its preview.
+            let mut output = [0.0; 512];
+            for _ in 0..6 {
+                reader.render(&mut output);
+            }
+            assert_eq!(audio.problems(), (expected_gaps, 0));
+            assert!(audio.len() <= audio.limit());
+        }
+        assert_eq!(GameAudio::default().limit(), 32768 / 20);
+    }
+
+    #[test]
     fn gaps_and_drops_are_counted_but_deliberate_clears_are_not() {
         let audio = Arc::new(GameAudio::default());
         audio.configure(32768);
@@ -535,11 +547,11 @@ mod pacer_tests {
     use super::FramePacer;
 
     #[test]
-    fn ds_fast_forward_does_not_fall_back_to_normal_pacing_with_adaptive_audio() {
+    fn ds_fast_forward_caps_bursty_audio_to_the_selected_deadline() {
         let fps = 59.8261;
         let mut paced = FramePacer::new(32768, fps, 2);
         let target = 1.0 / fps / 2.0;
-        // A slow core/rewind spike makes adaptive audio approach a 1× ratio.
+        // A batch may deliver two frames of decimated audio at once.
         // Even a full queue must not turn the frame target into normal speed.
         for _ in 0..300 {
             let interval = paced.fast_forward_interval(548, 1638, 1638);

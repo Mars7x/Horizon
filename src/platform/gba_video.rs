@@ -49,6 +49,18 @@ pub fn present_ds(raw: &Frame, filter: VideoFilter, targets: [(u32, u32); 2]) ->
     } else {
         filter
     };
+    if width > 256
+        && filter == VideoFilter::None
+        && targets
+            .iter()
+            .all(|&(w, h)| w > 0 && h > 0 && w <= width && h <= height)
+        && targets.iter().any(|&(w, h)| w < width || h < height)
+    {
+        // Rendering stays at the selected internal resolution. Sample the
+        // nearest pixels that the viewport can actually show before upload,
+        // instead of making Slint upload two 8× textures just to shrink them.
+        return ds_viewport_pixels(raw, targets);
+    }
     if matches!(filter, VideoFilter::None | VideoFilter::Smooth) {
         // No per-screen treatment is needed: one copy keeps both screens in
         // their original positions. At 8× this avoids two temporary 12 MiB
@@ -86,6 +98,42 @@ pub fn present_ds(raw: &Frame, filter: VideoFilter, targets: [(u32, u32); 2]) ->
     Presented {
         pixels,
         smooth: top.smooth,
+        exact: None,
+        screens: Some(sizes),
+    }
+}
+
+fn ds_viewport_pixels(raw: &Frame, targets: [(u32, u32); 2]) -> Presented {
+    let (width, height) = (raw.width, raw.height / 2);
+    let sizes = targets.map(|(w, h)| {
+        let scale = (f64::from(w) / f64::from(width)).min(f64::from(h) / f64::from(height));
+        (
+            (f64::from(width) * scale).round().max(1.0) as u32,
+            (f64::from(height) * scale).round().max(1.0) as u32,
+        )
+    });
+    let stride = sizes[0].0.max(sizes[1].0);
+    let mut pixels = SharedPixelBuffer::<Rgba8Pixel>::new(stride, sizes[0].1 + sizes[1].1);
+    let output = pixels.make_mut_bytes();
+    let mut first_row = 0;
+    for (screen, (w, h)) in sizes.into_iter().enumerate() {
+        let columns: Vec<_> = (0..w)
+            .map(|x| (u64::from(x * 2 + 1) * u64::from(width) / u64::from(w * 2)) as usize * 4)
+            .collect();
+        for y in 0..h {
+            let source_y = (u64::from(y * 2 + 1) * u64::from(height) / u64::from(h * 2)) as u32;
+            let source = ((screen as u32 * height + source_y) * width) as usize * 4;
+            let target = ((first_row + y) * stride) as usize * 4;
+            let row = &mut output[target..target + w as usize * 4];
+            for (pixel, column) in row.as_chunks_mut::<4>().0.iter_mut().zip(&columns) {
+                pixel.copy_from_slice(&raw.rgba[source + column..source + column + 4]);
+            }
+        }
+        first_row += h;
+    }
+    Presented {
+        pixels,
+        smooth: false,
         exact: None,
         screens: Some(sizes),
     }
@@ -601,6 +649,46 @@ pub(super) fn correct_color(rgba: &mut [u8]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn upscaled_ds_none_uploads_viewport_pixels_without_losing_screen_bounds() {
+        let mut raw = Frame {
+            width: 2048,
+            height: 3072,
+            rgba: [20, 30, 40, 255].repeat(2048 * 3072),
+            smooth: false,
+        };
+        for (x, y, color) in [
+            (2, 2, [255, 0, 0, 255]),
+            (2046, 1534, [0, 255, 0, 255]),
+            (4, 1540, [0, 0, 255, 255]),
+        ] {
+            let offset = (y * 2048 + x) * 4;
+            raw.rgba[offset..offset + 4].copy_from_slice(&color);
+        }
+        let shown = present_ds(&raw, VideoFilter::None, [(512, 384), (256, 192)]);
+        assert_eq!(shown.screens, Some([(512, 384), (256, 192)]));
+        assert_eq!((shown.pixels.width(), shown.pixels.height()), (512, 576));
+        assert!(!shown.smooth);
+        let bytes = shown.pixels.as_bytes();
+        assert_eq!(&bytes[..4], &[255, 0, 0, 255]);
+        let top_end = (383 * 512 + 511) * 4;
+        assert_eq!(&bytes[top_end..top_end + 4], &[0, 255, 0, 255]);
+        let bottom = 384 * 512 * 4;
+        assert_eq!(&bytes[bottom..bottom + 4], &[0, 0, 255, 255]);
+        assert_eq!(
+            (raw.width, raw.height, raw.rgba.len()),
+            (2048, 3072, 2048 * 3072 * 4)
+        );
+        // Unknown viewport and smooth filtering retain the full source image.
+        for (filter, targets) in [
+            (VideoFilter::None, [(0, 0); 2]),
+            (VideoFilter::Smooth, [(512, 384), (256, 192)]),
+        ] {
+            let shown = present_ds(&raw, filter, targets);
+            assert_eq!(shown.pixels.as_bytes(), raw.rgba);
+        }
+    }
 
     #[test]
     fn ds_none_and_smooth_keep_every_pixel_and_both_screen_bounds() {

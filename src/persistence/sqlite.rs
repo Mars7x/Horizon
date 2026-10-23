@@ -55,6 +55,62 @@ impl SqliteLibraryRepository {
         migrations::current_schema_version(&self.connection)
     }
 
+    /// Retire only the exact ROM records the worker removed, preserving identities/history.
+    pub fn forget_removed_game_roms(
+        &mut self,
+        game: GameId,
+        removed: &[crate::services::game_management::GameRom],
+    ) -> Result<(), PersistenceError> {
+        use std::os::unix::ffi::OsStrExt;
+        let transaction = self.connection.transaction()?;
+        for rom in removed {
+            transaction.execute(
+                "DELETE FROM rom_files WHERE game_id = ?1 AND path = ?2 AND sha256 = ?3",
+                params![game.get(), rom.path.as_os_str().as_bytes(), rom.sha256],
+            )?;
+        }
+        let remaining: i64 = transaction.query_row(
+            "SELECT COUNT(*) FROM rom_files WHERE game_id = ?1",
+            [game.get()],
+            |row| row.get(0),
+        )?;
+        if remaining == 0 {
+            transaction.execute("INSERT OR REPLACE INTO retired_game_sources (game_id, source_id, external_id, first_seen_at, last_seen_at) SELECT game_id, source_id, external_id, first_seen_at, unixepoch() FROM game_sources WHERE game_id = ?1", [game.get()])?;
+            transaction.execute("DELETE FROM game_sources WHERE game_id = ?1", [game.get()])?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn set_game_hidden(&mut self, game: GameId, hidden: bool) -> Result<(), PersistenceError> {
+        self.connection.execute(
+            "INSERT INTO game_preferences(game_id, hidden) VALUES (?1, ?2) ON CONFLICT(game_id) DO UPDATE SET hidden = excluded.hidden",
+            params![game.get(), hidden],
+        )?;
+        Ok(())
+    }
+
+    pub fn game_rom_records(
+        &self,
+        game: GameId,
+    ) -> Result<Vec<crate::services::game_management::GameRom>, PersistenceError> {
+        use std::os::unix::ffi::OsStringExt;
+        let mut statement = self.connection.prepare("SELECT path, sha256, size, catalog_name FROM rom_files WHERE game_id = ?1 ORDER BY path")?;
+        let records = statement
+            .query_map([game.get()], |row| {
+                Ok(crate::services::game_management::GameRom {
+                    path: std::path::PathBuf::from(std::ffi::OsString::from_vec(
+                        row.get::<_, Vec<u8>>(0)?,
+                    )),
+                    sha256: row.get(1)?,
+                    size: row.get(2)?,
+                    catalog: row.get(3)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(records)
+    }
+
     /// Retain every location for a content identity; launch revalidates bytes.
     pub fn rom_locations(
         &self,
@@ -541,6 +597,10 @@ impl LibraryRepository for SqliteLibraryRepository {
                 continue;
             }
             transaction.execute(
+                "INSERT OR REPLACE INTO retired_game_sources (game_id, source_id, external_id, first_seen_at, last_seen_at) SELECT game_id, source_id, external_id, first_seen_at, unixepoch() FROM game_sources WHERE source_id = ?1 AND external_id = ?2 AND EXISTS (SELECT 1 FROM game_preferences WHERE game_preferences.game_id = game_sources.game_id)",
+                params![source_id.as_str(), external_id],
+            )?;
+            transaction.execute(
                 "DELETE FROM game_sources WHERE source_id = ?1 AND external_id = ?2",
                 params![source_id.as_str(), external_id],
             )?;
@@ -558,6 +618,8 @@ impl LibraryRepository for SqliteLibraryRepository {
              SELECT 1 FROM play_sessions WHERE play_sessions.game_id = games.id\
              ) AND NOT EXISTS (\
              SELECT 1 FROM source_lifetime_playtime WHERE source_lifetime_playtime.game_id = games.id\
+             ) AND NOT EXISTS (\
+             SELECT 1 FROM game_preferences WHERE game_preferences.game_id = games.id\
              )",
             [],
         )?;
@@ -574,7 +636,20 @@ impl LibraryRepository for SqliteLibraryRepository {
              ORDER BY g.id, gs.source_id, gs.external_id",
         )?;
 
-        Self::read_games(&mut statement)
+        let games = Self::read_games(&mut statement)?;
+        let mut hidden = self
+            .connection
+            .prepare("SELECT game_id FROM game_preferences WHERE hidden = 1")?;
+        let hidden = hidden
+            .query_map([], |row| row.get::<_, i64>(0))?
+            .collect::<Result<BTreeSet<_>, _>>()?;
+        Ok(games
+            .into_iter()
+            .map(|game| {
+                let is_hidden = hidden.contains(&game.game().id().get());
+                game.with_hidden(is_hidden)
+            })
+            .collect())
     }
 
     fn game_count(&self) -> Result<usize, Self::Error> {
@@ -605,7 +680,8 @@ impl ActivityRepository for SqliteLibraryRepository {
                  CASE WHEN g.created_at > (SELECT at FROM first_import) + ?2 \
                       THEN g.created_at ELSE -1 END) AS at \
                FROM games AS g \
-               WHERE EXISTS (SELECT 1 FROM game_sources AS gs WHERE gs.game_id = g.id)) \
+               WHERE EXISTS (SELECT 1 FROM game_sources AS gs WHERE gs.game_id = g.id) \
+                 AND NOT EXISTS (SELECT 1 FROM game_preferences AS p WHERE p.game_id = g.id AND p.hidden = 1)) \
              SELECT game_id FROM recency WHERE at >= 0 \
              ORDER BY at DESC, game_id ASC LIMIT ?1",
         )?;

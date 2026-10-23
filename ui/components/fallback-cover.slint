@@ -7,6 +7,8 @@ import { GameCardData } from "../models/game-card.slint";
 // GameTile as one visual unit so fallback text/details do not re-layout.
 export component FallbackCover inherits Rectangle {
     in property <GameCardData> game;
+    // Small identity thumbnails scale type without changing Home’s authored sizes.
+    in property <float> typography-scale: 1.0;
 
     background: @linear-gradient(135deg,
         root.game.cover-primary 0%,
@@ -49,7 +51,7 @@ export component FallbackCover inherits Rectangle {
         height: parent.height * 0.40;
         text: root.game.monogram;
         color: #ffffff;
-        font-size: Typography.cover-mark-size;
+        font-size: Typography.cover-mark-size * root.typography-scale;
         font-weight: Typography.title-weight;
         vertical-alignment: center;
         horizontal-alignment: center;
@@ -61,7 +63,7 @@ export component FallbackCover inherits Rectangle {
         width: parent.width * 0.80;
         text: root.game.platform;
         color: #ffffffe0;
-        font-size: Typography.cover-caption-size;
+        font-size: Typography.cover-caption-size * root.typography-scale;
         font-weight: Typography.emphasis-weight;
         horizontal-alignment: center;
     }

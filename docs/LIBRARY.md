@@ -1,7 +1,7 @@
 # Library
 
 Library is a full-shell route, reached by Home's final tile.
-Its established responsive square-cover grid, Source/Sort controls and scrolling
+Its established responsive square-cover grid, Filter/Sort controls and scrolling
 are retained. Add games and its X/Delete shortcut are absent. The
 [GBA importer](ROM_IMPORT.md) remains part of first-run setup. Imported games
 persist across restarts and launch through the embedded mGBA player.
@@ -15,7 +15,9 @@ visible at different UI scales, including the empty-filter message.
 [Library page](../ui/pages/library.slint). Indices remain stable for the process;
 reloads append and mark unavailable games rather than moving old slots.
 
-Source filtering never edits provider records. Sort modes are Alphabetical,
+Filtering never edits provider records. Hidden games is a separate recoverable
+view; normal filters omit hidden entries. Right-click or +/Start/F10 opens commands beside the selected game.
+See [game options](GAME_OPTIONS.md). Sort modes are Alphabetical,
 Recently played, Time played and Recently added. Source-reported lifetime and
 observed playtime stay distinct; provider totals do not establish last-played
 timestamps. The generic reload service remains but has no current user trigger.

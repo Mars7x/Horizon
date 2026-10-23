@@ -281,6 +281,13 @@ mod tests {
                         );
                     }
                     assert!(palette.accent_foreground.contrast_against(palette.accent) >= 4.5);
+                    assert!(
+                        palette
+                            .divider
+                            .best_foreground()
+                            .contrast_against(palette.divider)
+                            >= 4.5
+                    );
                 }
             }
         }

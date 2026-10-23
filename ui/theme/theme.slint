@@ -20,6 +20,7 @@ export global Theme {
     in-out property <color> accent-pressed: #2d70b8;
     in-out property <color> accent-subtle: #e4effc;
     in-out property <color> accent-foreground: #ffffff;
+    in-out property <color> toggle-off-foreground: #000000;
     in-out property <color> focus: #3584e4;
     in-out property <color> focus-highlight: #62a0ea;
     // Picker preview of the White preset uses the very same contrast-adjusted
@@ -72,7 +73,7 @@ export global Metrics {
     out property <length> page-accessory-y: page-title-y + (page-title-height - page-accessory-height) / 2;
     // Sub-pages open with a "Section  /  Page" breadcrumb at the content top.
     out property <length> breadcrumb-height: 26px;
-    // Every focusable list row (Settings, Achievements) shares one height.
+    // Every focusable list row (Settings) shares one height.
     out property <length> list-row-height: 80px;
     out property <length> list-row-gap: 8px;
     out property <length> scroll-edge-shadow-height: 11px;
@@ -83,7 +84,7 @@ export global Metrics {
     out property <length> utility-spacing: 24px;
     out property <length> utility-center-step: utility-cell-size + utility-spacing;
     out property <length> utility-row-width:
-        utility-cell-size * 4 + utility-spacing * 3;
+        utility-cell-size * 3 + utility-spacing * 2;
 
     // One reference-style focus layer. The frame sits deliberately outside
     // the game shell with a visible air gap while keeping the same radius

@@ -37,6 +37,7 @@ component ClockReadout inherits Rectangle {
 }
 
 export component Footer inherits Rectangle {
+    in property <bool> game-options-available: false;
     in property <float> icon-render-scale: 1.0;
     in property <int> connected-controller-count: 0;
     in property <ControllerArt> controller-art: ControllerArt.generic;
@@ -78,9 +79,9 @@ export component Footer inherits Rectangle {
         // The keyboard's "Enter" cap is wider than a face button.
         x: parent.width - Metrics.page-margin - self.width;
         y: parent.height - Metrics.hint-row-center-from-bottom - self.height / 2;
-        width: InputGlyphs.family == GlyphFamily.keyboard ? 113px : 95px;
+        width: (root.game-options-available ? 150px : 0px) + (InputGlyphs.family == GlyphFamily.keyboard ? 113px : 95px);
         height: Metrics.hint-row-height;
-        hints: [{ button: "A", label: "OK" }];
+        hints: root.game-options-available ? [{ button: "+", label: "Options" }, { button: "A", label: "OK" }] : [{ button: "A", label: "OK" }];
         activated(button) => { root.hint-activated(button); }
     }
 }

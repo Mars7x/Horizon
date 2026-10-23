@@ -74,9 +74,14 @@ const MIGRATIONS: &[Migration] = &[
         name: "large_rom_files",
         sql: include_str!("migrations/0013_large_rom_files.sql"),
     },
+    Migration {
+        version: 14,
+        name: "game_management",
+        sql: include_str!("migrations/0014_game_management.sql"),
+    },
 ];
 
-pub(crate) const LATEST_SCHEMA_VERSION: i64 = 13;
+pub(crate) const LATEST_SCHEMA_VERSION: i64 = 14;
 
 const MIGRATION_LEDGER_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations (

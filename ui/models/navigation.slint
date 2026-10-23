@@ -1,12 +1,11 @@
 // Slint-facing representation of Horizon's Rust-owned navigation route.
 // Navigation policy/history stays in Rust; Slint only renders the published
-// destination. The four utility values are durable full-shell submenu pages.
+// destination. The three utility values are durable full-shell submenu pages.
 export enum AppRouteView {
     home,
     library,
     album,
     activity,
-    achievements,
     settings,
     // The user's profile, opened from Home's avatar.
     profile,

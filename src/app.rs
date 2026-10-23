@@ -435,11 +435,30 @@ pub fn run() -> Result<(), AppError> {
             },
         },
     );
+    let game_menu = crate::presentation::game_menu::GameMenuController::new(
+        &ui,
+        database_path.clone(),
+        Rc::clone(&catalog),
+        Rc::clone(&home),
+        Rc::clone(&reloader),
+    );
+    let menu_sounds = Rc::clone(&navigation_sound);
+    game_menu.set_sound(Rc::new(move |cue| menu_sounds.borrow_mut().play(cue)));
+    navigation.set_game_menu(Rc::clone(&game_menu));
+    let menu_close = Rc::downgrade(&game_menu);
+    let close_player = Rc::clone(&player);
+    ui.window().on_close_requested(move || {
+        if menu_close.upgrade().is_some_and(|menu| menu.delay_close()) {
+            slint::CloseRequestResponse::KeepWindowShown
+        } else {
+            close_player.request_close()
+        }
+    });
     let rom_setup = crate::presentation::rom_setup::RomSetupController::new(
         &ui,
         database_path.clone(),
         rom_setup_state,
-        reloader,
+        Rc::clone(&reloader),
     );
     let import_sounds = Rc::clone(&navigation_sound);
     rom_setup.set_sound(Rc::new(move |cue| import_sounds.borrow_mut().play(cue)));
@@ -496,9 +515,6 @@ pub fn run() -> Result<(), AppError> {
                 ui.get_library_filter_text(),
                 ui.get_library_sort_text(),
                 ui.get_activity_selected_index(),
-                ui.get_achievements_selected_index(),
-                ui.get_achievements_first_entry(),
-                ui.get_achievements_viewing_entries(),
             ),
             (
                 ui.get_album_selected_index(),
@@ -529,9 +545,6 @@ pub fn run() -> Result<(), AppError> {
                 ui.get_library_filter_text(),
                 ui.get_library_sort_text(),
                 ui.get_activity_selected_index(),
-                ui.get_achievements_selected_index(),
-                ui.get_achievements_first_entry(),
-                ui.get_achievements_viewing_entries(),
             ),
             (
                 ui.get_album_selected_index(),

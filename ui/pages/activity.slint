@@ -2,13 +2,12 @@ import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
 import { FallbackCover } from "../components/fallback-cover.slint";
 import { FocusFrame } from "../components/focus-frame.slint";
 import { ActivityCoverData, ActivityDayData } from "../models/activity.slint";
-import { AchievementEntryData } from "../models/achievements.slint";
 import { PageHeader, HeaderValue } from "../components/page-header.slint";
 import { MarqueeText } from "../components/marquee-text.slint";
-import { Surface, BadgeIcon } from "../components/list-row.slint";
+import { Surface } from "../components/list-row.slint";
 
-// Phase 10.3.0: one controller focus region, shared cover/focus design from
-// Home, and two quiet informational panels. No achievement provider is configured yet.
+// One controller focus region, shared cover/focus design from Home,
+// and a read-only weekly playtime chart.
 export component ActivityPage inherits Rectangle {
     in property <[ActivityCoverData]> covers;
     in property <[ActivityDayData]> days;
@@ -18,8 +17,6 @@ export component ActivityPage inherits Rectangle {
     in property <bool> focus-visible: false;
     in property <string> week-total: "0 min";
     in property <string> month-total: "0 min";
-    in property <[AchievementEntryData]> recent-achievements;
-    in property <string> achievement-status: "Achievements unavailable";
     callback choose-game(int);
     background: Theme.background;
 
@@ -67,8 +64,7 @@ export component ActivityPage inherits Rectangle {
     // comfortable 20px separation, even when focus enlarges the cover.
     private property <length> panels-top: root.covers-top + root.cover-label-top
         + 36px + 20px + 20px;
-    private property <length> panels-gap: 18px;
-    private property <length> panel-width: (root.width - Metrics.page-margin * 2 - root.panels-gap) / 2;
+    private property <length> panel-width: root.width - Metrics.page-margin * 2;
     private property <length> panels-height: max(150px, root.height - root.panels-top - Metrics.page-bottom-bar-height);
 
     // Read-only period totals on the header row; never focus targets.
@@ -266,55 +262,4 @@ export component ActivityPage inherits Rectangle {
         }
     }
 
-    Surface {
-        x: Metrics.page-margin + root.panel-width + root.panels-gap;
-        y: root.panels-top; width: root.panel-width; height: root.panels-height;
-        clip: true;
-        Text {
-            x: 19px; y: 13px; text: "Milestones";
-            color: Theme.foreground; font-size: Typography.heading-size;
-            font-weight: Typography.heading-weight;
-        }
-        if root.recent-achievements.length == 0 : Text {
-            x: 19px; y: 62px;
-            width: parent.width - 38px; height: 76px;
-            text: root.achievement-status;
-            color: Theme.secondary-foreground;
-            font-size: Typography.body-size;
-            wrap: word-wrap;
-        }
-        // As many whole unlocks as fit below the panel heading (max three).
-        for achievement[i] in root.recent-achievements : Rectangle {
-            x: 18px; y: 52px + i * 66px;
-            width: parent.width - 36px; height: 64px;
-            visible: i < 3 && 52px + (i + 1) * 66px <= root.panels-height - 4px;
-            background: transparent;
-            BadgeIcon {
-                x: 0px; y: 5px; width: 54px; height: 54px;
-                badge: achievement.badge;
-                has-badge: achievement.has-badge;
-                unlocked: achievement.unlocked;
-            }
-            MarqueeText {
-                x: 67px; y: 5px; width: parent.width - 70px; height: 24px;
-                text: achievement.title;
-                edge-color: Theme.surface;
-                font-weight: Typography.emphasis-weight;
-            }
-            MarqueeText {
-                x: 67px; y: 29px; width: parent.width - 70px; height: 19px;
-                text: achievement.game + " · " + achievement.provider;
-                edge-color: Theme.surface;
-                text-color: Theme.secondary-foreground;
-                font-size: Typography.caption-size;
-            }
-            MarqueeText {
-                x: 67px; y: 48px; width: parent.width - 70px; height: 16px;
-                text: achievement.when;
-                edge-color: Theme.surface;
-                text-color: Theme.secondary-foreground;
-                font-size: Typography.caption-size;
-            }
-        }
-    }
 }

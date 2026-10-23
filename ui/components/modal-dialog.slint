@@ -11,6 +11,7 @@ import { Theme, Metrics, Motion } from "../theme/theme.slint";
 // pinned to the area however the card moves.
 export component ModalDialog inherits Rectangle {
     in property <bool> open: false;
+    callback dismissed();
     in property <length> area-width;
     in property <length> area-height;
     in property <length> card-width: 456px;
@@ -32,7 +33,7 @@ export component ModalDialog inherits Rectangle {
         x: -root.x; y: -root.y;
         width: root.area-width; height: root.area-height;
         background: #00000099;
-        TouchArea { width: parent.width; height: parent.height; }
+        TouchArea { width: parent.width; height: parent.height; clicked => { root.dismissed(); } }
     }
     Rectangle {
         width: parent.width; height: parent.height;

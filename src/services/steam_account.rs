@@ -212,7 +212,7 @@ impl SteamAccountService {
     }
 }
 
-/// Used by read-only Achievements, the profile and its friends without sharing
+/// Used by the profile and its read-only friends without sharing
 /// provider-specific presentation models or making UI-thread network requests.
 pub struct SteamWebApiClient {
     client: reqwest::blocking::Client,

@@ -38,6 +38,9 @@
 | [0223](0223-image-only-album.md) | Album retains screenshots and animated images; clip playback removed |
 | [0224](0224-shared-rom-title-cleanup-and-launch-feedback.md) | Shared ROM annotation cleanup and immediate accepted-launch feedback |
 | [0225](0225-ds-fast-forward-pacing-and-compact-toggle.md) | DS fast-forward retains its frame target; compact quick-menu toggle |
+| [0226](0226-fixed-ratio-fast-forward-audio.md) | Fixed selected audio ratio; no frame-cost feedback into pitch or pacing |
+| [0227](0227-remove-achievements-utility.md) | Three Home utilities; remove inactive Achievements and Activity Milestones |
+| [0228](0228-shared-game-options.md) | Shared game context menu, persistent hiding and confirmed ROM-only uninstall |
 
 Earlier decisions and their supporting phase notes are in
 [history](../history/INDEX.md). Their numbered identifiers remain reserved.

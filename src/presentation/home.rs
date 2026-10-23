@@ -832,7 +832,9 @@ fn ordered_home_indices(catalog: &Catalog, ids: &[GameId]) -> Vec<usize> {
         if !seen.insert(*id) {
             continue;
         }
-        if let Some(index) = catalog.position(*id) {
+        if let Some(index) = catalog.position(*id)
+            && !catalog[index].hidden()
+        {
             order.push(index);
             if order.len() == HOME_RECENT_LIMIT {
                 return order;
@@ -844,7 +846,9 @@ fn ordered_home_indices(catalog: &Catalog, ids: &[GameId]) -> Vec<usize> {
     // otherwise empty Home slot, in case-insensitive A–Z order.
     let mut fallback: Vec<usize> = catalog
         .iter()
-        .filter_map(|(index, game)| (!seen.contains(&game.game().id())).then_some(index))
+        .filter_map(|(index, game)| {
+            (!game.hidden() && !seen.contains(&game.game().id())).then_some(index)
+        })
         .collect();
     fallback.sort_by(|&left, &right| {
         let lhs = catalog[left].game().title().as_str();
@@ -1178,6 +1182,17 @@ mod tests {
         ];
         // Two distinct recently played games, then all three unplayed A–Z.
         assert_eq!(ordered_home_indices(&games, &ids), vec![4, 2, 1, 3, 0]);
+    }
+
+    #[test]
+    fn hidden_games_are_excluded_from_recent_and_alphabetical_home_slots() {
+        let mut games = catalogue(&["Hidden", "Visible"]);
+        games[0] = games[0].clone().with_hidden(true);
+        assert_eq!(
+            ordered_home_indices(&games, &[games[0].game().id()]),
+            vec![1]
+        );
+        assert_eq!(ordered_home_indices(&games, &[]), vec![1]);
     }
 
     #[test]

@@ -24,3 +24,5 @@ pub mod rom_setup;
 
 pub mod gba_player;
 pub mod onboarding;
+
+pub mod game_menu;

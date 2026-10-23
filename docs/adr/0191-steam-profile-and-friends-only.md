@@ -7,6 +7,8 @@ Date: 2026-10-14
 Accepted. Supersedes ADR 0190's preservation of Steam screenshots,
 achievements and automatic local controller-file lookup. Earlier Album and
 achievement ADRs remain historical; their shared UI/media decisions still apply.
+The placeholder-preservation decision is superseded by [ADR 0227](0227-remove-achievements-utility.md):
+Achievements and Activity Milestones are removed. The Steam account boundary remains in force.
 
 ## Context
 

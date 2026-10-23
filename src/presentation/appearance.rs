@@ -151,6 +151,7 @@ fn apply_resolved(ui: &AppWindow, appearance: crate::appearance::ResolvedAppeara
     theme.set_foreground(to_slint_color(palette.foreground));
     theme.set_secondary_foreground(to_slint_color(palette.secondary_foreground));
     theme.set_divider(to_slint_color(palette.divider));
+    theme.set_toggle_off_foreground(to_slint_color(palette.divider.best_foreground()));
     theme.set_accent(to_slint_color(palette.accent));
     theme.set_accent_hover(to_slint_color(palette.accent_hover));
     theme.set_accent_pressed(to_slint_color(palette.accent_pressed));

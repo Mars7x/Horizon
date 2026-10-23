@@ -6,6 +6,8 @@ import { RewindRow } from "models/rewind.slint";
 export { RewindRow }
 import { OnboardingPage } from "pages/onboarding.slint";
 import { GamePlayer } from "pages/game-player.slint";
+import { GameContextMenu } from "components/game-context-menu.slint";
+import { ConfirmDialog } from "components/confirm-dialog.slint";
 import { RomSetupDialog } from "components/rom-setup.slint";
 import { Theme, Metrics, Typography, Motion } from "theme/theme.slint";
 export { Theme, Metrics, Typography, Motion }
@@ -21,8 +23,6 @@ export { GameCardData, CardRect }
 import { LibraryCardData } from "models/library.slint";
 export { LibraryCardData }
 import { ActivityCoverData, ActivityDayData, ActivityHistoryRowData } from "models/activity.slint";
-import { AchievementGameData, AchievementEntryData } from "models/achievements.slint";
-export { AchievementGameData, AchievementEntryData }
 export { ActivityCoverData, ActivityDayData, ActivityHistoryRowData }
 import { AlbumTileData } from "models/album.slint";
 export { AlbumTileData }
@@ -44,7 +44,6 @@ import { HintData } from "models/hints.slint";
 import { HomePage } from "pages/home.slint";
 import { LibraryPage } from "pages/library.slint";
 import { ActivityPage } from "pages/activity.slint";
-import { AchievementsPage } from "pages/achievements.slint";
 import { AlbumPage } from "pages/album.slint";
 import { ActivityGameDetailsPage } from "pages/activity-game-details.slint";
 import { SettingsPage } from "pages/settings.slint";
@@ -102,8 +101,8 @@ export component AppWindow inherits Window {
     pure function route-key(route: AppRouteView) -> int {
         return route == AppRouteView.home ? 0 : route == AppRouteView.library ? 1
             : route == AppRouteView.album ? 2 : route == AppRouteView.activity ? 3
-            : route == AppRouteView.achievements ? 4 : route == AppRouteView.settings ? 5
-            : 6;
+            : route == AppRouteView.settings ? 4
+            : 5;
     }
     private property <int> route-phase: route-transition.phase;
     private property <bool> route-back: root.current-route == AppRouteView.home
@@ -115,11 +114,10 @@ export component AppWindow inherits Window {
         // The on-screen keyboard needs no hints.
         root.keyboard-open || (root.current-route == AppRouteView.settings && root.settings-binding-open) ? []
         : root.rom-setup-open ? [{ button: "B", label: "Close" }, { button: "A", label: "Select" }]
-        : root.current-route == AppRouteView.library ? [{ button: "B", label: "Back" }]
+        : root.current-route == AppRouteView.library ? (root.library-total-count > 0 ? [{ button: "+", label: "Options" }, { button: "B", label: "Back" }] : [{ button: "B", label: "Back" }])
         : root.current-route == AppRouteView.activity ? (root.activity-details-visible
             ? [{ button: "B", label: "Back" }]
             : [{ button: "B", label: "Back" }, { button: "A", label: "Details" }])
-        : root.current-route == AppRouteView.achievements ? [{ button: "B", label: "Back" }]
         // Fullscreen: Left/Right browse and LB/RB skip 10 s are not listed.
         // The Album's hints depend on its viewer, selection and capture
         // owners; its controller publishes them (`album-hints`).
@@ -187,6 +185,7 @@ export component AppWindow inherits Window {
     in property <int> library-selected-index: 0;
     in property <int> library-browse-sequence: 0;
     in property <string> library-filter-text: "All sources";
+    in property <bool> library-hidden-view: false;
     in property <string> library-sort-text: "Alphabetical";
     in property <int> library-total-count: 0;
     in property <int> library-collection-count: 0;
@@ -204,6 +203,27 @@ export component AppWindow inherits Window {
     in-out property <int> launching-game-index: -1;
     in-out property <string> launch-feedback-text: "";
 
+    in property <bool> game-menu-open: false;
+    in property <length> game-menu-x;
+    in property <length> game-menu-y;
+    out property <CardRect> game-menu-popup-rect: game-menu.popup-rect;
+    callback game-menu-focus(int);
+    callback home-game-options(int);
+    callback library-game-options(int);
+    in property <bool> game-menu-busy: false;
+    in property <GameCardData> game-menu-game;
+    in property <bool> game-menu-hidden: false;
+    in property <int> game-menu-view: 0;
+    in property <int> game-menu-selected: 0;
+    in property <string> game-menu-details;
+    in property <string> game-menu-message;
+    in property <string> game-menu-confirm-text;
+    in property <length> game-menu-offset;
+    out property <length> game-menu-max-offset: game-menu.max-details-offset;
+    callback game-menu-choose(int);
+    callback game-menu-back();
+    callback game-menu-scroll(int);
+
     // Activity is persisted/application-owned data. The Activity page only
     // formats and renders these models; it never queries SQLite directly.
     in property <[ActivityCoverData]> activity-covers;
@@ -211,29 +231,6 @@ export component AppWindow inherits Window {
     in property <string> activity-week-total: "0 min";
     in property <string> activity-month-total: "0 min";
     in property <int> activity-selected-index: 0;
-    in property <[AchievementEntryData]> activity-recent-achievements;
-    in property <string> activity-achievement-status: "Achievements unavailable";
-    in property <string> achievements-game-count: "Unavailable";
-    in property <string> achievements-source-label: "All sources";
-    in property <bool> achievements-has-source-choice: false;
-    in property <string> achievements-selected-game-title: "Select a game";
-    in property <string> achievements-selected-game-provider: "";
-    in property <string> achievements-selected-game-progress: "";
-    in property <float> achievements-selected-game-fraction: 0;
-    callback achievements-cycle-source(int);
-    in property <[AchievementGameData]> achievement-games;
-    in property <[AchievementEntryData]> achievement-entries;
-    in property <string> achievements-status: "Achievements unavailable";
-    in property <bool> achievements-loading: false;
-    in property <int> achievements-selected-index: 0;
-    in property <int> achievements-visit-revision: 0;
-    in property <int> achievements-catalog-revision: 0;
-    in property <int> achievements-first-entry: 0;
-    in property <bool> achievements-viewing-entries: false;
-    out property <int> achievements-visible-entries: achievements-page.visible-entries;
-    callback achievements-select(int);
-    callback achievements-scroll-entries(int);
-    callback achievements-back();
     // Album: Rust owns the captures, order, selection and decoding; the page
     // reports its grid shape back.
     in property <[HintData]> album-hints;
@@ -659,6 +656,7 @@ export component AppWindow inherits Window {
                     focus-visible: root.current-route == AppRouteView.home
                         && !root.top-utilities-focused;
                     select-game(index) => { root.select-game(index); }
+                    game-options(index) => { if (root.current-route == AppRouteView.home) { root.home-game-options(index); } }
                     open-library => { if (root.current-route == AppRouteView.home) { root.open-library(); } }
                     carousel-geometry-changed(first-game-center-x-px) => {
                         root.home-first-game-center-x-px = first-game-center-x-px;
@@ -692,6 +690,7 @@ export component AppWindow inherits Window {
                     collection-count: root.library-collection-count;
                     browse-sequence: root.library-browse-sequence;
                     filter-text: root.library-filter-text;
+                    hidden-view: root.library-hidden-view;
                     sort-text: root.library-sort-text;
                     selected-title: root.library-selected-title;
                     selected-source: root.library-selected-source;
@@ -699,6 +698,7 @@ export component AppWindow inherits Window {
                     scroll-row: root.library-scroll-row;
                     metadata-sequence: root.library-metadata-sequence;
                     focus-visible: root.current-route == AppRouteView.library;
+                    game-options(index) => { if (root.current-route == AppRouteView.library) { root.library-game-options(index); } }
                     choose-card(index) => {
                         if (root.current-route == AppRouteView.library) { root.library-select(index); }
                     }
@@ -791,8 +791,6 @@ export component AppWindow inherits Window {
                     days: root.activity-days;
                     week-total: root.activity-week-total;
                     month-total: root.activity-month-total;
-                    recent-achievements: root.activity-recent-achievements;
-                    achievement-status: root.activity-achievement-status;
                     selected-index: root.activity-selected-index;
                     pressed-index: root.activity-pressed-index;
                     details-open: root.activity-details-visible;
@@ -824,51 +822,6 @@ export component AppWindow inherits Window {
                         }
                     }
                     back => { root.activity-detail-back(); }
-                }
-            }
-
-            TransitionLayer {
-                x: 0px;
-                width: parent.width;
-                height: parent.height;
-                active: root.current-route == AppRouteView.achievements;
-                phase: root.route-phase;
-                returning: root.route-back;
-                outgoing: root.current-route != AppRouteView.achievements
-                    && root.transition-from-route == AppRouteView.achievements;
-
-                achievements-page := AchievementsPage {
-                    width: parent.width;
-                    height: parent.height;
-                    active: root.current-route == AppRouteView.achievements;
-                    game-count: root.achievements-game-count;
-                    source-label: root.achievements-source-label;
-                    has-source-choice: root.achievements-has-source-choice;
-                    selected-game-title: root.achievements-selected-game-title;
-                    selected-game-provider: root.achievements-selected-game-provider;
-                    selected-game-progress: root.achievements-selected-game-progress;
-                    selected-game-fraction: root.achievements-selected-game-fraction;
-                    games: root.achievement-games;
-                    entries: root.achievement-entries;
-                    selected-index: root.achievements-selected-index;
-                    visit-revision: root.achievements-visit-revision;
-                    catalog-revision: root.achievements-catalog-revision;
-                    first-entry: root.achievements-first-entry;
-                    viewing-entries: root.achievements-viewing-entries;
-                    status: root.achievements-status;
-                    loading: root.achievements-loading;
-                    choose-game(index) => {
-                        if (root.current-route == AppRouteView.achievements) { root.achievements-select(index); }
-                    }
-                    scroll-entries(delta) => {
-                        if (root.current-route == AppRouteView.achievements) { root.achievements-scroll-entries(delta); }
-                    }
-                    cycle-source(direction) => {
-                        if (root.current-route == AppRouteView.achievements) { root.achievements-cycle-source(direction); }
-                    }
-                    close-details() => {
-                        if (root.current-route == AppRouteView.achievements) { root.achievements-back(); }
-                    }
                 }
             }
 
@@ -1104,11 +1057,39 @@ export component AppWindow inherits Window {
                 opacity: root.chrome-opacity;
                 transform-scale: root.chrome-scale;
                 transform-origin: { x: self.width / 2, y: root.height / 2 - self.y };
+                game-options-available: !root.top-utilities-focused && root.selected-index >= 0 && root.selected-index < root.games.length;
                 connected-controller-count: root.connected-controller-count;
                 controller-art: root.controller-art;
                 clock-time: root.clock-time;
                 clock-suffix: root.clock-suffix;
                 hint-activated(button) => { root.hint-activated(button); }
+            }
+
+            game-menu := GameContextMenu {
+                z: 12;
+                area-width: parent.width; area-height: parent.height;
+                open: root.game-menu-open && root.game-menu-view != 2;
+                anchor-x: root.game-menu-x; anchor-y: root.game-menu-y;
+                game: root.game-menu-game; view: root.game-menu-view;
+                selected: root.game-menu-selected; hidden-game: root.game-menu-hidden;
+                busy: root.game-menu-busy; message: root.game-menu-message;
+                details: root.game-menu-details; details-offset: root.game-menu-offset;
+                choose(index) => { root.game-menu-choose(index); }
+                hover-row(index) => { root.game-menu-focus(index); }
+                back => { root.game-menu-back(); }
+                scroll(direction) => { root.game-menu-scroll(direction); }
+            }
+            ConfirmDialog {
+                z: 13;
+                area-width: parent.width; area-height: parent.height;
+                open: root.game-menu-open && root.game-menu-view == 2;
+                title: root.game-menu-busy ? "Uninstalling…" : "Uninstall game?";
+                text: root.game-menu-confirm-text;
+                text-height: 136px;
+                busy: root.game-menu-busy;
+                action: "Uninstall";
+                selected: root.game-menu-selected;
+                choose(index) => { root.game-menu-choose(index); }
             }
 
             OnboardingPage {

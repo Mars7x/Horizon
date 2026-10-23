@@ -11,10 +11,10 @@ carousel and footer. [HomeController](../src/presentation/home.rs) owns selectio
 and card projections; [catalog](../src/presentation/catalog.rs) indices are stable
 for the run. Rendering components forward intent rather than choose routes.
 
-The top row is the Profile avatar followed by Album, Activity, Achievements and
-Settings. It never wraps. The avatar opens Profile and has its own focus slot.
+The top row is the Profile avatar followed by Album, Activity and Settings. It never wraps. The avatar opens Profile and has its own focus slot.
 There is no Shop, Friends or Web utility. The permanent final carousel tile opens
-Library even when no games exist. Menu/Start/+ does not open Library. Clicking a game launches that title;
+Library even when no games exist. Menu/Start/+ opens [game options](GAME_OPTIONS.md) for the selected game; right-click opens the same anchored menu without launching.
+It does not open Library. Clicking a game launches that title;
 recognized drags keep the existing scroll, inertia and catch behavior.
 
 When active games exist, Home shows at most 15: recently played or newly added

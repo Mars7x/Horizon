@@ -113,23 +113,40 @@ on L2 + Y, so the game also sees Y for that one frame.
 Fast-forward is a shared toggle: off runs at 1×, on requests 2× for this loaded
 game. Left turns it off, Right turns it on, and Select/click toggles it. Held
 fast-forward also requests 2× and returns to the selected setting on release.
-When a core cannot reach 2×, the worker measures its frame time and adjusts the
-audio to the reachable pace. DS fast-forward retains its selected frame deadline
-(2× the core's reported rate); slower adaptive audio must not feed back into
-that deadline and silently pace the game at 1×. A speed change resets the work
-estimate. Actual throughput still depends on the core/GPU budget at the selected
-resolution. It logs the reached speed every five seconds.
+Audio decimation stays at the selected 1× or 2× ratio. Individual slow frames,
+GPU readbacks and rewind snapshots never retune pitch or generate extra audio
+that feeds back into playback pacing. DS fast-forward caps its frame interval
+at twice the core's reported rate, including when audio arrives in larger batches.
+Actual throughput still depends on the core/GPU budget at the selected resolution;
+a core that cannot sustain the target can still underrun. The worker logs reached
+emulation speed every five seconds, separately from presented frames, which are
+limited by display refresh and presentation cost. See [ADR 0226](adr/0226-fixed-ratio-fast-forward-audio.md).
 Only the newest frame is filtered once per frame shown. A stereo low-pass filter
 prevents aliasing before decimation back to the output sample rate. Speed changes
-clear buffered audio, which remains bounded to 50 ms in the application queue.
+clear buffered audio, which remains bounded to the per-system queue described below.
+For upscaled DS with None, nearest-neighbour sampling prepares each screen at
+its physical viewport size before UI upload when both viewports fit within the
+source. The core still renders at the selected internal resolution, and saved
+screenshots/states retain their source frames. Unknown viewports, native frames
+and other filters keep their existing presentation paths.
 The toggle uses a shared compact 40×22 track/thumb, centered in the row and
 aligned with its other trailing values; the whole row remains the input target.
 Its motion respects Reduced Motion.
 
 The game worker publishes atomic stereo frames to a bounded queue; PipeWire does
 not lock against core filtering or allocate. Playback builds about 31 ms of
-headroom on startup and after a real underrun (anything queued beyond that before
+headroom for mGBA on startup and after a real underrun (anything queued beyond that before
 the first sample is heard is trimmed), with short ramps at audio boundaries.
+DS uses a bounded 100 ms queue with about 62 ms of starting headroom, absorbing
+the 30–50 ms serialization, GPU readback and preview work of high-resolution
+rewind snapshots. mGBA retains its 50 ms queue and about 31 ms of headroom.
+Periodic DS rewind samples use a frame already read back for display, avoiding
+an extra GPU readback at 2× speed. If the display stops requesting frames during
+background play, snapshots continue at a one-second fallback interval.
+The worker waits for PipeWire's first callback before producing gameplay audio,
+while still accepting stop/pause commands; a two-second connection stall becomes
+a visible error. Pacing starts from the first completed frame, so cold GPU setup
+does not trigger a burst of catch-up frames that overfills the queue.
 At normal speed, each frame waits as long as the audio it produced lasts
 (averaged over about 32 frames), plus a gentle correction of at most 5% from
 how full the queue is. mGBA retains that audio-clocked policy at both speeds;
@@ -151,7 +168,9 @@ samples at the queue limit or open a refill gap. `real_core_audio_drift_at_norma
 measures this against real PipeWire. Ordinary pauses, including focus freeze, keep the PipeWire stream
 connected and render silence without consuming the bounded queued audio. Resume
 continues that timeline without restarting the output or rebuilding headroom;
-speed changes, restart and state loads still discard obsolete audio. Brief frame
+speed changes, restart and state loads still discard obsolete audio. Stopping a
+game gates audio before waiting for the writer or capturing its exit state, so
+exit saving cannot drain the queue. Brief frame
 jitter no longer repeatedly drains an empty queue or
 produces silence because the worker holds a mutex. Long core/storage/device stalls
 can still exhaust a bounded buffer.

@@ -37,6 +37,7 @@ export component LibraryPage inherits Rectangle {
         triggered => { self.stop(); root.releasing-press = false; }
     }
     in property <string> filter-text: "All sources";
+    in property <bool> hidden-view: false;
     in property <string> sort-text: "Alphabetical";
     in property <int> total-count: 0;
     in property <int> collection-count: 0;
@@ -100,6 +101,7 @@ export component LibraryPage inherits Rectangle {
     }
 
     callback choose-card(int);
+    callback game-options(int);
     callback cycle-filter();
     callback cycle-sort();
     callback scroll-rows(int);
@@ -189,7 +191,7 @@ export component LibraryPage inherits Rectangle {
             height: Metrics.page-accessory-height;
             spacing: Metrics.spacing-sm;
             HeaderValue {
-                width: 160px; label: "Source"; value: root.filter-text;
+                width: 160px; label: "Filter"; value: root.filter-text;
                 interactive: true; button: "LB";
                 clicked => { root.cycle-filter(); }
             }
@@ -208,7 +210,7 @@ export component LibraryPage inherits Rectangle {
         height: Typography.body-size * 2;
         horizontal-alignment: center;
         vertical-alignment: center;
-        text: "No games yet";
+        text: root.hidden-view ? "No hidden games" : "No games here";
         color: Theme.secondary-foreground; font-size: Typography.body-size;
     }
     if root.collection-count > 0 && root.total-count == 0 : Text {
@@ -408,6 +410,7 @@ export component LibraryPage inherits Rectangle {
                         width: parent.width; height: parent.height;
                         // Any cover in view can be clicked; one only peeking is
                         // selected and scrolled fully into view.
+                        pointer-event(event) => { if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) { root.game-options(row.absolute-index); } }
                         clicked => { root.choose-card(row.absolute-index); }
                         scroll-event(event) => {
                             if event.delta-y != 0px {

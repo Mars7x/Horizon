@@ -1,6 +1,6 @@
 //! Handing results from worker threads to the UI thread without polling.
 //!
-//! Every background job (artwork, achievements, Album media, system status)
+//! Every background job (artwork, Album media, system status)
 //! sends its results through a [`WorkerSender`]. Each send also calls the
 //! channel's [`Notify`], which the presentation layer turns into one
 //! coalesced wake-up of the UI thread (`presentation::wake::ui_notify`). The

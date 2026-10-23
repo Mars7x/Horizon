@@ -32,6 +32,7 @@ export component GameCarousel inherits Rectangle {
     in property <string> launch-feedback-text;
     in property <bool> focus-visible: true;
     callback game-selected(int);
+    callback game-options(int);
     callback open-library();
     callback geometry-changed(float);
 
@@ -420,6 +421,7 @@ export component GameCarousel inherits Rectangle {
                 launching: index == root.launching-game-index;
                 focus-visible: root.focus-visible;
                 activated(index) => { root.game-selected(index); }
+                game-options(index) => { root.game-options(index); }
             }
             LibraryTile {
                 x: root.reordering

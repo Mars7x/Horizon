@@ -17,18 +17,19 @@ import and Ready. Completed setup is skipped; unfinished confirmed steps resume.
 
 | Surface | Current behavior |
 | --- | --- |
-| Home | Established carousel, Library tile, four utilities/profile avatar; Accept plays imported games |
+| Home | Established carousel, Library tile, three utilities/profile avatar; Accept plays imported games |
 | Library | Full-shell grid/sort/filter; Accept opens imported games in the embedded player |
 | Activity | Retained session totals, recent history and distinct lifetime counters |
 | Album | Horizon-owned screenshots/animated images, viewer and confirmed deletion |
-| Achievements | Retained page and Milestones layout; no provider, “Achievements unavailable” |
 | Settings | Appearance; Controller → Button mapping and DS button mapping; Cores → mGBA and melonDS; Third-Party → SteamGridDB and Steam Account |
 | Player | GB/GBC/GBA and DS in a zoomed shell with quick menu, visual rewind, playback speed, four state slots and a crash-safe automatic resume point; DS layouts, swap, lid, blow and GPU internal resolution |
 | Profile | Local name/picture, Steam profile picture and read-only Steam friends |
 
-Utilities are **Album, Activity, Achievements, Settings**, in that order.
+Utilities are **Album, Activity, Settings**, in that order.
 Steam account setup uses a SteamID64 and Web API key; interactive Steam login
 is not implemented. SteamGridDB is independent of Steam account features.
+Game options on +/Start/F10 provide Play, properties, persistent Hide/Unhide and
+confirmed ROM uninstall; saves, states, captures and history are retained.
 RetroAchievements is intended future work, not an available backend.
 
 Storage uses the fresh [purpose-first layout](STORAGE.md), with readable game

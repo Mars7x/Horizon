@@ -54,8 +54,8 @@ It preserves GameIds, paths, history and previously verified catalog titles.
 Selected bytes are rehashed on a worker before the batch commits. The system's
 source plus SHA-256 is the durable identity, independent of title/path and future RetroAchievements
 identification. Copies share a GameId; equal titles with different bytes do not.
-A filename fallback never replaces an existing verified catalog title. ROMs stay
-in place and are never modified, moved or deleted.
+A filename fallback never replaces an existing verified catalog title. Import leaves ROMs in place without modifying or moving them. Only a separate,
+explicitly confirmed [Uninstall action](GAME_OPTIONS.md#uninstall) deletes registered ROM files.
 
 Portal paths and catalog provenance remain in SQLite, preserving raw Unix path
 bytes. Missing/revoked access requires selecting the folder again; failed or

@@ -39,6 +39,7 @@ use super::{
 pub struct NavigationController {
     navigator: RefCell<Navigator>,
     restoring_history: Cell<bool>,
+    game_menu: RefCell<Option<Rc<super::game_menu::GameMenuController>>>,
     focus: RefCell<ShellFocus>,
     focus_memory: RefCell<RouteFocusMemory>,
     home: Rc<HomeController>,
@@ -62,6 +63,7 @@ impl NavigationController {
         let controller = Rc::new(Self {
             navigator: RefCell::new(Navigator::default()),
             restoring_history: Cell::new(false),
+            game_menu: RefCell::new(None),
             focus: RefCell::new(ShellFocus::default()),
             focus_memory: RefCell::new(RouteFocusMemory::default()),
             home,
@@ -377,6 +379,28 @@ impl NavigationController {
         self.restore_focus_for_route(ui, route);
     }
 
+    pub fn set_game_menu(&self, menu: Rc<super::game_menu::GameMenuController>) {
+        *self.game_menu.borrow_mut() = Some(menu);
+    }
+
+    fn open_game_menu(&self) {
+        let selected = match self.current_route() {
+            AppRoute::Home
+                if self.focus.borrow().region() == ShellFocusRegion::Content
+                    && !self.home.library_tile_selected() =>
+            {
+                self.home.selected_game_id()
+            }
+            AppRoute::Library => self.library.selected_game_id(),
+            _ => None,
+        };
+        if let Some(id) = selected
+            && let Some(menu) = self.game_menu.borrow().as_ref()
+        {
+            menu.open(id);
+        }
+    }
+
     pub fn handle_action(&self, ui: &AppWindow, event: UiActionEvent) {
         if event.repeated && event.action.is_global() {
             debug!(action = ?event.action, "repeated global action ignored by navigation layer");
@@ -390,6 +414,14 @@ impl NavigationController {
                 keyboard.handle_action(ui, event)
             });
         if keyboard == KeyboardFeedback::Handled {
+            return;
+        }
+        if self
+            .game_menu
+            .borrow()
+            .as_ref()
+            .is_some_and(|menu| menu.handle_action(ui, event))
+        {
             return;
         }
         if self.current_route() == AppRoute::Profile {
@@ -457,7 +489,7 @@ impl NavigationController {
             UiAction::Back => self.handle_back(ui),
             UiAction::Home => self.handle_home(ui),
             UiAction::Forward => self.handle_forward(ui),
-            UiAction::Menu => {}
+            UiAction::Menu => self.open_game_menu(),
             UiAction::Accept
                 if !event.repeated
                     && self.current_route() == AppRoute::Home
@@ -545,6 +577,37 @@ impl NavigationController {
             }
         });
 
+        let weak = ui.as_weak();
+        let controller = Rc::clone(self);
+        ui.on_home_game_options(move |index| {
+            if let Some(ui) = weak.upgrade()
+                && controller.current_route() == AppRoute::Home
+                && !ui.get_game_menu_open()
+                && !ui.get_player_open()
+                && index >= 0
+                && (index as usize) < controller.home.game_count().saturating_sub(1)
+            {
+                controller.focus.borrow_mut().leave_utilities();
+                controller.home.select_from_shell(&ui, index);
+                controller.publish_focus(&ui);
+                controller.open_game_menu();
+            }
+        });
+        let weak = ui.as_weak();
+        let controller = Rc::clone(self);
+        ui.on_library_game_options(move |index| {
+            if let Some(ui) = weak.upgrade()
+                && controller.current_route() == AppRoute::Library
+                && !ui.get_game_menu_open()
+                && !ui.get_player_open()
+                && index >= 0
+                && index < ui.get_library_total_count()
+            {
+                controller.library.select_for_context(&ui, index);
+                controller.open_game_menu();
+            }
+        });
+
         // Pointer activation is routed through the shell too, so it restores
         // content focus and cannot operate a retained/outgoing Library page.
         let weak = ui.as_weak();
@@ -605,7 +668,7 @@ impl NavigationController {
             }
         });
         // Activity has exactly one controller focus region (the cover strip).
-        // Charts and the Milestones placeholder never capture navigation.
+        // Charts never capture navigation.
         let weak = ui.as_weak();
         let controller = Rc::clone(self);
         ui.on_activity_choose(move |index| {
@@ -653,10 +716,13 @@ impl NavigationController {
         let weak = ui.as_weak();
         let controller = Rc::clone(self);
         ui.on_library_layout_changed(move || {
-            if let Some(ui) = weak.upgrade()
-                && controller.current_route() == AppRoute::Library
-            {
-                controller.library.on_viewport_changed(&ui);
+            if let Some(ui) = weak.upgrade() {
+                if controller.current_route() == AppRoute::Library {
+                    controller.library.on_viewport_changed(&ui);
+                }
+                if let Some(menu) = controller.game_menu.borrow().as_ref() {
+                    menu.reposition(&ui);
+                }
             }
         });
     }
@@ -877,7 +943,6 @@ impl NavigationController {
             AppRoute::Home => self.home.handle_action(ui, event),
             AppRoute::Library => self.library.handle_action(ui, event),
             // No achievement provider is configured yet; Back remains global.
-            AppRoute::Utility(UtilityPage::Achievements) => {}
             AppRoute::Utility(UtilityPage::Album) => {
                 let feedback = self
                     .album
@@ -974,7 +1039,6 @@ fn route_view(route: AppRoute) -> AppRouteView {
         AppRoute::Library => AppRouteView::Library,
         AppRoute::Utility(UtilityPage::Album) => AppRouteView::Album,
         AppRoute::Utility(UtilityPage::Activity) => AppRouteView::Activity,
-        AppRoute::Utility(UtilityPage::Achievements) => AppRouteView::Achievements,
         AppRoute::Utility(UtilityPage::Settings) => AppRouteView::Settings,
         AppRoute::Profile => AppRouteView::Profile,
     }
@@ -998,9 +1062,6 @@ mod tests {
 
         assert!(route_view(AppRoute::Utility(UtilityPage::Album)) == AppRouteView::Album);
         assert!(route_view(AppRoute::Utility(UtilityPage::Activity)) == AppRouteView::Activity);
-        assert!(
-            route_view(AppRoute::Utility(UtilityPage::Achievements)) == AppRouteView::Achievements
-        );
         assert!(route_view(AppRoute::Utility(UtilityPage::Settings)) == AppRouteView::Settings);
     }
 }
@@ -1042,6 +1103,11 @@ mod runtime_tests {
             crate::platform::gba_core::test_rom(),
         )
         .unwrap();
+        std::fs::write(
+            directory.join("z-copy.gba"),
+            crate::platform::gba_core::test_rom(),
+        )
+        .unwrap();
         let mut repository =
             SqliteLibraryRepository::open(directory.join("library.sqlite3")).unwrap();
         let scan = rom_import::scan_folder(&directory, None).unwrap();
@@ -1063,7 +1129,8 @@ mod runtime_tests {
         let ui = AppWindow::new().unwrap();
         let registry = Rc::new(crate::sources::production_source_registry().unwrap());
         let catalog = crate::presentation::catalog::Catalog::shared(games.clone());
-        let activity = Rc::new(ActivityService::new(Rc::new(RefCell::new(repository))));
+        let repository = Rc::new(RefCell::new(repository));
+        let activity = Rc::new(ActivityService::new(Rc::clone(&repository)));
         let launches = Rc::new(Cell::new(0));
         let launcher = Rc::new(GameLaunchService::new(
             Rc::clone(&registry),
@@ -1107,16 +1174,18 @@ mod runtime_tests {
         let navigation = NavigationController::new(&ui, home, library, settings);
         let showcase = crate::presentation::activity::ActivityShowcaseController::new(
             &ui,
-            catalog,
+            Rc::clone(&catalog),
             Rc::clone(&navigation.home),
         );
         let overview = activity.overview(10, 10).unwrap();
         showcase.refresh(&ui, &overview);
-        let details =
-            crate::presentation::activity::ActivityDetailsController::new(activity, showcase);
+        let details = crate::presentation::activity::ActivityDetailsController::new(
+            Rc::clone(&activity),
+            Rc::clone(&showcase),
+        );
         navigation.set_activity_details(details);
         let album_dir = directory.join("album");
-        std::fs::create_dir_all(album_dir.join("horizon")).unwrap();
+        std::fs::create_dir_all(album_dir.join("horizon/screenshots")).unwrap();
         let pixels = image::RgbaImage::from_fn(32, 16, |x, y| {
             image::Rgba(if (x + y) % 2 == 0 {
                 [255, 0, 255, 255]
@@ -1124,8 +1193,10 @@ mod runtime_tests {
                 [0, 255, 0, 255]
             })
         });
-        pixels.save(album_dir.join("horizon/one.png")).unwrap();
-        pixels.save(album_dir.join("horizon/two.png")).unwrap();
+        crate::services::image::write_jxl(&album_dir.join("horizon/screenshots/one.jxl"), &pixels)
+            .unwrap();
+        crate::services::image::write_jxl(&album_dir.join("horizon/screenshots/two.jxl"), &pixels)
+            .unwrap();
         let album = AlbumController::new(
             &ui,
             &games,
@@ -1134,9 +1205,35 @@ mod runtime_tests {
             Some(directory.join("cache")),
         );
         navigation.set_album(Rc::clone(&album), &ui);
+        let reloader = crate::presentation::library_reload::LibraryReloader::new(
+            &ui,
+            crate::presentation::library_reload::LibraryReloadParts {
+                catalog: Rc::clone(&catalog),
+                repository: Rc::clone(&repository),
+                activity: Rc::clone(&activity),
+                registry: Rc::clone(&registry),
+                artwork: Rc::new(ArtworkService::new(Rc::clone(&registry), None, None)),
+                home: Rc::clone(&navigation.home),
+                library: Rc::clone(&navigation.library),
+                showcase: Rc::clone(&showcase),
+                album: Rc::clone(&album),
+                artwork_preferences: Rc::new(|| crate::services::settings::ArtworkPreferences {
+                    api_key: None,
+                    prefer_steamgriddb: false,
+                }),
+            },
+        );
+        let menu = crate::presentation::game_menu::GameMenuController::new(
+            &ui,
+            directory.join("library.sqlite3"),
+            Rc::clone(&catalog),
+            Rc::clone(&navigation.home),
+            Rc::clone(&reloader),
+        );
+        navigation.set_game_menu(menu);
         ui.global::<crate::Motion>().set_reduced_motion(true);
         ui.show().unwrap();
-        let stage = Rc::new(Cell::new(0));
+        let stage = Rc::new(Cell::new(20));
         let count = Rc::new(Cell::new(0));
         let progress = Rc::clone(&stage);
         let ticks = Rc::clone(&count);
@@ -1150,7 +1247,7 @@ mod runtime_tests {
                 let ui = weak.upgrade().unwrap();
                 ticks.set(ticks.get() + 1);
                 assert!(
-                    ticks.get() < 60,
+                    ticks.get() < 120,
                     "navigation runtime timed out at {}",
                     progress.get()
                 );
@@ -1158,6 +1255,171 @@ mod runtime_tests {
                 let forward =
                     || navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Forward));
                 match progress.get() {
+                    20 => {
+                        use slint::platform::{PointerEventButton, WindowEvent};
+                        let rect = ui.invoke_player_capture_origin();
+                        let position = slint::LogicalPosition::new(
+                            (rect.x + rect.width / 2.0) * 1280.0,
+                            (rect.y + rect.height / 2.0) * 720.0,
+                        );
+                        ui.window().dispatch_event(WindowEvent::PointerPressed {
+                            position,
+                            button: PointerEventButton::Right,
+                        });
+                        ui.window().dispatch_event(WindowEvent::PointerReleased {
+                            position,
+                            button: PointerEventButton::Right,
+                        });
+                        assert!(
+                            ui.get_game_menu_open(),
+                            "right-click must open game commands"
+                        );
+                        assert_eq!(launches.get(), 0, "right-click must not launch");
+                        let outside = slint::LogicalPosition::new(20.0, 680.0);
+                        ui.window().dispatch_event(WindowEvent::PointerPressed {
+                            position: outside,
+                            button: PointerEventButton::Left,
+                        });
+                        ui.window().dispatch_event(WindowEvent::PointerReleased {
+                            position: outside,
+                            button: PointerEventButton::Left,
+                        });
+                        assert!(!ui.get_game_menu_open(), "outside click must dismiss");
+                        assert_eq!(launches.get(), 0);
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Menu));
+                        assert!(ui.get_game_menu_open());
+                        assert_eq!(ui.get_game_menu_selected(), 0);
+                        progress.set(21);
+                    }
+                    21 if ui.get_game_menu_details().contains("SHA-256") => {
+                        let popup = ui.get_game_menu_popup_rect();
+                        let game_rect = ui.invoke_player_capture_origin();
+                        assert!(popup.x >= (game_rect.x + game_rect.width) * 1280.0 + 11.0);
+                        assert!(popup.x + popup.width <= 1264.0 && popup.y + popup.height <= 704.0);
+                        assert_eq!(popup.width, 304.0);
+                        use slint::platform::WindowEvent;
+                        ui.window().dispatch_event(WindowEvent::PointerMoved {
+                            position: slint::LogicalPosition::new(popup.x + 24.0, popup.y + 147.0),
+                        });
+                        assert_eq!(ui.get_game_menu_selected(), 2);
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Up));
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Up));
+                        let image = ui.window().take_snapshot().unwrap();
+                        image::save_buffer(
+                            output.join("game-options.png"),
+                            image.as_bytes(),
+                            image.width(),
+                            image.height(),
+                            image::ColorType::Rgba8,
+                        )
+                        .unwrap();
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Down));
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Accept));
+                        assert_eq!(ui.get_game_menu_view(), 1);
+                        progress.set(22);
+                    }
+                    22 => {
+                        let image = ui.window().take_snapshot().unwrap();
+                        image::save_buffer(
+                            output.join("game-properties.png"),
+                            image.as_bytes(),
+                            image.width(),
+                            image.height(),
+                            image::ColorType::Rgba8,
+                        )
+                        .unwrap();
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Down));
+                        assert!(ui.get_game_menu_offset() > 0.0);
+                        back();
+                        assert_eq!(ui.get_game_menu_view(), 0);
+                        assert_eq!(ui.get_game_menu_selected(), 1);
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Down));
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Accept));
+                        progress.set(23);
+                    }
+                    23 if !ui.get_game_menu_open() => {
+                        assert!(repository.borrow().list_games().unwrap()[0].hidden());
+                        assert!(navigation.home.library_tile_selected());
+                        navigation.navigate_to(&ui, AppRoute::Library);
+                        navigation.library.cycle_filter(&ui);
+                        navigation.library.cycle_filter(&ui);
+                        assert_eq!(ui.get_library_filter_text(), "Hidden games");
+                        assert_eq!(ui.get_library_total_count(), 1);
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Menu));
+                        assert!(ui.get_game_menu_hidden());
+                        ui.invoke_game_menu_choose(2);
+                        progress.set(24);
+                    }
+                    24 if !ui.get_game_menu_open() => {
+                        assert!(!repository.borrow().list_games().unwrap()[0].hidden());
+                        navigation.library.cycle_filter(&ui);
+                        assert_eq!(ui.get_library_total_count(), 1);
+                        ui.invoke_library_game_options(0);
+                        assert_eq!(
+                            launches.get(),
+                            0,
+                            "Library context selection must not launch"
+                        );
+                        progress.set(25);
+                    }
+                    25 if ui.get_game_menu_details().contains("SHA-256") => {
+                        ui.invoke_game_menu_choose(3);
+                        assert_eq!(ui.get_game_menu_view(), 2);
+                        assert_eq!(ui.get_game_menu_selected(), 0);
+                        progress.set(26);
+                    }
+                    26 => {
+                        let image = ui.window().take_snapshot().unwrap();
+                        image::save_buffer(
+                            output.join("game-uninstall-confirm.png"),
+                            image.as_bytes(),
+                            image.width(),
+                            image.height(),
+                            image::ColorType::Rgba8,
+                        )
+                        .unwrap();
+                        ui.invoke_game_menu_choose(0);
+                        assert_eq!(ui.get_game_menu_view(), 0);
+                        assert_eq!(ui.get_game_menu_selected(), 3);
+                        assert!(output.join("homebrew.gba").exists());
+                        ui.invoke_game_menu_choose(3);
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Right));
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Accept));
+                        progress.set(27);
+                    }
+                    27 if !ui.get_game_menu_open() => {
+                        assert!(!output.join("homebrew.gba").exists());
+                        assert!(!output.join("z-copy.gba").exists());
+                        assert!(catalog.borrow().is_empty());
+                        assert_eq!(
+                            repository
+                                .borrow()
+                                .game_activity_history(game)
+                                .unwrap()
+                                .sessions
+                                .len(),
+                            1
+                        );
+                        assert!(output.join("album/horizon/screenshots/one.jxl").exists());
+                        // Reimport restores the same identity so the existing
+                        // route, pointer and Album regression checks can follow.
+                        std::fs::write(
+                            output.join("homebrew.gba"),
+                            crate::platform::gba_core::test_rom(),
+                        )
+                        .unwrap();
+                        let scan = rom_import::scan_folder(&output, None).unwrap();
+                        repository
+                            .borrow_mut()
+                            .save_rom_import(&RomSetup::default(), &scan.candidates)
+                            .unwrap();
+                        let games = repository.borrow().list_games().unwrap();
+                        assert_eq!(games[0].game().id(), game);
+                        reloader.accept_games(games);
+                        navigation.handle_home(&ui);
+                        progress.set(0);
+                    }
+
                     0 => {
                         navigation.navigate_to(&ui, AppRoute::Utility(UtilityPage::Settings));
                         ui.invoke_settings_activate(3);
@@ -1191,6 +1453,9 @@ mod runtime_tests {
                         navigation.handle_home(&ui);
                         navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Menu));
                         assert_eq!(navigation.current_route(), AppRoute::Home);
+                        assert!(ui.get_game_menu_open());
+                        back();
+                        assert!(!ui.get_game_menu_open());
                         navigation.navigate_to(&ui, AppRoute::Utility(UtilityPage::Activity));
                         navigation.begin_activity_details_open(&ui, 0);
                         assert!(ui.get_activity_details_visible());

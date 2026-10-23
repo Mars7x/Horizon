@@ -19,6 +19,7 @@ export component HomePage inherits Rectangle {
     in property <string> launch-feedback-text;
     in property <bool> focus-visible: true;
     callback select-game(int);
+    callback game-options(int);
     callback open-library();
     callback carousel-geometry-changed(float);
 
@@ -74,6 +75,7 @@ export component HomePage inherits Rectangle {
             launch-feedback-text: root.launch-feedback-text;
             focus-visible: root.focus-visible;
             game-selected(index) => { root.select-game(index); }
+            game-options(index) => { root.game-options(index); }
             open-library => { root.open-library(); }
             geometry-changed(first-game-center-x-px) => {
                 root.carousel-geometry-changed(first-game-center-x-px);

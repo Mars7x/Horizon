@@ -448,14 +448,6 @@ impl Core {
             }
         });
     }
-    /// The speed the core is managing, for fast-forward audio (see SpeedAudio).
-    pub fn set_reached_speed(&mut self, speed: f64) {
-        CALLBACKS.with(|state| {
-            if let Some(state) = state.borrow_mut().as_mut() {
-                state.audio_speed.set_reached(speed);
-            }
-        });
-    }
     pub fn capture_frame(&self) -> Result<Frame, String> {
         CALLBACKS
             .with(|state| {

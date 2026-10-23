@@ -10,12 +10,14 @@ export component ConfirmDialog inherits ModalDialog {
     in property <string> title;
     in property <string> text: "";
     in property <string> action: "OK";
+    in property <bool> busy: false;
+    in property <length> text-height: 44px;
     in property <int> selected: 0;
     callback choose(int);
 
     card-width: 456px;
-    card-height: root.text != "" ? 196px : 152px;
-    private property <length> buttons-y: root.text != "" ? 132px : 88px;
+    card-height: root.text != "" ? 152px + root.text-height : 152px;
+    private property <length> buttons-y: root.text != "" ? 88px + root.text-height : 88px;
 
     Text {
         x: 29px; y: 27px;
@@ -28,7 +30,7 @@ export component ConfirmDialog inherits ModalDialog {
     }
     if root.text != "" : Text {
         x: 29px; y: 66px;
-        width: parent.width - 58px; height: 44px;
+        width: parent.width - 58px; height: root.text-height;
         text: root.text;
         color: Theme.secondary-foreground;
         font-size: Typography.body-size;
@@ -39,7 +41,7 @@ export component ConfirmDialog inherits ModalDialog {
         width: 120px; height: 40px;
         label: "Cancel";
         focused: root.open && root.selected == 0;
-        enabled: root.open;
+        enabled: root.open && !root.busy;
         activated => { root.choose(0); }
     }
     ActionButton {
@@ -48,7 +50,7 @@ export component ConfirmDialog inherits ModalDialog {
         label: root.action;
         primary: true;
         focused: root.open && root.selected == 1;
-        enabled: root.open;
+        enabled: root.open && !root.busy;
         activated => { root.choose(1); }
     }
 }

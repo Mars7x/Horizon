@@ -9,7 +9,7 @@ pub mod grid;
 pub mod keyboard;
 pub use edge_step::step_with_edge_wrap;
 
-/// Full-shell submenu pages opened from the four top utility icons.
+/// Full-shell submenu pages opened from the three top utility icons.
 ///
 /// These are real navigation destinations, not modal overlays. Grouping them
 /// under one type keeps the shell model explicit without pretending every
@@ -19,26 +19,24 @@ pub enum UtilityPage {
     Album,
     #[default]
     Activity,
-    Achievements,
     Settings,
 }
 
 impl UtilityPage {
-    const COUNT: usize = 4;
+    const COUNT: usize = 3;
 
     const fn index(self) -> usize {
         match self {
             Self::Album => 0,
             Self::Activity => 1,
-            Self::Achievements => 2,
-            Self::Settings => 3,
+            Self::Settings => 2,
         }
     }
 }
 
 /// Navigable destinations in Horizon's application shell.
 ///
-/// Only Home uses persistent top/bottom shell chrome. Library and all four
+/// Only Home uses persistent top/bottom shell chrome. Library and all three
 /// utility destinations are durable full-shell routes with Back/Home history.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AppRoute {
@@ -84,25 +82,23 @@ pub enum ShellFocusRegion {
     TopUtilities,
 }
 
-/// Stable ordering of the four utility icons in the persistent header.
+/// Stable ordering of the three utility icons in the persistent header.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum TopUtility {
     Album,
     #[default]
     Activity,
-    Achievements,
     Settings,
 }
 
 impl TopUtility {
-    pub const COUNT: i32 = 4;
+    pub const COUNT: i32 = 3;
 
     pub const fn index(self) -> i32 {
         match self {
             Self::Album => 0,
             Self::Activity => 1,
-            Self::Achievements => 2,
-            Self::Settings => 3,
+            Self::Settings => 2,
         }
     }
 
@@ -110,8 +106,7 @@ impl TopUtility {
         match index {
             0 => Some(Self::Album),
             1 => Some(Self::Activity),
-            2 => Some(Self::Achievements),
-            3 => Some(Self::Settings),
+            2 => Some(Self::Settings),
             _ => None,
         }
     }
@@ -120,7 +115,6 @@ impl TopUtility {
         match self {
             Self::Album => UtilityPage::Album,
             Self::Activity => UtilityPage::Activity,
-            Self::Achievements => UtilityPage::Achievements,
             Self::Settings => UtilityPage::Settings,
         }
     }
@@ -135,7 +129,6 @@ impl UtilityPage {
         match self {
             Self::Album => TopUtility::Album,
             Self::Activity => TopUtility::Activity,
-            Self::Achievements => TopUtility::Achievements,
             Self::Settings => TopUtility::Settings,
         }
     }
@@ -220,7 +213,6 @@ impl Default for RouteFocusMemory {
                 FocusSnapshot::for_route(AppRoute::Library),
                 FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Album)),
                 FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Activity)),
-                FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Achievements)),
                 FocusSnapshot::for_route(AppRoute::Utility(UtilityPage::Settings)),
                 FocusSnapshot::for_route(AppRoute::Profile),
             ],
@@ -677,7 +669,6 @@ mod tests {
         for page in [
             UtilityPage::Album,
             UtilityPage::Activity,
-            UtilityPage::Achievements,
             UtilityPage::Settings,
         ] {
             assert!(!AppRoute::Utility(page).uses_shell_chrome());
@@ -825,7 +816,6 @@ mod tests {
             AppRoute::Library,
             AppRoute::Utility(UtilityPage::Album),
             AppRoute::Utility(UtilityPage::Activity),
-            AppRoute::Utility(UtilityPage::Achievements),
             AppRoute::Utility(UtilityPage::Settings),
             AppRoute::Home,
         ] {
@@ -833,7 +823,7 @@ mod tests {
         }
 
         assert_eq!(navigator.current(), AppRoute::Home);
-        assert_eq!(navigator.back_stack_depth(), 6);
+        assert_eq!(navigator.back_stack_depth(), 5);
     }
 
     #[test]
@@ -844,10 +834,10 @@ mod tests {
 
         assert!(focus.enter_utilities());
         assert!(focus.move_utility(1));
-        assert_eq!(focus.utility(), TopUtility::Achievements);
+        assert_eq!(focus.utility(), TopUtility::Settings);
         assert!(focus.leave_utilities());
         assert!(focus.enter_utilities());
-        assert_eq!(focus.utility(), TopUtility::Achievements);
+        assert_eq!(focus.utility(), TopUtility::Settings);
     }
 
     #[test]
@@ -877,7 +867,6 @@ mod tests {
         for (utility, page) in [
             (TopUtility::Album, UtilityPage::Album),
             (TopUtility::Activity, UtilityPage::Activity),
-            (TopUtility::Achievements, UtilityPage::Achievements),
             (TopUtility::Settings, UtilityPage::Settings),
         ] {
             assert_eq!(utility.page(), page);
@@ -947,7 +936,6 @@ mod tests {
         for (page, utility) in [
             (UtilityPage::Album, TopUtility::Album),
             (UtilityPage::Activity, TopUtility::Activity),
-            (UtilityPage::Achievements, TopUtility::Achievements),
             (UtilityPage::Settings, TopUtility::Settings),
         ] {
             let snapshot = memory.recall(AppRoute::Utility(page));
@@ -962,17 +950,14 @@ mod tests {
         let mut focus = ShellFocus::default();
         let settings = AppRoute::Utility(UtilityPage::Settings);
 
-        focus.enter_utilities_from_content(TopUtility::Achievements, 2);
+        focus.enter_utilities_from_content(TopUtility::Album, 2);
         memory.remember(AppRoute::Home, focus.snapshot());
 
         focus.restore(FocusSnapshot::for_route(settings));
         focus.enter_utilities();
         memory.remember(settings, focus.snapshot());
 
-        assert_eq!(
-            memory.recall(AppRoute::Home).utility(),
-            TopUtility::Achievements
-        );
+        assert_eq!(memory.recall(AppRoute::Home).utility(), TopUtility::Album);
         assert_eq!(
             memory.recall(AppRoute::Home).region(),
             ShellFocusRegion::TopUtilities
@@ -999,10 +984,9 @@ mod tests {
         let step = 64.0;
 
         for (x, utility) in [
-            (544.0, TopUtility::Album),
-            (608.0, TopUtility::Activity),
-            (672.0, TopUtility::Achievements),
-            (736.0, TopUtility::Settings),
+            (576.0, TopUtility::Album),
+            (640.0, TopUtility::Activity),
+            (704.0, TopUtility::Settings),
         ] {
             assert_eq!(nearest_utility_for_x(x, viewport_width, step), utility);
         }
@@ -1011,7 +995,7 @@ mod tests {
     #[test]
     fn utility_and_game_center_helpers_support_reverse_spatial_transfer() {
         let activity_x = utility_center_x(TopUtility::Activity, 1280.0, 64.0);
-        assert_eq!(activity_x, 608.0);
+        assert_eq!(activity_x, 640.0);
 
         assert_eq!(nearest_game_for_x(activity_x, 439.0, 250.0, 8), 1);
         assert_eq!(nearest_game_for_x(768.0, 439.0, 250.0, 8), 1);
@@ -1039,7 +1023,6 @@ mod tests {
             AppRoute::Library,
             AppRoute::Utility(UtilityPage::Album),
             AppRoute::Utility(UtilityPage::Activity),
-            AppRoute::Utility(UtilityPage::Achievements),
             AppRoute::Utility(UtilityPage::Settings),
         ];
         let mut navigator = Navigator::default();
