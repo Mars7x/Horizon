@@ -238,6 +238,14 @@ impl SdlGamepadInput {
         self.gameplay_snapshot().map_or(0, |(buttons, _)| buttons)
     }
     pub fn gameplay_snapshot(&self) -> Option<(u16, u64)> {
+        self.player_snapshot(true)
+            .map(|(buttons, id, _)| (buttons, id))
+    }
+    pub fn three_ds_snapshot(&self) -> Option<(u16, [i16; 4])> {
+        self.player_snapshot(false)
+            .map(|(buttons, _, axes)| (buttons, axes))
+    }
+    fn player_snapshot(&self, stick_as_dpad: bool) -> Option<(u16, u64, [i16; 4])> {
         let state = self.state.borrow();
         if !state.enabled {
             return None;
@@ -284,17 +292,27 @@ impl SdlGamepadInput {
         }
         let x = pad.axis(Axis::LeftX);
         let y = pad.axis(Axis::LeftY);
-        if x < -18000 {
+        if stick_as_dpad && x < -18000 {
             buttons |= 1 << 6;
-        } else if x > 18000 {
+        } else if stick_as_dpad && x > 18000 {
             buttons |= 1 << 7;
         }
-        if y < -18000 {
+        if stick_as_dpad && y < -18000 {
             buttons |= 1 << 4;
-        } else if y > 18000 {
+        } else if stick_as_dpad && y > 18000 {
             buttons |= 1 << 5;
         }
-        Some((buttons, u64::from(selected?.raw())))
+        let axes = [x, y, pad.axis(Axis::RightX), pad.axis(Axis::RightY)].map(analog_axis);
+        Some((buttons, u64::from(selected?.raw()), axes))
+    }
+}
+
+fn analog_axis(value: i16) -> i16 {
+    let value = i32::from(value).clamp(-32767, 32767);
+    if value.abs() <= 6000 {
+        0
+    } else {
+        (value.signum() * (value.abs() - 6000) * 32767 / (32767 - 6000)) as i16
     }
 }
 
@@ -1070,6 +1088,17 @@ fn is_odin3(machine: &str, compatible: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn analog_deadzone_retains_both_full_stick_ranges() {
+        for value in [-6000, -1, 0, 1, 6000] {
+            assert_eq!(super::analog_axis(value), 0);
+        }
+        assert_eq!(super::analog_axis(i16::MIN), -32767);
+        assert_eq!(super::analog_axis(i16::MAX), 32767);
+        assert!(super::analog_axis(18000) > 0);
+        assert_eq!(super::analog_axis(-18000), -super::analog_axis(18000));
+    }
+
     use std::time::{Duration, Instant};
 
     use sdl3::gamepad::{Axis, Button};

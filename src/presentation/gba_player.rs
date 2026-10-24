@@ -48,8 +48,10 @@ const DS_PAUSE_ACTIONS: [i32; 11] = [
     5,
     RETURN_TO_HORIZON,
 ];
-fn pause_actions(ds: bool) -> &'static [i32] {
-    if ds {
+fn pause_actions(ds: bool, three_ds: bool) -> &'static [i32] {
+    if three_ds {
+        &[0, 1, 4, 5, RETURN_TO_HORIZON]
+    } else if ds {
         &DS_PAUSE_ACTIONS
     } else {
         &PAUSE_ACTIONS
@@ -63,8 +65,8 @@ enum StateMode {
     Load = 2,
     Overwrite = 3,
 }
-fn pause_step(current: i32, down: bool, repeated: bool, ds: bool) -> i32 {
-    let actions = pause_actions(ds);
+fn pause_step(current: i32, down: bool, repeated: bool, ds: bool, three_ds: bool) -> i32 {
+    let actions = pause_actions(ds, three_ds);
     let index = actions
         .iter()
         .position(|&action| action == current)
@@ -105,6 +107,8 @@ pub struct GbaPlayer {
     quick_loading: Cell<bool>,
     notice_until: Cell<Option<Instant>>,
     ds_gamepad: CallbackSlot<dyn Fn() -> u16>,
+    three_ds_gamepad: CallbackSlot<dyn Fn() -> (u16, [i16; 4])>,
+    three_ds_keyboard: Cell<u8>,
     /// A DS game's screen layout (None for other systems), and whether its
     /// screens are swapped for this session.
     ds_layout: Cell<Option<crate::domain::core_settings::DsLayout>>,
@@ -166,6 +170,8 @@ impl GbaPlayer {
             quick_loading: Cell::new(false),
             notice_until: Cell::new(None),
             ds_gamepad: RefCell::new(None),
+            three_ds_gamepad: RefCell::new(None),
+            three_ds_keyboard: Cell::new(0),
             ds_layout: Cell::new(None),
             ds_swapped: Cell::new(false),
             selected_game: RefCell::new(None),
@@ -282,6 +288,9 @@ impl GbaPlayer {
     }
     pub fn set_ds_gamepad(&self, source: Rc<dyn Fn() -> u16>) {
         *self.ds_gamepad.borrow_mut() = Some(source);
+    }
+    pub fn set_three_ds_gamepad(&self, source: Rc<dyn Fn() -> (u16, [i16; 4])>) {
+        *self.three_ds_gamepad.borrow_mut() = Some(source);
     }
     pub fn set_shortcut_buttons(&self, source: Rc<dyn Fn() -> u16>) {
         *self.shortcut_buttons.borrow_mut() = Some(source);
@@ -534,6 +543,21 @@ impl GbaPlayer {
         if !self.foreground.get() || self.stage.get() == PlayerStage::Exiting {
             return true;
         }
+        if ui.get_player_three_ds() && !ui.get_player_paused() {
+            let bit = match text.to_ascii_lowercase().as_str() {
+                "i" => 1,
+                "k" => 2,
+                "j" => 4,
+                "l" => 8,
+                _ => 0,
+            };
+            if bit != 0 {
+                let held = self.three_ds_keyboard.get();
+                self.three_ds_keyboard
+                    .set(if pressed { held | bit } else { held & !bit });
+                return true;
+            }
+        }
         if pressed
             && !repeated
             && (text == slint::SharedString::from(slint::platform::Key::Escape).as_str()
@@ -751,6 +775,7 @@ impl GbaPlayer {
                     event.action == UiAction::Down,
                     event.repeated,
                     self.ds_layout.get().is_some(),
+                    ui.get_player_three_ds(),
                 )),
                 UiAction::Left | UiAction::Right
                     if ui.get_player_focus() == 1 && !event.repeated =>
@@ -926,7 +951,7 @@ impl GbaPlayer {
             }
             return;
         }
-        if !pause_actions(self.ds_layout.get().is_some()).contains(&index)
+        if !pause_actions(self.ds_layout.get().is_some(), ui.get_player_three_ds()).contains(&index)
             || (ui.get_player_busy() && index != RETURN_TO_HORIZON)
         {
             return;
@@ -1594,7 +1619,26 @@ impl GbaPlayer {
                 && !ui.get_player_paused()
                 && !ui.get_player_busy()
                 && !ui.get_player_failed();
-            let pad = if let Some(extra) = &game.ds_input {
+            if !active {
+                self.three_ds_keyboard.set(0);
+            }
+            let mut axes = [0; 4];
+            let pad = if game.three_ds {
+                let (buttons, analog) = self
+                    .three_ds_gamepad
+                    .borrow()
+                    .as_ref()
+                    .map_or((0, [0; 4]), |source| source());
+                axes = analog;
+                let keys = self.three_ds_keyboard.get();
+                if axes[0] == 0 {
+                    axes[0] = (i16::from(keys & 8 != 0) - i16::from(keys & 4 != 0)) * 32767;
+                }
+                if axes[1] == 0 {
+                    axes[1] = (i16::from(keys & 2 != 0) - i16::from(keys & 1 != 0)) * 32767;
+                }
+                buttons
+            } else if let Some(extra) = &game.ds_input {
                 // The touchscreen takes the mouse only.
                 if !active {
                     extra.pointer.store(0, Ordering::Release);
@@ -1606,8 +1650,23 @@ impl GbaPlayer {
             } else {
                 self.gamepads.borrow().as_ref().map_or(0, |source| source())
             };
-            if self.foreground.get() && pad == 0 {
+            if self.foreground.get() && pad == 0 && axes == [0; 4] {
                 self.pad_ready.set(true);
+            }
+            if game.three_ds
+                && let Some(extra) = &game.ds_input
+            {
+                let packed = if active && self.pad_ready.get() {
+                    axes.into_iter()
+                        .enumerate()
+                        .fold(0, |packed, (index, value)| {
+                            packed | (u64::from(value as u16) << (index * 16))
+                        })
+                } else {
+                    extra.pointer.store(0, Ordering::Release);
+                    0
+                };
+                extra.analog.store(packed, Ordering::Release);
             }
             let buttons = if !self.foreground.get()
                 || self.stage.get() != PlayerStage::Playing
@@ -1832,6 +1891,8 @@ impl LaunchExecutor for GbaPlayer {
                 .ok_or("The player is not ready")?;
             let running =
                 RunningGame::start(self.paths.clone(), *system, sha256.clone(), frame_ready)?;
+            ui.set_player_three_ds(running.three_ds);
+            self.three_ds_keyboard.set(0);
             publish_display(&ui, Some(&running));
             *self.running.borrow_mut() = Some(running);
             self.launched_game.set(self.selected_game());
@@ -1916,6 +1977,14 @@ fn keyboard_button(text: &str) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn three_ds_menu_skips_unavailable_state_and_ds_actions() {
+        assert_eq!(super::pause_actions(false, true), &[0, 1, 4, 5, 6]);
+        assert_eq!(super::pause_step(1, true, false, false, true), 4);
+        assert_eq!(super::pause_step(4, false, false, false, true), 1);
+        assert_eq!(super::pause_step(6, true, false, false, true), 0);
+    }
+
     use super::*;
     fn walk(directory: &std::path::Path) -> Vec<std::path::PathBuf> {
         let mut found = Vec::new();
@@ -1972,6 +2041,7 @@ mod tests {
                 database,
                 core: PathBuf::new(),
                 ds_core: std::env::var_os("HORIZON_DS_CORE").unwrap().into(),
+                three_ds_core: crate::platform::data_paths::three_ds_core_path(),
                 saves: directory.join("saves"),
                 album: directory.join("album"),
                 settings: crate::platform::data_paths::CoreSettingsPaths {
@@ -2214,6 +2284,16 @@ mod tests {
     #[test]
     #[ignore = "measurement; requires Wayland, PipeWire, HORIZON_DS_CORE, a real HORIZON_DS_ROM and fresh HORIZON_DS_TEST_DIR"]
     fn real_ds_player_fast_forward_audio_report() {
+        real_player_audio_report(false);
+    }
+
+    #[test]
+    #[ignore = "requires Wayland, PipeWire, Azahar, HORIZON_3DS_ROM and fresh HORIZON_3DS_TEST_DIR"]
+    fn real_3ds_player_audio_report() {
+        real_player_audio_report(true);
+    }
+
+    fn real_player_audio_report(three_ds: bool) {
         use crate::{
             persistence::SqliteLibraryRepository,
             services::rom_import::{self, RomSetup},
@@ -2222,13 +2302,30 @@ mod tests {
         let _ = tracing_subscriber::fmt()
             .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
             .try_init();
-        let directory = PathBuf::from(std::env::var_os("HORIZON_DS_TEST_DIR").unwrap());
+        let directory = PathBuf::from(
+            std::env::var_os(if three_ds {
+                "HORIZON_3DS_TEST_DIR"
+            } else {
+                "HORIZON_DS_TEST_DIR"
+            })
+            .unwrap(),
+        );
         std::fs::create_dir_all(&directory).unwrap();
-        std::fs::copy(
-            std::env::var_os("HORIZON_DS_ROM").unwrap(),
-            directory.join("Game.nds"),
-        )
-        .unwrap();
+        // Kept between runs in the same folder, so a second launch can reuse
+        // what the first verified.
+        let game = directory.join(if three_ds { "Game.3ds" } else { "Game.nds" });
+        if !game.exists() {
+            std::fs::copy(
+                std::env::var_os(if three_ds {
+                    "HORIZON_3DS_ROM"
+                } else {
+                    "HORIZON_DS_ROM"
+                })
+                .unwrap(),
+                &game,
+            )
+            .unwrap();
+        }
         let database = directory.join("library.sqlite3");
         let mut repository = SqliteLibraryRepository::open(&database).unwrap();
         let scan = rom_import::scan_folder(&directory, None).unwrap();
@@ -2236,7 +2333,11 @@ mod tests {
             .save_rom_import(&RomSetup::default(), &scan.candidates)
             .unwrap();
         let target = SourceLaunchTarget::EmbeddedCartridge {
-            system: crate::services::rom_import::RomSystem::NintendoDs,
+            system: if three_ds {
+                crate::services::rom_import::RomSystem::Nintendo3ds
+            } else {
+                crate::services::rom_import::RomSystem::NintendoDs
+            },
             sha256: scan.candidates[0]
                 .fingerprint
                 .as_ref()
@@ -2272,6 +2373,9 @@ mod tests {
                 database,
                 core: PathBuf::new(),
                 ds_core: std::env::var_os("HORIZON_DS_CORE").unwrap().into(),
+                three_ds_core: std::env::var_os("HORIZON_3DS_CORE")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(crate::platform::data_paths::three_ds_core_path),
                 saves: directory.join("saves"),
                 album: directory.join("album"),
                 settings: crate::platform::data_paths::CoreSettingsPaths {
@@ -2305,6 +2409,12 @@ mod tests {
         }
         let shots = Cell::new(0u32);
         let shot_directory = directory.clone();
+        let normal_only = std::env::var_os("HORIZON_DS_NORMAL_ONLY").is_some();
+        let run_seconds = std::env::var("HORIZON_DS_RUN_SECONDS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(29);
+        let three_ds_shot = Cell::new(0);
         let timer = Timer::default();
         // Eight seconds at normal speed, then 2× for twenty; the worker logs
         // audio gaps every five seconds.
@@ -2345,17 +2455,66 @@ mod tests {
             }
             assert!(!ui.get_player_failed(), "{}", ui.get_player_message());
             let elapsed = started.elapsed();
-            if elapsed > Duration::from_secs(8) && current_speed(&ui) == PlaybackSpeed::Normal {
+            if three_ds {
+                let stage = three_ds_shot.get();
+                let snapshot = |name: &str| {
+                    let pixels = ui.window().take_snapshot().unwrap();
+                    image::save_buffer(
+                        shot_directory.join(name),
+                        pixels.as_bytes(),
+                        pixels.width(),
+                        pixels.height(),
+                        image::ColorType::Rgba8,
+                    )
+                    .unwrap();
+                };
+                if stage == 0 && elapsed > Duration::from_secs(18) {
+                    assert!(ui.get_player_three_ds());
+                    assert!(ui.get_player_has_frame());
+                    snapshot("3ds-playing.png");
+                    assert!(live.keyboard("i", false, true));
+                    three_ds_shot.set(1);
+                } else if stage == 1 && elapsed > Duration::from_secs(19) {
+                    let running = live.running.borrow();
+                    let packed = running
+                        .as_ref()
+                        .unwrap()
+                        .ds_input
+                        .as_ref()
+                        .unwrap()
+                        .analog
+                        .load(Ordering::Acquire);
+                    assert_eq!((packed >> 16) as u16 as i16, -32767);
+                    drop(running);
+                    assert!(live.keyboard("i", false, false));
+                    live.keyboard(
+                        slint::SharedString::from(slint::platform::Key::Escape).as_str(),
+                        false,
+                        true,
+                    );
+                    three_ds_shot.set(2);
+                } else if stage == 2 && elapsed > Duration::from_secs(20) {
+                    assert!(ui.get_player_paused());
+                    snapshot("3ds-quick-menu.png");
+                    assert_eq!(pause_step(1, true, false, false, true), 4);
+                    live.choose(0);
+                    three_ds_shot.set(3);
+                }
+            }
+            if !normal_only
+                && elapsed > Duration::from_secs(8)
+                && current_speed(&ui) == PlaybackSpeed::Normal
+            {
                 eprintln!("DS fast-forward: 2x");
                 live.set_speed(&ui, PlaybackSpeed::Double);
             }
-            if elapsed > Duration::from_secs(29)
+            if elapsed > Duration::from_secs(run_seconds)
                 && live.is_open()
                 && let Some(game) = live.running.borrow().as_ref()
             {
                 let _ = game.commands.send(Command::Stop);
             }
-            if elapsed > Duration::from_secs(29) && !live.is_open() {
+            if elapsed > Duration::from_secs(run_seconds) && !live.is_open() {
                 slint::quit_event_loop().unwrap();
             }
         });
@@ -2364,20 +2523,23 @@ mod tests {
 
     #[test]
     fn pause_navigation_includes_states_and_does_not_wrap_on_repeat() {
-        assert_eq!(pause_step(1, true, false, false), REWIND);
-        assert_eq!(pause_step(REWIND, true, false, false), 2);
-        assert_eq!(pause_step(4, false, false, false), 3);
-        assert_eq!(pause_step(0, false, true, false), 0);
-        assert_eq!(pause_step(6, true, true, false), 6);
-        assert_eq!(pause_step(6, true, false, false), 0);
+        assert_eq!(pause_step(1, true, false, false, false), REWIND);
+        assert_eq!(pause_step(REWIND, true, false, false, false), 2);
+        assert_eq!(pause_step(4, false, false, false, false), 3);
+        assert_eq!(pause_step(0, false, true, false, false), 0);
+        assert_eq!(pause_step(6, true, true, false, false), 6);
+        assert_eq!(pause_step(6, true, false, false, false), 0);
         // DS: Screen layout, Swap screens and the lid sit between Playback
         // speed and Save state.
-        assert_eq!(pause_step(1, true, false, true), REWIND);
-        assert_eq!(pause_step(REWIND, true, false, true), SCREEN_LAYOUT);
-        assert_eq!(pause_step(SCREEN_LAYOUT, true, false, true), SWAP_SCREENS);
-        assert_eq!(pause_step(SWAP_SCREENS, true, false, true), LID);
-        assert_eq!(pause_step(LID, true, false, true), 2);
-        assert_eq!(pause_step(2, false, false, true), LID);
+        assert_eq!(pause_step(1, true, false, true, false), REWIND);
+        assert_eq!(pause_step(REWIND, true, false, true, false), SCREEN_LAYOUT);
+        assert_eq!(
+            pause_step(SCREEN_LAYOUT, true, false, true, false),
+            SWAP_SCREENS
+        );
+        assert_eq!(pause_step(SWAP_SCREENS, true, false, true, false), LID);
+        assert_eq!(pause_step(LID, true, false, true, false), 2);
+        assert_eq!(pause_step(2, false, false, true, false), LID);
     }
     #[test]
     fn rewind_positions_show_the_actual_available_time() {
@@ -2394,6 +2556,7 @@ mod tests {
                 database: Default::default(),
                 core: Default::default(),
                 ds_core: Default::default(),
+                three_ds_core: crate::platform::data_paths::three_ds_core_path(),
                 saves: Default::default(),
                 album: Default::default(),
                 settings: crate::platform::data_paths::CoreSettingsPaths {
@@ -2532,6 +2695,7 @@ mod runtime_tests {
                 database: database.clone(),
                 core: std::env::var_os("HORIZON_GBA_CORE").unwrap().into(),
                 ds_core: crate::platform::data_paths::ds_core_path(),
+                three_ds_core: crate::platform::data_paths::three_ds_core_path(),
                 saves: directory.join("saves"),
                 settings: core_paths,
                 album: directory.join("album"),
@@ -2680,6 +2844,7 @@ mod runtime_tests {
                 database: database.clone(),
                 core: std::env::var_os("HORIZON_GBA_CORE").unwrap().into(),
                 ds_core: crate::platform::data_paths::ds_core_path(),
+                three_ds_core: crate::platform::data_paths::three_ds_core_path(),
                 saves: directory.join("saves"),
                 settings: core_paths,
                 album: directory.join("album"),
@@ -2831,6 +2996,7 @@ mod runtime_tests {
                 database,
                 core: std::env::var_os("HORIZON_GBA_CORE").unwrap().into(),
                 ds_core: crate::platform::data_paths::ds_core_path(),
+                three_ds_core: crate::platform::data_paths::three_ds_core_path(),
                 saves: directory.join("saves"),
                 settings: core_paths,
                 album: directory.join("album"),
@@ -2976,6 +3142,7 @@ mod runtime_tests {
                 database: database.clone(),
                 core: std::env::var_os("HORIZON_GBA_CORE").unwrap().into(),
                 ds_core: crate::platform::data_paths::ds_core_path(),
+                three_ds_core: crate::platform::data_paths::three_ds_core_path(),
                 saves: saves.clone(),
                 settings: core_paths,
                 album: directory.join("album"),
@@ -3549,7 +3716,7 @@ mod runtime_tests {
                         b"exit-state obstruction",
                     )
                     .unwrap();
-                    for _ in 1..pause_actions(false).len() {
+                    for _ in 1..pause_actions(false, false).len() {
                         live.handle_action(UiActionEvent::fresh(UiAction::Down));
                     }
                     assert_eq!(ui.get_player_focus(), RETURN_TO_HORIZON);

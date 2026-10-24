@@ -1,7 +1,7 @@
 # Home
 
 Home's existing visual identity is protected. Its carousel, selected title,
-corner focus, selected scale, utility lift, idle motion, marquee and transitions
+full-outline focus, selected scale, utility lift and idle motion, marquee and transitions
 are references for other pages, not candidates for unrelated redesign.
 
 ## Composition
@@ -28,9 +28,16 @@ covers.
 
 ## Focus, title and media
 
-Crisp corner brackets without a glow track the animated selected card, not the
-grid slot. Utility focus has the established ring and coupled lift. Do not recolor authored utility
-SVGs or replace their scale-aware rendering. Only selected long titles marquee;
+A continuous rounded outline without a glow tracks the animated selected card,
+not the grid slot. Home games and the Library tile use a 4px stroke and 4px gap
+outside the selected shell. The outline keeps its selection fade, using the
+configured focus accent without idle pulsing or expansion.
+Selecting a game or the Library tile enlarges it to the shared 1.10 selected
+scale. The outline follows that animated shell. Launch keeps its short
+press/rebound, and handoff geometry uses the same selected and pressed sizes.
+
+Utility focus has the established ring and coupled lift. Do not recolor authored
+utility SVGs or replace their scale-aware rendering. Only selected long titles marquee;
 others clip with soft edges. Respect reduced motion and high contrast.
 
 Profile pictures use Horizon's local copy or the configured Steam avatar,

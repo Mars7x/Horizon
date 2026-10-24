@@ -58,6 +58,7 @@ export component PausePanel inherits Rectangle {
     // A DS game: offer Screen layout (action 8) and Swap screens (action 7)
     // after Playback speed.
     in property <bool> ds;
+    in property <bool> states-available: true;
     in property <bool> ds-lid-closed;
     in property <string> ds-layout;
     in property <bool> ds-layout-forward: true;
@@ -109,7 +110,7 @@ export component PausePanel inherits Rectangle {
             // DS has eleven actions: in a small window every row shrinks a
             // little so they all fit, rather than the menu scrolling.
             menu := VerticalLayout {
-                property <int> rows: root.ds ? 11 : 8;
+                property <int> rows: root.ds ? 11 : (root.states-available ? 8 : 5);
                 property <bool> tight: (root.content-height - Metrics.spacing-xs * (self.rows + 1) - Metrics.spacing-sm * 2) / self.rows < 36px;
                 property <length> gap: self.tight ? Metrics.spacing-xs / 2 : Metrics.spacing-xs;
                 property <length> fit: (root.content-height - self.gap * (self.rows + 1) - Metrics.spacing-sm * 2) / self.rows;
@@ -119,13 +120,13 @@ export component PausePanel inherits Rectangle {
                 spacing: self.gap;
                 PauseAction { row-height: menu.row-size; title: "Continue"; focused: root.view == 0 && root.focused == 0; enabled: root.open && root.view == 0; activated => { root.activate(0); } }
                 SettingsRow { height: menu.row-size; compact: true; title: "Fast-forward (2×)"; toggle: true; compact-toggle: true; checked: root.speed == 2; focused: root.view == 0 && root.focused == 1; enabled: root.open && root.view == 0; activated => { root.activate(1); } }
-                PauseAction { row-height: menu.row-size; title: "Rewind"; focused: root.view == 0 && root.focused == 10; enabled: root.open && root.view == 0; activated => { root.activate(10); } }
+                if root.states-available : PauseAction { row-height: menu.row-size; title: "Rewind"; focused: root.view == 0 && root.focused == 10; enabled: root.open && root.view == 0; activated => { root.activate(10); } }
                 if root.ds : PauseAction { row-height: menu.row-size; title: "Screen layout"; value: root.ds-layout; value-width: Metrics.spacing-xxl * 3.5; forward: root.ds-layout-forward; focused: root.view == 0 && root.focused == 8; enabled: root.open && root.view == 0; activated => { root.activate(8); } }
                 if root.ds : PauseAction { row-height: menu.row-size; title: "Swap screens"; focused: root.view == 0 && root.focused == 7; enabled: root.open && root.view == 0; activated => { root.activate(7); } }
                 if root.ds : PauseAction { row-height: menu.row-size; title: root.ds-lid-closed ? "Open lid" : "Close lid"; focused: root.view == 0 && root.focused == 9; enabled: root.open && root.view == 0; activated => { root.activate(9); } }
-                Rectangle { height: Metrics.spacing-sm; background: transparent; }
-                PauseAction { row-height: menu.row-size; title: "Save state"; focused: root.view == 0 && root.focused == 2; enabled: root.open && root.view == 0; activated => { root.activate(2); } }
-                PauseAction { row-height: menu.row-size; title: "Load state"; focused: root.view == 0 && root.focused == 3; enabled: root.open && root.view == 0; activated => { root.activate(3); } }
+                if root.states-available : Rectangle { height: Metrics.spacing-sm; background: transparent; }
+                if root.states-available : PauseAction { row-height: menu.row-size; title: "Save state"; focused: root.view == 0 && root.focused == 2; enabled: root.open && root.view == 0; activated => { root.activate(2); } }
+                if root.states-available : PauseAction { row-height: menu.row-size; title: "Load state"; focused: root.view == 0 && root.focused == 3; enabled: root.open && root.view == 0; activated => { root.activate(3); } }
                 Rectangle { height: Metrics.spacing-sm; background: transparent; }
                 PauseAction {
                     row-height: menu.row-size;

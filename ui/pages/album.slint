@@ -19,8 +19,8 @@ component TickGlyph inherits Path {
     stroke-line-cap: round;
 }
 
-// A capture in the grid. Same focus language as covers: Home's corner
-// brackets and a slight lift.
+// A capture in the grid. Same focus language as covers: a continuous
+// outline and a slight lift.
 component AlbumTile inherits Rectangle {
     in property <AlbumTileData> tile;
     in property <bool> selected;
@@ -88,11 +88,11 @@ component AlbumTile inherits Rectangle {
 
     }
     FocusFrame {
+        shell-radius: Metrics.radius-md;
         x: shell.x - Metrics.focus-offset;
         y: shell.y - Metrics.focus-offset;
         width: shell.width + Metrics.focus-offset * 2;
         height: shell.height + Metrics.focus-offset * 2;
-        active: root.selected;
         opacity: root.selected ? 1.0 : 0.0;
         animate opacity { duration: Motion.focus-duration; easing: ease-in-out; }
     }
@@ -173,7 +173,7 @@ export component AlbumPage inherits Rectangle {
     // The selected tile's lift. The viewer opens from and closes onto the
     // lifted size, so the frame and tile meet exactly.
     private property <float> tile-lift: 1.06;
-    // Room around the grid for the lifted tile and its brackets.
+    // Room around the grid for the lifted tile and its outline.
     private property <length> grid-pad: 20px;
     private property <length> gap: 22px;
     out property <int> grid-columns: root.width < 900px ? 3

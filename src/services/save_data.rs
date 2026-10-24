@@ -13,11 +13,10 @@ static NEXT: AtomicU64 = AtomicU64::new(0);
 
 pub fn folder(database: &Path, root: &Path, id: GameId) -> Result<GameFolder, String> {
     let details = super::game_management::details(database, id).map_err(|e| e.to_string())?;
-    let mut sources = details
-        .game
-        .sources()
-        .iter()
-        .filter(|source| matches!(source.source_id().as_str(), "gb" | "gbc" | "gba" | "nds"));
+    let mut sources = details.game.sources().iter().filter(|source| {
+        crate::services::rom_import::RomSystem::from_source_id(source.source_id().as_str())
+            .is_some()
+    });
     let source = sources
         .next()
         .ok_or("This game has no supported save folder.")?;
@@ -93,6 +92,13 @@ fn plan(folder: &GameFolder) -> io::Result<Vec<Entry>> {
         _ => {}
     }
     collect(&folder.save_path(), &mut entries, 0)?;
+    if folder.manifest.system == "3ds" {
+        collect(
+            &data_paths::three_ds_user_directory(&folder.directory),
+            &mut entries,
+            0,
+        )?;
+    }
     collect(
         &data_paths::state_root_directory(&folder.directory),
         &mut entries,
@@ -274,6 +280,24 @@ mod tests {
         }
     }
 
+    #[test]
+    fn three_ds_profile_is_backed_up_and_reset_without_affecting_other_games() {
+        let fixture = Fixture::new("3ds");
+        let folder = &fixture.folder;
+        let user = data_paths::three_ds_user_directory(&folder.directory);
+        fs::create_dir_all(user.join("sdmc/title/data")).unwrap();
+        fs::write(user.join("sdmc/title/data/progress"), b"3ds progress").unwrap();
+        let other = fixture.root.join("other-game");
+        fs::create_dir_all(&other).unwrap();
+        fs::write(other.join("save"), b"other progress").unwrap();
+        let copy = backup(folder).unwrap();
+        let saved = data_paths::three_ds_user_directory(&copy).join("sdmc/title/data/progress");
+        assert_eq!(fs::read(&saved).unwrap(), b"3ds progress");
+        delete(folder).unwrap();
+        assert!(!user.exists());
+        assert_eq!(fs::read(saved).unwrap(), b"3ds progress");
+        assert_eq!(fs::read(other.join("save")).unwrap(), b"other progress");
+    }
     #[test]
     fn backups_are_complete_unique_and_survive_progress_reset_for_both_cores() {
         for system in ["gba", "nds"] {

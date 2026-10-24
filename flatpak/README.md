@@ -42,3 +42,6 @@ need a real consumer, documentation and explicit policy review.
 
 License texts/notices are installed with the binary. Never package a developer's
 credentials, cached artwork or user media as source/build inputs.
+
+Nintendo 3DS uses the separately approved Azahar Vulkan core; see
+[3DS playback](../docs/THREE_DS_PLAYBACK.md) for import formats, controls, isolated saves and initial limits.

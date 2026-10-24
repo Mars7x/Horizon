@@ -55,6 +55,8 @@ pub type AudioBuffer = Arc<super::gba_audio::GameAudio>;
 #[derive(Default)]
 pub struct DsInput {
     pub pointer: AtomicU64,
+    /// Circle Pad X/Y, then C-stick X/Y, as packed signed libretro axes.
+    pub analog: AtomicU64,
     /// The screen arrangement (see `pack_ds_view`), for the filter thread.
     pub view: std::sync::atomic::AtomicU8,
 }
@@ -65,6 +67,9 @@ struct Callbacks {
     pixel_format: u32,
     preferences: MgbaPreferences,
     ds: bool,
+    three_ds: bool,
+    vulkan: Option<super::azahar_vulkan::Backend>,
+    error: Option<String>,
     extra: Arc<DsInput>,
     directory: Option<std::ffi::CString>,
     options: std::collections::BTreeMap<Vec<u8>, std::ffi::CString>,
@@ -86,6 +91,7 @@ thread_local! { static CALLBACKS: RefCell<Option<Callbacks>> = const { RefCell::
 /// A core drawing with OpenGL (libretro's hardware rendering).
 struct Hardware {
     gl: super::gl_context::GlContext,
+    version: (u32, u32),
     /// The core's own context callbacks, once it asked for the context.
     reset: Option<extern "C" fn()>,
     destroy: Option<extern "C" fn()>,
@@ -167,6 +173,7 @@ pub struct Core {
     unserialize: unsafe extern "C" fn(*const c_void, usize) -> bool,
     pub state_identity: String,
     ds: bool,
+    three_ds: bool,
     run: unsafe extern "C" fn(),
     reset: unsafe extern "C" fn(),
     unload: unsafe extern "C" fn(),
@@ -197,7 +204,44 @@ impl Core {
         buttons: Arc<AtomicU16>,
         extra: Option<(Arc<DsInput>, &Path, u8)>,
     ) -> Result<Self, String> {
-        let ds = extra.is_some();
+        Self::load_content(path, rom, preferences, audio, buttons, extra, None)
+    }
+    pub fn load_3ds(
+        path: &Path,
+        content: &Path,
+        directory: &Path,
+        audio: AudioBuffer,
+        buttons: Arc<AtomicU16>,
+        input: Arc<DsInput>,
+    ) -> Result<Self, String> {
+        Self::load_content(
+            path,
+            &[],
+            MgbaPreferences::default(),
+            audio,
+            buttons,
+            Some((input, directory, 1)),
+            Some(content),
+        )
+    }
+    fn load_content(
+        path: &Path,
+        rom: &[u8],
+        preferences: MgbaPreferences,
+        audio: AudioBuffer,
+        buttons: Arc<AtomicU16>,
+        extra: Option<(Arc<DsInput>, &Path, u8)>,
+        content: Option<&Path>,
+    ) -> Result<Self, String> {
+        let three_ds = content.is_some();
+        let ds = extra.is_some() && !three_ds;
+        let full_path = content
+            .map(|path| {
+                use std::os::unix::ffi::OsStrExt;
+                std::ffi::CString::new(path.as_os_str().as_bytes())
+                    .map_err(|_| "Invalid 3DS game path".to_owned())
+            })
+            .transpose()?;
         let (extra, directory, scale) = if let Some((input, path, scale)) = extra {
             use std::os::unix::ffi::OsStrExt;
             (
@@ -213,10 +257,12 @@ impl Core {
         };
         // Upscaling draws on the graphics card. Without a usable context the
         // game still plays, at native resolution.
-        let hardware = (scale > 1)
-            .then(|| match super::gl_context::GlContext::new(3, 2) {
+        let gl_version = (3, 2);
+        let hardware = (scale > 1 && !three_ds)
+            .then(|| match super::gl_context::GlContext::new(gl_version.0, gl_version.1) {
                 Ok(gl) => Some(Hardware {
                     gl,
+                    version: (gl_version.0 as u32, gl_version.1 as u32),
                     reset: None,
                     destroy: None,
                     stencil: false,
@@ -321,6 +367,7 @@ impl Core {
                 memory: symbol(&library, b"retro_get_memory_data\0")?,
                 memory_size: symbol(&library, b"retro_get_memory_size\0")?,
                 ds,
+                three_ds,
                 _library: library,
                 av: AvInfo::default(),
                 frames: Arc::new(AtomicU64::new(0)),
@@ -332,6 +379,9 @@ impl Core {
                     pixel_format: 0,
                     preferences,
                     ds,
+                    three_ds,
+                    vulkan: three_ds.then(super::azahar_vulkan::Backend::default),
+                    error: None,
                     extra,
                     directory,
                     options: Default::default(),
@@ -352,7 +402,9 @@ impl Core {
             set_input(input_state);
             init();
             let info = GameInfo {
-                path: if ds {
+                path: if let Some(path) = &full_path {
+                    path.as_ptr()
+                } else if ds {
                     c"game.nds".as_ptr()
                 } else {
                     ptr::null()
@@ -361,27 +413,50 @@ impl Core {
                 size: rom.len(),
                 meta: ptr::null(),
             };
+            let loading = std::time::Instant::now();
             if !load(&info) {
                 return Err("The core could not load this game".into());
             }
+            let loaded = loading.elapsed();
             get_av(&mut core.av);
             // The core drew nothing yet: give it its framebuffer and context.
-            let reset = CALLBACKS.with(|state| {
-                let mut state = state.borrow_mut();
-                let hardware = state.as_mut()?.hardware.as_mut()?;
-                let size = (
-                    core.av.max_width.clamp(256, 4096),
-                    core.av.max_height.clamp(384, 4096),
-                );
-                match hardware.gl.framebuffer(size, hardware.stencil) {
-                    Ok(name) => HW_FRAMEBUFFER.with(|cell| cell.set(name as usize)),
-                    Err(error) => tracing::warn!(%error, "DS upscaling framebuffer"),
-                }
-                hardware.reset
-            });
+            let reset = if three_ds {
+                CALLBACKS.with(|state| -> Result<_, String> {
+                    let mut state = state.borrow_mut();
+                    let backend = state
+                        .as_mut()
+                        .and_then(|s| s.vulkan.as_mut())
+                        .ok_or("3DS Vulkan backend is unavailable")?;
+                    let negotiation = backend
+                        .negotiation
+                        .ok_or("Azahar did not negotiate Vulkan")?;
+                    backend.host = Some(super::azahar_vulkan::Host::new(negotiation)?);
+                    Ok(backend.reset)
+                })?
+            } else {
+                CALLBACKS.with(|state| {
+                    let mut state = state.borrow_mut();
+                    let hardware = state.as_mut()?.hardware.as_mut()?;
+                    let size = (
+                        core.av.max_width.clamp(256, 4096),
+                        core.av.max_height.clamp(384, 4096),
+                    );
+                    match hardware.gl.framebuffer(size, hardware.stencil) {
+                        Ok(name) => HW_FRAMEBUFFER.with(|cell| cell.set(name as usize)),
+                        Err(error) => tracing::warn!(%error, "DS upscaling framebuffer"),
+                    }
+                    hardware.reset
+                })
+            };
+            let resetting = std::time::Instant::now();
             if let Some(reset) = reset {
                 reset();
             }
+            tracing::debug!(
+                load_ms = loaded.as_millis(),
+                context_ms = resetting.elapsed().as_millis(),
+                "core started its game"
+            );
             if !core.av.fps.is_finite()
                 || !(30.0..=120.0).contains(&core.av.fps)
                 || !core.av.sample_rate.is_finite()
@@ -397,7 +472,15 @@ impl Core {
             Ok(core)
         }
     }
+    pub fn take_error(&self) -> Option<String> {
+        CALLBACKS.with(|state| state.borrow_mut().as_mut()?.error.take())
+    }
     pub fn supports_states(&self) -> bool {
+        // Azahar's size query creates a complete state. Never poll it from
+        // the gameplay loop; directory saves are the initial 3DS boundary.
+        if self.three_ds {
+            return false;
+        }
         // SAFETY: retained core on its worker.
         let size = unsafe { (self.serialize_size)() };
         size > 0 && size <= self.max_state_size()
@@ -413,6 +496,9 @@ impl Core {
         if self.ds { 8 * 1024 * 1024 } else { MAX_SAVE }
     }
     pub fn serialize_state(&self) -> Result<Vec<u8>, String> {
+        if self.three_ds {
+            return Err("3DS save states and rewind are not available yet".into());
+        }
         // SAFETY: libretro v1 symbols from the retained core, on its worker.
         let size = unsafe { (self.serialize_size)() };
         if size == 0 || size > self.max_state_size() {
@@ -462,6 +548,33 @@ impl Core {
             })
             .ok_or_else(|| "No game frame is available yet".into())
     }
+    /// A bounded timeline picture, without transferring an upscaled DS frame
+    /// or disturbing the pending full-resolution screenshot/state capture.
+    pub fn capture_rewind_preview(&self) -> Result<Frame, String> {
+        let preview = CALLBACKS.with(|state| {
+            let mut state = state.borrow_mut();
+            let state = state.as_mut()?;
+            let raw_size = state.raw_frame.as_ref().map(|raw| (raw.width, raw.height));
+            let hardware = state.hardware.as_mut()?;
+            let source = hardware.pending.or(raw_size)?;
+            if hardware.viewport_failed || source.0 <= 256 || source.1 <= 384 {
+                return None;
+            }
+            let mut rgba = Vec::new();
+            match hardware.gl.read_viewport(source, [(256, 192); 2], &mut rgba) {
+                Ok(()) => Some(Frame { width: 256, height: 384, rgba, smooth: false }),
+                Err(error) => {
+                    hardware.viewport_failed = true;
+                    tracing::warn!(%error, "DS rewind preview readback unavailable; retaining full-resolution capture");
+                    None
+                }
+            }
+        });
+        if let Some(preview) = preview {
+            return Ok(preview);
+        }
+        self.capture_frame()
+    }
     pub fn run_frame(&mut self) {
         unsafe { (self.run)() }
         CALLBACKS.with(|state| {
@@ -497,7 +610,7 @@ impl Core {
                 if !stage.wanted() {
                     return false;
                 }
-                if state.preferences.video_filter == crate::domain::core_settings::VideoFilter::None {
+                if state.ds && state.preferences.video_filter == crate::domain::core_settings::VideoFilter::None {
                     let size = display.load(Ordering::Acquire);
                     let (layout, swapped) = unpack_ds_view(state.extra.view.load(Ordering::Acquire));
                     let targets = layout.screens(swapped, ((size >> 32) as u32 as f64, size as u32 as f64))
@@ -537,6 +650,10 @@ impl Core {
     /// Battery memory, then a Game Boy cartridge clock when the game has
     /// one: the same .sav layout standalone mGBA writes.
     fn save_regions(&self) -> Result<[(*mut u8, usize); 2], String> {
+        // Azahar owns its SDMC/NAND files, not libretro battery-memory slots.
+        if self.three_ds {
+            return Ok([(ptr::null_mut(), 0); 2]);
+        }
         // SAFETY: libretro v1 symbols from the retained core, on its worker.
         let regions = [SAVE_RAM, RTC]
             .map(|id| unsafe { ((self.memory)(id).cast::<u8>(), (self.memory_size)(id)) });
@@ -584,10 +701,13 @@ impl Drop for Core {
     fn drop(&mut self) {
         // A GPU-drawing core lets go of its context first, while it's current.
         let destroy = CALLBACKS.with(|state| {
-            state
-                .borrow()
-                .as_ref()
-                .and_then(|state| state.hardware.as_ref()?.destroy)
+            state.borrow().as_ref().and_then(|state| {
+                state
+                    .vulkan
+                    .as_ref()
+                    .and_then(|v| v.destroy)
+                    .or_else(|| state.hardware.as_ref().and_then(|h| h.destroy))
+            })
         });
         if let Some(destroy) = destroy {
             destroy();
@@ -666,6 +786,18 @@ extern "C" fn core_log(level: u32, message: *const c_char) {
     ];
     if level >= 2 && EXPECTED.iter().any(|expected| message.contains(expected)) {
         tracing::debug!(target: "horizon::core", "{message}");
+        return;
+    }
+    // Azahar tags each line with its own level ("… Service.FS <Error> …").
+    // Its warnings and errors are mostly routine for an emulator (stubbed
+    // services, files a fresh console lacks): debug, except its renderer's
+    // warnings and anything Critical, which stay visible.
+    if level >= 2 && (message.contains(" <Warning> ") || message.contains(" <Error> ")) {
+        if message.contains("Render.Vulkan") && message.contains(" <Error> ") {
+            tracing::warn!(target: "horizon::core", "{message}");
+        } else {
+            tracing::debug!(target: "horizon::core", "{message}");
+        }
         return;
     }
     match level {
@@ -768,6 +900,15 @@ extern "C" fn environment(command: u32, data: *mut c_void) -> bool {
                     let state = state.borrow();
                     let preferences = state.as_ref()?.preferences;
                     let key = CStr::from_ptr(variable.key).to_bytes();
+                    if state.as_ref()?.three_ds {
+                        return match key {
+                            b"citra_graphics_api" => Some(c"Vulkan"),
+                            b"citra_use_libretro_save_path" => Some(c"LibRetro Default"),
+                            b"citra_layout_option" => Some(c"default"),
+                            b"citra_resolution_factor" => Some(c"1"),
+                            _ => None,
+                        };
+                    }
                     if state.as_ref()?.ds {
                         #[cfg(test)]
                         if let Some(value) = test_ds_option(key) {
@@ -875,11 +1016,19 @@ extern "C" fn environment(command: u32, data: *mut c_void) -> bool {
             let Ok(mut state) = state.try_borrow_mut() else {
                 return false;
             };
+            // SAFETY: the core passes its retro_hw_render_callback.
+            let request = unsafe { &mut *data.cast::<HwRender>() };
+            if let Some(backend) = state.as_mut().and_then(|s| s.vulkan.as_mut()) {
+                if request.context_type != 6 {
+                    return false;
+                }
+                backend.reset = request.context_reset;
+                backend.destroy = request.context_destroy;
+                return true;
+            }
             let Some(hardware) = state.as_mut().and_then(|s| s.hardware.as_mut()) else {
                 return false;
             };
-            // SAFETY: the core passes its retro_hw_render_callback.
-            let request = unsafe { &mut *data.cast::<HwRender>() };
             match request.context_type {
                 // NONE: the core gave up on hardware rendering.
                 0 => {
@@ -889,7 +1038,7 @@ extern "C" fn environment(command: u32, data: *mut c_void) -> bool {
                 }
                 // OPENGL or OPENGL_CORE up to the context Horizon made (3.2).
                 1 | 3
-                    if (request.version_major, request.version_minor) <= (3, 2)
+                    if (request.version_major, request.version_minor) <= hardware.version
                         && request.bottom_left_origin =>
                 {
                     request.get_current_framebuffer = Some(hw_framebuffer);
@@ -901,6 +1050,48 @@ extern "C" fn environment(command: u32, data: *mut c_void) -> bool {
                 }
                 _ => false,
             }
+        }),
+        // Experimental libretro Vulkan interfaces used by pinned Azahar.
+        65577 => CALLBACKS.with(|state| {
+            let state = state.borrow();
+            let Some(host) = state
+                .as_ref()
+                .and_then(|s| s.vulkan.as_ref()?.host.as_ref())
+            else {
+                return false;
+            };
+            // SAFETY: GET_HW_RENDER_INTERFACE supplies an interface pointer slot.
+            unsafe {
+                *data.cast::<*const c_void>() = host.interface();
+            }
+            true
+        }),
+        65579 => CALLBACKS.with(|state| {
+            let mut state = state.borrow_mut();
+            let Some(backend) = state.as_mut().and_then(|s| s.vulkan.as_mut()) else {
+                return false;
+            };
+            // SAFETY: pinned Azahar supplies the complete v2 negotiation struct.
+            let header = unsafe { std::slice::from_raw_parts(data.cast::<u32>(), 2) };
+            if header != [0, 2] {
+                return false;
+            }
+            let negotiation = unsafe { *data.cast::<super::azahar_vulkan::Negotiation>() };
+            if !negotiation.supported() {
+                return false;
+            }
+            backend.negotiation = Some(negotiation);
+            true
+        }),
+        56 => CALLBACKS.with(|state| {
+            if !state.borrow().as_ref().is_some_and(|s| s.three_ds) {
+                return false;
+            }
+            // SAFETY: GET_PREFERRED_HW_RENDER supplies an enum slot.
+            unsafe {
+                *data.cast::<u32>() = 6;
+            }
+            true
         }),
         27 => {
             // GET_LOG_INTERFACE: struct retro_log_callback { retro_log_printf_t log; }.
@@ -930,7 +1121,7 @@ extern "C" fn input_state(port: u32, device: u32, index: u32, id: u32) -> i16 {
     if port == 0 && device == 6 && index == 0 && id < 3 {
         return CALLBACKS.with(|state| {
             let state = state.borrow();
-            let Some(s) = state.as_ref().filter(|s| s.ds) else {
+            let Some(s) = state.as_ref().filter(|s| s.ds || s.three_ds) else {
                 return 0;
             };
             let packed = s.extra.pointer.load(Ordering::Acquire);
@@ -939,6 +1130,18 @@ extern "C" fn input_state(port: u32, device: u32, index: u32, id: u32) -> i16 {
             } else {
                 (packed >> (id * 16)) as u16 as i16
             }
+        });
+    }
+    if port == 0 && device == 5 && index < 2 && id < 2 {
+        return CALLBACKS.with(|state| {
+            state
+                .borrow()
+                .as_ref()
+                .filter(|s| s.three_ds)
+                .map_or(0, |s| {
+                    (s.extra.analog.load(Ordering::Acquire) >> ((index * 2 + id) * 16)) as u16
+                        as i16
+                })
         });
     }
     if port != 0 || device != 1 || index != 0 || id >= 16 {
@@ -962,11 +1165,27 @@ extern "C" fn video(data: *const c_void, width: u32, height: u32, pitch: usize) 
         CALLBACKS.with(|state| {
             if let Ok(mut state) = state.try_borrow_mut()
                 && let Some(state) = state.as_mut()
-                && let Some(hardware) = state.hardware.as_mut()
                 && (1..=4096).contains(&width)
                 && (1..=4096).contains(&height)
             {
-                hardware.pending = Some((width, height));
+                if let Some(host) = state.vulkan.as_mut().and_then(|v| v.host.as_mut()) {
+                    let raw = state.raw_frame.get_or_insert_with(|| Frame {
+                        width,
+                        height,
+                        rgba: Vec::new(),
+                        smooth: false,
+                    });
+                    if let Err(error) = host.read_frame(width, height, &mut raw.rgba) {
+                        state.error = Some(error);
+                        return;
+                    }
+                    raw.width = width;
+                    raw.height = height;
+                } else if let Some(hardware) = state.hardware.as_mut() {
+                    hardware.pending = Some((width, height));
+                } else {
+                    return;
+                }
                 state.fresh = true;
                 state.frames.fetch_add(1, Ordering::Release);
             }
@@ -1240,6 +1459,58 @@ pub(crate) fn test_ds_rom() -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "requires Azahar, a decrypted HORIZON_3DS_ROM and fresh HORIZON_3DS_TEST_DIR"]
+    fn real_3ds_core_boots_without_polling_save_states() {
+        use super::*;
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .try_init();
+        let directory = std::path::PathBuf::from(std::env::var_os("HORIZON_3DS_TEST_DIR").unwrap());
+        std::fs::create_dir_all(&directory).unwrap();
+        let audio = Arc::new(super::super::gba_audio::GameAudio::default());
+        let mut core = Core::load_3ds(
+            &std::path::PathBuf::from(std::env::var_os("HORIZON_3DS_CORE").unwrap()),
+            &std::path::PathBuf::from(std::env::var_os("HORIZON_3DS_ROM").unwrap()),
+            &directory,
+            Arc::clone(&audio),
+            Arc::new(AtomicU16::new(0)),
+            Arc::new(DsInput::default()),
+        )
+        .unwrap();
+        assert!(!core.supports_states());
+        for _ in 0..600 {
+            let started = std::time::Instant::now();
+            core.run_frame();
+            assert_eq!(core.take_error(), None);
+            audio.clear();
+            std::thread::sleep(
+                std::time::Duration::from_secs_f64(1.0 / core.av.fps)
+                    .saturating_sub(started.elapsed()),
+            );
+        }
+        let frame = core.capture_frame().unwrap();
+        assert!(frame.width >= 400 && frame.height >= 240);
+        assert!(core.frames.load(Ordering::Acquire) >= 600);
+        image::save_buffer(
+            directory.join("boot.png"),
+            &frame.rgba,
+            frame.width,
+            frame.height,
+            image::ColorType::Rgba8,
+        )
+        .unwrap();
+        assert!(
+            frame
+                .rgba
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .any(|pixel| pixel[..3].iter().any(|&channel| channel > 16)),
+            "game must produce a visible picture"
+        );
+        assert!(!core.supports_states());
+    }
     use super::*;
 
     #[test]
@@ -1319,10 +1590,24 @@ mod tests {
             );
             assert_eq!(hardware.pending, Some((2048, 3072)));
         });
+        let preview = core.capture_rewind_preview().unwrap();
+        assert_eq!((preview.width, preview.height), (256, 384));
+        assert!(preview.rgba[0] >= 248 && preview.rgba[1] == 0 && preview.rgba[2] == 0);
+        assert!(preview.rgba[256 * 192 * 4 + 2] >= 248);
+        CALLBACKS.with(|state| {
+            let state = state.borrow();
+            let state = state.as_ref().unwrap();
+            assert!(
+                state.raw_frame.is_none(),
+                "preview must not force a full readback"
+            );
+            assert_eq!(state.hardware.as_ref().unwrap().pending, Some((2048, 3072)));
+        });
         let frame = core.capture_frame().unwrap();
         assert_eq!((frame.width, frame.height), (2048, 3072));
         assert!(frame.rgba[0] >= 248 && frame.rgba[1] == 0 && frame.rgba[2] == 0);
         assert!(frame.rgba[2048 * 1536 * 4 + 2] >= 248);
+        assert_eq!(core.capture_rewind_preview().unwrap().rgba, preview.rgba);
         let saved = core.serialize_state().unwrap();
         core.run_frame();
         core.restore_state(&saved).unwrap();
@@ -1330,6 +1615,23 @@ mod tests {
         stage.want();
         assert!(core.hand_off(&stage, &display));
         assert_eq!(core.capture_frame().unwrap().width, 2048);
+        // The upstream core can fall back to software while retaining its GL
+        // context. A native software frame must never read that old GPU image.
+        CALLBACKS.with(|state| {
+            let mut state = state.borrow_mut();
+            let state = state.as_mut().unwrap();
+            state.hardware.as_mut().unwrap().pending = None;
+            state.raw_frame = Some(Frame {
+                width: 256,
+                height: 384,
+                rgba: [0, 255, 0, 255].repeat(256 * 384),
+                smooth: false,
+            });
+        });
+        assert_eq!(
+            &core.capture_rewind_preview().unwrap().rgba[..4],
+            &[0, 255, 0, 255]
+        );
         drop(core);
         std::fs::remove_dir_all(directory).unwrap();
     }

@@ -11,12 +11,13 @@ not onboarding, a roadmap or authorization to revive a feature.
 - Horizon is a Rust/Slint desktop Flatpak moving toward embedded emulator cores.
   Game Boy, Game Boy Color and GBA use an automatic folder importer and the
   approved bundled mGBA libretro core on an in-process worker. Nintendo DS uses
-  the approved melonDS DS core on the same worker (ADR 0216). No BIOS manager,
+  the approved melonDS DS core on the same worker (ADR 0216). Nintendo 3DS uses
+  the approved Azahar Vulkan core (ADR 0231). No BIOS manager, CIA installer,
   DSi or further cores are implemented.
   Do not expand core/process APIs, resume compositor/session work or install host
   packages without explicit direction.
 - Preserve Home's identity, carousel, focus geometry, selected scaling, motion
-  and marquee. Utilities remain **Album, Activity, Achievements, Settings**.
+  and marquee. Utilities remain **Album, Activity, Settings**.
   Library is full-shell; Profile opens from Home's avatar. Routes/history/focus
   belong in Rust, never Slint. Follow [navigation](docs/NAVIGATION.md).
 - Steam is profile pictures and read-only friends only through the shared account

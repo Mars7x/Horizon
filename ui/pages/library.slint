@@ -253,7 +253,7 @@ export component LibraryPage inherits Rectangle {
             }
 
             // Outgoing grid: one frozen overscan window at the previous scroll
-            // offset. No pointer targets, no sliding brackets, and no model updates
+            // offset. No pointer targets, no sliding outlines, and no model updates
             // after the transition begins. It disappears automatically as the
             // timeline reaches its end (or immediately for Reduced Motion).
             if root.outgoing-opacity > 0.0 : Rectangle {
@@ -304,11 +304,11 @@ export component LibraryPage inherits Rectangle {
                     }
                     // The outgoing focus outline follows the outgoing shell too.
                     FocusFrame {
+                        shell-radius: root.card-size * (20.0 / 148.0);
                         x: old-shell.x - Metrics.focus-offset;
                         y: old-shell.y - Metrics.focus-offset;
                         width: old-shell.width + Metrics.focus-offset * 2;
                         height: old-shell.height + Metrics.focus-offset * 2;
-                        active: root.focus-visible && parent.was-selected;
                         opacity: parent.was-selected ? 1.0 : 0.0;
                     }
                 }
@@ -391,18 +391,16 @@ export component LibraryPage inherits Rectangle {
                             }
                         }
                     }
-                    // As on Home, each cover owns its focus brackets; newly
-                    // selected brackets fade in in-place rather than sliding between
+                    // As on Home, each cover owns its outline; newly
+                    // selected outlines fade in-place rather than sliding between
                     // arbitrary grid positions or diagonally across row boundaries.
                     FocusFrame {
-                        // Home's frame is attached to the scaling tile, not its
-                        // fixed navigation slot. Keep the same 9px token gap and
-                        // original 1x bracket paths/stroke through both motions.
+                        shell-radius: root.card-size * (20.0 / 148.0);
+                        // Follow the scaling shell using the shared outline gap.
                         x: shell.x - Metrics.focus-offset;
                         y: shell.y - Metrics.focus-offset;
                         width: shell.width + Metrics.focus-offset * 2;
                         height: shell.height + Metrics.focus-offset * 2;
-                        active: parent.selected;
                         opacity: parent.selected ? 1.0 : 0.0;
                         animate opacity { duration: Motion.focus-duration; easing: ease-in-out; }
                     }

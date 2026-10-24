@@ -3,14 +3,16 @@
 Horizon keeps behavior in Rust and rendering in Slint. The first approved host is
 an in-process mGBA libretro worker, scoped to mGBA's systems (Game Boy, Game Boy
 Color and GBA). Nintendo DS uses the separately approved melonDS DS core on
-the same worker; this remains a narrow two-core host rather than a plugin framework.
+the same worker; Azahar adds the separately approved 3DS Vulkan path. Hosting remains scoped to
+these bundled cores rather than a plugin framework.
 [ADR 0216](adr/0216-nintendo-ds-playback.md) records the DS hosting review;
-[ADR 0218](adr/0218-ds-gpu-upscaling-and-dev-speed.md) adds the only GPU path:
+[ADR 0218](adr/0218-ds-gpu-upscaling-and-dev-speed.md) adds the DS GPU path:
 melonDS's OpenGL renderer drawing into a hidden context owned by the worker
 ([gl_context](../src/platform/gl_context.rs)), read back into the same software
 picture pipeline. With None filtering, oversized DS pictures are sampled to the
-physical viewport on the GPU before transfer; captures/rewind still read the
-full core image. See [ADR 0229](adr/0229-ds-viewport-readback.md).
+physical viewport on the GPU before transfer; rewind reads native-sized GPU
+previews, while screenshots and saved states retain full-resolution captures.
+See [ADR 0229](adr/0229-ds-viewport-readback.md).
 [ADR 0198](adr/0198-first-gba-playback.md) and
 [ADR 0209](adr/0209-game-boy-and-game-boy-color.md) record the decision.
 
@@ -42,6 +44,12 @@ Blocking network/image/media work runs off the UI thread through
 [presentation wakeups](../src/presentation/wake.rs). Account changes must prevent
 stale responses from repopulating another account's UI. UI/controller objects
 remain on the appropriate main thread; SDL event-pump ownership stays explicit.
+
+Azahar negotiates its Vulkan device through the pinned libretro interface. The
+worker owns the instance, device and bounded staging buffer; it fences each
+native-size image copy before presenting the existing RGBA boundary. There is
+no surface, swapchain or OpenGL fallback. See [3DS playback](THREE_DS_PLAYBACK.md)
+and [ADR 0231](adr/0231-azahar-vulkan-playback.md).
 
 ## Retained integrations
 

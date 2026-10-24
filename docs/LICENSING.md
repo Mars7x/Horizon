@@ -54,3 +54,6 @@ Its upstream combined notices are retained in
 [melonDS DS licenses](../LICENSES/melonDS-DS-third-party.txt) and installed with
 the core. Distribute corresponding source for the exact pins with releases.
 The DS hash catalog follows the existing CC-BY-SA-4.0 metadata attribution.
+
+Nintendo 3DS uses the separately approved Azahar Vulkan core; see
+[3DS playback](THREE_DS_PLAYBACK.md) for import formats, controls, isolated saves and initial limits.

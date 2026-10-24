@@ -44,6 +44,9 @@
 | [0229](0229-ds-viewport-readback.md) | GPU viewport sampling before DS presentation readback |
 | [0230](0230-manual-save-management.md) | Confirmed progress reset and manual save snapshots |
 
+| [0231](0231-azahar-vulkan-playback.md) | Initial Azahar playback through Vulkan |
+| [0232](0232-3ds-verified-file-identity.md) | Verified 3DS file identity: skip re-hashing an unchanged cartridge |
+
 Earlier decisions and their supporting phase notes are in
 [history](../history/INDEX.md). Their numbered identifiers remain reserved.
 Read the relevant current feature guide and actual source before using historical

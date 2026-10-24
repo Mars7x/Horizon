@@ -88,12 +88,10 @@ export global Metrics {
     out property <length> utility-row-width:
         utility-cell-size * 3 + utility-spacing * 2;
 
-    // One reference-style focus layer. The frame sits deliberately outside
-    // the game shell with a visible air gap while keeping the same radius
-    // language. `focus-offset` is the world-space separation from the shell.
-    out property <length> focus-stroke: 10px;
-    out property <length> focus-arm: 58px;
-    out property <length> focus-offset: 9px;
+    // Shared continuous media outline, with a clear gap outside the shell.
+    out property <length> focus-stroke: 4px;
+    out property <length> focus-gap: 4px;
+    out property <length> focus-offset: focus-gap + focus-stroke;
 
     // Home shell geometry. Phase 3.14.13 brings the main scene closer to
     // the reference proportions: title nearer the top chrome, a larger shelf,
@@ -176,7 +174,7 @@ export global Motion {
     out property <duration> status-exit-duration: reduced-motion ? 0ms : 155ms;
     out property <length> status-slide-distance: reduced-motion ? 0px : 7px;
 
-    // Preserve the existing Home game bracket cadence and its accent-derived
+    // Shared menu-focus cadence with an accent-derived
     // colour breathing; menu strokes share that same single clock/brush.
     // Unlike alpha-only changes, colour mixing stays visible on opaque surfaces.
     out property <duration> focus-idle-cycle: 3200ms;
@@ -186,7 +184,6 @@ export global Motion {
         : Theme.focus.mix(Theme.focus-highlight,
             1.0 - focus-idle-highlight-strength
                 * (0.5 - 0.5 * cos(animation-tick() / focus-idle-cycle * 360deg)));
-    out property <length> game-focus-idle-expansion: 2.2px;
     out property <duration> player-press-hold: reduced-motion ? 0ms : 125ms;
     out property <float> player-card-blend-window: 0.65;
     out property <duration> player-zoom-duration: reduced-motion ? 0ms : 230ms;
@@ -226,7 +223,6 @@ export global Motion {
     out property <duration> pause-open-duration: reduced-motion ? 0ms : 120ms;
     out property <length> dialog-rise: reduced-motion ? 0px : 12px;
     // How long a focus frame takes to start or stop its idle breathing.
-    out property <duration> focus-idle-fade: reduced-motion ? 0ms : 220ms;
 
     // Loops. These run only while something is visibly busy, and stop with
     // Reduced Motion (the caret then stays solid, the spinner still).

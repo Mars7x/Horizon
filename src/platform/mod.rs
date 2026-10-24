@@ -1,3 +1,4 @@
+pub(crate) mod azahar_vulkan;
 pub mod clock;
 pub mod data_paths;
 pub mod file_chooser;

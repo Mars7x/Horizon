@@ -88,3 +88,6 @@ still following the shared A/B and X/Y swap. Its touchscreen accepts
 mouse press/drag only; controllers have no touch cursor. During a DS game L3
 swaps the screens; in every game Guide opens the quick menu and stick clicks
 never do. See [playback](GBA_PLAYBACK.md).
+
+Nintendo 3DS uses the separately approved Azahar Vulkan core; see
+[3DS playback](THREE_DS_PLAYBACK.md) for import formats, controls, isolated saves and initial limits.

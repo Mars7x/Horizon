@@ -431,6 +431,7 @@ export component AppWindow inherits Window {
     callback player-rewind-answer(bool);
     callback player-touch(float, float, bool);
     in property <bool> player-ds;
+    in property <bool> player-three-ds;
     in property <bool> player-ds-lid-closed;
     in property <image> player-loading-frame;
     in property <bool> player-loading-picture;
@@ -1145,7 +1146,7 @@ export component AppWindow inherits Window {
                 rewind-answer(resume) => { root.player-rewind-answer(resume); }
                 touch(x, y, pressed) => { root.player-touch(x, y, pressed); }
                 loading-frame: root.player-loading-frame; loading-picture: root.player-loading-picture; saving: root.player-saving; notice: root.player-notice; notice-shown: root.player-notice-shown; exiting: root.player-exiting;
-                ds: root.player-ds; ds-lid-closed: root.player-ds-lid-closed; ds-layout: root.player-ds-layout; ds-layout-forward: root.player-ds-layout-forward; ds-top: root.player-ds-top; ds-bottom: root.player-ds-bottom;
+                ds: root.player-ds; three-ds: root.player-three-ds; ds-lid-closed: root.player-ds-lid-closed; ds-layout: root.player-ds-layout; ds-layout-forward: root.player-ds-layout-forward; ds-top: root.player-ds-top; ds-bottom: root.player-ds-bottom;
                 ds-top-clip-width: root.player-ds-top-clip-width; ds-top-clip-height: root.player-ds-top-clip-height;
                 ds-bottom-clip-width: root.player-ds-bottom-clip-width; ds-bottom-clip-height: root.player-ds-bottom-clip-height;
                 restart-confirm: root.player-restart-confirm; restart-focus: root.player-restart-focus;

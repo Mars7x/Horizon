@@ -10,20 +10,23 @@ per-screen clips are unchanged; view/layout/physical-size snapshots determine
 the next presentation. GL nearest sampling preserves sharp pixels; exact
 texel-boundary ties may resolve to either adjacent source texel per driver.
 
-Viewport presentation no longer warms full-size capture allocations during play.
-Before audio starts, warm one serialization/capture/preview operation and discard
+Before audio starts, warm full capture storage and one serialization/preview operation; discard
 its boot picture/history point. This keeps the first rewind snapshot from
 allocating a large cold buffer during audible gameplay and retains the existing
 audio queue/latency policy.
 
-Presentation images never replace the full core image. Screenshots, save-state
-previews and rewind retain their full-resolution capture boundary. Other filters,
+Presentation images never replace the full core image. Screenshots and save-state
+previews retain their full-resolution capture boundary. Rewind reads a separate
+native-sized preview from the same GPU frame, avoiding a full-resolution transfer
+and CPU downsampling every half-second. Retain a target large enough for both
+display and rewind reads so alternating sizes does not reallocate GPU objects.
+Rewind remains enabled and serialization stays on the emulation worker. Other filters,
 native DS, mGBA, unknown viewport sizes and enlarging viewports keep their current
 pipeline. Failed presentation framebuffer allocation logs a warning once and
 falls back to full-size presentation for that session.
 
 Restore the core’s GL read/draw framebuffer, texture, pack alignment and scissor
-state after presentation, including failure paths. Free presentation textures
+state after readback, including full captures and failure paths. Free presentation textures
 and framebuffer on the same worker before destroying the context. Keep only a
 bounded latest frame between worker, filter and UI. This is a narrow DS host
 optimization, not a new renderer framework, core or process API.

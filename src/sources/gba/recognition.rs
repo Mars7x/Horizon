@@ -7,7 +7,7 @@ use ring::digest::{Context, SHA1_FOR_LEGACY_USE_ONLY, SHA256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File},
-    io::{BufReader, Read},
+    io::{BufReader, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
 };
 use thiserror::Error;
@@ -28,6 +28,8 @@ pub enum RomImportError {
     ScanLimit,
     #[error("A selected ROM changed or became unavailable; choose the folder again")]
     Changed,
+    #[error("This 3DS game is encrypted; Azahar requires a decrypted cartridge or homebrew")]
+    Encrypted3ds,
 }
 
 /// The supported cartridge systems. Each is its own Library source.
@@ -37,14 +39,16 @@ pub enum RomSystem {
     GameBoyColor,
     GameBoyAdvance,
     NintendoDs,
+    Nintendo3ds,
 }
 
 impl RomSystem {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::GameBoy,
         Self::GameBoyColor,
         Self::GameBoyAdvance,
         Self::NintendoDs,
+        Self::Nintendo3ds,
     ];
 
     pub fn source_id(self) -> &'static str {
@@ -53,11 +57,14 @@ impl RomSystem {
             Self::GameBoyColor => "gbc",
             Self::GameBoyAdvance => "gba",
             Self::NintendoDs => "nds",
+            Self::Nintendo3ds => "3ds",
         }
     }
 
     pub fn max_rom_size(self) -> u64 {
-        if self == Self::NintendoDs {
+        if self == Self::Nintendo3ds {
+            4 * 1024 * 1024 * 1024
+        } else if self == Self::NintendoDs {
             512 * 1024 * 1024
         } else {
             MAX_ROM
@@ -67,6 +74,7 @@ impl RomSystem {
     pub fn from_extension(path: &Path) -> Option<Self> {
         match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
             "nds" => Some(Self::NintendoDs),
+            "3ds" | "cci" | "cxi" | "3dsx" => Some(Self::Nintendo3ds),
             "gba" => Some(Self::GameBoyAdvance),
             "gb" | "gbc" => Some(Self::GameBoy),
             _ => None,
@@ -79,6 +87,7 @@ impl RomSystem {
             Self::GameBoyColor => "Game Boy Color",
             Self::GameBoyAdvance => "Game Boy Advance",
             Self::NintendoDs => "Nintendo DS",
+            Self::Nintendo3ds => "Nintendo 3DS",
         }
     }
 
@@ -91,7 +100,9 @@ impl RomSystem {
     /// No-Intro names every system "… Game Boy …", so test the longer names first.
     fn from_catalog_name(name: &str) -> Option<Self> {
         let name = name.to_ascii_lowercase();
-        if name.contains("nintendo ds") && !name.contains("nintendo dsi") {
+        if name.contains("nintendo 3ds") {
+            Some(Self::Nintendo3ds)
+        } else if name.contains("nintendo ds") && !name.contains("nintendo dsi") {
             Some(Self::NintendoDs)
         } else if name.contains("game boy advance") {
             Some(Self::GameBoyAdvance)
@@ -141,7 +152,7 @@ pub struct RomCatalog {
 
 /// One catalog per system. A user-chosen DAT replaces its system's catalog.
 #[derive(Debug)]
-pub struct RomCatalogs([RomCatalog; 4]);
+pub struct RomCatalogs([RomCatalog; 5]);
 
 impl RomCatalogs {
     /// Pinned, attributed metadata only. No ROM bytes or runtime download.
@@ -151,6 +162,11 @@ impl RomCatalogs {
             RomCatalog::parse(include_bytes!("../../../data/catalogs/gbc.xml").as_slice())?,
             RomCatalog::parse(include_bytes!("../../../data/catalogs/gba.xml").as_slice())?,
             RomCatalog::parse(include_bytes!("../../../data/catalogs/nds.xml").as_slice())?,
+            RomCatalog {
+                name: "Nintendo 3DS (filename metadata)".into(),
+                system: RomSystem::Nintendo3ds,
+                entries: BTreeMap::new(),
+            },
         ]))
     }
 
@@ -290,11 +306,33 @@ fn read_fingerprint(path: &Path) -> Result<(RomFingerprint, bool), RomImportErro
         return Err(RomImportError::Changed);
     }
     let mut file = File::open(path)?;
+    read_open_fingerprint(&mut file, path)
+}
+
+/// Hash the descriptor that a file-path core will retain, without buffering
+/// a multi-gigabyte cartridge or reopening a replaceable path after verification.
+pub fn fingerprint_open(file: &mut File, path: &Path) -> Result<RomFingerprint, RomImportError> {
+    read_open_fingerprint(file, path).map(|(fingerprint, _)| fingerprint)
+}
+
+fn read_open_fingerprint(
+    file: &mut File,
+    path: &Path,
+) -> Result<(RomFingerprint, bool), RomImportError> {
+    file.seek(SeekFrom::Start(0))?;
     let size = file.metadata()?.len();
     let system = RomSystem::from_extension(path).unwrap_or(RomSystem::GameBoyAdvance);
     let maximum = system.max_rom_size();
-    if !(192..=maximum).contains(&size) {
+    let minimum = if system == RomSystem::Nintendo3ds {
+        0x20
+    } else {
+        192
+    };
+    if !(minimum..=maximum).contains(&size) {
         return Err(RomImportError::Changed);
+    }
+    if system == RomSystem::Nintendo3ds {
+        crate::sources::three_ds::validate(file, path, size)?;
     }
     let mut sha1 = Context::new(&SHA1_FOR_LEGACY_USE_ONLY);
     let mut sha256 = Context::new(&SHA256);

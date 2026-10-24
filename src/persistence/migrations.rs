@@ -79,9 +79,14 @@ const MIGRATIONS: &[Migration] = &[
         name: "game_management",
         sql: include_str!("migrations/0014_game_management.sql"),
     },
+    Migration {
+        version: 15,
+        name: "3ds_rom_files",
+        sql: include_str!("migrations/0015_3ds_rom_files.sql"),
+    },
 ];
 
-pub(crate) const LATEST_SCHEMA_VERSION: i64 = 14;
+pub(crate) const LATEST_SCHEMA_VERSION: i64 = 15;
 
 const MIGRATION_LEDGER_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -441,6 +446,60 @@ mod tests {
             )
             .expect("archived Steam identity");
         assert_eq!(archived, 1);
+    }
+
+    #[test]
+    fn three_ds_migration_admits_four_gib_cartridges_and_keeps_rows() {
+        let mut connection = Connection::open_in_memory().expect("in-memory database");
+        connection
+            .execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("foreign keys");
+        connection
+            .execute_batch(MIGRATION_LEDGER_SQL)
+            .expect("create migration ledger");
+        for migration in MIGRATIONS
+            .iter()
+            .filter(|migration| migration.version <= 14)
+        {
+            connection
+                .execute_batch(migration.sql)
+                .expect("apply old migration");
+            connection
+                .execute(
+                    "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?1, ?2, 0)",
+                    params![migration.version, migration.name],
+                )
+                .expect("record old migration");
+        }
+        let (sha1, sha256) = ("a".repeat(40), "b".repeat(64));
+        connection
+            .execute_batch(&format!(
+                "INSERT INTO games(id, title, created_at, updated_at) VALUES (1, 'Game', 0, 0);
+                 INSERT INTO rom_files(path, game_id, sha1, sha256, size, catalog_name, imported_at)
+                 VALUES (x'2f612e6e6473', 1, '{sha1}', '{sha256}', 536870912, NULL, 7);"
+            ))
+            .expect("seed version-14 rom file");
+        let large = format!(
+            "INSERT INTO rom_files(path, game_id, sha1, sha256, size, catalog_name, imported_at)
+             VALUES (x'2f622e336473', 1, '{sha1}', '{}', 3221225472, NULL, 8)",
+            "c".repeat(64)
+        );
+        assert!(
+            connection.execute_batch(&large).is_err(),
+            "512 MiB limit before"
+        );
+        migrate(&mut connection).expect("apply 3DS rom files migration");
+        connection
+            .execute_batch(&large)
+            .expect("a 3 GiB cartridge fits");
+        let sizes: Vec<i64> = connection
+            .prepare("SELECT size FROM rom_files ORDER BY size")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(sizes, vec![536870912, 3221225472]);
     }
 
     #[test]

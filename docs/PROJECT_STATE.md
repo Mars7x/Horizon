@@ -2,12 +2,12 @@
 
 Horizon is an early-development Rust/Slint Linux desktop Flatpak. Its approved
 direction is embedded emulator cores. Game folder selection automatically scans and imports
-supported files: Game Boy, Game Boy Color, Game Boy Advance and Nintendo DS. Bundled offline
+supported files: Game Boy, Game Boy Color, Game Boy Advance, Nintendo DS and decrypted Nintendo 3DS content. Bundled offline
 hash catalogs provide exact title recognition, with unverified filename fallbacks
 for unknown files. Existing local XML catalogs remain supported. Imported games
-launch in Horizon using bundled mGBA (GB/GBC/GBA) and melonDS DS (DS) libretro
-cores on an in-process worker. See
-[playback](GBA_PLAYBACK.md). BIOS management, DSi, further cores and a permanent
+launch in Horizon using bundled mGBA (GB/GBC/GBA) melonDS DS (DS) and Azahar (3DS) libretro
+cores on an in-process worker. See [3DS playback](THREE_DS_PLAYBACK.md) and
+[playback](GBA_PLAYBACK.md). BIOS management, DSi, CIA installation, further cores and a permanent
 multi-system hosting API remain unimplemented.
 
 First launch presents [Welcome/Profile setup](ONBOARDING.md), then optional game
@@ -23,6 +23,7 @@ import and Ready. Completed setup is skipped; unfinished confirmed steps resume.
 | Album | Horizon-owned screenshots/animated images, viewer and confirmed deletion |
 | Settings | Appearance; Controller → Button mapping and DS button mapping; Cores → mGBA and melonDS; Third-Party → SteamGridDB and Steam Account |
 | Player | GB/GBC/GBA and DS in a zoomed shell with quick menu, visual rewind, playback speed, four state slots and a crash-safe automatic resume point; DS layouts, swap, lid, blow and GPU internal resolution |
+| 3DS player | Initial native-resolution Vulkan playback, Circle Pad/C-stick, touch, audio, screenshots and isolated in-game saves; no rewind, save states or automatic resume yet |
 | Profile | Local name/picture, Steam profile picture and read-only Steam friends |
 
 Utilities are **Album, Activity, Settings**, in that order.
@@ -46,8 +47,8 @@ supported, with import decoders retained for external PNG/JPEG/GIF/APNG images.
 ## Inactive boundaries
 
 The cartridge systems launch only their imported content through the embedded player; no capture
-sources are registered. Only melonDS may draw with the GPU (its internal
-resolution, through a hidden OpenGL context); mGBA stays software-only. External URI/foreground-handoff execution remains dormant.
+sources are registered. melonDS draws upscaled DS pictures through a hidden OpenGL context. Azahar uses
+Vulkan exclusively, at native resolution; mGBA stays software-only. External URI/foreground-handoff execution remains dormant.
 Optional SteamGridDB lookup can supply covers for imported games. The reusable importer
 opens from first-run setup.
 The shared append-only catalog and historical SQLite identities remain intact.

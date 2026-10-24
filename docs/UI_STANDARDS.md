@@ -2,7 +2,8 @@
 
 Home keeps its own shell. The approved [first-run flow](ONBOARDING.md) omits the
 app header; Welcome also omits the hint bar and preference controls. Other full-screen pages use the shared frame;
-feature work must not replace Home's focus geometry, selected scale or marquee.
+feature work must preserve Home's approved full focus outline, selected scale
+and marquee.
 See [Home](HOME_UI.md) and [navigation](NAVIGATION.md).
 
 The embedded game surface is content: aspect-preserving software frames on a
@@ -64,7 +65,7 @@ cancel use OK and Back. The quick menu stays hidden beneath it.
 | Sub-page | Breadcrumb in the content area; click means Back | [Breadcrumb](../ui/components/page-header.slint) |
 | Focusable rows | One exclusive animated outline; hover is not selection | [ListRow](../ui/components/list-row.slint), [SettingsRow](../ui/components/settings-row.slint) |
 | Read-only panels/history | Never focusable; scrolling is independent of selection | [Surface](../ui/components/list-row.slint) |
-| Covers/media | Home corner brackets follow animated selected geometry | [FocusFrame](../ui/components/focus-frame.slint) |
+| Covers/media | All cover/media grids use continuous outlines with selection fades and no idle motion | [FocusFrame](../ui/components/focus-frame.slint) |
 | Hints | Bottom-bar baseline shared with Home; show working actions only | [HintBar](../ui/components/hint-bar.slint) |
 | Long text | Selected text may marquee; other text clips with soft edges | [MarqueeText](../ui/components/marquee-text.slint) |
 
@@ -101,7 +102,8 @@ rapid navigation must not expose stale focus. Item-to-item Album viewing slides
 rather than changing the page transition contract.
 
 Reduced Motion makes shared transitions immediate and stops marquee/pulsing.
-High Contrast suppresses idle focus pulses. Cover focus must follow the animated
+Cover/media outlines have no idle pulse, expansion or glow. Other focus styles
+respect High Contrast and Reduced Motion. Cover focus must follow the animated
 selected cover rather than its fixed grid slot. Do not revive segmented text
 masks or runtime gradient-percent coercions; validate against the installed
 Slint syntax and real rendering.

@@ -317,6 +317,9 @@ impl GlContext {
         rgba.resize(row * height, 0);
         // SAFETY: the buffer holds exactly width×height RGBA pixels.
         unsafe {
+            let (mut read, mut pack) = (0, 0);
+            (self.gl.get_integerv)(GL_READ_FRAMEBUFFER_BINDING, &mut read);
+            (self.gl.get_integerv)(GL_PACK_ALIGNMENT, &mut pack);
             (self.gl.bind_framebuffer)(GL_READ_FRAMEBUFFER, self.framebuffer);
             (self.gl.pixel_storei)(GL_PACK_ALIGNMENT, 1);
             (self.gl.read_pixels)(
@@ -328,7 +331,8 @@ impl GlContext {
                 GL_UNSIGNED_BYTE,
                 rgba.as_mut_ptr().cast(),
             );
-            (self.gl.bind_framebuffer)(GL_READ_FRAMEBUFFER, 0);
+            (self.gl.bind_framebuffer)(GL_READ_FRAMEBUFFER, read as u32);
+            (self.gl.pixel_storei)(GL_PACK_ALIGNMENT, pack);
         }
         normalize_readback(rgba, width, height);
     }
@@ -432,7 +436,9 @@ impl GlContext {
     }
 
     fn prepare_viewport(&mut self, size: (u32, u32)) -> Result<(), String> {
-        if self.viewport.size == size {
+        // Rewind samples to native size between display-sized reads. Retain
+        // the larger target so these never recreate textures/framebuffers.
+        if self.viewport.size.0 >= size.0 && self.viewport.size.1 >= size.1 {
             return Ok(());
         }
         self.release_viewport();
@@ -719,6 +725,25 @@ mod tests {
             assert_eq!(
                 retained, full,
                 "presentation must not change capture pixels"
+            );
+            unsafe {
+                let mut binding = 0;
+                (gl.gl.get_integerv)(super::GL_READ_FRAMEBUFFER_BINDING, &mut binding);
+                assert_eq!(
+                    binding as u32, fbo,
+                    "full capture must restore the core's read binding"
+                );
+                (gl.gl.get_integerv)(super::GL_PACK_ALIGNMENT, &mut binding);
+                assert_eq!(binding, 8, "full capture must restore pack alignment");
+            }
+            let target = gl.viewport.framebuffer;
+            let mut preview = Vec::new();
+            gl.read_viewport(source, [(256, 192); 2], &mut preview)
+                .unwrap();
+            assert_eq!(preview.len(), 256 * 384 * 4);
+            assert_eq!(
+                gl.viewport.framebuffer, target,
+                "a rewind preview must reuse the display target"
             );
         }
         let targets = [(640, 480); 2];

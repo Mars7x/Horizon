@@ -31,7 +31,7 @@ and keeps the animated selected cover in view. LB/RB change filter/sort where
 available; pointer controls use the same Rust-owned selection rules. Wheel input
 pans without changing the focused game.
 
-Selected scale, corner brackets and title clipping/marquee match Home. Top
+Selected scale, continuous focus outline and title clipping/marquee match Home. Top
 header elevation follows camera offset; it is absent at zero. Empty filters have
 a distinct no-results message. Artwork changes propagate through the shared card
 observer. Retired identities are not active games; they remain only in

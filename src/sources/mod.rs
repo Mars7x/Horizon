@@ -4,6 +4,7 @@
 //! Services consume only normalized source metadata and discovery snapshots.
 
 pub mod gba;
+pub mod three_ds;
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -531,8 +532,8 @@ mod tests {
     fn production_registry_has_no_external_game_sources() {
         let registry = production_source_registry().expect("production registry");
 
-        assert_eq!(registry.len(), 4);
-        for id in ["gb", "gbc", "gba", "nds"] {
+        assert_eq!(registry.len(), 5);
+        for id in ["gb", "gbc", "gba", "nds", "3ds"] {
             assert!(registry.get(&source_id(id)).is_some());
         }
         assert!(registry.get(&source_id("flatpak")).is_none());

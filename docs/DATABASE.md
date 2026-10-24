@@ -1,6 +1,6 @@
 # Database
 
-Latest schema: `14`
+Latest schema: `15`
 
 [SqliteLibraryRepository](../src/persistence/sqlite.rs) owns SQL and the shared
 connection. Data lives in `library/library.sqlite3` at the location chosen by
@@ -31,6 +31,7 @@ checksums. Never “fix” a deployed file or its checksum to bypass a failure.
 | 0012 | Confirmed first-run setup progress and completion |
 | 0013 | DS-size ROM file limit |
 | 0014 | Durable per-game visibility preference |
+| 0015 | Imported-file size limit widened to 4 GiB for 3DS cartridges |
 
 ## Identities and membership
 

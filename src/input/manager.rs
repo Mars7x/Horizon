@@ -166,6 +166,21 @@ impl InputManager {
         )
     }
 
+    pub fn three_ds_input(&self) -> (u16, [i16; 4]) {
+        let (raw, axes) = self
+            .gamepad_input
+            .as_ref()
+            .and_then(SdlGamepadInput::three_ds_snapshot)
+            .unwrap_or_default();
+        (
+            gameplay_mapping(
+                raw & !self.shortcuts.get().withheld(raw),
+                self.swap_confirm.get(),
+            ),
+            axes,
+        )
+    }
+
     pub fn gameplay_buttons(&self) -> u16 {
         gameplay_mapping(
             self.bindings.get().apply(self.game_buttons()),

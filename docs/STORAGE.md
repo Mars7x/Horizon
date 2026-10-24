@@ -18,6 +18,7 @@ data/
   saves/<system>/<game>/      (gb, gbc, gba or nds)
     game.json
     view.json                 (DS: remembered layout and swap)
+    verified.json             (3DS: identity of the last verified cartridge)
     <game name>.sav
     save-reset                (explicit reset disables beside-ROM save import)
     backups/<game name>.previous.sav
@@ -143,7 +144,7 @@ profile, core/integration preference and Album paths are not read, moved or
 deleted. Appearance, controller and cache paths already match this layout and
 continue to be used. Existing files remain untouched; the new database starts
 an independent library/setup.
-Deployed migrations remain immutable (schema 13 only widens the imported-file size limit for DS). This is not
+Deployed migrations remain immutable (schemas 13 and 15 only widen the imported-file size limit, for DS and then 3DS up to 4 GiB). This is not
 permission to delete old data. See [ADR 0205](adr/0205-human-readable-storage.md).
 
 Nintendo DS uses the same game-named cartridge save layout, with states under
@@ -155,3 +156,6 @@ Generated DS support files stay under each game’s `core-data/melonDS DS` folde
 
 Album scans image captures only. Existing recording folders and files are left
 untouched and are not listed, decoded or deleted by Album.
+
+Nintendo 3DS uses the separately approved Azahar Vulkan core; see
+[3DS playback](THREE_DS_PLAYBACK.md) for import formats, controls, isolated saves and initial limits.

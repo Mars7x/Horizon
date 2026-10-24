@@ -399,3 +399,18 @@ its applicable licenses. No Nintendo firmware, BIOS dumps or games are included.
 The Nintendo DS metadata catalog (`data/catalogs/nds.xml`) uses the same No-Intro/libretro snapshot and
 CC-BY-SA-4.0 terms as the other offline catalogs. Its exact input digest and
 reproduction command are maintained in `scripts/generate-hash-catalog.py`.
+
+## Azahar and Vulkan
+
+Nintendo 3DS playback uses unmodified [Azahar 2126.2](https://github.com/azahar-emu/azahar/tree/219d743a1e698101fe1ab8bef43e6563126c3c27),
+GPL-2.0-or-later, built from the pinned source and recursive submodules with
+Vulkan enabled and OpenGL disabled. [Upstream notices](LICENSES/Azahar-third-party.txt)
+retain its source/dependency notices and the MIT libretro Vulkan ABI header
+(RetroArch team, 2010–2020), translated in `src/platform/azahar_vulkan.rs`.
+The inventory includes notices for disabled upstream components. Distribution
+must provide the corresponding pinned source under its applicable terms. No
+Nintendo system files, keys or games are included.
+
+**ash 0.38** supplies Vulkan bindings under MIT OR Apache-2.0, with the existing
+[MIT](LICENSES/MIT.txt) and [Apache-2.0](LICENSES/Apache-2.0.txt) license texts.
+Copyright Maik Klein and ash contributors; https://github.com/ash-rs/ash.

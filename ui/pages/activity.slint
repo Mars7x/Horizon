@@ -181,14 +181,10 @@ export component ActivityPage inherits Rectangle {
                     }
                 }
                 FocusFrame {
-                    // Follow the actual animated shell rather than a fixed
-                    // unselected tile box. This maintains a Library-like
-                    // six-pixel clearance at every selected scale and at the
-                    // contracted point of the A-button press.
-                    x: shell.x - 6px; y: shell.y - 6px;
-                    width: shell.width + 12px; height: shell.height + 12px;
-                    scale-factor: (root.card-size + 20px) / Metrics.game-tile-size;
-                    active: parent.selected;
+                    shell-radius: root.card-size * (20.0 / 148.0);
+                    x: shell.x - Metrics.focus-offset; y: shell.y - Metrics.focus-offset;
+                    width: shell.width + Metrics.focus-offset * 2;
+                    height: shell.height + Metrics.focus-offset * 2;
                     opacity: parent.selected ? 1.0 : 0.0;
                     animate opacity { duration: Motion.focus-duration; easing: ease-in-out; }
                 }

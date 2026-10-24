@@ -35,6 +35,7 @@ pub struct PlayerPaths {
     pub database: PathBuf,
     pub core: PathBuf,
     pub ds_core: PathBuf,
+    pub three_ds_core: PathBuf,
     pub saves: PathBuf,
     pub settings: crate::platform::data_paths::CoreSettingsPaths,
     pub album: PathBuf,
@@ -328,9 +329,19 @@ fn record_rewind(
     at: Duration,
     lid_closed: bool,
 ) -> Result<(), String> {
+    #[cfg(test)]
+    let measured = Instant::now();
     let state = core.serialize_state()?;
-    let raw = core.capture_frame()?;
+    #[cfg(test)]
+    let serialized = measured.elapsed();
+    let raw = core.capture_rewind_preview()?;
     let preview = crate::services::save_states::preview_size(&raw).unwrap_or(raw);
+    #[cfg(test)]
+    tracing::debug!(
+        serialize_ms = serialized.as_secs_f64() * 1000.0,
+        total_ms = measured.elapsed().as_secs_f64() * 1000.0,
+        "rewind capture timing"
+    );
     let cost = preview.rgba.len();
     // A useful history must fit a prior point and the exact paused moment.
     if state.len().saturating_add(cost) > crate::domain::rewind::MEMORY_LIMIT / 2 {
@@ -384,6 +395,7 @@ fn rewind_picture(
     }
 }
 pub struct RunningGame {
+    pub three_ds: bool,
     pub commands: Sender<Command>,
     pub events: Receiver<Event>,
     pub frame: LatestFrame,
@@ -414,7 +426,7 @@ impl RunningGame {
         let (sender, events) = mpsc::channel();
         let frame = Arc::new(Mutex::new(None));
         let buttons = Arc::new(AtomicU16::new(0));
-        let ds_input = (system == RomSystem::NintendoDs)
+        let ds_input = matches!(system, RomSystem::NintendoDs | RomSystem::Nintendo3ds)
             .then(|| Arc::new(crate::platform::gba_core::DsInput::default()));
         let worker_ds_input = ds_input.clone();
         let display = DisplaySize::default();
@@ -447,6 +459,7 @@ impl RunningGame {
             });
         match worker {
             Ok(worker) => Ok(Self {
+                three_ds: system == RomSystem::Nintendo3ds,
                 commands,
                 events,
                 frame,
@@ -491,10 +504,109 @@ pub fn read_rom_snapshot(path: &Path, sha256: &str) -> Result<Vec<u8>, String> {
 
 const CHANGED_ROM: &str = "The game file has changed. Add its folder again before playing.";
 
+/// The imported 3DS file, held open: Azahar reads it through this descriptor
+/// (`cartridge_descriptor_path`), so a replaced path can't redirect it.
+fn open_3ds_file(path: &Path) -> Result<File, String> {
+    if !fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file()) {
+        return Err("The 3DS cartridge is unavailable or is a link".into());
+    }
+    File::open(path).map_err(|_| "Could not open the 3DS cartridge".into())
+}
+
+/// What identifies a held file without reading it: an unchanged device,
+/// inode, size, and modification and change times (to the nanosecond).
+/// Rewriting or replacing the file changes the change time, which ordinary
+/// tools cannot set back.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileIdentity {
+    sha256: String,
+    device: u64,
+    inode: u64,
+    size: u64,
+    modified: (i64, i64),
+    changed: (i64, i64),
+}
+impl FileIdentity {
+    fn of(metadata: &fs::Metadata, sha256: &str) -> Self {
+        use std::os::unix::fs::MetadataExt;
+        Self {
+            sha256: sha256.to_owned(),
+            device: metadata.dev(),
+            inode: metadata.ino(),
+            size: metadata.len(),
+            modified: (metadata.mtime(), metadata.mtime_nsec()),
+            changed: (metadata.ctime(), metadata.ctime_nsec()),
+        }
+    }
+}
+
+/// The held file is the game that was imported, and didn't change while it
+/// was checked. A 4 GiB cartridge takes seconds to hash, so a file whose
+/// identity matches the one recorded after its last successful hash
+/// (`record`, beside its saves) isn't read again. Runs while Azahar loads,
+/// which reads through its own reopened description, so the two never share
+/// a file position.
+fn verify_3ds_file(file: &mut File, sha256: &str, record: &Path) -> Result<(), String> {
+    use std::io::{Seek, SeekFrom};
+    let before = file
+        .metadata()
+        .map_err(|_| "Could not inspect the 3DS cartridge")?;
+    let identity = FileIdentity::of(&before, sha256);
+    let recorded = fs::read(record)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<FileIdentity>(&bytes).ok());
+    if recorded.as_ref() == Some(&identity) {
+        return Ok(());
+    }
+    // SHA-256 only: the import's SHA-1 isn't needed to recognise it.
+    file.seek(SeekFrom::Start(0))
+        .map_err(|_| "Could not read the 3DS cartridge")?;
+    let mut digest = ring::digest::Context::new(&ring::digest::SHA256);
+    let mut buffer = vec![0u8; 4 << 20];
+    loop {
+        let count = file
+            .read(&mut buffer)
+            .map_err(|_| "Could not read the 3DS cartridge")?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    let actual: String = digest
+        .finish()
+        .as_ref()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let after = file
+        .metadata()
+        .map_err(|_| "Could not recheck the 3DS cartridge")?;
+    if actual != sha256 || FileIdentity::of(&after, sha256) != identity {
+        return Err(CHANGED_ROM.into());
+    }
+    // Best effort: without the record, the next launch hashes again.
+    let written = serde_json::to_vec(&identity)
+        .map_err(std::io::Error::other)
+        .and_then(|bytes| {
+            let partial = record.with_extension("json.part");
+            fs::write(&partial, bytes)?;
+            File::open(&partial)?.sync_all()?;
+            fs::rename(&partial, record)
+        });
+    if let Err(error) = written {
+        tracing::debug!(%error, "could not record the verified 3DS file");
+    }
+    Ok(())
+}
+
 /// The imported file's bytes, checked for size and (DS) header, but not yet
 /// against its imported identity: see `rom_matches`.
 fn read_rom(path: &Path) -> Result<Vec<u8>, String> {
     let system = RomSystem::from_extension(path).unwrap_or(RomSystem::GameBoyAdvance);
+    if system == RomSystem::Nintendo3ds {
+        return Err("3DS cartridges use verified file-path loading".into());
+    }
     let maximum = system.max_rom_size();
     let mut file = File::open(path)
         .map_err(|_| "Game folder access is unavailable. Choose its folder again.".to_owned())?;
@@ -553,18 +665,23 @@ fn play(
     let mut failure =
         "This game has no available imported ROM. Choose its folder again.".to_owned();
     let ds = system == RomSystem::NintendoDs;
+    let three_ds = system == RomSystem::Nintendo3ds;
     // DS state serialization and GPU readback can take 30–50 ms at 8×.
     // Its 100 ms queue starts around 62 ms; mGBA retains 31 ms headroom.
     let audio: AudioBuffer = Arc::new(crate::platform::gba_audio::GameAudio::with_buffer_ms(
-        if ds { 100 } else { 50 },
+        if ds || three_ds { 100 } else { 50 },
     ));
     let preferences = crate::persistence::core_settings::CoreSettingsStore::new(paths.settings)
         .load()
         .map_err(|_| "Could not read playback or core settings".to_owned())?;
-    let mut mgba = if ds {
+    let mut mgba = if ds || three_ds {
         // DS takes only its filter; its layout is the player's.
         crate::domain::core_settings::MgbaPreferences {
-            video_filter: preferences.ds.video_filter,
+            video_filter: if three_ds {
+                crate::domain::core_settings::VideoFilter::None
+            } else {
+                preferences.ds.video_filter
+            },
             ..Default::default()
         }
     } else {
@@ -603,7 +720,22 @@ fn play(
     let mut read_at = Duration::ZERO;
     let mut selected = None;
     for location in locations {
-        let rom = match read_rom(&location.path) {
+        let mut verified_file = if three_ds {
+            match open_3ds_file(&location.path) {
+                Ok(file) => Some(file),
+                Err(error) => {
+                    failure = error;
+                    continue;
+                }
+            }
+        } else {
+            None
+        };
+        let rom = match if three_ds {
+            Ok(Vec::new())
+        } else {
+            read_rom(&location.path)
+        } {
             Ok(bytes) => bytes,
             Err(error) => {
                 failure = error;
@@ -620,44 +752,81 @@ fn play(
             "Could not prepare the game's save folder. Existing files have been preserved."
                 .to_owned()
         })?;
-        let ds_directory =
-            crate::platform::data_paths::ds_support_directory(&game_folder.directory);
-        if ds {
+        let ds_directory = if three_ds {
+            crate::platform::data_paths::three_ds_support_directory(&game_folder.directory)
+        } else {
+            crate::platform::data_paths::ds_support_directory(&game_folder.directory)
+        };
+        if ds || three_ds {
             crate::services::game_storage::ensure_directory(&game_folder.directory, &ds_directory)
                 .map_err(|_| "Could not prepare DS core data")?;
         }
         // The identity check (a large DS cartridge takes a few hundred
         // milliseconds to hash) runs while the core loads. Nothing runs, and
         // no save is touched, until both are done and the file matched.
-        let (matched, core) = thread::scope(|scope| {
-            let check = scope.spawn(|| rom_matches(&rom, sha256));
-            let core = Core::load_system(
-                if ds { &paths.ds_core } else { &paths.core },
-                &rom,
-                mgba,
-                Arc::clone(&audio),
-                Arc::clone(&buttons),
-                ds_input.clone().map(|input| {
-                    (
-                        input,
-                        ds_directory.as_path(),
-                        preferences.ds.resolution.scale(),
-                    )
-                }),
-            );
-            (check.join().unwrap_or(false), core)
-        });
+        let (matched, core) = if let Some(file) = verified_file.as_mut() {
+            let input = ds_input.clone().ok_or("3DS input is unavailable")?;
+            let content = crate::platform::data_paths::cartridge_descriptor_path(file);
+            // A 4 GiB cartridge takes seconds to hash: verify while it loads.
+            let (verified, core) = thread::scope(|scope| {
+                let record =
+                    crate::platform::data_paths::three_ds_verified_path(&game_folder.directory);
+                let check = scope.spawn(move || verify_3ds_file(file, sha256, &record));
+                let core = Core::load_3ds(
+                    &paths.three_ds_core,
+                    &content,
+                    &ds_directory,
+                    Arc::clone(&audio),
+                    Arc::clone(&buttons),
+                    input,
+                );
+                (
+                    check
+                        .join()
+                        .unwrap_or_else(|_| Err("Could not verify the 3DS cartridge".into())),
+                    core,
+                )
+            });
+            if let Err(error) = verified {
+                drop(core);
+                failure = error;
+                continue;
+            }
+            (true, core)
+        } else {
+            thread::scope(|scope| {
+                let check = scope.spawn(|| rom_matches(&rom, sha256));
+                let core = Core::load_system(
+                    if ds { &paths.ds_core } else { &paths.core },
+                    &rom,
+                    mgba,
+                    Arc::clone(&audio),
+                    Arc::clone(&buttons),
+                    ds_input.clone().map(|input| {
+                        (
+                            input,
+                            ds_directory.as_path(),
+                            preferences.ds.resolution.scale(),
+                        )
+                    }),
+                );
+                (check.join().unwrap_or(false), core)
+            })
+        };
         if !matched {
             drop(core);
             failure = CHANGED_ROM.into();
             continue;
         }
-        selected = Some((location, game_folder, core?));
+        selected = Some((location, game_folder, core?, verified_file));
         break;
     }
-    let Some((location, game_folder, mut core)) = selected else {
+    let Some((location, game_folder, core, verified_file)) = selected else {
         return Err(failure);
     };
+    // Drop the core before releasing its verified cartridge descriptor.
+    let _verified_file = verified_file;
+    let mut core = core;
     let core_at = launch.elapsed();
     // Filtering runs beside the core, so it never slows the game down.
     struct Filter {
@@ -684,7 +853,7 @@ fn play(
                     let ds_input = ds_input.clone();
                     let display = Arc::clone(&display);
                     move || {
-                        let view = ds_input.as_ref().map(|input| &input.view);
+                        let view = ds_input.as_ref().filter(|_| ds).map(|input| &input.view);
                         stage.run(mgba, view, &display, &frame, &*frame_ready)
                     }
                 })
@@ -693,7 +862,8 @@ fn play(
     };
     let save_path = game_folder.save_path();
     // A game new to Horizon may have a save from another emulator beside it.
-    if !save_path.exists()
+    if !three_ds
+        && !save_path.exists()
         && !crate::platform::data_paths::save_reset_marker(&game_folder.directory).exists()
         && let Some((found, bytes)) = save_beside(&location.path, ds, core.max_save_size())
     {
@@ -733,15 +903,21 @@ fn play(
     let mut rewind_clock = Duration::ZERO;
     let mut rewind_since = Duration::ZERO;
     let mut rewind_enabled = core.supports_states();
+    #[cfg(test)]
+    if std::env::var_os("HORIZON_TEST_NO_REWIND").is_some() {
+        rewind_enabled = false;
+    }
     if ds
         && preferences.ds.resolution.scale() > 1
         && rewind_enabled
         && mgba.video_filter == crate::domain::core_settings::VideoFilter::None
     {
-        // Viewport presentation no longer warms full-resolution capture memory.
-        // Prime serialization/readback/preview work before audible playback, then
-        // discard this boot picture (it may precede an automatic state restore).
-        if let Err(error) = record_rewind(&core, &mut rewind, Duration::ZERO, false) {
+        // Warm full capture storage for later screenshots/automatic saves as
+        // well as serialization and the small rewind target before audio.
+        let warmup = core
+            .capture_frame()
+            .and_then(|_| record_rewind(&core, &mut rewind, Duration::ZERO, false));
+        if let Err(error) = warmup {
             tracing::debug!(%error, "rewind warmup deferred until gameplay");
         }
         rewind.clear();
@@ -1123,15 +1299,17 @@ fn play(
             if !paused {
                 let before = audio.written();
                 core.run_frame();
+                if let Some(error) = core.take_error() {
+                    return Err(error);
+                }
                 let pushed = audio.written().wrapping_sub(before);
                 let presented = present(&core);
                 let elapsed = Duration::from_secs_f64(1.0 / fps);
                 rewind_clock += elapsed;
                 rewind_since += elapsed;
-                // Reuse the GPU readback of a frame already being shown.
-                // At 2×, taking an extra full-resolution readback just for
-                // rewind can stall audio. In the background, still retain
-                // history even when the display stops requesting frames.
+                // Pair snapshots with displayed frames when possible. GPU
+                // previews transfer only a native-sized picture; background
+                // play still retains history without display requests.
                 if rewind_enabled
                     && rewind_since >= crate::domain::rewind::INTERVAL
                     && (!ds || presented || rewind_since >= crate::domain::rewind::INTERVAL * 2)
@@ -1434,6 +1612,45 @@ fn write_save_bounded(path: &Path, bytes: &[u8], maximum: usize) -> Result<(), S
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn three_ds_launch_descriptor_retains_verified_content_after_path_replacement() {
+        use std::io::Read;
+        let directory = std::env::temp_dir().join(format!("horizon-3ds-fd-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("game.3dsx");
+        let mut bytes = [0u8; 32];
+        bytes[..4].copy_from_slice(b"3DSX");
+        bytes[4..6].copy_from_slice(&32u16.to_le_bytes());
+        std::fs::write(&path, bytes).unwrap();
+        let hash = crate::sources::gba::recognition::fingerprint(&path)
+            .unwrap()
+            .sha256;
+        let record = directory.join("verified.json");
+        let mut file = super::open_3ds_file(&path).unwrap();
+        super::verify_3ds_file(&mut file, &hash, &record).unwrap();
+        // Recorded: an unchanged file is accepted without hashing again.
+        assert!(record.exists());
+        super::verify_3ds_file(&mut file, &hash, &record).unwrap();
+        std::fs::rename(&path, directory.join("original")).unwrap();
+        std::fs::write(&path, b"replacement").unwrap();
+        let mut launched = std::fs::File::open(
+            crate::platform::data_paths::cartridge_descriptor_path(&file),
+        )
+        .unwrap();
+        let mut read = Vec::new();
+        launched.read_to_end(&mut read).unwrap();
+        assert_eq!(read, bytes);
+        // A replaced file has another identity, so it's hashed, and refused.
+        let mut replaced = super::open_3ds_file(&path).unwrap();
+        assert!(super::verify_3ds_file(&mut replaced, &hash, &record).is_err());
+        // A file changed in place: its change time differs, so it's hashed.
+        let mut original = super::open_3ds_file(&directory.join("original")).unwrap();
+        super::verify_3ds_file(&mut original, &hash, &record).unwrap();
+        std::fs::write(directory.join("original"), b"3DSXchanged in place......").unwrap();
+        assert!(super::verify_3ds_file(&mut original, &hash, &record).is_err());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
     use super::*;
     #[test]
     #[ignore = "requires the built pinned mGBA core (HORIZON_GBA_CORE)"]

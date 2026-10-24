@@ -23,7 +23,8 @@ logs a warning (once until a check succeeds again). See
 [ADR 0215](adr/0215-deleted-games-leave-the-library.md).
 
 The current backend supports raw Game Boy (`.gb`), Game Boy Color (`.gbc`) and
-Game Boy Advance (`.gba`) and Nintendo DS (`.nds`) files, each its own Library source. Scans recurse through regular folders,
+Game Boy Advance (`.gba`), Nintendo DS (`.nds`) and decrypted Nintendo 3DS
+(`.3ds`, `.cci`, `.cxi`, `.3dsx`) files, each its own Library source. Scans recurse through regular folders,
 skip symlinks and unsupported extensions, and bound file size (192 bytes–32 MiB for GB/GBC/GBA; 4 KiB–512 MiB for DS),
 depth (16) and directory entries (20,000). Readable files are included automatically.
 Empty/unsupported folders and directory errors offer only retry or Back. If some
@@ -83,3 +84,6 @@ can be up to 512 MiB; both ARM executable sections must fit within the file.
 DSi-exclusive headers are rejected. DS-enhanced games run in DS mode.
 GB/GBC/GBA keep their 32 MiB limit. Launch verifies the complete snapshot again.
 See [ADR 0216](adr/0216-nintendo-ds-playback.md).
+
+Nintendo 3DS uses the separately approved Azahar Vulkan core; see
+[3DS playback](THREE_DS_PLAYBACK.md) for import formats, controls, isolated saves and initial limits.

@@ -57,6 +57,37 @@ pub fn ds_core_path() -> PathBuf {
     }
 }
 
+pub fn three_ds_core_path() -> PathBuf {
+    if std::env::var("FLATPAK_ID").is_ok_and(|id| id == APP_ID) {
+        PathBuf::from("/app/lib/horizon/azahar_libretro.so")
+    } else {
+        std::env::var_os("HORIZON_3DS_CORE")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/usr/lib/horizon/azahar_libretro.so"))
+    }
+}
+
+/// The identity of the 3DS file last verified for this game (see
+/// `gba_player::verify_3ds_file`).
+pub fn three_ds_verified_path(game: &Path) -> PathBuf {
+    game.join("verified.json")
+}
+
+pub fn three_ds_support_directory(game: &Path) -> PathBuf {
+    game.join("core-data")
+}
+
+pub fn three_ds_user_directory(game: &Path) -> PathBuf {
+    three_ds_support_directory(game).join("Azahar")
+}
+
+/// Reopening this descriptor retains the verified inode across rename/unlink.
+/// The worker keeps the file alive for the entire game session.
+pub fn cartridge_descriptor_path(file: &std::fs::File) -> PathBuf {
+    use std::os::fd::AsRawFd;
+    PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()))
+}
+
 /// melonDS DS recognizes this final component and does not add another subfolder.
 pub fn ds_support_directory(game: &Path) -> PathBuf {
     game.join("core-data/melonDS DS")

@@ -13,7 +13,8 @@
     "0011_rom_import.sql": "7fff7561b47fbf576568a4fd16dec499569c72226133b4d34173e5cad5d92d78",
     "0012_onboarding.sql": "7a179045ee11cc05d44d587ea1e5270c0d62d2b444779801f4bd8cf53d490718",
     "0013_large_rom_files.sql": "79b37e2a21472cc7490af00df126a36621dec7154431be58de35d80b0f390282",
-    "0014_game_management.sql": "2634a54e7a9f1f1cce079b989defe81790e86007ab96fcb53add7af5dcbda668"
+    "0014_game_management.sql": "2634a54e7a9f1f1cce079b989defe81790e86007ab96fcb53add7af5dcbda668",
+    "0015_3ds_rom_files.sql": "66fa806461af2ca8e54ded8ed6799e588ae7daa55940af9c083af162954006ad"
   },
   "flatpak_finish_args": [
     "--require-version=1.16.0",

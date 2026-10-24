@@ -1,75 +1,11 @@
-import { Metrics, Motion, Theme } from "../theme/theme.slint";
+import { Metrics, Theme } from "../theme/theme.slint";
 
-// Four crisp native vector corners with no glow layer.
+// The shared cover/media focus: continuous outline, no glow or idle motion.
+// Callers own selection fades and follow their actual animated shell.
 export component FocusFrame inherits Rectangle {
-    in property <float> scale-factor: 1.0;
-    in property <bool> active: true;
+    in property <length> shell-radius: Metrics.game-shell-radius;
     background: transparent;
-
-    private property <float> motion-strength: root.active
-        && !Motion.reduced-motion && !Motion.loops-paused && !Theme.high-contrast ? 1.0 : 0.0;
-    animate motion-strength {
-        duration: Motion.focus-idle-fade;
-        easing: ease-in-out;
-    }
-    private property <float> cursor-cycle: root.motion-strength > 0.0
-        ? 0.5 - 0.5 * cos(animation-tick() / Motion.focus-idle-cycle * 360deg)
-        : 0.0;
-    private property <length> cursor-outset: Motion.game-focus-idle-expansion * root.motion-strength * root.cursor-cycle;
-    // HSV brightness can clip on already saturated/brilliant accents. Instead,
-    // interpolate toward Horizon's accent-derived, lighter focus highlight.
-    // At full expansion, use the shared stronger accent-derived highlight;
-    // contraction returns precisely to the configured accent.
-    private property <brush> cursor-ink: Theme.focus.mix(
-        Theme.focus-highlight,
-        1.0 - Motion.focus-idle-highlight-strength * root.motion-strength * root.cursor-cycle);
-
-    Path {
-        x: -root.cursor-outset; y: -root.cursor-outset;
-        width: Metrics.focus-arm * root.scale-factor;
-        height: Metrics.focus-arm * root.scale-factor;
-        viewbox-width: 58; viewbox-height: 58;
-        commands: "M 52 6 H 32 A 26 26 0 0 0 6 32 V 52";
-        fill: transparent;
-        stroke: root.cursor-ink;
-        stroke-width: Metrics.focus-stroke * root.scale-factor;
-        stroke-line-cap: round;
-        stroke-line-join: round;
-    }
-    Path {
-        x: parent.width - self.width + root.cursor-outset; y: -root.cursor-outset;
-        width: Metrics.focus-arm * root.scale-factor;
-        height: Metrics.focus-arm * root.scale-factor;
-        viewbox-width: 58; viewbox-height: 58;
-        commands: "M 6 6 H 26 A 26 26 0 0 1 52 32 V 52";
-        fill: transparent;
-        stroke: root.cursor-ink;
-        stroke-width: Metrics.focus-stroke * root.scale-factor;
-        stroke-line-cap: round;
-        stroke-line-join: round;
-    }
-    Path {
-        x: -root.cursor-outset; y: parent.height - self.height + root.cursor-outset;
-        width: Metrics.focus-arm * root.scale-factor;
-        height: Metrics.focus-arm * root.scale-factor;
-        viewbox-width: 58; viewbox-height: 58;
-        commands: "M 6 6 V 26 A 26 26 0 0 0 32 52 H 52";
-        fill: transparent;
-        stroke: root.cursor-ink;
-        stroke-width: Metrics.focus-stroke * root.scale-factor;
-        stroke-line-cap: round;
-        stroke-line-join: round;
-    }
-    Path {
-        x: parent.width - self.width + root.cursor-outset; y: parent.height - self.height + root.cursor-outset;
-        width: Metrics.focus-arm * root.scale-factor;
-        height: Metrics.focus-arm * root.scale-factor;
-        viewbox-width: 58; viewbox-height: 58;
-        commands: "M 52 6 V 26 A 26 26 0 0 1 26 52 H 6";
-        fill: transparent;
-        stroke: root.cursor-ink;
-        stroke-width: Metrics.focus-stroke * root.scale-factor;
-        stroke-line-cap: round;
-        stroke-line-join: round;
-    }
+    border-width: Metrics.focus-stroke;
+    border-radius: root.shell-radius + Metrics.focus-offset;
+    border-color: Theme.focus;
 }

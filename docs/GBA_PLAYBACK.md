@@ -137,11 +137,11 @@ The game worker publishes atomic stereo frames to a bounded queue; PipeWire does
 not lock against core filtering or allocate. Playback builds about 31 ms of
 headroom for mGBA on startup and after a real underrun (anything queued beyond that before
 the first sample is heard is trimmed), with short ramps at audio boundaries.
-DS uses a bounded 100 ms queue with about 62 ms of starting headroom, absorbing
-the 30–50 ms serialization, GPU readback and preview work of high-resolution
-rewind snapshots. mGBA retains its 50 ms queue and about 31 ms of headroom.
-Periodic DS rewind samples use a frame already read back for display, avoiding
-an extra GPU readback at 2× speed. If the display stops requesting frames during
+DS uses a bounded 100 ms queue with about 62 ms of starting headroom for
+synchronous core work. mGBA retains its 50 ms queue and about 31 ms of headroom.
+GPU DS rewind snapshots transfer a native-sized preview instead of the full
+upscaled image; state serialization still runs synchronously on the core worker.
+If the display stops requesting frames during
 background play, snapshots continue at a one-second fallback interval.
 The worker waits for PipeWire's first callback before producing gameplay audio,
 while still accepting stop/pause commands; a two-second connection stall becomes
@@ -327,18 +327,28 @@ With None filtering, GPU-rendered DS pictures larger than the viewport are
 nearest-sampled on the GPU before readback, copying only the pixels needed for
 presentation. Each layout/swap/resize uses the physical screen sizes; native,
 other filters and unavailable GPU targets retain their existing pipeline.
-Internal rendering stays at the selected resolution. Full-resolution capture
-and rewind readbacks stay separate and unchanged. Exact nearest texel-boundary
-ties may choose either adjacent source texel on different drivers. The full
-rewind capture work is warmed before audio begins; its boot preview is discarded
-and playback retains the existing audio queue and latency settings.
+Internal rendering stays at the selected resolution. Screenshots and saved-state
+captures remain full resolution. Rewind uses GPU nearest sampling to read only
+256×384 pixels, retaining each screen's native size; a failed GPU target falls
+back to full capture and CPU preview preparation. The readback target is reused
+between display and rewind sizes, avoiding repeated texture allocations.
+Exact nearest texel-boundary ties may choose either adjacent source texel on
+different drivers. Full capture storage, serialization and preview work are warmed before audio begins;
+the boot preview is discarded and audio queue/latency settings stay unchanged.
 
-GPU readback keeps full-resolution pictures for captures and rewind. Its CPU
+Both full-resolution and preview readbacks restore the core's GL state. Their CPU
 normalization flips rows and applies opacity to whole RGBA pixels, allowing
 compiler vectorization without architecture-specific intrinsics or changing RGB
 values. At high DS resolutions, GPU readback and presentation can cost more
 than emulation; selected speed, emulated frame rate and displayed frame rate
 are separate measurements.
+
+The ignored `real_ds_player_fast_forward_audio_report` measurement also accepts
+`HORIZON_DS_NORMAL_ONLY=1` and `HORIZON_DS_RUN_SECONDS` for normal-speed resolution
+and automatic-save investigations. Test-only `HORIZON_TEST_NO_REWIND=1` permits an
+isolated comparison; production rewind remains enabled. Debug test logs separate
+rewind serialization time from total capture time. The bundled melonDS DS and
+melonDS sources remain pinned upstream archives without source patches.
 
 ## Development
 
@@ -447,3 +457,6 @@ DS None/Smooth presentation copies the original stacked image directly into its
 output buffer, retaining both screen bounds and every source pixel. It avoids
 per-screen intermediate buffers and reassembly, especially costly at 8×. See
 [ADR 0225](adr/0225-ds-fast-forward-pacing-and-compact-toggle.md).
+
+Nintendo 3DS uses the separately approved Azahar Vulkan core; see
+[3DS playback](THREE_DS_PLAYBACK.md) for import formats, controls, isolated saves and initial limits.

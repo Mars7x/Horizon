@@ -11,7 +11,7 @@ export component GameTile inherits Rectangle {
     private property <bool> releasing-press: false;
 
     // The spring easing belongs only to the release, not ordinary carousel
-    // navigation. Keep the previous 140ms selected-card focus transition.
+    // navigation. Selection uses the shared selected-card scale transition.
     changed launching => {
         if (!root.launching) {
             root.releasing-press = true;
@@ -195,7 +195,6 @@ export component GameTile inherits Rectangle {
         }
 
         focus := FocusFrame {
-            active: root.selected && root.focus-visible && !root.launching;
             x: -Metrics.focus-offset;
             y: -Metrics.focus-offset;
             width: parent.width + Metrics.focus-offset * 2;

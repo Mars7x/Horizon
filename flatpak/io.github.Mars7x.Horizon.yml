@@ -152,6 +152,28 @@ modules:
         archive-type: tar-gzip
         sha256: b9258cf6254e7f7c37f1cd61dba943a1c5ea3cff5718c789834dac359094f5f7
 
+  - name: azahar-core
+    # Approved 3DS core; Vulkan only. No Qt/SDL frontend or surface is used.
+    buildsystem: simple
+    build-commands:
+      - >-
+        cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        -DENABLE_LIBRETRO=ON -DENABLE_OPENGL=OFF -DENABLE_VULKAN=ON
+        -DENABLE_SOFTWARE_RENDERER=OFF -DENABLE_TESTS=OFF -DENABLE_LTO=OFF
+      - cmake --build build
+      - install -Dm0755 build/bin/Release/azahar_libretro.so /app/lib/horizon/azahar_libretro.so
+      - install -Dm0644 license.txt /app/share/licenses/azahar/GPL-2.0-or-later.txt
+      - install -Dm0644 Horizon-Azahar-notices.txt /app/share/licenses/azahar/THIRD_PARTY_NOTICES.txt
+    sources:
+      - type: git
+        url: https://github.com/azahar-emu/azahar.git
+        tag: '2126.2'
+        commit: 219d743a1e698101fe1ab8bef43e6563126c3c27
+        # Recursive submodules are pinned by the superproject; keep enabled.
+      - type: file
+        path: ../LICENSES/Azahar-third-party.txt
+        dest-filename: Horizon-Azahar-notices.txt
+
   - name: horizon
     buildsystem: simple
     build-options:
