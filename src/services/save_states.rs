@@ -13,9 +13,10 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 pub const MANUAL_SLOTS: u8 = 4;
-/// Native frame sizes: GBA, Game Boy and Game Boy Color, and a Super Game
-/// Boy game with its border.
-const PREVIEW_SIZES: [(u32, u32); 4] = [(240, 160), (160, 144), (256, 224), (256, 384)];
+/// Native frame sizes: GBA, Game Boy and Game Boy Color, a Super Game Boy
+/// game with its border, DS (both screens) and 3DS (both screens, as Azahar
+/// draws them).
+const PREVIEW_SIZES: [(u32, u32); 5] = [(240, 160), (160, 144), (256, 224), (256, 384), (400, 480)];
 
 /// An upscaled frame (DS drawn at 2× to 8×) averaged down to its native
 /// preview size; None when it already is one, or isn't a whole multiple.
@@ -114,24 +115,24 @@ impl Store {
         }
     }
     fn core_name(&self) -> &'static str {
-        if self.folder.manifest.system == "nds" {
-            "melonds-ds"
-        } else {
-            "mgba"
+        match self.folder.manifest.system.as_str() {
+            "nds" => "melonds-ds",
+            "3ds" => "azahar",
+            _ => "mgba",
         }
     }
     fn max_state_size(&self) -> usize {
-        if self.folder.manifest.system == "nds" {
-            64 * 1024 * 1024
-        } else {
-            16 * 1024 * 1024
+        match self.folder.manifest.system.as_str() {
+            "3ds" => 128 * 1024 * 1024,
+            "nds" => 64 * 1024 * 1024,
+            _ => 16 * 1024 * 1024,
         }
     }
     fn core(&self) -> PathBuf {
-        if self.folder.manifest.system == "nds" {
-            data_paths::ds_state_core_directory(&self.folder.directory)
-        } else {
-            data_paths::state_core_directory(&self.folder.directory)
+        match self.folder.manifest.system.as_str() {
+            "nds" => data_paths::ds_state_core_directory(&self.folder.directory),
+            "3ds" => data_paths::three_ds_state_core_directory(&self.folder.directory),
+            _ => data_paths::state_core_directory(&self.folder.directory),
         }
     }
     fn files(&self, directory: &Path, slot: u8) -> data_paths::SaveStatePaths {

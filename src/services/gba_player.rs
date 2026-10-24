@@ -855,25 +855,11 @@ fn play(
             }
             (true, core)
         } else {
-            // Patches apply to a copy in memory; the check is of the file.
-            let patched = match crate::services::mods::patch_cartridge(&game_folder.directory, &rom)
-            {
-                Ok(patched) => patched,
-                Err(_) if !rom_matches(&rom, sha256) => {
-                    failure = CHANGED_ROM.into();
-                    continue;
-                }
-                Err(error) => return Err(error),
-            };
-            if let Some((_, applied)) = &patched {
-                tracing::info!(count = applied.len(), "cartridge mods applied");
-            }
-            let content = patched.as_ref().map_or(rom.as_slice(), |(bytes, _)| bytes);
             thread::scope(|scope| {
                 let check = scope.spawn(|| rom_matches(&rom, sha256));
                 let core = Core::load_system(
                     if ds { &paths.ds_core } else { &paths.core },
-                    content,
+                    &rom,
                     mgba,
                     Arc::clone(&audio),
                     Arc::clone(&buttons),
@@ -968,7 +954,7 @@ fn play(
         crate::services::save_states::Store::new(game_folder.clone(), core.state_identity.clone());
     if preferences.resume_last_state && core.supports_states()
         && let Some(snapshot) = states.latest().map_err(|_| "Saved states are unavailable or incompatible. Disable Resume last state in Settings to start normally. Existing states have been preserved.".to_owned())? {
-            core.restore_state(&snapshot.bytes)?;
+            core.restore_launch_state(&snapshot.bytes)?;
     }
     let state_at = launch.elapsed();
     let mut autosave = Autosave {
@@ -980,7 +966,7 @@ fn play(
     let mut rewind = crate::domain::rewind::History::default();
     let mut rewind_clock = Duration::ZERO;
     let mut rewind_since = Duration::ZERO;
-    let mut rewind_enabled = core.supports_states();
+    let mut rewind_enabled = core.supports_frequent_states();
     #[cfg(test)]
     if std::env::var_os("HORIZON_TEST_NO_REWIND").is_some() {
         rewind_enabled = false;
@@ -1081,7 +1067,12 @@ fn play(
                         let result = if rewind_enabled {
                             record_rewind(&core, &mut rewind, rewind_clock, lid_closed)
                         } else {
-                            Err("Rewind is unavailable for this game".into())
+                            Err(if three_ds {
+                                "Rewind isn't available for 3DS games"
+                            } else {
+                                "Rewind is unavailable for this game"
+                            }
+                            .into())
                         };
                         if let Err(error) = result {
                             let _ = events.send(Event::ActionFailed(error));
@@ -1216,7 +1207,12 @@ fn play(
                     }
                     Command::QuickSave => {
                         if session.is_some() && core.supports_states() {
+                            // A 3DS state takes about a second: a clean pause,
+                            // not audio running dry.
+                            audio.set_paused(paused || three_ds);
                             autosave.start(&core, &writer, QUICK_SLOT, true);
+                            audio.set_paused(paused);
+                            deadline = Instant::now();
                         } else {
                             let _ = events
                                 .send(Event::QuickSaved(Err("This game can't save states".into())));
@@ -1231,7 +1227,7 @@ fn play(
                     }
                     Command::Autosave => {
                         if session.is_some()
-                            && core.supports_states()
+                            && core.supports_frequent_states()
                             && autosave.played >= Autosave::AT_LEAST
                         {
                             autosave.start(&core, &writer, 0, false);
@@ -1241,8 +1237,11 @@ fn play(
                         let _ = events.send(Event::States(states.list()));
                     }
                     Command::SaveState(slot) => {
+                        audio.set_paused(paused || three_ds);
                         let result = core.serialize_state().and_then(|bytes| core.capture_frame().and_then(|frame|
                             states.save(slot, &bytes, &frame).map_err(|_| "Could not save the state. Existing checkpoints have been preserved.".to_owned())));
+                        audio.set_paused(paused);
+                        deadline = Instant::now();
                         if let Err(error) = result {
                             let _ = events.send(Event::ActionFailed(error));
                         } else {
@@ -1373,7 +1372,7 @@ fn play(
                     .min(Duration::from_millis(100));
             }
             last_tick = now;
-            if !paused && session.is_some() && core.supports_states() && autosave.due() {
+            if !paused && session.is_some() && core.supports_frequent_states() && autosave.due() {
                 autosave.start(&core, &writer, 0, false);
             }
             if !paused {

@@ -36,9 +36,12 @@ like a DS game's. Settings → Cores → Azahar → Screen layout chooses Stacke
 The quick menu's Screen layout and Swap screens, and L3, change them during
 play; as on the DS, the game remembers its layout and swap in `view.json` and
 then ignores the default. Screenshots show the screens as arranged. Internal
-resolution renders at Native or 2× to 6× (`cores/azahar.json`, next launch). Each frame is read back from the
-graphics card into CPU-cached memory, about 1 ms at Native and 4 ms at 4×; reading
-uncached device memory had cost up to 70 ms a frame and caused the stutter.
+resolution renders at Native or 2× to 6× (`cores/azahar.json`, next launch). Frames stay on
+the graphics card until shown: each screen is then shrunk there to the size it
+is shown at (exact halvings, then one linear step) and only that is read back,
+into CPU-cached memory. Screenshots read the full frame. At 6× this keeps 60
+frames a second where reading every 27 MB frame managed about 50
+([ADR 0235](adr/0235-3ds-gpu-viewport-readback.md)).
 Games still pause briefly the first time they compile a shader; Azahar keeps
 those in its shader cache.
 
@@ -51,11 +54,30 @@ existing Z/X/C/V, A/S, Enter and Backspace bindings remain. Mouse
 and touch work on the bottom screen wherever the layout puts it; Azahar reads
 it once, as a touch.
 
-Quick menu offers Continue, 1×/2× playback, Screen layout, Swap screens,
-Screenshot, Restart and Return to Horizon (no lid). 3DS rewind, manual states and automatic resume are deliberately unavailable
-in this first integration. In particular, Azahar's expensive state-size query
-must never run periodically during gameplay. Upstream manual state capability
-is not being described as unsupported by Azahar itself.
+Quick menu offers Continue, 1×/2× playback, Screen layout, Swap screens, Save
+state, Load state, Screenshot, Restart and Return to Horizon (no lid, no
+rewind).
+
+## Save states
+
+3DS games have the four manual slots, quick save/load and the automatic resume
+point, using Azahar's own states (about 7 MB, compressed) in the shared bundle
+format under `states/azahar`, with a 400×480 preview of both screens. A state
+takes Azahar about a second to save and a little under a second to load at any
+internal resolution: the quick menu says "Saving state…" / "Loading state…"
+meanwhile, and the game's audio pauses rather than running dry. Return to
+Horizon writes the resume point (exit takes about a second longer), and with
+Resume last state on, a launch restores the newest point behind the usual
+loading picture.
+
+Because each state costs a second, nothing takes one in the background: no
+rewind, no timed or focus-loss autosaves, and Azahar's size query (which builds
+a complete state) is never polled. Loading takes no rollback state first; the
+bundle is checksummed, Azahar checks the game and build before reading it, and
+a load that fails ends the session as on other systems. Azahar rejects states
+from any other build, so a core update makes older 3DS states unloadable
+([ADR 0211](adr/0211-states-follow-the-core-release.md),
+[ADR 0237](adr/0237-3ds-save-states.md)).
 
 ## Saves and compatibility
 

@@ -1,6 +1,8 @@
 //! Azahar's libretro Vulkan v5 interface, on the existing emulation worker.
-//! The core negotiates its device/features. Native-size images are copied into
-//! the existing RGBA presentation boundary; no window surface or GL fallback.
+//! The core negotiates its device/features. Each frame is accepted when the
+//! core presents it and read back only when needed: shown frames are first
+//! shrunk on the GPU to the size each screen is shown at, and screenshots read
+//! the full image. No window surface or GL fallback.
 //! ABI definitions follow libretro_vulkan.h (RetroArch team, MIT; see notices).
 use ash::{Entry, vk};
 use std::{
@@ -59,6 +61,12 @@ pub struct Backend {
     pub destroy: Option<extern "C" fn()>,
     pub negotiation: Option<Negotiation>,
     pub host: Option<Box<Host>>,
+    /// The latest frame hasn't been read at full size yet.
+    pub unread: bool,
+    /// The shown frame, shrunk on the GPU, reused between frames.
+    pub presentation: super::gba_core::Frame,
+    /// Shrinking failed once: read full frames for the rest of the session.
+    pub shrink_failed: bool,
 }
 #[repr(C)]
 struct Image {
@@ -238,7 +246,24 @@ pub struct Host {
     memory: vk::DeviceMemory,
     capacity: u64,
     coherent: bool,
+    /// The core's latest presented frame and its size.
+    current: Option<(FrameImage, u32, u32)>,
+    /// GPU images the shown frame is shrunk through: halvings of the whole
+    /// frame (mip levels), then the two screens at their shown sizes.
+    halves: Scratch,
+    shown: Scratch,
 }
+/// A reusable device-local image, recreated only when it must grow.
+#[derive(Default)]
+struct Scratch {
+    image: vk::Image,
+    memory: vk::DeviceMemory,
+    format: vk::Format,
+    extent: (u32, u32),
+    levels: u32,
+}
+/// A rectangle of pixels: x, y, width, height.
+pub type Region = (u32, u32, u32, u32);
 fn error(operation: &str, value: vk::Result) -> String {
     format!("Vulkan {operation} failed ({value:?})")
 }
@@ -270,6 +295,9 @@ impl Host {
             memory: vk::DeviceMemory::null(),
             capacity: 0,
             coherent: false,
+            current: None,
+            halves: Scratch::default(),
+            shown: Scratch::default(),
         });
         host.initialize(negotiation)?;
         Ok(host)
@@ -502,16 +530,13 @@ impl Host {
         }
         Ok(())
     }
-    pub fn read_frame(
-        &mut self,
-        width: u32,
-        height: u32,
-        rgba: &mut Vec<u8>,
-    ) -> Result<(), String> {
+    /// The core presented a frame of `width`×`height`: remember its image,
+    /// and submit any work it asked the frontend to submit. Nothing is read.
+    pub fn accept_frame(&mut self, width: u32, height: u32) -> Result<(), String> {
         if !(1..=4096).contains(&width) || !(1..=4096).contains(&height) {
             return Err("Invalid Vulkan frame dimensions".into());
         }
-        let (image, waits, mut commands, signal) = {
+        let (image, waits, commands, signal) = {
             let mut pending = self
                 .shared
                 .pending
@@ -545,101 +570,8 @@ impl Host {
         ) {
             return Err("Unsupported Azahar Vulkan pixel format or layout".into());
         }
-        let bytes = u64::from(width) * u64::from(height) * 4;
-        self.prepare_buffer(bytes)?;
-        let device = self.device.as_ref().ok_or("Vulkan device is unavailable")?;
-        let layout = if image.layout == vk::ImageLayout::GENERAL {
-            image.layout
-        } else {
-            vk::ImageLayout::TRANSFER_SRC_OPTIMAL
-        };
-        let range = vk::ImageSubresourceRange::default()
-            .aspect_mask(vk::ImageAspectFlags::COLOR)
-            .level_count(1)
-            .layer_count(1);
-        // SAFETY: image was submitted by the pinned core on this device;
-        // queue ordering/barriers protect it, and copy size is bounded above.
-        unsafe {
-            device
-                .reset_command_buffer(self.command, vk::CommandBufferResetFlags::empty())
-                .map_err(|e| error("command reset", e))?;
-            device
-                .begin_command_buffer(
-                    self.command,
-                    &vk::CommandBufferBeginInfo::default()
-                        .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
-                )
-                .map_err(|e| error("command begin", e))?;
-            let before = vk::ImageMemoryBarrier::default()
-                .image(image.image)
-                .subresource_range(range)
-                .old_layout(image.layout)
-                .new_layout(layout)
-                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                .src_access_mask(vk::AccessFlags::MEMORY_WRITE | vk::AccessFlags::SHADER_READ)
-                .dst_access_mask(vk::AccessFlags::TRANSFER_READ);
-            device.cmd_pipeline_barrier(
-                self.command,
-                vk::PipelineStageFlags::ALL_COMMANDS,
-                vk::PipelineStageFlags::TRANSFER,
-                vk::DependencyFlags::empty(),
-                &[],
-                &[],
-                &[before],
-            );
-            let region = vk::BufferImageCopy::default()
-                .image_subresource(
-                    vk::ImageSubresourceLayers::default()
-                        .aspect_mask(vk::ImageAspectFlags::COLOR)
-                        .layer_count(1),
-                )
-                .image_extent(vk::Extent3D {
-                    width,
-                    height,
-                    depth: 1,
-                });
-            device.cmd_copy_image_to_buffer(
-                self.command,
-                image.image,
-                layout,
-                self.buffer,
-                &[region],
-            );
-            let after = vk::ImageMemoryBarrier::default()
-                .image(image.image)
-                .subresource_range(range)
-                .old_layout(layout)
-                .new_layout(image.layout)
-                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                .src_access_mask(vk::AccessFlags::TRANSFER_READ)
-                .dst_access_mask(vk::AccessFlags::MEMORY_READ | vk::AccessFlags::MEMORY_WRITE);
-            let host = vk::BufferMemoryBarrier::default()
-                .buffer(self.buffer)
-                .size(vk::WHOLE_SIZE)
-                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
-                .dst_access_mask(vk::AccessFlags::HOST_READ);
-            device.cmd_pipeline_barrier(
-                self.command,
-                vk::PipelineStageFlags::TRANSFER,
-                vk::PipelineStageFlags::ALL_COMMANDS | vk::PipelineStageFlags::HOST,
-                vk::DependencyFlags::empty(),
-                &[],
-                &[host],
-                &[after],
-            );
-            device
-                .end_command_buffer(self.command)
-                .map_err(|e| error("command end", e))?;
-            let waits = if commands.is_empty() {
-                waits
-            } else {
-                Vec::new()
-            };
-            commands.push(self.command);
+        if !commands.is_empty() || !waits.is_empty() || signal != vk::Semaphore::null() {
+            let device = self.device.as_ref().ok_or("Vulkan device is unavailable")?;
             let stages = vec![vk::PipelineStageFlags::ALL_COMMANDS; waits.len()];
             let signals: Vec<_> = (signal != vk::Semaphore::null())
                 .then_some(signal)
@@ -650,18 +582,464 @@ impl Host {
                 .wait_semaphores(&waits)
                 .wait_dst_stage_mask(&stages)
                 .signal_semaphores(&signals);
-            device
-                .reset_fences(&[self.fence])
-                .map_err(|e| error("fence reset", e))?;
+            let _queue = acquire(&self.shared.queue_locked);
+            // SAFETY: the core's own command buffers and semaphores, for its
+            // device, submitted once on the queue it shares with us.
+            unsafe { device.queue_submit(self.queue, &[submit], vk::Fence::null()) }
+                .map_err(|e| error("core submission", e))?;
+        }
+        self.current = Some((image, width, height));
+        Ok(())
+    }
+
+    /// The latest frame's size.
+    pub fn current_size(&self) -> Option<(u32, u32)> {
+        self.current.map(|(_, width, height)| (width, height))
+    }
+
+    /// The latest frame at full size, as opaque RGBA.
+    pub fn read_frame(&mut self, rgba: &mut Vec<u8>) -> Result<(u32, u32), String> {
+        let (image, width, height) = self.current.ok_or("No Azahar frame is available")?;
+        self.read(image, None, (width, height), rgba)?;
+        Ok((width, height))
+    }
+
+    /// Two `regions` of the latest frame, each shrunk on the GPU to its
+    /// `target` size, the first above the second at the left (a buffer of
+    /// the wider width), as opaque RGBA. Targets must not enlarge.
+    pub fn read_shrunk(
+        &mut self,
+        regions: [Region; 2],
+        targets: [(u32, u32); 2],
+        rgba: &mut Vec<u8>,
+    ) -> Result<(u32, u32), String> {
+        let (image, width, height) = self.current.ok_or("No Azahar frame is available")?;
+        if regions
+            .iter()
+            .zip(&targets)
+            .any(|(&(x, y, w, h), &(tw, th))| {
+                tw == 0 || th == 0 || tw > w || th > h || x + w > width || y + h > height
+            })
+        {
+            return Err("Invalid Vulkan shrink request".into());
+        }
+        let size = (targets[0].0.max(targets[1].0), targets[0].1 + targets[1].1);
+        self.read(image, Some((regions, targets, (width, height))), size, rgba)?;
+        Ok(size)
+    }
+
+    /// Make the halving (`halves`) or shown-size scratch image at least
+    /// `extent` with `levels` mip levels, recreating it only to grow.
+    fn grow_image(
+        &mut self,
+        halves: bool,
+        format: vk::Format,
+        extent: (u32, u32),
+        levels: u32,
+    ) -> Result<(), String> {
+        let scratch = if halves { &self.halves } else { &self.shown };
+        if scratch.image != vk::Image::null()
+            && scratch.format == format
+            && scratch.extent.0 >= extent.0
+            && scratch.extent.1 >= extent.1
+            && scratch.levels >= levels
+        {
+            return Ok(());
+        }
+        let device = self.device.as_ref().ok_or("Vulkan device is unavailable")?;
+        let instance = self
+            .instance
+            .as_ref()
+            .ok_or("Vulkan instance is unavailable")?;
+        // SAFETY: earlier reads are fenced before returning, so the old image
+        // is idle; the new one is created and bound on this device.
+        unsafe {
+            let features = instance
+                .get_physical_device_format_properties(self.gpu, format)
+                .optimal_tiling_features;
+            if !features.contains(
+                vk::FormatFeatureFlags::BLIT_SRC
+                    | vk::FormatFeatureFlags::BLIT_DST
+                    | vk::FormatFeatureFlags::SAMPLED_IMAGE_FILTER_LINEAR,
+            ) {
+                return Err("The GPU cannot shrink Azahar's frames".into());
+            }
+            let scratch = if halves {
+                &mut self.halves
+            } else {
+                &mut self.shown
+            };
+            device.destroy_image(scratch.image, None);
+            device.free_memory(scratch.memory, None);
+            *scratch = Scratch::default();
+            let image = device
+                .create_image(
+                    &vk::ImageCreateInfo::default()
+                        .image_type(vk::ImageType::TYPE_2D)
+                        .format(format)
+                        .extent(vk::Extent3D {
+                            width: extent.0,
+                            height: extent.1,
+                            depth: 1,
+                        })
+                        .mip_levels(levels)
+                        .array_layers(1)
+                        .samples(vk::SampleCountFlags::TYPE_1)
+                        .tiling(vk::ImageTiling::OPTIMAL)
+                        .usage(
+                            vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST,
+                        )
+                        .sharing_mode(vk::SharingMode::EXCLUSIVE)
+                        .initial_layout(vk::ImageLayout::UNDEFINED),
+                    None,
+                )
+                .map_err(|e| error("shrink image", e))?;
+            let required = device.get_image_memory_requirements(image);
+            let properties = instance.get_physical_device_memory_properties(self.gpu);
+            let Some(index) = (0..properties.memory_type_count)
+                .filter(|&index| required.memory_type_bits & (1 << index) != 0)
+                .min_by_key(|&index| {
+                    !properties.memory_types[index as usize]
+                        .property_flags
+                        .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
+                })
+            else {
+                device.destroy_image(image, None);
+                return Err("No Vulkan memory for shrinking frames".into());
+            };
+            let memory = match device.allocate_memory(
+                &vk::MemoryAllocateInfo::default()
+                    .allocation_size(required.size)
+                    .memory_type_index(index),
+                None,
+            ) {
+                Ok(memory) => memory,
+                Err(value) => {
+                    device.destroy_image(image, None);
+                    return Err(error("shrink allocation", value));
+                }
+            };
+            if let Err(value) = device.bind_image_memory(image, memory, 0) {
+                device.destroy_image(image, None);
+                device.free_memory(memory, None);
+                return Err(error("shrink binding", value));
+            }
+            *scratch = Scratch {
+                image,
+                memory,
+                format,
+                extent,
+                levels,
+            };
+        }
+        Ok(())
+    }
+
+    /// Copy `image` (or, with `shrink`, its two regions shrunk to their
+    /// targets) into the readback buffer and then into `rgba`, waiting for
+    /// the GPU.
+    #[allow(clippy::type_complexity)]
+    fn read(
+        &mut self,
+        image: FrameImage,
+        shrink: Option<([Region; 2], [(u32, u32); 2], (u32, u32))>,
+        (width, height): (u32, u32),
+        rgba: &mut Vec<u8>,
+    ) -> Result<(), String> {
+        // How many halvings each screen needs before one linear blit (which
+        // reads 2×2 pixels) reaches its target without skipping any.
+        let halvings = |(_, _, w, h): Region, (tw, th): (u32, u32)| {
+            let mut level = 0;
+            while (w >> level) > 2 * tw || (h >> level) > 2 * th {
+                level += 1;
+            }
+            level
+        };
+        let plan = shrink.map(|(regions, targets, source)| {
+            let levels = [0, 1].map(|i| halvings(regions[i], targets[i]));
+            (regions, targets, source, levels)
+        });
+        if let Some((_, _, source, levels)) = plan {
+            let deepest = levels[0].max(levels[1]);
+            if deepest > 0 {
+                self.grow_image(
+                    true,
+                    image.format,
+                    ((source.0 >> 1).max(1), (source.1 >> 1).max(1)),
+                    deepest,
+                )?;
+            }
+            self.grow_image(false, image.format, (width, height), 1)?;
+        }
+        let bytes = u64::from(width) * u64::from(height) * 4;
+        self.prepare_buffer(bytes)?;
+        let device = self.device.as_ref().ok_or("Vulkan device is unavailable")?;
+        let layout = if image.layout == vk::ImageLayout::GENERAL {
+            image.layout
+        } else {
+            vk::ImageLayout::TRANSFER_SRC_OPTIMAL
+        };
+        let range = |level: u32, count: u32| {
+            vk::ImageSubresourceRange::default()
+                .aspect_mask(vk::ImageAspectFlags::COLOR)
+                .base_mip_level(level)
+                .level_count(count)
+                .layer_count(1)
+        };
+        let layers = |level: u32| {
+            vk::ImageSubresourceLayers::default()
+                .aspect_mask(vk::ImageAspectFlags::COLOR)
+                .mip_level(level)
+                .layer_count(1)
+        };
+        let barrier = |image: vk::Image,
+                       range: vk::ImageSubresourceRange,
+                       (old, new): (vk::ImageLayout, vk::ImageLayout),
+                       (from, to): (vk::AccessFlags, vk::AccessFlags)| {
+            vk::ImageMemoryBarrier::default()
+                .image(image)
+                .subresource_range(range)
+                .old_layout(old)
+                .new_layout(new)
+                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .src_access_mask(from)
+                .dst_access_mask(to)
+        };
+        let corner = |x: u32, y: u32| vk::Offset3D {
+            x: x as i32,
+            y: y as i32,
+            z: 1,
+        };
+        let origin = |x: u32, y: u32| vk::Offset3D {
+            x: x as i32,
+            y: y as i32,
+            z: 0,
+        };
+        let (halves, shown) = (self.halves.image, self.shown.image);
+        // SAFETY: images were created on this device (the core's by the
+        // pinned core); barriers order them against the core's work on the
+        // same queue, and every size is bounded by the frame's.
+        unsafe {
+            let command = self.command;
+            let record =
+                |what: &str, value: Result<(), vk::Result>| value.map_err(|e| error(what, e));
+            record(
+                "command reset",
+                device.reset_command_buffer(command, vk::CommandBufferResetFlags::empty()),
+            )?;
+            record(
+                "command begin",
+                device.begin_command_buffer(
+                    command,
+                    &vk::CommandBufferBeginInfo::default()
+                        .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
+                ),
+            )?;
+            let transfer = vk::PipelineStageFlags::TRANSFER;
+            device.cmd_pipeline_barrier(
+                command,
+                vk::PipelineStageFlags::ALL_COMMANDS,
+                transfer,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[barrier(
+                    image.image,
+                    range(0, 1),
+                    (image.layout, layout),
+                    (
+                        vk::AccessFlags::MEMORY_WRITE | vk::AccessFlags::SHADER_READ,
+                        vk::AccessFlags::TRANSFER_READ,
+                    ),
+                )],
+            );
+            // What the readback buffer is copied from.
+            let mut copy_from = (image.image, layout, 0);
+            if let Some((regions, targets, source, levels)) = plan {
+                let deepest = levels[0].max(levels[1]);
+                let write = (vk::AccessFlags::empty(), vk::AccessFlags::TRANSFER_WRITE);
+                let to_read = (
+                    vk::AccessFlags::TRANSFER_WRITE,
+                    vk::AccessFlags::TRANSFER_READ,
+                );
+                let mut starts = vec![barrier(
+                    shown,
+                    range(0, 1),
+                    (
+                        vk::ImageLayout::UNDEFINED,
+                        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    ),
+                    write,
+                )];
+                if deepest > 0 {
+                    starts.push(barrier(
+                        halves,
+                        range(0, deepest),
+                        (
+                            vk::ImageLayout::UNDEFINED,
+                            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                        ),
+                        write,
+                    ));
+                }
+                device.cmd_pipeline_barrier(
+                    command,
+                    transfer,
+                    transfer,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[],
+                    &starts,
+                );
+                // Halve the whole frame, level by level: each halving
+                // averages 2×2 pixels exactly.
+                for level in 1..=deepest {
+                    let (from, from_layout, from_level) = if level == 1 {
+                        (image.image, layout, 0)
+                    } else {
+                        (halves, vk::ImageLayout::TRANSFER_SRC_OPTIMAL, level - 2)
+                    };
+                    let from_size = (
+                        (source.0 >> (level - 1)).max(1),
+                        (source.1 >> (level - 1)).max(1),
+                    );
+                    let to_size = ((source.0 >> level).max(1), (source.1 >> level).max(1));
+                    let blit = vk::ImageBlit::default()
+                        .src_subresource(layers(from_level))
+                        .src_offsets([origin(0, 0), corner(from_size.0, from_size.1)])
+                        .dst_subresource(layers(level - 1))
+                        .dst_offsets([origin(0, 0), corner(to_size.0, to_size.1)]);
+                    device.cmd_blit_image(
+                        command,
+                        from,
+                        from_layout,
+                        halves,
+                        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                        &[blit],
+                        vk::Filter::LINEAR,
+                    );
+                    device.cmd_pipeline_barrier(
+                        command,
+                        transfer,
+                        transfer,
+                        vk::DependencyFlags::empty(),
+                        &[],
+                        &[],
+                        &[barrier(
+                            halves,
+                            range(level - 1, 1),
+                            (
+                                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                            ),
+                            to_read,
+                        )],
+                    );
+                }
+                // Each screen from the level that is at most twice its size.
+                let mut below = 0;
+                for screen in 0..2 {
+                    let (x, y, w, h) = regions[screen];
+                    let level = levels[screen];
+                    let (from, from_layout, from_level) = if level == 0 {
+                        (image.image, layout, 0)
+                    } else {
+                        (halves, vk::ImageLayout::TRANSFER_SRC_OPTIMAL, level - 1)
+                    };
+                    let (tw, th) = targets[screen];
+                    let blit = vk::ImageBlit::default()
+                        .src_subresource(layers(from_level))
+                        .src_offsets([
+                            origin(x >> level, y >> level),
+                            corner((x + w) >> level, (y + h) >> level),
+                        ])
+                        .dst_subresource(layers(0))
+                        .dst_offsets([origin(0, below), corner(tw, below + th)]);
+                    device.cmd_blit_image(
+                        command,
+                        from,
+                        from_layout,
+                        shown,
+                        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                        &[blit],
+                        vk::Filter::LINEAR,
+                    );
+                    below += th;
+                }
+                device.cmd_pipeline_barrier(
+                    command,
+                    transfer,
+                    transfer,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[],
+                    &[barrier(
+                        shown,
+                        range(0, 1),
+                        (
+                            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                        ),
+                        to_read,
+                    )],
+                );
+                copy_from = (shown, vk::ImageLayout::TRANSFER_SRC_OPTIMAL, 0);
+            }
+            let region = vk::BufferImageCopy::default()
+                .image_subresource(layers(copy_from.2))
+                .image_extent(vk::Extent3D {
+                    width,
+                    height,
+                    depth: 1,
+                });
+            device.cmd_copy_image_to_buffer(
+                command,
+                copy_from.0,
+                copy_from.1,
+                self.buffer,
+                &[region],
+            );
+            let after = barrier(
+                image.image,
+                range(0, 1),
+                (layout, image.layout),
+                (
+                    vk::AccessFlags::TRANSFER_READ,
+                    vk::AccessFlags::MEMORY_READ | vk::AccessFlags::MEMORY_WRITE,
+                ),
+            );
+            let host = vk::BufferMemoryBarrier::default()
+                .buffer(self.buffer)
+                .size(vk::WHOLE_SIZE)
+                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                .dst_access_mask(vk::AccessFlags::HOST_READ);
+            device.cmd_pipeline_barrier(
+                command,
+                transfer,
+                vk::PipelineStageFlags::ALL_COMMANDS | vk::PipelineStageFlags::HOST,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[host],
+                &[after],
+            );
+            record("command end", device.end_command_buffer(command))?;
+            let commands = [command];
+            let submit = vk::SubmitInfo::default().command_buffers(&commands);
+            record("fence reset", device.reset_fences(&[self.fence]))?;
             {
                 let _queue = acquire(&self.shared.queue_locked);
-                device
-                    .queue_submit(self.queue, &[submit], self.fence)
-                    .map_err(|e| error("frame submission", e))?;
+                record(
+                    "frame submission",
+                    device.queue_submit(self.queue, &[submit], self.fence),
+                )?;
             }
-            device
-                .wait_for_fences(&[self.fence], true, 1_000_000_000)
-                .map_err(|e| error("frame completion", e))?;
+            record(
+                "frame completion",
+                device.wait_for_fences(&[self.fence], true, 1_000_000_000),
+            )?;
             let mapped = device
                 .map_memory(self.memory, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty())
                 .map_err(|e| error("readback mapping", e))?;
@@ -707,6 +1085,10 @@ impl Drop for Host {
                 }
                 device.destroy_buffer(self.buffer, None);
                 device.free_memory(self.memory, None);
+                for scratch in [&self.halves, &self.shown] {
+                    device.destroy_image(scratch.image, None);
+                    device.free_memory(scratch.memory, None);
+                }
                 device.destroy_fence(self.fence, None);
                 device.destroy_command_pool(self.pool, None);
                 if let Some(destroy) = self.destroy_device {

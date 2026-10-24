@@ -19,8 +19,8 @@ data/
     game.json
     view.json                 (DS and 3DS: remembered layout and swap)
     verified.json             (3DS: identity of the last verified cartridge)
-    mods/                     (the user's mods: patches, or 3DS LayeredFS folders)
-    mods.json                 (which mods are on)
+    mods/                     (3DS: the user's LayeredFS mod folders)
+    mods.json                 (3DS: which mods are on)
     <game name>.sav
     save-reset                (explicit reset disables beside-ROM save import)
     backups/<game name>.previous.sav
@@ -156,6 +156,9 @@ and release, preventing cross-core loads. Both DS screens are retained in the
 256×384 JXL preview. No migration or deletion of existing game data is performed.
 
 Generated DS support files stay under each game’s `core-data/melonDS DS` folder.
+
+Nintendo 3DS states use the same bundles under `states/azahar`, with a 400×480
+JXL preview of both screens as Azahar draws them.
 
 Album scans image captures only. Existing recording folders and files are left
 untouched and are not listed, decoded or deleted by Album.

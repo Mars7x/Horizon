@@ -6,18 +6,23 @@ the same commands without launching. The Options hint is clickable. The Library 
 header utilities, empty grids and other pages do not open game options. Gameplay
 keeps its existing Start/Select and pause controls.
 
-The compact floating menu opens beside the selected cover, flips left near the
-right edge and stays inside the viewport. The background remains undimmed.
-Pointer movement highlights a command; clicking outside dismisses without
-activating the underlying page. It uses the shared palette and reduced-motion
-timing, compact ListRows and shared Surface styling. The popup contains only action labels, with no title,
-helper text or status caption. Properties, failures and uninstall confirmation
-use separate detail dialogs. The opening rise is a local offset from the cover
-anchor, so the first opening never animates from the screen origin.
-Up/Down selects Manage save data, Manage mods, Game properties, Hide/Unhide or Uninstall. A/Enter activates;
-B/Escape or + backs out. Closing retains the background page’s selection, filter
-and scroll. Global Home closes options and performs its normal navigation reset.
-Reduced Motion presents modal changes immediately.
+Game options are a full-height side panel at the right edge, the mirror of the
+in-game quick menu: the same Theme.background, sideways edge shadow, 120 ms
+slide in and 180 ms out (immediate with Reduced Motion), header, compact rows,
+confirmations, message line and hints. The page behind dims as the game does
+behind the quick menu; clicking it, or + / F10 again, closes the panel without
+activating anything underneath. The header shows the current page's name in a
+small caption (the system's name on the options page) above the game's title.
+Pages change inside the panel with the shared forward/back transition while the
+header and footer stay put.
+
+The options page lists Manage save data, Manage mods (3DS games only), Game
+properties, Hide/Unhide game and, set apart, Uninstall game. Up/Down selects,
+A/Enter activates, and B/Escape goes up one page; on the options page it closes
+the panel. Closing retains the background page's selection, filter and scroll.
+Global Home closes options and performs its normal navigation reset. Results
+and failures appear on the message line above the hints, on the page where they
+happened; there are no separate error dialogs.
 
 ## Visibility and properties
 
@@ -26,62 +31,58 @@ It does not change ROMs, artwork, saves or historical totals. Library’s Filter
 picker includes Hidden games; opening options there offers Unhide game. Hidden
 preferences are keyed by durable GameId and survive restarts and folder rescans.
 
-Properties displays the imported title, system, registered ROM paths, imported
-file sizes, SHA-256 identities and title provenance. These are saved import
-records, not a claim that the files are currently accessible or unchanged.
-Up/Down and the wheel scroll long details. Closing properties or cancelling
-uninstall dismisses options entirely, returning to the selected game.
+Game properties lists the imported title, system, registered ROM paths,
+imported file sizes, SHA-256 identities and title provenance as captioned facts.
+These are saved import records, not a claim that the files are currently
+accessible or unchanged. Up/Down and the wheel scroll long details; B returns to
+the options page.
 
 ## Manage save data
 
-Manage save data opens a shared dialog with Open save file location, Back up save
-data, Delete save data and Back. The first action asks the desktop file manager
+Manage save data opens a page with Open save folder, Back up save data and, set
+apart, Delete save data. The first action asks the desktop file manager
 to open the identity-bound save folder through XDG OpenDirectory; no host command
 or extra sandbox permission is used. Backup copies the battery save and complete
 state tree (manual slots, automatic resume and state fallback backups) to a new
 timestamped folder under `backups/manual/`, with its identity document. Only a
 fully synced snapshot receives its final name; an interrupted copy stays `.part`.
-The dialog reports success or failure and never overwrites a previous snapshot.
+The message line reports success or failure; a backup never overwrites a
+previous snapshot.
 
-Delete requires a second confirmation with Cancel initially selected. It deletes
+Delete asks first, on its own page with Cancel focused above Delete save data
+(as the quick menu asks before a restart); Cancel returns to Save data. It deletes
 the battery save and state tree, including automatic resume and state fallback
 backups. Manual snapshots, previous battery backups, game identity, DS view,
 ROMs, captures and history stay. A persistent reset marker prevents a future
 launch from silently importing an old save beside the ROM. Links and invalid
 paths stop the operation before removal; changes or filesystem failures during
 removal are reported without claiming that the reset completed. Save operations
-run on a joined worker while gameplay is closed. Back/Cancel closes the entire
-options flow rather than bringing back the floating popup. See
+run on a joined worker while gameplay is closed. See
 [ADR 0230](adr/0230-manual-save-management.md).
 
 ## Manage mods
 
-Manage mods lists the mods in the game's `mods/` folder, each On or Off, then
-Open mods folder and Back. Select turns a mod on or off; new mods start off.
-Choices are saved in the game's `mods.json` and apply the next time the game
-starts. Open mods folder creates the folder when missing and opens it through
-XDG OpenDirectory. More than five rows scroll with the selection.
+3DS games only, the one system Horizon applies mods to. The page lists the mod
+folders in the game's `mods/` folder, each with an on/off switch, then Open mods
+folder. Select switches a mod; new mods start off. Choices are saved in the
+game's `mods.json` and apply the next time the game starts. Open mods folder
+creates the folder when missing and opens it through XDG OpenDirectory. Rows
+past the bottom scroll with the selection.
 
-- Game Boy, Game Boy Color, GBA and DS mods are `.ips`, `.bps` or `.ups`
-  patches. Enabled ones apply in name order to a copy of the cartridge in
-  memory after it is read; the game file is never changed. BPS and UPS
-  patches check the cartridge's CRC32, so a patch for another version stops the
-  launch with its name. The imported identity check still runs on the
-  unpatched file.
-- 3DS mods are folders in Azahar's LayeredFS layout (`romfs/`, `exefs/`,
-  `code.ips`/`code.bps`, `exheader.bin`). At launch the enabled folders merge,
-  in name order with later files winning, into Azahar's mod folder for the
-  title (`core-data/Azahar/load/mods/<title ID>/`) as hard links, or copies
-  across filesystems. Horizon marks the folder it builds and rebuilds only that
-  one; a folder placed there by hand is used as it is and never replaced.
-
-Links and other special files in `mods/` are ignored. Patched games share the
-game's saves and states. See [ADR 0233](adr/0233-per-game-mods.md).
+Each mod is a folder in Azahar's LayeredFS layout (`romfs/`, `exefs/`,
+`code.ips`/`code.bps`, `exheader.bin`). At launch the enabled folders merge, in
+name order with later files winning, into Azahar's mod folder for the title
+(`core-data/Azahar/load/mods/<title ID>/`) as hard links, or copies across
+filesystems. Horizon marks the folder it builds and rebuilds only that one; a
+folder placed there by hand is used as it is and never replaced. Files, links
+and other special entries in `mods/` are ignored. See
+[ADR 0233](adr/0233-per-game-mods.md).
 
 ## Uninstall
 
-Uninstall requires a second confirmation with Cancel selected by default. It
-names the game and count of imported ROM files to delete. It retains battery
+Uninstall asks first, on its own page with Cancel focused; Cancel returns to the
+options page. It names the count of imported ROM files to delete under the
+game's title. It retains battery
 saves, save states/backups, screenshots, artwork, settings, identities and history.
 All registered copies of the selected content are included; unrelated files and
 other games are outside the plan. Missing files can be forgotten.

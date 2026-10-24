@@ -4,12 +4,11 @@ import { SaveStateRow } from "models/save-state.slint";
 export { SaveStateRow }
 import { RewindRow } from "models/rewind.slint";
 export { RewindRow }
-import { ModRow } from "models/mods.slint";
-export { ModRow }
+import { ModRow, PropertyRow } from "models/game-options.slint";
+export { ModRow, PropertyRow }
 import { OnboardingPage } from "pages/onboarding.slint";
 import { GamePlayer } from "pages/game-player.slint";
 import { GameContextMenu } from "components/game-context-menu.slint";
-import { ConfirmDialog } from "components/confirm-dialog.slint";
 import { RomSetupDialog } from "components/rom-setup.slint";
 import { Theme, Metrics, Typography, Motion } from "theme/theme.slint";
 export { Theme, Metrics, Typography, Motion }
@@ -206,11 +205,6 @@ export component AppWindow inherits Window {
     in-out property <string> launch-feedback-text: "";
 
     in property <bool> game-menu-open: false;
-    in property <length> game-menu-x;
-    in property <length> game-menu-y;
-    out property <length> game-menu-placement-width: Metrics.game-context-width;
-    out property <length> game-menu-placement-height: Metrics.game-context-height;
-    out property <CardRect> game-menu-popup-rect: game-menu.popup-rect;
     callback game-menu-focus(int);
     callback home-game-options(int);
     callback library-game-options(int);
@@ -219,14 +213,16 @@ export component AppWindow inherits Window {
     in property <bool> game-menu-hidden: false;
     in property <int> game-menu-view: 0;
     in property <int> game-menu-selected: 0;
-    in property <string> game-menu-details;
+    in property <bool> game-menu-mods-available: false;
+    in property <[PropertyRow]> game-menu-properties;
     in property <string> game-menu-message;
     in property <string> game-menu-confirm-text;
     in property <length> game-menu-offset;
     in property <[ModRow]> game-menu-mods;
-    out property <length> game-menu-max-offset: game-menu.max-details-offset;
+    out property <length> game-menu-max-offset: game-menu.max-properties-offset;
     callback game-menu-choose(int);
     callback game-menu-back();
+    callback game-menu-dismiss();
     callback game-menu-scroll(int);
 
     // Activity is persisted/application-owned data. The Activity page only
@@ -1078,32 +1074,20 @@ export component AppWindow inherits Window {
 
             game-menu := GameContextMenu {
                 z: 12;
-                area-width: parent.width; area-height: parent.height;
-                open: root.game-menu-open && root.game-menu-view != 2 && root.game-menu-view != 5;
-                anchor-x: root.game-menu-x; anchor-y: root.game-menu-y;
+                width: parent.width; height: parent.height;
+                open: root.game-menu-open;
                 game: root.game-menu-game; view: root.game-menu-view;
                 selected: root.game-menu-selected; hidden-game: root.game-menu-hidden;
+                mods-available: root.game-menu-mods-available;
                 busy: root.game-menu-busy; message: root.game-menu-message;
-                details: root.game-menu-details; details-offset: root.game-menu-offset;
+                confirm-text: root.game-menu-confirm-text;
+                properties: root.game-menu-properties; properties-offset: root.game-menu-offset;
                 mods: root.game-menu-mods;
                 choose(index) => { root.game-menu-choose(index); }
                 hover-row(index) => { root.game-menu-focus(index); }
                 back => { root.game-menu-back(); }
+                dismiss => { root.game-menu-dismiss(); }
                 scroll(direction) => { root.game-menu-scroll(direction); }
-            }
-            ConfirmDialog {
-                z: 13;
-                area-width: parent.width; area-height: parent.height;
-                open: root.game-menu-open && (root.game-menu-view == 2 || root.game-menu-view == 5);
-                title: root.game-menu-view == 5
-                    ? (root.game-menu-busy ? "Deleting save data…" : "Delete save data?")
-                    : (root.game-menu-busy ? "Uninstalling…" : "Uninstall game?");
-                text: root.game-menu-confirm-text;
-                text-height: root.game-menu-view == 5 ? 176px : 136px;
-                busy: root.game-menu-busy;
-                action: root.game-menu-view == 5 ? "Delete" : "Uninstall";
-                selected: root.game-menu-selected;
-                choose(index) => { root.game-menu-choose(index); }
             }
 
             OnboardingPage {

@@ -24,17 +24,18 @@ The Super Game Boy border is off by default, so every Game Boy picture stays
 
 ## Launch and return motion
 
-An accepted launch plays its cue immediately, before waiting for core loading,
-a resume preview or the first frame. The selected Home or Library card keeps its press/rebound. Once a real frame is
-ready, the rebound releases after a 125 ms press hold and the player expands
-from that card to the full viewport over 230 ms. While a game loads, the worker
-first sends the picture of the state it will resume (from any core release,
-decoded and blurred off the UI thread, each DS screen apart); the player then
-zooms into that picture, blurred and dimmed under a spinner, as soon as the press
-hold ends. The loading picture is its own layer above the game: the first real
-frame appears beneath it and the layer fades out (200 ms; instant with Reduced
-Motion), so nothing switches mid-transition. Without a state, the zoom waits up to
-500 ms for a frame, then expands a black surface with the spinner. Errors still
+An accepted launch plays its cue immediately and never waits for core loading,
+a resume preview or the first frame. The selected Home or Library card keeps its
+press/rebound; the rebound releases after the 125 ms press hold and the player
+expands from that card to the full viewport over 230 ms, however long the game
+takes to load. While it loads, the worker first sends the picture of the state
+it will resume (from any core release, decoded and blurred off the UI thread,
+each DS screen apart), shown blurred and dimmed under a spinner; without one
+(or until it arrives) the player is black under the spinner. A first frame that arrives
+mid-zoom is held until the zoom ends, so its upload never drops a frame of the
+animation. The loading picture is its own layer above the game: the first real frame appears beneath it and
+the layer fades out (200 ms; instant with Reduced Motion), so nothing switches
+mid-transition. Errors still
 use the dialog; a launch never shows a "Starting game" dialog. The launch keeps
 the UI thread free (`real_ds_player_fast_forward_audio_report` records UI stalls).
 

@@ -60,6 +60,8 @@ export component PausePanel inherits Rectangle {
     in property <bool> ds;
     in property <bool> lid-available: true;
     in property <bool> states-available: true;
+    // Rewind takes a state every half-second: not for 3DS games.
+    in property <bool> rewind-available: true;
     in property <bool> ds-lid-closed;
     in property <string> ds-layout;
     in property <bool> ds-layout-forward: true;
@@ -111,7 +113,7 @@ export component PausePanel inherits Rectangle {
             // DS has eleven actions: in a small window every row shrinks a
             // little so they all fit, rather than the menu scrolling.
             menu := VerticalLayout {
-                property <int> rows: 5 + (root.states-available ? 3 : 0) + (root.ds ? 2 : 0) + (root.ds && root.lid-available ? 1 : 0);
+                property <int> rows: 5 + (root.states-available ? 2 : 0) + (root.states-available && root.rewind-available ? 1 : 0) + (root.ds ? 2 : 0) + (root.ds && root.lid-available ? 1 : 0);
                 property <bool> tight: (root.content-height - Metrics.spacing-xs * (self.rows + 1) - Metrics.spacing-sm * 2) / self.rows < 36px;
                 property <length> gap: self.tight ? Metrics.spacing-xs / 2 : Metrics.spacing-xs;
                 property <length> fit: (root.content-height - self.gap * (self.rows + 1) - Metrics.spacing-sm * 2) / self.rows;
@@ -121,7 +123,7 @@ export component PausePanel inherits Rectangle {
                 spacing: self.gap;
                 PauseAction { row-height: menu.row-size; title: "Continue"; focused: root.view == 0 && root.focused == 0; enabled: root.open && root.view == 0; activated => { root.activate(0); } }
                 SettingsRow { height: menu.row-size; compact: true; title: "Fast-forward (2×)"; toggle: true; compact-toggle: true; checked: root.speed == 2; focused: root.view == 0 && root.focused == 1; enabled: root.open && root.view == 0; activated => { root.activate(1); } }
-                if root.states-available : PauseAction { row-height: menu.row-size; title: "Rewind"; focused: root.view == 0 && root.focused == 10; enabled: root.open && root.view == 0; activated => { root.activate(10); } }
+                if root.states-available && root.rewind-available : PauseAction { row-height: menu.row-size; title: "Rewind"; focused: root.view == 0 && root.focused == 10; enabled: root.open && root.view == 0; activated => { root.activate(10); } }
                 if root.ds : PauseAction { row-height: menu.row-size; title: "Screen layout"; value: root.ds-layout; value-width: Metrics.spacing-xxl * 3.5; forward: root.ds-layout-forward; focused: root.view == 0 && root.focused == 8; enabled: root.open && root.view == 0; activated => { root.activate(8); } }
                 if root.ds : PauseAction { row-height: menu.row-size; title: "Swap screens"; focused: root.view == 0 && root.focused == 7; enabled: root.open && root.view == 0; activated => { root.activate(7); } }
                 if root.ds && root.lid-available : PauseAction { row-height: menu.row-size; title: root.ds-lid-closed ? "Open lid" : "Close lid"; focused: root.view == 0 && root.focused == 9; enabled: root.open && root.view == 0; activated => { root.activate(9); } }

@@ -13,7 +13,7 @@ for the run. Rendering components forward intent rather than choose routes.
 
 The top row is the Profile avatar followed by Album, Activity and Settings. It never wraps. The avatar opens Profile and has its own focus slot.
 There is no Shop, Friends or Web utility. The permanent final carousel tile opens
-Library even when no games exist. Menu/Start/+ opens [game options](GAME_OPTIONS.md) for the selected game; right-click opens the same anchored menu without launching.
+Library even when no games exist. Menu/Start/+ opens [game options](GAME_OPTIONS.md) for the selected game; right-click opens the same panel without launching.
 It does not open Library. Clicking a game launches that title;
 recognized drags keep the existing scroll, inertia and catch behavior.
 

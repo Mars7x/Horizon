@@ -46,8 +46,11 @@
 
 | [0231](0231-azahar-vulkan-playback.md) | Initial Azahar playback through Vulkan |
 | [0232](0232-3ds-verified-file-identity.md) | Verified 3DS file identity: skip re-hashing an unchanged cartridge |
-| [0233](0233-per-game-mods.md) | Per-game mods: cartridge patches and 3DS LayeredFS folders |
+| [0233](0233-per-game-mods.md) | Per-game mods: 3DS LayeredFS folders |
 | [0234](0234-3ds-resolution-and-input.md) | 3DS internal resolution, DS-style screen layouts, cached readback and single-purpose input |
+| [0235](0235-3ds-gpu-viewport-readback.md) | 3DS GPU viewport readback: shrink shown frames on the GPU before reading them |
+| [0236](0236-game-options-panel.md) | Game options panel: the quick menu’s mirror at the right edge |
+| [0237](0237-3ds-save-states.md) | 3DS save states: slots and resume point, no rewind or background states |
 
 Earlier decisions and their supporting phase notes are in
 [history](../history/INDEX.md). Their numbered identifiers remain reserved.

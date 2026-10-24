@@ -15,7 +15,7 @@ use std::{
     },
 };
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Frame {
     pub width: u32,
     pub height: u32,
@@ -117,11 +117,46 @@ extern "C" fn hw_proc_address(name: *const c_char) -> *const c_void {
         _ => std::ptr::null(),
     }
 }
+/// The top and bottom screens of a 3DS frame of `size`, as Azahar draws them
+/// by default (the 320-wide bottom screen centred under the 400-wide top).
+fn three_ds_regions((width, height): (u32, u32)) -> Option<[super::azahar_vulkan::Region; 2]> {
+    let scale = width / 400;
+    (scale > 0 && width == 400 * scale && height == 480 * scale).then(|| {
+        let half = 240 * scale;
+        [(0, 0, width, half), (40 * scale, half, 320 * scale, half)]
+    })
+}
+/// Every screen fits its region and at least one is smaller: worth shrinking.
+fn shrinks(regions: [super::azahar_vulkan::Region; 2], targets: [(u32, u32); 2]) -> bool {
+    let pairs = || targets.iter().zip(&regions);
+    pairs().all(|(&(tw, th), &(_, _, w, h))| tw > 0 && th > 0 && tw <= w && th <= h)
+        && pairs().any(|(&(tw, th), &(_, _, w, h))| tw < w || th < h)
+}
 /// libretro: the frame is in the framebuffer, not in memory.
 const HW_FRAME: usize = usize::MAX;
 impl Callbacks {
     /// Read the core's drawn frame back into `raw_frame` if one is waiting.
     fn read_back(&mut self) {
+        if let Some(backend) = self.vulkan.as_mut() {
+            let Some(host) = backend.host.as_mut().filter(|_| backend.unread) else {
+                return;
+            };
+            backend.unread = false;
+            let raw = self.raw_frame.get_or_insert_with(|| Frame {
+                width: 0,
+                height: 0,
+                rgba: Vec::new(),
+                smooth: false,
+            });
+            match host.read_frame(&mut raw.rgba) {
+                Ok((width, height)) => {
+                    raw.width = width;
+                    raw.height = height;
+                }
+                Err(error) => self.error = Some(error),
+            }
+            return;
+        }
         let Some(hardware) = self.hardware.as_mut() else {
             return;
         };
@@ -483,17 +518,25 @@ impl Core {
         CALLBACKS.with(|state| state.borrow_mut().as_mut()?.error.take())
     }
     pub fn supports_states(&self) -> bool {
-        // Azahar's size query creates a complete state. Never poll it from
-        // the gameplay loop; directory saves are the initial 3DS boundary.
+        // Azahar's size query creates a complete state (about a second), so
+        // it is never asked: Azahar always has states.
         if self.three_ds {
-            return false;
+            return true;
         }
         // SAFETY: retained core on its worker.
         let size = unsafe { (self.serialize_size)() };
         size > 0 && size <= self.max_state_size()
     }
+    /// States cheap enough to take every half-second (rewind) and in the
+    /// background (timed autosaves). A 3DS state takes about a second: only
+    /// manual slots, quick save and the resume point on exit.
+    pub fn supports_frequent_states(&self) -> bool {
+        !self.three_ds && self.supports_states()
+    }
     fn max_state_size(&self) -> usize {
-        if self.ds {
+        if self.three_ds {
+            128 * 1024 * 1024
+        } else if self.ds {
             64 * 1024 * 1024
         } else {
             16 * 1024 * 1024
@@ -503,9 +546,6 @@ impl Core {
         if self.ds { 8 * 1024 * 1024 } else { MAX_SAVE }
     }
     pub fn serialize_state(&self) -> Result<Vec<u8>, String> {
-        if self.three_ds {
-            return Err("3DS save states and rewind are not available yet".into());
-        }
         // SAFETY: libretro v1 symbols from the retained core, on its worker.
         let size = unsafe { (self.serialize_size)() };
         if size == 0 || size > self.max_state_size() {
@@ -521,7 +561,32 @@ impl Core {
         if bytes.is_empty() || bytes.len() > self.max_state_size() {
             return Err("Invalid saved state size".into());
         }
+        // A 3DS rollback would be a second full state (about a second).
+        // Store bundles are checksummed and Azahar checks the game and build
+        // before reading one, and a load that fails still ends the session.
+        if self.three_ds {
+            return self.unserialize_with(bytes, None);
+        }
         let rollback = self.serialize_state()?;
+        self.unserialize_with(bytes, Some(&rollback))
+    }
+    /// Restore a state into a game that has only just started: nothing to
+    /// roll back to (a failure ends the launch), so no state is taken first.
+    pub fn restore_launch_state(&mut self, bytes: &[u8]) -> Result<(), String> {
+        if bytes.is_empty() || bytes.len() > self.max_state_size() {
+            return Err("Invalid saved state size".into());
+        }
+        self.unserialize_with(bytes, None)
+    }
+    fn unserialize_with(&mut self, bytes: &[u8], rollback: Option<&[u8]>) -> Result<(), String> {
+        let Some(rollback) = rollback else {
+            // SAFETY: validated bounded buffer, retained core, same worker.
+            return if unsafe { (self.unserialize)(bytes.as_ptr().cast(), bytes.len()) } {
+                Ok(())
+            } else {
+                Err("The core rejected the saved state".into())
+            };
+        };
         // SAFETY: validated bounded buffers, retained core, same worker.
         if !unsafe { (self.unserialize)(bytes.as_ptr().cast(), bytes.len()) } {
             let restored = unsafe { (self.unserialize)(rollback.as_ptr().cast(), rollback.len()) };
@@ -612,8 +677,44 @@ impl Core {
             if !state.fresh {
                 return false;
             }
-            // Reading a GPU frame back costs time: only for one to be shown.
-            if state.hardware.is_some() {
+            // A 3DS frame is shrunk on the GPU to the size each screen is
+            // shown at, then read: at 6× a full frame is 27 MB.
+            if state.vulkan.is_some() {
+                if !stage.wanted() {
+                    return false;
+                }
+                let size = display.load(Ordering::Acquire);
+                let (layout, swapped) = unpack_ds_view(state.extra.view.load(Ordering::Acquire));
+                let targets = layout
+                    .place(
+                        swapped,
+                        ((size >> 32) as u32 as f64, size as u32 as f64),
+                        crate::domain::core_settings::DsLayout::THREE_DS_SCREENS,
+                    )
+                    .map(|rect| (rect.width.round() as u32, rect.height.round() as u32));
+                if let Some(backend) = state.vulkan.as_mut()
+                    && !backend.shrink_failed
+                    && let Some(host) = backend.host.as_mut()
+                    && let Some(regions) = host.current_size().and_then(three_ds_regions)
+                    && shrinks(regions, targets)
+                {
+                    match host.read_shrunk(regions, targets, &mut backend.presentation.rgba) {
+                        Ok((width, height)) => {
+                            backend.presentation.width = width;
+                            backend.presentation.height = height;
+                            stage.submit_viewport(&backend.presentation, targets);
+                            state.fresh = false;
+                            // The full frame stays readable for screenshots.
+                            return true;
+                        }
+                        Err(error) => {
+                            backend.shrink_failed = true;
+                            tracing::warn!(%error, "3DS frames can't be shrunk on the GPU; reading them at full size");
+                        }
+                    }
+                }
+                state.read_back();
+            } else if state.hardware.is_some() {
                 if !stage.wanted() {
                     return false;
                 }
@@ -1185,19 +1286,15 @@ extern "C" fn video(data: *const c_void, width: u32, height: u32, pitch: usize) 
                 && (1..=4096).contains(&width)
                 && (1..=4096).contains(&height)
             {
-                if let Some(host) = state.vulkan.as_mut().and_then(|v| v.host.as_mut()) {
-                    let raw = state.raw_frame.get_or_insert_with(|| Frame {
-                        width,
-                        height,
-                        rgba: Vec::new(),
-                        smooth: false,
-                    });
-                    if let Err(error) = host.read_frame(width, height, &mut raw.rgba) {
+                if let Some(backend) = state.vulkan.as_mut()
+                    && let Some(host) = backend.host.as_mut()
+                {
+                    // Read later, at the size it's shown (see `hand_off`).
+                    if let Err(error) = host.accept_frame(width, height) {
                         state.error = Some(error);
                         return;
                     }
-                    raw.width = width;
-                    raw.height = height;
+                    backend.unread = true;
                 } else if let Some(hardware) = state.hardware.as_mut() {
                     hardware.pending = Some((width, height));
                 } else {
@@ -1477,6 +1574,23 @@ pub(crate) fn test_ds_rom() -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn three_ds_frames_shrink_only_when_both_screens_fit() {
+        use super::{shrinks, three_ds_regions};
+        assert_eq!(
+            three_ds_regions((800, 960)),
+            Some([(0, 0, 800, 480), (80, 480, 640, 480)])
+        );
+        assert_eq!(three_ds_regions((256, 384)), None);
+        assert_eq!(three_ds_regions((400, 481)), None);
+        let regions = three_ds_regions((2400, 2880)).unwrap();
+        assert!(shrinks(regions, [(900, 540), (720, 540)]));
+        // Larger than drawn, unknown, or already the drawn size: read whole.
+        assert!(!shrinks(regions, [(2401, 1440), (720, 540)]));
+        assert!(!shrinks(regions, [(0, 0), (0, 0)]));
+        assert!(!shrinks(regions, [(2400, 1440), (1920, 1440)]));
+    }
+
+    #[test]
     #[ignore = "requires Azahar, a decrypted HORIZON_3DS_ROM and fresh HORIZON_3DS_TEST_DIR"]
     fn real_3ds_core_boots_without_polling_save_states() {
         use super::*;
@@ -1499,7 +1613,8 @@ mod tests {
                 .unwrap_or(1),
         )
         .unwrap();
-        assert!(!core.supports_states());
+        // States, but never the frequent ones (rewind, timed autosaves).
+        assert!(core.supports_states() && !core.supports_frequent_states());
         for _ in 0..600 {
             let started = std::time::Instant::now();
             core.run_frame();
@@ -1513,6 +1628,49 @@ mod tests {
         let frame = core.capture_frame().unwrap();
         assert!(frame.width >= 400 && frame.height >= 240);
         assert!(core.frames.load(Ordering::Acquire) >= 600);
+        // Shrunk on the GPU, each screen matches the CPU's average of the
+        // full frame: at half size (one linear blit) and at a quarter (a
+        // halving first).
+        let regions = three_ds_regions((frame.width, frame.height)).unwrap();
+        for divisor in [2, 4] {
+            let targets = regions.map(|(_, _, w, h)| (w / divisor, h / divisor));
+            let mut shrunk = Vec::new();
+            let size = CALLBACKS
+                .with(|state| {
+                    let mut state = state.borrow_mut();
+                    let host = state.as_mut()?.vulkan.as_mut()?.host.as_mut()?;
+                    Some(host.read_shrunk(regions, targets, &mut shrunk))
+                })
+                .unwrap()
+                .unwrap();
+            assert_eq!(size, (targets[0].0, targets[0].1 + targets[1].1));
+            let mut worst = 0;
+            let mut below = 0;
+            for (&(x0, y0, _, _), &(tw, th)) in regions.iter().zip(&targets) {
+                for ty in 0..th {
+                    for tx in 0..tw {
+                        for channel in 0..3 {
+                            let mut sum = 0u32;
+                            for dy in 0..divisor {
+                                for dx in 0..divisor {
+                                    let (x, y) = (x0 + tx * divisor + dx, y0 + ty * divisor + dy);
+                                    sum += u32::from(
+                                        frame.rgba[((y * frame.width + x) * 4 + channel) as usize],
+                                    );
+                                }
+                            }
+                            let expected = sum / (divisor * divisor);
+                            let actual = u32::from(
+                                shrunk[(((below + ty) * size.0 + tx) * 4 + channel) as usize],
+                            );
+                            worst = worst.max(expected.abs_diff(actual));
+                        }
+                    }
+                }
+                below += th;
+            }
+            assert!(worst <= 3, "1/{divisor} differs by up to {worst}");
+        }
         image::save_buffer(
             directory.join("boot.png"),
             &frame.rgba,
@@ -1530,7 +1688,23 @@ mod tests {
                 .any(|pixel| pixel[..3].iter().any(|&channel| channel > 16)),
             "game must produce a visible picture"
         );
-        assert!(!core.supports_states());
+        // A real state round trip: saved, played past, restored.
+        let state = core.serialize_state().unwrap();
+        assert!(state.len() > 1024 * 1024);
+        for _ in 0..30 {
+            core.run_frame();
+            audio.clear();
+        }
+        core.restore_state(&state).unwrap();
+        core.run_frame();
+        assert_eq!(core.take_error(), None);
+        assert!(core.restore_state(&state[..state.len() / 2]).is_err());
+        core.run_frame();
+        assert_eq!(
+            core.take_error(),
+            None,
+            "a rejected state leaves the game running"
+        );
     }
     use super::*;
 

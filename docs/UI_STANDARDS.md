@@ -74,12 +74,12 @@ spacing, sizes and animation timing. No ad-hoc layout constants or local font
 families. Authored SVG geometry/colors stay intact; generated chrome uses
 semantic tokens. Do not set hand cursors; hover color communicates clickability.
 
-Game options use a compact floating Surface beside the selected cover and shared
-compact ListRows, including the shared focus outline, hover, typography and
-Reduced Motion behavior. The background remains undimmed. Properties and uninstall
-confirmation use shared dialogs; dismissing either returns to the game rather
-than reopening the popup. The popup contains only action labels; titles, helper text and status captions
-stay out of it. Failures use a separate shared dialog.
+Game options mirror the quick menu at the right edge: a full-height side panel
+over the dimmed page, with the same background, sideways edge shadow, slide
+timing, header (page caption above the game's title), compact ListRows and
+compact switches, stacked Cancel-first confirmations, message line and hints.
+Its pages change inside the panel with the shared TransitionDriver/TransitionLayer;
+B goes up one page. No floating popup, separate dialogs or error dialogs.
 
 ## Motion and scrolling
 

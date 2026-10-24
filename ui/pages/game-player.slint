@@ -191,30 +191,40 @@ export component GamePlayer inherits Rectangle {
             visible: root.loading-veil > 0.001;
             opacity: root.loading-veil;
             background: #000;
-            if root.loading-picture && root.ds : Image {
-                x: round(parent.width * root.top-x / root.screen-pixel) * root.screen-pixel;
-                y: round(parent.height * root.top-y / root.screen-pixel) * root.screen-pixel;
-                width: round(parent.width * root.top-w / root.screen-pixel) * root.screen-pixel;
-                height: round(parent.height * root.top-h / root.screen-pixel) * root.screen-pixel;
-                source: root.loading-frame;
-                source-clip-x: 0; source-clip-y: 0;
-                source-clip-width: root.loading-frame.width; source-clip-height: root.loading-frame.height / 2;
-                image-fit: fill; image-rendering: ImageRendering.smooth;
-            }
-            if root.loading-picture && root.ds : Image {
-                x: round(parent.width * root.bottom-x / root.screen-pixel) * root.screen-pixel;
-                y: round(parent.height * root.bottom-y / root.screen-pixel) * root.screen-pixel;
-                width: round(parent.width * root.bottom-w / root.screen-pixel) * root.screen-pixel;
-                height: round(parent.height * root.bottom-h / root.screen-pixel) * root.screen-pixel;
-                source: root.loading-frame;
-                source-clip-x: 0; source-clip-y: root.loading-frame.height / 2;
-                source-clip-width: root.loading-frame.width; source-clip-height: root.loading-frame.height / 2;
-                image-fit: fill; image-rendering: ImageRendering.smooth;
-            }
-            if root.loading-picture && !root.ds : Image {
+            // A picture that arrives once the zoom has begun fades in.
+            Rectangle {
                 width: parent.width; height: parent.height;
-                source: root.loading-frame;
-                image-fit: contain; image-rendering: ImageRendering.smooth;
+                opacity: root.loading-picture ? 1.0 : 0.0;
+                visible: self.opacity > 0.001;
+                animate opacity { duration: Motion.reduced-motion ? 0ms : 150ms; easing: ease-out; }
+                if root.ds : Image {
+                    x: round(parent.width * root.top-x / root.screen-pixel) * root.screen-pixel;
+                    y: round(parent.height * root.top-y / root.screen-pixel) * root.screen-pixel;
+                    width: round(parent.width * root.top-w / root.screen-pixel) * root.screen-pixel;
+                    height: round(parent.height * root.top-h / root.screen-pixel) * root.screen-pixel;
+                    source: root.loading-frame;
+                    source-clip-x: 0; source-clip-y: 0;
+                    source-clip-width: root.loading-frame.width; source-clip-height: root.loading-frame.height / 2;
+                    image-fit: fill; image-rendering: ImageRendering.smooth;
+                }
+                if root.ds : Image {
+                    x: round(parent.width * root.bottom-x / root.screen-pixel) * root.screen-pixel;
+                    y: round(parent.height * root.bottom-y / root.screen-pixel) * root.screen-pixel;
+                    width: round(parent.width * root.bottom-w / root.screen-pixel) * root.screen-pixel;
+                    height: round(parent.height * root.bottom-h / root.screen-pixel) * root.screen-pixel;
+                    source: root.loading-frame;
+                    // A 3DS frame's 320-wide bottom screen is centred in 400.
+                    source-clip-x: root.three-ds ? root.loading-frame.width / 10 : 0;
+                    source-clip-y: root.loading-frame.height / 2;
+                    source-clip-width: root.three-ds ? root.loading-frame.width * 4 / 5 : root.loading-frame.width;
+                    source-clip-height: root.loading-frame.height / 2;
+                    image-fit: fill; image-rendering: ImageRendering.smooth;
+                }
+                if !root.ds : Image {
+                    width: parent.width; height: parent.height;
+                    source: root.loading-frame;
+                    image-fit: contain; image-rendering: ImageRendering.smooth;
+                }
             }
             Rectangle {
                 width: parent.width; height: parent.height;
@@ -277,7 +287,7 @@ export component GamePlayer inherits Rectangle {
             height: root.height;
             shadow-strength: root.pause-reveal;
             open: root.paused && !root.rewind-open; busy: root.busy; ds: root.ds; ds-lid-closed: root.ds-lid-closed; ds-layout: root.ds-layout; ds-layout-forward: root.ds-layout-forward; speed: root.speed;
-            states-available: !root.three-ds; lid-available: !root.three-ds;
+            rewind-available: !root.three-ds; lid-available: !root.three-ds;
             screenshot-preview: root.screenshot-preview;
             screenshot-visible: root.screenshot-visible;
             screenshot-sequence: root.screenshot-sequence;

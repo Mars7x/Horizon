@@ -1,244 +1,275 @@
 import { Theme, Metrics, Typography, Motion } from "../theme/theme.slint";
-import { GameCardData, CardRect } from "../models/game-card.slint";
-import { ModalDialog } from "modal-dialog.slint";
-import { FallbackCover } from "fallback-cover.slint";
+import { GameCardData } from "../models/game-card.slint";
+import { ModRow, PropertyRow } from "../models/game-options.slint";
+import { ListRow } from "list-row.slint";
+import { SettingsRow } from "settings-row.slint";
 import { ActionButton } from "action-button.slint";
-import { ListRow, Surface } from "list-row.slint";
 import { HintBar } from "hint-bar.slint";
-import { ModRow } from "../models/mods.slint";
+import { MarqueeText } from "marquee-text.slint";
+import { TransitionDriver, TransitionLayer } from "transition.slint";
+import { ScrollEdgeShadow } from "page-header.slint";
 
-// Floating game commands; details, saves and mods use shared dialogs.
-// Rust chooses placement, identity, focus and operations. The page stays visible.
+// Game options: the quick menu's mirror, a full-height panel at the right
+// edge over the dimmed page. One header (the page's caption above the game's
+// title), pages that change inside it, the message line and hints at the
+// bottom. Rust owns the page, focus and every operation.
+//
+// Pages: 0 options, 1 properties, 2 uninstall confirmation, 4 save data,
+// 5 delete-saves confirmation, 6 mods (3DS).
 export component GameContextMenu inherits Rectangle {
     in property <bool> open: false;
-    in property <length> area-width;
-    in property <length> area-height;
-    in property <length> anchor-x;
-    in property <length> anchor-y;
     in property <GameCardData> game;
     in property <int> view: 0;
     in property <int> selected: 0;
     in property <bool> hidden-game: false;
+    in property <bool> mods-available: false;
     in property <bool> busy: false;
     in property <string> message;
-    in property <string> details;
-    in property <length> details-offset;
+    in property <string> confirm-text;
+    in property <[PropertyRow]> properties;
+    in property <length> properties-offset;
     in property <[ModRow]> mods;
-    out property <length> max-details-offset: max(0px, properties.preferred-height - 330px);
-    out property <CardRect> popup-rect: { x: popup.x / 1px, y: popup.y / 1px, width: popup.width / 1px, height: popup.height / 1px };
+    in property <length> footer-center: Metrics.hint-row-center-from-bottom;
+    out property <length> max-properties-offset: max(0px, facts.preferred-height - root.content-height);
     callback choose(int);
     callback hover-row(int);
+    // B: up one page (on the options page, closes).
     callback back();
+    // A click beside the panel closes it.
+    callback dismiss();
     callback scroll(int);
-    width: root.area-width; height: root.area-height;
-    visible: root.open || popup.opacity > 0.01 || properties-dialog.opacity > 0.01 || error-dialog.opacity > 0.01 || saves-dialog.opacity > 0.01 || mods-dialog.opacity > 0.01;
-    background: transparent;
-    private property <length> popup-rise: root.open && root.view == 0 ? 0px : Motion.dialog-rise / 2;
-    animate popup-rise { duration: Motion.dialog-duration; easing: ease-out; }
 
-    // Dismiss without activating anything on the page behind the menu.
-    TouchArea {
+    private property <float> reveal: root.open ? 1.0 : 0.0;
+    animate reveal {
+        duration: root.open ? Motion.pause-open-duration : Motion.dialog-duration;
+        easing: root.open ? ease-out-quart : ease-out;
+    }
+    visible: root.reveal > 0.001;
+    background: transparent;
+
+    // Rows of the options page: Manage mods only for 3DS games.
+    private property <int> mods-row: root.mods-available ? 1 : -1;
+    private property <int> properties-row: root.mods-available ? 2 : 1;
+    private property <int> hide-row: root.properties-row + 1;
+    private property <int> uninstall-row: root.properties-row + 2;
+    private property <length> row-step: Metrics.compact-row-height + Metrics.spacing-xs;
+
+    private property <length> content-top: Metrics.spacing-lg * 3 + Metrics.compact-title-height + Metrics.compact-row-height;
+    private property <length> content-height: root.height - root.content-top - root.footer-center - Metrics.hint-row-height * 3;
+    view-transition := TransitionDriver { key: root.view; prewarm: true; retargetable: true; }
+    private property <int> view-phase: Motion.reduced-motion ? 3 : view-transition.phase;
+    private property <bool> view-back: root.view-depth(root.view) < root.view-depth(view-transition.from-key);
+    pure function view-depth(view: int) -> int { return view == 0 ? 0 : (view == 2 || view == 5 ? 2 : 1); }
+    function pick(index: int) {
+        if root.open && !root.busy { root.choose(index); }
+    }
+
+    // The page behind dims like the game behind the quick menu.
+    Rectangle {
         width: parent.width; height: parent.height;
-        visible: popup.visible;
-        clicked => { root.back(); }
-        pointer-event(event) => { if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) { root.back(); } }
-    }
-    popup := Surface {
-        x: root.anchor-x;
-        y: root.anchor-y + root.popup-rise;
-        width: min(Metrics.game-context-width, root.area-width - Metrics.spacing-xl);
-        height: min(root.area-height - Metrics.spacing-xl, Metrics.game-context-height);
-        opacity: root.open && root.view == 0 ? 1.0 : 0.0;
-        visible: (root.open && root.view == 0) || self.opacity > 0.01;
-        animate opacity { duration: Motion.dialog-duration; easing: ease-out; }
-        background: Theme.surface-raised;
-        drop-shadow-color: Theme.shadow.with-alpha(Theme.is-dark ? 0.42 : 0.18);
-        drop-shadow-blur: 20px; drop-shadow-offset-y: 5px;
-        for label[index] in ["Manage save data", "Manage mods", "Game properties", root.hidden-game ? "Unhide game" : "Hide game", "Uninstall game"] : ListRow {
-            x: Metrics.spacing-sm;
-            y: Metrics.spacing-sm + index * (Metrics.compact-row-height + Metrics.spacing-xs) + (index == 4 ? Metrics.spacing-sm : 0px);
-            width: parent.width - Metrics.spacing-md;
-            compact: true;
-            title: label;
-            trailing-width: Metrics.spacing-lg;
-            focused: root.selected == index;
-            enabled: root.open && !root.busy && root.view == 0;
-            hovered => { root.hover-row(index); }
-            activated => { root.choose(index); }
-        }
-        Rectangle { x: Metrics.spacing-md; y: Metrics.spacing-sm + 4 * (Metrics.compact-row-height + Metrics.spacing-xs); width: parent.width - Metrics.spacing-xl; height: 1px; background: Theme.divider; }
-    }
-    saves-dialog := ModalDialog {
-        area-width: root.area-width; area-height: root.area-height;
-        open: root.open && root.view == 4;
-        card-width: 504px; card-height: 464px;
-        dismissed => { root.back(); }
-        Text {
-            x: Metrics.spacing-lg; y: Metrics.spacing-lg;
-            width: parent.width - Metrics.spacing-xxl; height: 28px;
-            text: "Manage save data"; color: Theme.foreground;
-            font-size: Typography.heading-size; font-weight: Typography.heading-weight;
-        }
-        Text {
-            x: Metrics.spacing-lg; y: 58px;
-            width: parent.width - Metrics.spacing-xxl; height: 50px;
-            text: root.game.title + "\nBattery save, save states and automatic resume";
-            color: Theme.secondary-foreground; font-size: Typography.caption-size;
-            wrap: word-wrap; overflow: elide;
-        }
-        Surface {
-            x: Metrics.spacing-lg; y: 120px;
-            width: parent.width - Metrics.spacing-xxl; height: 220px;
-            for label[index] in ["Open save file location", "Back up save data", "Delete save data", "Back"] : ListRow {
-                x: Metrics.spacing-sm;
-                y: Metrics.spacing-xs + index * (Metrics.compact-row-height + Metrics.spacing-xs);
-                width: parent.width - Metrics.spacing-md;
-                compact: true; title: label; trailing-width: Metrics.spacing-lg;
-                focused: root.selected == index;
-                enabled: root.open && root.view == 4 && !root.busy;
-                hovered => { root.hover-row(index); }
-                activated => { root.choose(index); }
-            }
-        }
-        Text {
-            x: Metrics.spacing-lg; y: 356px;
-            width: parent.width - Metrics.spacing-xxl; height: 84px;
-            text: root.message == "" ? "Backups stay in this game's save folder. Deleting save data requires confirmation." : root.message;
-            color: Theme.secondary-foreground; font-size: Typography.caption-size;
-            wrap: word-wrap; overflow: elide;
-        }
-    }
-    mods-dialog := ModalDialog {
-        area-width: root.area-width; area-height: root.area-height;
-        open: root.open && root.view == 6;
-        card-width: 504px; card-height: 500px;
-        dismissed => { root.back(); }
-        private property <length> step: Metrics.compact-row-height + Metrics.spacing-xs;
-        // Rows past the fifth scroll into view with the selection.
-        private property <length> scroll: max(0, min(root.selected - 4, root.mods.length + 2 - 5)) * self.step;
-        Text {
-            x: Metrics.spacing-lg; y: Metrics.spacing-lg;
-            width: parent.width - Metrics.spacing-xxl; height: 28px;
-            text: "Mods"; color: Theme.foreground;
-            font-size: Typography.heading-size; font-weight: Typography.heading-weight;
-        }
-        Text {
-            x: Metrics.spacing-lg; y: 58px;
-            width: parent.width - Metrics.spacing-xxl; height: 50px;
-            text: root.game.title + "\nMods that are on apply when the game starts";
-            color: Theme.secondary-foreground; font-size: Typography.caption-size;
-            wrap: word-wrap; overflow: elide;
-        }
-        Surface {
-            x: Metrics.spacing-lg; y: 120px;
-            width: parent.width - Metrics.spacing-xxl; height: 5 * step + Metrics.spacing-xs;
-            clip: true;
-            for row[index] in root.mods : ListRow {
-                x: Metrics.spacing-sm;
-                y: Metrics.spacing-xs + index * step - scroll;
-                animate y { duration: Motion.focus-duration; easing: ease-in-out; }
-                width: parent.width - Metrics.spacing-md;
-                compact: true; title: row.title; trailing-width: 72px;
-                focused: root.selected == index;
-                enabled: root.open && root.view == 6 && !root.busy;
-                hovered => { root.hover-row(index); }
-                activated => { root.choose(index); }
-                Text {
-                    x: parent.width - 72px; width: 56px; height: parent.height;
-                    horizontal-alignment: right; vertical-alignment: center;
-                    text: row.enabled ? "On" : "Off";
-                    color: row.enabled ? Theme.foreground : Theme.secondary-foreground;
-                    font-size: Typography.body-size; font-weight: Typography.emphasis-weight;
-                }
-            }
-            for label[index] in ["Open mods folder", "Back"] : ListRow {
-                x: Metrics.spacing-sm;
-                y: Metrics.spacing-xs + (root.mods.length + index) * step - scroll;
-                animate y { duration: Motion.focus-duration; easing: ease-in-out; }
-                width: parent.width - Metrics.spacing-md;
-                compact: true; title: label; trailing-width: Metrics.spacing-lg;
-                focused: root.selected == root.mods.length + index;
-                enabled: root.open && root.view == 6 && !root.busy;
-                hovered => { root.hover-row(root.mods.length + index); }
-                activated => { root.choose(root.mods.length + index); }
-            }
-        }
-        Text {
-            x: Metrics.spacing-lg; y: 396px;
-            width: parent.width - Metrics.spacing-xxl; height: 84px;
-            text: root.message;
-            color: Theme.secondary-foreground; font-size: Typography.caption-size;
-            wrap: word-wrap; overflow: elide;
-        }
-    }
-    error-dialog := ModalDialog {
-        area-width: root.area-width; area-height: root.area-height;
-        open: root.open && root.view == 3;
-        card-height: 232px;
-        dismissed => { root.back(); }
-        Text {
-            x: Metrics.spacing-lg; y: Metrics.spacing-lg;
-            width: parent.width - Metrics.spacing-xxl; height: 116px;
-            text: root.message; color: Theme.foreground;
-            font-size: Typography.body-size; wrap: word-wrap;
-        }
-        ActionButton {
-            x: parent.width - 124px; y: parent.height - 60px; width: 100px; height: 36px;
-            label: "Close"; enabled: root.open && root.view == 3;
-            activated => { root.back(); }
-        }
-    }
-    properties-dialog := ModalDialog {
-        area-width: root.area-width; area-height: root.area-height;
-        open: root.open && root.view == 1;
-        card-width: 504px; card-height: 582px;
-        dismissed => { root.back(); }
-    Rectangle {
-        x: 24px; y: 24px; width: 64px; height: 64px;
-        border-radius: Metrics.radius-md; clip: true;
-        FallbackCover { width: parent.width; height: parent.height; typography-scale: 0.32; game: root.game; visible: !root.game.has-artwork; }
-        Image { width: parent.width; height: parent.height; source: root.game.artwork; image-fit: cover; visible: root.game.has-artwork; }
-    }
-    menu-title := Text {
-        x: 104px; y: 24px + max(0px, (64px - self.height - 26px) / 2);
-        width: parent.width - 128px; height: min(48px, self.preferred-height);
-        text: root.game.title; color: Theme.foreground;
-        font-size: Typography.body-size; font-weight: Typography.heading-weight;
-        wrap: word-wrap; overflow: elide;
-    }
-    Text {
-        x: 104px; y: menu-title.y + menu-title.height + 6px; width: parent.width - 128px; height: 20px;
-        text: root.view == 1 ? "Game properties" : root.game.platform;
-        color: Theme.secondary-foreground; font-size: Typography.caption-size;
-    }
-    Rectangle { x: 24px; y: 108px; width: parent.width - 48px; height: 1px; background: Theme.divider; }
-    Rectangle {
-        x: 28px; y: 128px; width: parent.width - 56px; height: 330px; clip: true;
-        properties := Text {
-            y: -root.details-offset;
-            width: parent.width;
-            text: root.details; wrap: word-wrap;
-            color: Theme.foreground; font-size: Typography.body-size;
-        }
+        background: #00000070; opacity: root.reveal;
         TouchArea {
             width: parent.width; height: parent.height;
-            scroll-event(event) => { if (event.delta-y != 0px) { root.scroll(event.delta-y < 0px ? 1 : -1); return accept; } reject }
+            enabled: root.open && !root.busy;
+            clicked => { root.dismiss(); }
+            pointer-event(event) => { if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) { root.dismiss(); } }
         }
     }
+    panel := Rectangle {
+        width: min(Metrics.pause-panel-width, root.width);
+        height: root.height;
+        x: root.width - self.width * root.reveal;
+        background: Theme.background;
+        // Swallow pointer input so nothing behind the panel reacts.
+        TouchArea { width: parent.width; height: parent.height; }
+        ScrollEdgeShadow {
+            x: -self.width;
+            width: Metrics.scroll-edge-shadow-height; height: parent.height;
+            direction: 270deg; strength: root.reveal;
+        }
         Text {
-            x: 28px; y: 466px; width: parent.width - 56px; height: 44px;
-            text: root.message;
-            color: Theme.secondary-foreground; font-size: Typography.caption-size; wrap: word-wrap;
+            x: Metrics.spacing-lg; y: Metrics.spacing-lg;
+            width: parent.width - Metrics.spacing-lg * 2; height: Metrics.compact-title-height;
+            text: root.view == 1 ? "Game properties"
+                : root.view == 2 ? "Uninstall game"
+                : root.view == 4 ? "Save data"
+                : root.view == 5 ? "Delete save data"
+                : root.view == 6 ? "Mods"
+                : root.game.platform;
+            color: Theme.secondary-foreground; font-size: Typography.caption-size;
+        }
+        MarqueeText {
+            active: root.open;
+            edge-color: Theme.background;
+            x: Metrics.spacing-lg; y: Metrics.spacing-lg + Metrics.compact-title-height;
+            width: parent.width - Metrics.spacing-lg * 2; height: Metrics.compact-row-height + Metrics.spacing-md;
+            text: root.game.title; text-color: Theme.foreground;
+            font-size: Typography.heading-size; font-weight: Typography.heading-weight;
+        }
+        Rectangle {
+            y: root.content-top; width: parent.width; height: root.content-height;
+            background: transparent; clip: true;
+            // Options.
+            TransitionLayer {
+                active: root.view == 0; outgoing: view-transition.from-key == 0;
+                returning: root.view-back; phase: root.view-phase;
+                x: Metrics.spacing-lg; rest-y: 0px;
+                width: parent.width - Metrics.spacing-lg * 2; height: root.content-height;
+                ListRow {
+                    y: 0px; width: parent.width; compact: true;
+                    title: "Manage save data"; trailing-width: Metrics.spacing-lg;
+                    focused: root.view == 0 && root.selected == 0;
+                    enabled: root.open && root.view == 0;
+                    hovered => { root.hover-row(0); } activated => { root.pick(0); }
+                }
+                if root.mods-available : ListRow {
+                    y: root.row-step; width: parent.width; compact: true;
+                    title: "Manage mods"; trailing-width: Metrics.spacing-lg;
+                    focused: root.view == 0 && root.selected == root.mods-row;
+                    enabled: root.open && root.view == 0;
+                    hovered => { root.hover-row(root.mods-row); } activated => { root.pick(root.mods-row); }
+                }
+                ListRow {
+                    y: root.row-step * root.properties-row; width: parent.width; compact: true;
+                    title: "Game properties"; trailing-width: Metrics.spacing-lg;
+                    focused: root.view == 0 && root.selected == root.properties-row;
+                    enabled: root.open && root.view == 0;
+                    hovered => { root.hover-row(root.properties-row); } activated => { root.pick(root.properties-row); }
+                }
+                ListRow {
+                    y: root.row-step * root.hide-row; width: parent.width; compact: true;
+                    title: root.hidden-game ? "Unhide game" : "Hide game"; trailing-width: Metrics.spacing-lg;
+                    focused: root.view == 0 && root.selected == root.hide-row;
+                    enabled: root.open && root.view == 0;
+                    hovered => { root.hover-row(root.hide-row); } activated => { root.pick(root.hide-row); }
+                }
+                // The destructive action sits apart.
+                ListRow {
+                    y: root.row-step * root.uninstall-row + Metrics.spacing-sm * 2; width: parent.width; compact: true;
+                    title: "Uninstall game"; trailing-width: Metrics.spacing-lg;
+                    focused: root.view == 0 && root.selected == root.uninstall-row;
+                    enabled: root.open && root.view == 0;
+                    hovered => { root.hover-row(root.uninstall-row); } activated => { root.pick(root.uninstall-row); }
+                }
+            }
+            // Save data.
+            TransitionLayer {
+                active: root.view == 4; outgoing: view-transition.from-key == 4;
+                returning: root.view-back; phase: root.view-phase;
+                x: Metrics.spacing-lg; rest-y: 0px;
+                width: parent.width - Metrics.spacing-lg * 2; height: root.content-height;
+                for label[index] in ["Open save folder", "Back up save data", "Delete save data"] : ListRow {
+                    y: root.row-step * index + (index == 2 ? Metrics.spacing-sm * 2 : 0px);
+                    width: parent.width; compact: true; title: label; trailing-width: Metrics.spacing-lg;
+                    focused: root.view == 4 && root.selected == index;
+                    enabled: root.open && root.view == 4;
+                    hovered => { root.hover-row(index); } activated => { root.pick(index); }
+                }
+            }
+            // Mods: each one switches on or off; the folder opens below them.
+            TransitionLayer {
+                active: root.view == 6; outgoing: view-transition.from-key == 6;
+                returning: root.view-back; phase: root.view-phase;
+                x: Metrics.spacing-lg; rest-y: 0px;
+                width: parent.width - Metrics.spacing-lg * 2; height: root.content-height;
+                private property <length> list-height: (root.mods.length + 1) * root.row-step + Metrics.spacing-sm * 2;
+                // Rows past the bottom scroll into view with the selection.
+                private property <length> scroll: max(0px, min(root.selected * root.row-step + Metrics.compact-row-height + Metrics.spacing-sm * 2 - root.content-height, self.list-height - root.content-height));
+                for row[index] in root.mods : SettingsRow {
+                    y: root.row-step * index - parent.scroll;
+                    animate y { duration: Motion.focus-duration; easing: ease-in-out; }
+                    width: parent.width; height: Metrics.compact-row-height;
+                    compact: true; title: row.title;
+                    toggle: true; compact-toggle: true; checked: row.enabled;
+                    focused: root.view == 6 && root.selected == index;
+                    enabled: root.open && root.view == 6;
+                    activated => { root.pick(index); }
+                }
+                ListRow {
+                    y: root.row-step * root.mods.length + (root.mods.length > 0 ? Metrics.spacing-sm * 2 : 0px) - parent.scroll;
+                    animate y { duration: Motion.focus-duration; easing: ease-in-out; }
+                    width: parent.width; compact: true; title: "Open mods folder"; trailing-width: Metrics.spacing-lg;
+                    focused: root.view == 6 && root.selected == root.mods.length;
+                    enabled: root.open && root.view == 6;
+                    hovered => { root.hover-row(root.mods.length); } activated => { root.pick(root.mods.length); }
+                }
+            }
+            // Properties: read-only facts, scrolled with Up/Down or the wheel.
+            TransitionLayer {
+                active: root.view == 1; outgoing: view-transition.from-key == 1;
+                returning: root.view-back; phase: root.view-phase;
+                x: Metrics.spacing-lg; rest-y: 0px;
+                width: parent.width - Metrics.spacing-lg * 2; height: root.content-height;
+                clip: true;
+                facts := VerticalLayout {
+                    y: -root.properties-offset;
+                    animate y { duration: Motion.focus-duration; easing: ease-out; }
+                    width: parent.width;
+                    spacing: Metrics.spacing-md;
+                    for fact in root.properties : VerticalLayout {
+                        spacing: Metrics.spacing-xs;
+                        Text {
+                            text: fact.label; color: Theme.secondary-foreground;
+                            font-size: Typography.caption-size;
+                        }
+                        Text {
+                            text: fact.value; color: Theme.foreground;
+                            font-size: Typography.body-size; wrap: word-wrap;
+                        }
+                    }
+                }
+                TouchArea {
+                    width: parent.width; height: parent.height;
+                    scroll-event(event) => { if (event.delta-y != 0px) { root.scroll(event.delta-y < 0px ? 1 : -1); return accept; } reject }
+                }
+            }
+            // Confirmations, as in the quick menu: Cancel first and focused.
+            for view in [2, 5] : TransitionLayer {
+                active: root.view == view; outgoing: view-transition.from-key == view;
+                returning: root.view-back; phase: root.view-phase;
+                x: Metrics.spacing-lg; rest-y: 0px;
+                width: parent.width - Metrics.spacing-lg * 2; height: root.content-height;
+                VerticalLayout {
+                    y: 0px; width: parent.width;
+                    alignment: start; spacing: Metrics.spacing-lg;
+                    Text {
+                        text: root.confirm-text; wrap: word-wrap;
+                        color: Theme.foreground; font-size: Typography.body-size;
+                    }
+                    ActionButton {
+                        height: Metrics.pause-row-height; label: "Cancel";
+                        focused: root.view == view && root.selected == 0;
+                        enabled: root.open && root.view == view && !root.busy;
+                        activated => { root.pick(0); }
+                    }
+                    ActionButton {
+                        height: Metrics.pause-row-height;
+                        label: root.busy ? (view == 2 ? "Uninstalling" : "Deleting") : (view == 2 ? "Uninstall" : "Delete save data");
+                        focused: root.view == view && root.selected == 1;
+                        enabled: root.open && root.view == view && !root.busy;
+                        activated => { root.pick(1); }
+                    }
+                }
+            }
+        }
+        Text {
+            x: Metrics.spacing-lg;
+            y: parent.height - root.footer-center - Metrics.hint-row-height / 2 - Metrics.spacing-md - Metrics.hint-row-height * 2;
+            width: parent.width - Metrics.spacing-lg * 2; height: Metrics.hint-row-height * 2;
+            vertical-alignment: bottom;
+            text: root.message; wrap: word-wrap; overflow: elide;
+            color: Theme.secondary-foreground; font-size: Typography.caption-size;
         }
         HintBar {
-            x: 28px; y: parent.height - 48px; width: 260px; height: 22px;
-            hints: [{ button: "B", label: "Close" }];
-            activated(button) => { root.back(); }
-        }
-        ActionButton {
-            x: parent.width - 124px; y: parent.height - 58px; width: 100px; height: 36px;
-            label: "Close"; enabled: root.open && root.view == 1;
-            activated => { root.back(); }
+            x: Metrics.spacing-lg; y: parent.height - root.footer-center - Metrics.hint-row-height / 2;
+            width: parent.width - Metrics.spacing-lg * 2; height: Metrics.hint-row-height;
+            hints: root.view == 1
+                ? [{ button: "B", label: "Back" }]
+                : [{ button: "B", label: root.view == 0 ? "Close" : (root.view == 2 || root.view == 5) ? "Cancel" : "Back" }, { button: "A", label: "Select" }];
+            interactive: root.open && !root.busy;
+            activated(button) => {
+                if button == "B" { root.back(); } else { root.pick(root.selected); }
+            }
         }
     }
 }

@@ -50,7 +50,18 @@ const DS_PAUSE_ACTIONS: [i32; 11] = [
 ];
 fn pause_actions(ds: bool, three_ds: bool) -> &'static [i32] {
     if three_ds {
-        &[0, 1, SCREEN_LAYOUT, SWAP_SCREENS, 4, 5, RETURN_TO_HORIZON]
+        // No rewind (a 3DS state takes about a second) and no lid.
+        &[
+            0,
+            1,
+            SCREEN_LAYOUT,
+            SWAP_SCREENS,
+            2,
+            3,
+            4,
+            5,
+            RETURN_TO_HORIZON,
+        ]
     } else if ds {
         &DS_PAUSE_ACTIONS
     } else {
@@ -125,10 +136,6 @@ pub struct GbaPlayer {
     worker_paused: Cell<bool>,
     stage: Cell<PlayerStage>,
     stage_since: Cell<Instant>,
-    first_frame_at: Cell<Option<Instant>>,
-    /// When the worker said the game is loading (with a picture to show,
-    /// if any), so the launch can zoom into it instead of waiting.
-    loading_at: Cell<Option<(Instant, bool)>>,
     /// When Return to Horizon started saving, until the collapse begins.
     exit_since: Cell<Option<Instant>>,
     /// Called by the game worker when a frame is ready (see `show_frame`).
@@ -185,8 +192,6 @@ impl GbaPlayer {
             worker_paused: Cell::new(false),
             stage: Cell::new(PlayerStage::Waiting),
             stage_since: Cell::new(Instant::now()),
-            first_frame_at: Cell::new(None),
-            loading_at: Cell::new(None),
             exit_since: Cell::new(None),
             frame_ready: std::cell::OnceCell::new(),
             last_shown: Cell::new(None),
@@ -921,7 +926,11 @@ impl GbaPlayer {
                 ui.set_player_restart_focus(0);
                 self.cue(UiSoundCue::Ok);
             } else {
-                self.send_action(&ui, Command::SaveState(entry.slot), "");
+                self.send_action(
+                    &ui,
+                    Command::SaveState(entry.slot),
+                    slow_state(&ui, "Saving"),
+                );
             }
         } else if self.state_mode.get() == StateMode::Load && entry.metadata.is_some() {
             self.send_action(
@@ -930,7 +939,7 @@ impl GbaPlayer {
                     slot: entry.slot,
                     quick: false,
                 },
-                "",
+                slow_state(&ui, "Loading"),
             );
         }
     }
@@ -1189,7 +1198,11 @@ impl GbaPlayer {
                 return;
             }
             if choice == 1 {
-                self.send_action(&ui, Command::SaveState(self.state_focus.get() as u8), "");
+                self.send_action(
+                    &ui,
+                    Command::SaveState(self.state_focus.get() as u8),
+                    slow_state(&ui, "Saving"),
+                );
             } else {
                 self.set_state_mode(&ui, StateMode::Save);
                 self.cue(UiSoundCue::Back);
@@ -1311,6 +1324,11 @@ impl GbaPlayer {
         if self.stage.get() == PlayerStage::Exiting {
             return;
         }
+        // A first frame that arrives mid-zoom waits for the zoom to end (the
+        // tick shows it), so uploading it never costs the animation a frame.
+        if self.stage.get() == PlayerStage::Entering && !ui.get_player_has_frame() {
+            return;
+        }
         // At most one frame per display refresh: a frame set sooner would be
         // replaced before it is drawn, wasting its filtering.
         let wait = self.last_shown.get().map_or(Duration::ZERO, |at| {
@@ -1336,9 +1354,6 @@ impl GbaPlayer {
         else {
             return;
         };
-        if self.first_frame_at.get().is_none() {
-            self.first_frame_at.set(Some(Instant::now()));
-        }
         publish_display(ui, running.as_ref());
         if let Some([top, bottom]) = frame.screens {
             let size = |value: u32| i32::try_from(value).unwrap_or(i32::MAX);
@@ -1439,7 +1454,6 @@ impl GbaPlayer {
                             )));
                         }
                         ui.set_player_loading_picture(picture);
-                        self.loading_at.set(Some((Instant::now(), picture)));
                     }
                     Event::Started(title) => {
                         ui.set_player_title(super::titles::game_title(&title).into());
@@ -1727,20 +1741,10 @@ impl GbaPlayer {
             let hold = Duration::from_millis(
                 ui.global::<crate::Motion>().get_player_press_hold().max(0) as u64,
             );
-            let prewarmed = self.first_frame_at.get().is_some_and(|first| {
-                Self::zoom_duration(&ui).is_zero() || first.elapsed() >= Duration::from_millis(16)
-            });
-            // A picture of the state being resumed can be zoomed into while
-            // the game finishes loading (once it has been uploaded).
-            let preview_ready = self
-                .loading_at
-                .get()
-                .is_some_and(|(at, picture)| picture && at.elapsed() >= Duration::from_millis(16));
-            if (ui.get_player_has_frame() && prewarmed && elapsed >= hold)
-                || (preview_ready && elapsed >= hold)
-                || ui.get_player_failed()
-                || elapsed >= Duration::from_millis(500)
-            {
+            // The zoom never waits for the game: it starts when the press
+            // ends and opens onto the loading layer (the resumed state's
+            // picture, or black, under a spinner) until the first frame.
+            if elapsed >= hold || ui.get_player_failed() {
                 // Capture the live camera position at the rebound, not at Accept.
                 ui.set_player_origin(ui.invoke_player_capture_origin());
                 Self::release_card(&ui);
@@ -1755,6 +1759,8 @@ impl GbaPlayer {
             self.keyboard.set(0);
             self.pad_ready.set(false);
             self.set_stage(&ui, PlayerStage::Playing);
+            // A frame held back during the zoom appears now.
+            self.show_frame(&ui);
         }
         if self.stage.get() == PlayerStage::Playing && ui.get_player_failed() {
             self.timer.stop();
@@ -1917,8 +1923,6 @@ impl LaunchExecutor for GbaPlayer {
             ui.set_player_origin(ui.invoke_player_capture_origin());
             self.set_stage(&ui, PlayerStage::Waiting);
             self.closing.set(false);
-            self.first_frame_at.set(None);
-            self.loading_at.set(None);
             ui.set_player_loading_picture(false);
             self.last_shown.set(None);
             self.frame_period.set(display_period(&ui));
@@ -1949,6 +1953,15 @@ impl LaunchExecutor for GbaPlayer {
             Ok(())
         })();
         result.map_err(|error| LaunchExecutionError::new(std::io::Error::other(error)))
+    }
+}
+/// A 3DS state takes about a second to save or load: say so meanwhile.
+/// Other systems' are instant and show nothing.
+fn slow_state(ui: &AppWindow, doing: &'static str) -> &'static str {
+    match (ui.get_player_three_ds(), doing) {
+        (true, "Saving") => "Saving state…",
+        (true, _) => "Loading state…",
+        _ => "",
     }
 }
 fn current_speed(ui: &AppWindow) -> PlaybackSpeed {
@@ -1996,11 +2009,14 @@ fn keyboard_button(text: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn three_ds_menu_skips_unavailable_state_and_lid_actions() {
-        assert_eq!(super::pause_actions(false, true), &[0, 1, 8, 7, 4, 5, 6]);
+    fn three_ds_menu_has_states_but_no_rewind_or_lid() {
+        assert_eq!(
+            super::pause_actions(false, true),
+            &[0, 1, 8, 7, 2, 3, 4, 5, 6]
+        );
         assert_eq!(super::pause_step(1, true, false, false, true), 8);
-        assert_eq!(super::pause_step(7, true, false, false, true), 4);
-        assert_eq!(super::pause_step(4, false, false, false, true), 7);
+        assert_eq!(super::pause_step(7, true, false, false, true), 2);
+        assert_eq!(super::pause_step(4, false, false, false, true), 3);
         assert_eq!(super::pause_step(6, true, false, false, true), 0);
     }
 
@@ -2414,6 +2430,11 @@ mod tests {
             },
         );
         ui.show().unwrap();
+        // Let the new window draw its first frames first: those aren't the launch.
+        Timer::single_shot(Duration::from_millis(500), || {
+            let _ = slint::quit_event_loop();
+        });
+        slint::run_event_loop().unwrap();
         player.execute(&target).unwrap();
         let weak = ui.as_weak();
         let live = Rc::clone(&player);
@@ -2454,7 +2475,7 @@ mod tests {
             // without them.)
             let at: &[u64] =
                 if std::env::var_os("HORIZON_LAUNCH_SHOTS").is_some_and(|v| !v.is_empty()) {
-                    &[450, 700, 1150, 1200, 1250, 1300, 1500]
+                    &[150, 250, 450, 700, 1150, 1200, 1250, 1300, 1500]
                 } else {
                     &[]
                 };
@@ -2567,6 +2588,28 @@ mod tests {
                         _ => live.swap_screens(&ui),
                     }
                     three_ds_shot.set(stage + 1);
+                } else if stage == 8 && elapsed > Duration::from_millis(24_000) {
+                    // A manual state: saved into slot 1, then loaded back.
+                    live.send_action(&ui, Command::SaveState(1), slow_state(&ui, "Saving"));
+                    assert!(ui.get_player_busy());
+                    assert_eq!(ui.get_player_message(), "Saving state…");
+                    three_ds_shot.set(9);
+                } else if stage == 9 && !ui.get_player_busy() {
+                    assert!(!ui.get_player_failed(), "{}", ui.get_player_message());
+                    eprintln!("3DS state saved at {elapsed:?}");
+                    live.send_action(
+                        &ui,
+                        Command::LoadState {
+                            slot: 1,
+                            quick: false,
+                        },
+                        slow_state(&ui, "Loading"),
+                    );
+                    three_ds_shot.set(10);
+                } else if stage == 10 && !ui.get_player_busy() {
+                    assert!(!ui.get_player_failed(), "{}", ui.get_player_message());
+                    eprintln!("3DS state loaded at {elapsed:?}");
+                    three_ds_shot.set(11);
                 }
             }
             if !normal_only
@@ -3362,7 +3405,6 @@ mod runtime_tests {
                     2
                 };
                 if recorded.get() & bit == 0 {
-                    assert!(ui.get_player_has_frame());
                     assert!(motion_player.handle_action(UiActionEvent::fresh(UiAction::Accept)));
                     assert!(ui.get_player_open());
                     let pixels = ui.window().take_snapshot().unwrap();

@@ -114,6 +114,10 @@ pub fn ds_state_core_directory(game: &Path) -> PathBuf {
     game.join("states/melonds-ds")
 }
 
+pub fn three_ds_state_core_directory(game: &Path) -> PathBuf {
+    game.join("states/azahar")
+}
+
 pub fn gba_save_directory() -> Result<PathBuf, DataPathError> {
     Ok(app_dir(BaseDir::Data)?.join("saves"))
 }

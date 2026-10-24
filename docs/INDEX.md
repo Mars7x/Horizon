@@ -16,7 +16,7 @@ these guides describe the current contracts. The root README is intentionally bl
 | [Navigation](NAVIGATION.md) | Routes, focus, history and page entry |
 | [Input](INPUT.md) | Controller/keyboard/mouse behavior and on-screen keyboard |
 | [Library](LIBRARY.md) | Catalog, grid, sorting and current empty state |
-| [Game options](GAME_OPTIONS.md) | Shared game menu, persistent visibility, properties and confirmed uninstall |
+| [Game options](GAME_OPTIONS.md) | Shared game options panel, save data, 3DS mods, visibility, properties and confirmed uninstall |
 | [ROM import](ROM_IMPORT.md) | Folder selection, automatic import and GB/GBC/GBA/DS recognition |
 | [Playback](GBA_PLAYBACK.md) | Embedded mGBA and melonDS DS, gameplay controls, battery saves, save states and lifecycle |
 | [3DS playback](THREE_DS_PLAYBACK.md) | Azahar Vulkan, decrypted import, controls and isolated in-game saves |

@@ -1,4 +1,6 @@
-//! Identity-bound game options shared by Home and Library.
+//! Identity-bound game options shared by Home and Library: a side panel with
+//! pages for save data, mods (3DS), properties and confirmations. Rust owns
+//! the page, focus and every operation; Slint only presents them.
 use super::{
     CallbackSlot, catalog::SharedCatalog, home::HomeController, library_reload::LibraryReloader,
     wake::drain_notify,
@@ -11,6 +13,7 @@ use crate::{
     services::{
         game_management::{self, GameDetails, ManagementError, UninstallOutcome},
         mods::ModEntry,
+        rom_import::RomSystem,
         worker::{WorkerSender, spawn, worker_channel},
     },
 };
@@ -22,14 +25,62 @@ use std::{
     sync::mpsc::Receiver,
 };
 
+/// The panel's pages (the `game-menu-view` values).
+const OPTIONS: i32 = 0;
+const PROPERTIES: i32 = 1;
+const CONFIRM_UNINSTALL: i32 = 2;
+const SAVES: i32 = 4;
+const CONFIRM_DELETE_SAVES: i32 = 5;
+const MODS: i32 = 6;
+
+/// The options page's rows, in order. Manage mods is for 3DS games, the
+/// only system Horizon applies mods to.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Choice {
+    Saves,
+    Mods,
+    Properties,
+    Hide,
+    Uninstall,
+}
+fn choices(three_ds: bool) -> &'static [Choice] {
+    if three_ds {
+        &[
+            Choice::Saves,
+            Choice::Mods,
+            Choice::Properties,
+            Choice::Hide,
+            Choice::Uninstall,
+        ]
+    } else {
+        &[
+            Choice::Saves,
+            Choice::Properties,
+            Choice::Hide,
+            Choice::Uninstall,
+        ]
+    }
+}
+fn row_of(three_ds: bool, choice: Choice) -> i32 {
+    choices(three_ds)
+        .iter()
+        .position(|&c| c == choice)
+        .map_or(0, |row| row as i32)
+}
+
+/// Save data page rows.
+const OPEN_SAVES: i32 = 0;
+const BACK_UP_SAVES: i32 = 1;
+const DELETE_SAVES: i32 = 2;
+
 enum Reply {
     Details(u64, Result<GameDetails, ManagementError>),
     Mutation(u64, Result<UninstallOutcome, ManagementError>),
-    Save(u64, Result<String, String>),
-    Mods(u64, Result<(Vec<ModEntry>, bool, String), String>),
+    Save(u64, i32, Result<String, String>),
+    Mods(u64, Result<(Vec<ModEntry>, String), String>),
 }
 
-/// What the mods dialog asks its worker to do.
+/// What the mods page asks its worker to do.
 enum ModsAction {
     List,
     Toggle(String, bool),
@@ -44,6 +95,7 @@ pub struct GameMenuController {
     home: Rc<HomeController>,
     reloader: Rc<LibraryReloader>,
     target: Cell<Option<GameId>>,
+    three_ds: Cell<bool>,
     details: RefCell<Option<GameDetails>>,
     generation: Cell<u64>,
     mutation: RefCell<Option<std::thread::JoinHandle<()>>>,
@@ -53,16 +105,7 @@ pub struct GameMenuController {
     sound: CallbackSlot<dyn Fn(UiSoundCue)>,
     mods: RefCell<Vec<ModEntry>>,
     mods_model: Rc<slint::VecModel<crate::ModRow>>,
-}
-
-/// The last row the view can focus.
-fn last_row(view: i32, mods: usize) -> i32 {
-    match view {
-        0 => 4,
-        4 => 3,
-        6 => i32::try_from(mods).unwrap_or(i32::MAX - 2) + 1,
-        _ => 0,
-    }
+    properties_model: Rc<slint::VecModel<crate::PropertyRow>>,
 }
 
 impl GameMenuController {
@@ -84,6 +127,7 @@ impl GameMenuController {
             home,
             reloader,
             target: Cell::new(None),
+            three_ds: Cell::new(false),
             details: RefCell::new(None),
             generation: Cell::new(0),
             mutation: RefCell::new(None),
@@ -93,8 +137,10 @@ impl GameMenuController {
             sound: RefCell::new(None),
             mods: RefCell::new(Vec::new()),
             mods_model: Rc::new(slint::VecModel::default()),
+            properties_model: Rc::new(slint::VecModel::default()),
         });
         ui.set_game_menu_mods(slint::ModelRc::from(controller.mods_model.clone()));
+        ui.set_game_menu_properties(slint::ModelRc::from(controller.properties_model.clone()));
         drain.bind(&controller);
         let weak = Rc::downgrade(&controller);
         ui.on_game_menu_choose(move |index| {
@@ -107,10 +153,10 @@ impl GameMenuController {
             if let Some(controller) = weak.upgrade()
                 && let Some(ui) = controller.ui.upgrade()
                 && ui.get_game_menu_open()
-                && matches!(ui.get_game_menu_view(), 0 | 4 | 6)
                 && !ui.get_game_menu_busy()
-                && (0..=last_row(ui.get_game_menu_view(), controller.mods.borrow().len()))
-                    .contains(&index)
+                && controller
+                    .last_row(ui.get_game_menu_view())
+                    .is_some_and(|last| (0..=last).contains(&index))
             {
                 ui.set_game_menu_selected(index);
             }
@@ -119,6 +165,14 @@ impl GameMenuController {
         ui.on_game_menu_back(move || {
             if let Some(controller) = weak.upgrade() {
                 controller.back();
+            }
+        });
+        let weak = Rc::downgrade(&controller);
+        ui.on_game_menu_dismiss(move || {
+            if let Some(controller) = weak.upgrade()
+                && controller.close()
+            {
+                controller.cue(UiSoundCue::Back);
             }
         });
         let weak = Rc::downgrade(&controller);
@@ -154,6 +208,23 @@ impl GameMenuController {
         next
     }
 
+    /// The last row a page can focus; None for pages without rows.
+    fn last_row(&self, view: i32) -> Option<i32> {
+        match view {
+            OPTIONS => Some(choices(self.three_ds.get()).len() as i32 - 1),
+            SAVES => Some(DELETE_SAVES),
+            MODS => Some(i32::try_from(self.mods.borrow().len()).unwrap_or(i32::MAX - 1)),
+            CONFIRM_UNINSTALL | CONFIRM_DELETE_SAVES => Some(1),
+            _ => None,
+        }
+    }
+
+    fn show(&self, ui: &AppWindow, view: i32, selected: i32) {
+        ui.set_game_menu_view(view);
+        ui.set_game_menu_selected(selected);
+        ui.set_game_menu_message("".into());
+    }
+
     pub fn open(&self, id: i64) -> bool {
         let Some(ui) = self.ui.upgrade() else {
             return false;
@@ -171,36 +242,25 @@ impl GameMenuController {
         let Some(card) = self.home.card_at(index) else {
             return false;
         };
+        let three_ds = catalog[index].sources().iter().any(|source| {
+            RomSystem::from_source_id(source.source_id().as_str()) == Some(RomSystem::Nintendo3ds)
+        });
         self.target.set(Some(id));
+        self.three_ds.set(three_ds);
         *self.details.borrow_mut() = None;
+        self.properties_model.set_vec(Vec::new());
+        self.mods.borrow_mut().clear();
+        self.mods_model.set_vec(Vec::new());
         ui.set_game_menu_game(card);
         ui.set_game_menu_hidden(catalog[index].hidden());
+        ui.set_game_menu_mods_available(three_ds);
         drop(catalog);
-        ui.set_game_menu_selected(0);
-        ui.set_game_menu_view(0);
+        self.show(&ui, OPTIONS, 0);
         ui.set_game_menu_offset(0.0);
-        ui.set_game_menu_details("Loading game details…".into());
-        ui.set_game_menu_message("".into());
-        self.reposition(&ui);
         ui.set_game_menu_open(true);
         self.load_details(id);
         self.cue(UiSoundCue::Ok);
         true
-    }
-
-    pub fn reposition(&self, ui: &AppWindow) {
-        let anchor = ui.invoke_player_capture_origin();
-        let (x, y) = popup_position(
-            anchor,
-            ui.get_logical_viewport_width_px(),
-            ui.get_logical_viewport_height_px(),
-            (
-                ui.get_game_menu_placement_width(),
-                ui.get_game_menu_placement_height(),
-            ),
-        );
-        ui.set_game_menu_x(x);
-        ui.set_game_menu_y(y);
     }
 
     fn load_details(&self, id: GameId) {
@@ -211,22 +271,26 @@ impl GameMenuController {
             let result = game_management::details(&database, id);
             let _ = sender.send(Reply::Details(generation, result));
         }) {
-            self.error("Could not start reading game details. Close the menu and try again.");
+            self.error("Could not read this game's details. Close and try again.");
         }
     }
 
-    fn close(&self) {
-        if let Some(ui) = self.ui.upgrade() {
-            if ui.get_game_menu_busy() {
-                return;
-            }
-            ui.set_game_menu_open(false);
+    /// Close the panel; false while an operation must finish first.
+    fn close(&self) -> bool {
+        let Some(ui) = self.ui.upgrade() else {
+            return false;
+        };
+        if !ui.get_game_menu_open() || ui.get_game_menu_busy() {
+            return false;
         }
+        ui.set_game_menu_open(false);
         self.next_generation();
         self.target.set(None);
         self.details.borrow_mut().take();
+        true
     }
 
+    /// Up one page; on the options page, close.
     fn back(&self) {
         let Some(ui) = self.ui.upgrade() else {
             return;
@@ -234,7 +298,20 @@ impl GameMenuController {
         if !ui.get_game_menu_open() || ui.get_game_menu_busy() {
             return;
         }
-        self.close();
+        let three_ds = self.three_ds.get();
+        match ui.get_game_menu_view() {
+            OPTIONS => {
+                self.close();
+            }
+            PROPERTIES => self.show(&ui, OPTIONS, row_of(three_ds, Choice::Properties)),
+            SAVES => self.show(&ui, OPTIONS, row_of(three_ds, Choice::Saves)),
+            MODS => self.show(&ui, OPTIONS, row_of(three_ds, Choice::Mods)),
+            CONFIRM_UNINSTALL => self.show(&ui, OPTIONS, row_of(three_ds, Choice::Uninstall)),
+            CONFIRM_DELETE_SAVES => self.show(&ui, SAVES, DELETE_SAVES),
+            _ => {
+                self.close();
+            }
+        }
         self.cue(UiSoundCue::Back);
     }
 
@@ -242,12 +319,12 @@ impl GameMenuController {
         let Some(ui) = self.ui.upgrade() else {
             return;
         };
-        if !ui.get_game_menu_open() || ui.get_game_menu_view() != 1 || ui.get_game_menu_busy() {
+        if !ui.get_game_menu_open() || ui.get_game_menu_view() != PROPERTIES {
             return;
         }
         let maximum = ui.get_game_menu_max_offset();
         ui.set_game_menu_offset(
-            (ui.get_game_menu_offset() + direction.signum() as f32 * 54.0)
+            (ui.get_game_menu_offset() + direction.signum() as f32 * 48.0)
                 .clamp(0.0, maximum.max(0.0)),
         );
     }
@@ -263,84 +340,77 @@ impl GameMenuController {
             return;
         };
         match ui.get_game_menu_view() {
-            0 => match index {
-                0 => {
-                    ui.set_game_menu_view(4);
-                    ui.set_game_menu_selected(0);
-                    ui.set_game_menu_message("".into());
-                    self.cue(UiSoundCue::Ok);
+            OPTIONS => {
+                let Some(&choice) = usize::try_from(index)
+                    .ok()
+                    .and_then(|row| choices(self.three_ds.get()).get(row))
+                else {
+                    return;
+                };
+                match choice {
+                    Choice::Saves => {
+                        self.show(&ui, SAVES, OPEN_SAVES);
+                        self.cue(UiSoundCue::Ok);
+                    }
+                    Choice::Mods => {
+                        self.show(&ui, MODS, 0);
+                        self.cue(UiSoundCue::Ok);
+                        self.manage_mods(id, ModsAction::List);
+                    }
+                    Choice::Properties => {
+                        self.show(&ui, PROPERTIES, 0);
+                        ui.set_game_menu_offset(0.0);
+                        if self.details.borrow().is_none() {
+                            ui.set_game_menu_message("Loading game details…".into());
+                        }
+                        self.cue(UiSoundCue::Ok);
+                    }
+                    Choice::Hide => self.mutate(id, false),
+                    Choice::Uninstall => {
+                        let count = self
+                            .details
+                            .borrow()
+                            .as_ref()
+                            .map_or(0, |details| details.roms.len());
+                        if count == 0 {
+                            self.error("Game details aren't available. Close and reopen game options before uninstalling.");
+                            return;
+                        }
+                        ui.set_game_menu_confirm_text(
+                            format!(
+                                "Delete {count} imported ROM {}?\n\nSaves, states, screenshots and history stay.",
+                                if count == 1 { "file" } else { "files" }
+                            )
+                            .into(),
+                        );
+                        self.show(&ui, CONFIRM_UNINSTALL, 0);
+                        self.cue(UiSoundCue::Ok);
+                    }
                 }
-                1 => {
-                    self.mods.borrow_mut().clear();
-                    self.mods_model.set_vec(Vec::new());
-                    ui.set_game_menu_view(6);
-                    ui.set_game_menu_selected(0);
-                    self.cue(UiSoundCue::Ok);
-                    self.manage_mods(id, ModsAction::List);
-                }
-                2 => {
-                    ui.set_game_menu_view(1);
-                    ui.set_game_menu_offset(0.0);
-                    self.cue(UiSoundCue::Ok);
-                }
-                3 => {
-                    self.mutate(id, false);
-                }
-                4 if self
-                    .details
-                    .borrow()
-                    .as_ref()
-                    .is_some_and(|details| !details.roms.is_empty()) =>
-                {
-                    let count = self
-                        .details
-                        .borrow()
-                        .as_ref()
-                        .map_or(0, |details| details.roms.len());
-                    let title = ui
-                        .get_game_menu_game()
-                        .title
-                        .chars()
-                        .take(80)
-                        .collect::<String>();
-                    ui.set_game_menu_confirm_text(format!("{title}\n\nDeletes {count} imported ROM {}. Saves, states, screenshots and history stay.", if count == 1 { "file" } else { "files" }).into());
-                    ui.set_game_menu_view(2);
-                    ui.set_game_menu_selected(0);
-                    self.cue(UiSoundCue::Ok);
-                }
-                4 => self
-                    .error("Game details are unavailable. Reopen this menu before uninstalling."),
-                _ => {}
-            },
-            2 => match index {
+            }
+            CONFIRM_UNINSTALL => match index {
                 0 => self.back(),
                 1 => self.mutate(id, true),
                 _ => {}
             },
-            3 => self.back(),
-            4 => match index {
-                0 | 1 => self.manage_saves(id, index),
-                2 => {
-                    let title = ui
-                        .get_game_menu_game()
-                        .title
-                        .chars()
-                        .take(80)
-                        .collect::<String>();
-                    ui.set_game_menu_confirm_text(format!("{title}\n\nDeletes the battery save, manual save states and automatic resume point. Existing manual backups, ROMs, screenshots and history stay. Back up first to keep your progress.").into());
-                    ui.set_game_menu_view(5);
-                    ui.set_game_menu_selected(0);
+            SAVES => match index {
+                OPEN_SAVES | BACK_UP_SAVES => self.manage_saves(id, index),
+                DELETE_SAVES => {
+                    ui.set_game_menu_confirm_text(
+                        "Delete the battery save, save states and resume point?\n\nBackups, ROMs, screenshots and history stay. Back up first to keep your progress."
+                            .into(),
+                    );
+                    self.show(&ui, CONFIRM_DELETE_SAVES, 0);
                     self.cue(UiSoundCue::Ok);
                 }
-                3 => self.back(),
                 _ => {}
             },
-            5 => match index {
+            CONFIRM_DELETE_SAVES => match index {
                 0 => self.back(),
-                1 => self.manage_saves(id, 2),
+                1 => self.manage_saves(id, DELETE_SAVES),
                 _ => {}
             },
-            6 => {
+            MODS => {
                 let count = self.mods.borrow().len();
                 match usize::try_from(index) {
                     Ok(row) if row < count => {
@@ -348,7 +418,6 @@ impl GameMenuController {
                         self.manage_mods(id, ModsAction::Toggle(entry.name, !entry.enabled));
                     }
                     Ok(row) if row == count => self.manage_mods(id, ModsAction::Open),
-                    Ok(row) if row == count + 1 => self.back(),
                     _ => {}
                 }
             }
@@ -370,28 +439,26 @@ impl GameMenuController {
             .name("mods".into())
             .spawn(move || {
                 let result = (|| {
-                    let (folder, system) =
-                        crate::services::save_data::folder_and_system(&database, &saves, id)?;
-                    let three_ds = system == crate::services::rom_import::RomSystem::Nintendo3ds;
+                    let folder = crate::services::save_data::folder(&database, &saves, id)?;
                     let game = &folder.directory;
                     let message = match action {
                         ModsAction::List => String::new(),
                         ModsAction::Toggle(name, enabled) => {
                             crate::services::mods::set_enabled(game, &name, enabled)
                                 .map_err(|e| format!("Could not save the mod choice: {e}"))?;
-                            "Changes apply the next time the game starts.".into()
+                            "Changes apply the next time the game starts".into()
                         }
                         ModsAction::Open => {
                             let directory = crate::services::mods::directory(game)
                                 .map_err(|e| format!("Could not prepare the mods folder: {e}"))?;
                             crate::platform::launcher::open_directory(&directory)
                                 .map_err(|e| format!("Could not open the mods folder: {e}"))?;
-                            "Mods folder opened. Reopen this list after adding mods.".into()
+                            "Mods folder opened. Reopen this page after adding mods".into()
                         }
                     };
-                    let mods = crate::services::mods::list(game, three_ds)
+                    let mods = crate::services::mods::list(game)
                         .map_err(|e| format!("Could not read this game's mods: {e}"))?;
-                    Ok((mods, three_ds, message))
+                    Ok((mods, message))
                 })();
                 let _ = sender.send(Reply::Mods(generation, result));
             });
@@ -399,7 +466,7 @@ impl GameMenuController {
             Ok(worker) => *self.mutation.borrow_mut() = Some(worker),
             Err(_) => {
                 ui.set_game_menu_busy(false);
-                ui.set_game_menu_message("Could not start reading mods. Try again.".into());
+                self.error("Could not start reading mods. Try again.");
             }
         }
     }
@@ -416,31 +483,31 @@ impl GameMenuController {
             let result = (|| {
                 let folder = crate::services::save_data::folder(&database, &saves, id)?;
                 match action {
-                    0 => {
+                    OPEN_SAVES => {
                         crate::platform::launcher::open_directory(&folder.directory)
                             .map_err(|e| format!("Could not open the save folder: {e}"))?;
-                        Ok("Save folder opened.".into())
+                        Ok("Save folder opened".into())
                     }
-                    1 => {
+                    BACK_UP_SAVES => {
                         let backup = crate::services::save_data::backup(&folder)
                             .map_err(|e| format!("Could not back up save data: {e}"))?;
                         Ok(format!("Backup saved in {}", backup.display()))
                     }
-                    2 => {
+                    DELETE_SAVES => {
                         crate::services::save_data::delete(&folder)
                             .map_err(|e| format!("Could not finish deleting save data: {e}. Any remaining files were kept."))?;
-                        Ok("Save data deleted. The next launch starts fresh.".into())
+                        Ok("Save data deleted. The next launch starts fresh".into())
                     }
                     _ => Err("Unknown save operation.".into()),
                 }
             })();
-            let _ = sender.send(Reply::Save(generation, result));
+            let _ = sender.send(Reply::Save(generation, action, result));
         });
         match started {
             Ok(worker) => *self.mutation.borrow_mut() = Some(worker),
             Err(_) => {
                 ui.set_game_menu_busy(false);
-                ui.set_game_menu_view(4);
+                self.show(&ui, SAVES, OPEN_SAVES);
                 self.error("Could not start managing save data. Try again.");
             }
         }
@@ -484,13 +551,18 @@ impl GameMenuController {
         }
     }
 
+    /// Failures show on the message line of the page they happened on.
     fn error(&self, text: &str) {
         if let Some(ui) = self.ui.upgrade() {
             ui.set_game_menu_message(text.into());
-            if ui.get_game_menu_view() == 0 {
-                ui.set_game_menu_view(3);
-                ui.set_game_menu_selected(0);
-            }
+        }
+    }
+
+    fn finish_requested_close(&self) {
+        if self.close_requested.replace(false)
+            && let Err(error) = slint::quit_event_loop()
+        {
+            tracing::warn!(%error, "could not finish the requested close");
         }
     }
 
@@ -505,28 +577,27 @@ impl GameMenuController {
                 {
                     match result {
                         Ok(details) => {
-                            ui.set_game_menu_details(properties_text(&details).into());
+                            self.properties_model.set_vec(property_rows(&details));
                             *self.details.borrow_mut() = Some(details);
+                            if ui.get_game_menu_view() == PROPERTIES {
+                                ui.set_game_menu_message("".into());
+                            }
                         }
-                        Err(error) => {
-                            ui.set_game_menu_details("Game details unavailable.".into());
-                            self.error(&error.to_string());
-                        }
+                        Err(error) => self.error(&error.to_string()),
                     }
                 }
-                Reply::Save(generation, result) if generation == self.generation.get() => {
+                Reply::Save(generation, action, result) if generation == self.generation.get() => {
                     ui.set_game_menu_busy(false);
-                    ui.set_game_menu_view(4);
-                    ui.set_game_menu_selected(0);
+                    // A deletion returns from its confirmation to Save data.
+                    if action == DELETE_SAVES {
+                        ui.set_game_menu_view(SAVES);
+                        ui.set_game_menu_selected(DELETE_SAVES);
+                    }
                     match result {
                         Ok(message) => {
                             ui.set_game_menu_message(message.into());
                             self.cue(UiSoundCue::Ok);
-                            if self.close_requested.replace(false)
-                                && let Err(error) = slint::quit_event_loop()
-                            {
-                                tracing::warn!(%error, "could not finish the requested close");
-                            }
+                            self.finish_requested_close();
                         }
                         Err(error) => {
                             self.close_requested.set(false);
@@ -537,7 +608,7 @@ impl GameMenuController {
                 Reply::Mods(generation, result) if generation == self.generation.get() => {
                     ui.set_game_menu_busy(false);
                     match result {
-                        Ok((mods, three_ds, message)) => {
+                        Ok((mods, message)) => {
                             self.mods_model.set_vec(
                                 mods.iter()
                                     .map(|entry| crate::ModRow {
@@ -546,30 +617,23 @@ impl GameMenuController {
                                     })
                                     .collect::<Vec<_>>(),
                             );
-                            let last = last_row(6, mods.len());
                             *self.mods.borrow_mut() = mods;
-                            ui.set_game_menu_selected(ui.get_game_menu_selected().min(last));
+                            if let Some(last) = self.last_row(MODS) {
+                                ui.set_game_menu_selected(ui.get_game_menu_selected().min(last));
+                            }
                             let message = if !message.is_empty() {
                                 message
                             } else if self.mods_model.row_count() == 0 {
-                                if three_ds {
-                                    "No mods yet. Put each mod's folder (with romfs, exefs or code.ips inside) in the mods folder.".into()
-                                } else {
-                                    "No mods yet. Put .ips, .bps or .ups patches in the mods folder.".into()
-                                }
+                                "No mods yet. Put each mod's folder (with romfs, exefs or code.ips inside) in the mods folder".into()
                             } else {
-                                "Mods apply in name order; later ones win.".into()
+                                "Mods apply in name order; later ones win".into()
                             };
                             ui.set_game_menu_message(message.into());
-                            if self.close_requested.replace(false)
-                                && let Err(error) = slint::quit_event_loop()
-                            {
-                                tracing::warn!(%error, "could not finish the requested close");
-                            }
+                            self.finish_requested_close();
                         }
                         Err(error) => {
                             self.close_requested.set(false);
-                            ui.set_game_menu_message(error.into());
+                            self.error(&error);
                         }
                     }
                 }
@@ -580,7 +644,11 @@ impl GameMenuController {
                             self.reloader.accept_games(games);
                             if let Some(error) = error {
                                 self.close_requested.set(false);
-                                ui.set_game_menu_view(0);
+                                self.show(
+                                    &ui,
+                                    OPTIONS,
+                                    row_of(self.three_ds.get(), Choice::Uninstall),
+                                );
                                 self.error(&format!("Uninstall stopped: {error}"));
                                 if let Some(id) = self.target.get() {
                                     self.load_details(id);
@@ -588,16 +656,18 @@ impl GameMenuController {
                             } else {
                                 self.close();
                                 self.cue(UiSoundCue::Ok);
-                                if self.close_requested.replace(false)
-                                    && let Err(error) = slint::quit_event_loop()
-                                {
-                                    tracing::warn!(%error, "could not finish the requested close");
-                                }
+                                self.finish_requested_close();
                             }
                         }
                         Err(error) => {
                             self.close_requested.set(false);
-                            ui.set_game_menu_view(0);
+                            if ui.get_game_menu_view() == CONFIRM_UNINSTALL {
+                                self.show(
+                                    &ui,
+                                    OPTIONS,
+                                    row_of(self.three_ds.get(), Choice::Uninstall),
+                                );
+                            }
                             self.error(&error.to_string());
                         }
                     }
@@ -614,35 +684,34 @@ impl GameMenuController {
         if ui.get_game_menu_busy() {
             return true;
         }
+        let view = ui.get_game_menu_view();
         match event.action {
-            UiAction::Back | UiAction::Menu if !event.repeated => self.back(),
+            UiAction::Back if !event.repeated => self.back(),
+            // The button that opened the panel closes it, from any page.
+            UiAction::Menu if !event.repeated => {
+                if self.close() {
+                    self.cue(UiSoundCue::Back);
+                }
+            }
             UiAction::Home if !event.repeated => {
                 self.close();
                 return false; // Global Home still clears history and resets selection.
             }
-            UiAction::Accept if !event.repeated && ui.get_game_menu_view() != 1 => {
+            UiAction::Accept if !event.repeated && view != PROPERTIES => {
                 self.choose(ui.get_game_menu_selected())
             }
-            UiAction::Up | UiAction::Down if ui.get_game_menu_view() == 1 => {
+            UiAction::Up | UiAction::Down if view == PROPERTIES => {
                 self.scroll(if event.action == UiAction::Up { -1 } else { 1 })
             }
-            UiAction::Up | UiAction::Down if matches!(ui.get_game_menu_view(), 0 | 4 | 6) => {
-                let next = (ui.get_game_menu_selected()
-                    + if event.action == UiAction::Up { -1 } else { 1 })
-                .clamp(
-                    0,
-                    last_row(ui.get_game_menu_view(), self.mods.borrow().len()),
-                );
-                if next != ui.get_game_menu_selected() {
-                    ui.set_game_menu_selected(next);
-                    self.cue(UiSoundCue::Navigation);
-                }
-            }
-            UiAction::Left | UiAction::Right if matches!(ui.get_game_menu_view(), 2 | 5) => {
-                let next = if event.action == UiAction::Left { 0 } else { 1 };
-                if next != ui.get_game_menu_selected() {
-                    ui.set_game_menu_selected(next);
-                    self.cue(UiSoundCue::Navigation);
+            UiAction::Up | UiAction::Down => {
+                if let Some(last) = self.last_row(view) {
+                    let next = (ui.get_game_menu_selected()
+                        + if event.action == UiAction::Up { -1 } else { 1 })
+                    .clamp(0, last);
+                    if next != ui.get_game_menu_selected() {
+                        ui.set_game_menu_selected(next);
+                        self.cue(UiSoundCue::Navigation);
+                    }
                 }
             }
             _ => {}
@@ -663,152 +732,70 @@ impl Drop for GameMenuController {
     }
 }
 
-/// Keep the compact commands next to their game, flipping left at the right
-/// edge. Use the shared popup size; errors open a separate dialog.
-fn popup_position(
-    anchor: crate::CardRect,
-    width: f32,
-    height: f32,
-    menu_size: (f32, f32),
-) -> (f32, f32) {
-    let width = if width.is_finite() {
-        width.max(32.0)
-    } else {
-        1280.0
+/// The facts on the properties page, in reading order.
+fn property_rows(details: &GameDetails) -> Vec<crate::PropertyRow> {
+    let row = |label: &str, value: String| crate::PropertyRow {
+        label: label.into(),
+        value: value.into(),
     };
-    let height = if height.is_finite() {
-        height.max(32.0)
-    } else {
-        720.0
-    };
-    let menu_width = menu_size.0.min((width - 32.0).max(0.0));
-    let menu_height = menu_size.1.min((height - 32.0).max(0.0));
-    let x = if anchor.x.is_finite() {
-        anchor.x * width
-    } else {
-        16.0
-    };
-    let y = if anchor.y.is_finite() {
-        anchor.y * height
-    } else {
-        16.0
-    };
-    let card_width = if anchor.width.is_finite() {
-        (anchor.width * width).max(0.0)
-    } else {
-        0.0
-    };
-    let right = x + card_width + 12.0;
-    let candidate = if right + menu_width <= width - 16.0 {
-        right
-    } else {
-        x - menu_width - 12.0
-    };
-    (
-        candidate.clamp(16.0, (width - 16.0 - menu_width).max(16.0)),
-        y.clamp(16.0, (height - 16.0 - menu_height).max(16.0)),
-    )
-}
-
-fn properties_text(details: &GameDetails) -> String {
     let system = details
         .game
         .sources()
         .iter()
-        .map(|source| source.source_id().as_str().to_uppercase())
+        .map(|source| {
+            RomSystem::from_source_id(source.source_id().as_str()).map_or_else(
+                || source.source_id().as_str().to_uppercase(),
+                |system| system.name().to_owned(),
+            )
+        })
         .collect::<Vec<_>>()
         .join(" · ");
-    let mut text = format!(
-        "Imported title\n{}\n\nSystem\n{}",
-        details.game.game().title().as_str(),
-        system
-    );
+    let mut rows = vec![
+        row("Title", details.game.game().title().as_str().to_owned()),
+        row("System", system),
+    ];
     if details.roms.is_empty() {
-        text.push_str("\n\nROM information unavailable");
+        rows.push(row("ROM", "Unavailable".into()));
     }
+    let numbered = details.roms.len() > 1;
     for (index, rom) in details.roms.iter().enumerate() {
-        text.push_str(&format!(
-            "\n\nROM {} · {:.2} MiB\n{}\n\nSHA-256\n{}\n{}\n\nTitle metadata\n{}",
-            index + 1,
-            rom.size as f64 / 1_048_576.0,
-            rom.path.to_string_lossy(),
-            rom.sha256.chars().take(32).collect::<String>(),
-            rom.sha256.chars().skip(32).collect::<String>(),
+        let label = |name: &str| {
+            if numbered {
+                format!("{name} {}", index + 1)
+            } else {
+                name.to_owned()
+            }
+        };
+        rows.push(row(&label("File"), rom.path.to_string_lossy().into_owned()));
+        rows.push(row(
+            &label("Size"),
+            format!("{:.2} MiB", rom.size as f64 / 1_048_576.0),
+        ));
+        rows.push(row(&label("SHA-256"), rom.sha256.clone()));
+        rows.push(row(
+            &label("Title from"),
             if rom.catalog.is_some() {
                 "Verified catalog match"
             } else {
-                "Imported filename"
+                "File name"
             }
+            .into(),
         ));
     }
-    text
+    rows
 }
 
 #[cfg(test)]
-mod placement_tests {
+mod tests {
     use super::*;
-    #[test]
-    #[ignore = "requires a real Wayland/Slint window"]
-    fn first_popup_open_animates_only_its_small_local_offset() {
-        use slint::{ComponentHandle, Timer, TimerMode};
-        use std::time::Duration;
-        let ui = AppWindow::new().unwrap();
-        ui.window().set_size(slint::PhysicalSize::new(1280, 720));
-        ui.show().unwrap();
-        let ticks = Rc::new(Cell::new(0));
-        let count = Rc::clone(&ticks);
-        let weak = ui.as_weak();
-        let timer = Timer::default();
-        timer.start(TimerMode::Repeated, Duration::from_millis(16), move || {
-            let ui = weak.upgrade().unwrap();
-            let tick = count.get() + 1;
-            count.set(tick);
-            if tick == 1 || tick == 40 {
-                ui.set_game_menu_x(if tick == 1 { 400.0 } else { 600.0 });
-                ui.set_game_menu_y(if tick == 1 { 250.0 } else { 350.0 });
-                ui.set_game_menu_open(true);
-            }
-            if (1..20).contains(&tick) || (40..60).contains(&tick) {
-                let rect = ui.get_game_menu_popup_rect();
-                let anchor = if tick < 40 { 250.0 } else { 350.0 };
-                assert!(
-                    rect.y >= anchor - 0.01 && rect.y <= anchor + 6.01,
-                    "frame {tick}: popup y {} moved beyond its local rise around {anchor}",
-                    rect.y
-                );
-                assert_eq!(rect.x, if tick < 40 { 400.0 } else { 600.0 });
-            }
-            if tick == 20 {
-                ui.set_game_menu_open(false);
-            }
-            if tick == 60 {
-                slint::quit_event_loop().unwrap();
-            }
-        });
-        slint::run_event_loop().unwrap();
-        assert_eq!(ticks.get(), 60);
-    }
 
     #[test]
-    fn placement_follows_the_game_and_flips_at_screen_edges() {
-        let at = |x, y, w| crate::CardRect {
-            x,
-            y,
-            width: w,
-            height: 0.3,
-        };
-        assert_eq!(
-            popup_position(at(0.1, 0.2, 0.2), 1280.0, 720.0, (320.0, 280.0)),
-            (396.0, 144.0)
-        );
-        assert_eq!(
-            popup_position(at(0.8, 0.8, 0.15), 1280.0, 720.0, (320.0, 280.0)),
-            (692.0, 424.0)
-        );
-        for (width, height) in [(800.0, 600.0), (1280.0, 720.0), (3440.0, 1440.0)] {
-            let (x, y) = popup_position(at(0.99, 0.99, 0.2), width, height, (320.0, 280.0));
-            assert!(x >= 16.0 && x + 320.0 <= width - 16.0);
-            assert!(y >= 16.0 && y + 280.0 <= height - 16.0);
-        }
+    fn manage_mods_is_offered_only_for_3ds_games() {
+        assert!(!choices(false).contains(&Choice::Mods));
+        assert_eq!(choices(true)[1], Choice::Mods);
+        assert_eq!(row_of(false, Choice::Properties), 1);
+        assert_eq!(row_of(true, Choice::Properties), 2);
+        assert_eq!(row_of(false, Choice::Uninstall), 3);
+        assert_eq!(row_of(true, Choice::Uninstall), 4);
     }
 }
