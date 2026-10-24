@@ -54,6 +54,8 @@ enum ResultMessage {
     Failed(String),
     /// A folder refresh finished: the library when it added games.
     Refreshed(Result<Option<Vec<LibraryGame>>, String>),
+    /// A refresh still running has added games so far: show them now.
+    RefreshProgress(Vec<LibraryGame>),
 }
 
 pub struct RomSetupController {
@@ -164,23 +166,32 @@ impl RomSetupController {
                 let mut repository =
                     SqliteLibraryRepository::open(database).map_err(|e| e.to_string())?;
                 let imported = repository.imported_rom_files().map_err(|e| e.to_string())?;
-                let scan = rom_import::scan_folder_for_new(
-                    &folder,
-                    catalog,
-                    &imported,
-                    std::time::SystemTime::now(),
-                )
-                .map_err(|e| e.to_string())?;
-                let added = scan.candidates.iter().any(|candidate| candidate.selected);
-                if added {
-                    rom_import::revalidate(&scan.candidates).map_err(|e| e.to_string())?;
-                    repository
-                        .add_rom_files(&scan.candidates)
+                let catalogs = rom_import::catalogs(catalog).map_err(|e| e.to_string())?;
+                let (files, seen) =
+                    rom_import::new_files(&folder, &imported, std::time::SystemTime::now())
                         .map_err(|e| e.to_string())?;
+                // Each game is added as soon as it's read, smallest first: a
+                // folder of large 3DS cartridges takes minutes to hash, and
+                // whatever finished stays imported if Horizon closes first.
+                let mut added = false;
+                let mut shown = std::time::Instant::now();
+                for (path, system) in files {
+                    let candidate = rom_import::read_new(path, system, &catalogs);
+                    let batch = std::slice::from_ref(&candidate);
+                    if !candidate.selected || rom_import::revalidate(batch).is_err() {
+                        continue;
+                    }
+                    repository.add_rom_files(batch).map_err(|e| e.to_string())?;
+                    added = true;
+                    if shown.elapsed() >= std::time::Duration::from_secs(1) {
+                        shown = std::time::Instant::now();
+                        let games = repository.list_games().map_err(|e| e.to_string())?;
+                        let _ = sender.send(ResultMessage::RefreshProgress(games));
+                    }
                 }
-                // Only a complete scan gets here, so missing files are gone.
+                // Only a complete walk gets here, so missing files are gone.
                 let retired = repository
-                    .retire_missing_rom_files(&folder, &scan.seen.into_iter().collect())
+                    .retire_missing_rom_files(&folder, &seen.into_iter().collect())
                     .map_err(|e| e.to_string())?;
                 if !added && retired == 0 {
                     return Ok(None);
@@ -355,6 +366,7 @@ impl RomSetupController {
                     self.running.set(false);
                     self.show(View::Error(error));
                 }
+                ResultMessage::RefreshProgress(games) => self.reloader.accept_games(games),
                 ResultMessage::Refreshed(result) => {
                     self.refreshing.set(false);
                     match result {

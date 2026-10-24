@@ -190,11 +190,59 @@ fn lcd_upscaled_ds(source: &[u8], width: u32, height: u32) -> Presented {
     }
 }
 
-/// A DS screenshot as the player shows it: the two screens of the core's
-/// stacked frame in `layout`, in `swapped` order, at full resolution. Large
-/// and small at native resolution is drawn at 3× so the small screen keeps
-/// whole pixels (1024×576); upscaled frames average the small screen down.
-/// Anything not two stacked 4:3 screens is returned as it is.
+/// The scale of a 3DS frame as Azahar draws it by default (the 400×240 top
+/// screen above the 320×240 bottom one, centred), or None.
+pub fn three_ds_scale(raw: &Frame) -> Option<u32> {
+    let scale = raw.width / 400;
+    (scale > 0
+        && raw.width == 400 * scale
+        && raw.height == 480 * scale
+        && raw.rgba.len() == raw.width as usize * raw.height as usize * 4)
+        .then_some(scale)
+}
+
+/// A 3DS frame for the player: the bottom screen moved to the left edge
+/// under the top one, so each screen is cut from the buffer's left like a
+/// DS screen. None when the frame isn't a 3DS frame.
+pub fn present_three_ds(raw: &Frame) -> Option<Presented> {
+    let scale = three_ds_scale(raw)?;
+    let (width, half) = (raw.width as usize, 240 * scale as usize);
+    let (inset, bottom) = (40 * scale as usize, 320 * scale as usize);
+    let mut pixels = SharedPixelBuffer::<Rgba8Pixel>::new(raw.width, raw.height);
+    let output = pixels.make_mut_bytes();
+    let top = width * half * 4;
+    output[..top].copy_from_slice(&raw.rgba[..top]);
+    for row in half..half * 2 {
+        let line = row * width * 4;
+        output[line..line + bottom * 4]
+            .copy_from_slice(&raw.rgba[line + inset * 4..line + (inset + bottom) * 4]);
+    }
+    Some(Presented {
+        pixels,
+        // Drawn above native, a frame is mostly shown smaller: average it.
+        smooth: scale > 1,
+        exact: None,
+        screens: Some([(raw.width, half as u32), (bottom as u32, half as u32)]),
+    })
+}
+
+/// One screen cut from a stacked frame: its pixels, width and height.
+type Screen = (Vec<u8>, usize, usize);
+
+fn cut(raw: &Frame, (x, y): (usize, usize), (width, height): (usize, usize)) -> Screen {
+    let stride = raw.width as usize * 4;
+    let mut rgba = Vec::with_capacity(width * height * 4);
+    for row in y..y + height {
+        rgba.extend_from_slice(&raw.rgba[row * stride + x * 4..][..width * 4]);
+    }
+    (rgba, width, height)
+}
+
+/// A DS or 3DS screenshot as the player shows it: the two screens of the
+/// core's stacked frame in `layout`, in `swapped` order, at full resolution.
+/// Large and small at native resolution is drawn at 3× so the small screen
+/// keeps whole pixels (1024×576 for a DS); upscaled frames average the small
+/// screen down. Anything else is returned as it is.
 pub fn ds_screenshot(
     raw: &Frame,
     layout: crate::domain::core_settings::DsLayout,
@@ -202,23 +250,41 @@ pub fn ds_screenshot(
 ) -> Frame {
     use crate::domain::core_settings::DsLayout;
     let (width, height) = (raw.width as usize, raw.height as usize / 2);
-    if width == 0
-        || width * 3 != height * 4
-        || !raw.height.is_multiple_of(2)
-        || raw.rgba.len() != width * height * 8
+    let (screens, native) = if let Some(scale) = three_ds_scale(raw) {
+        let scale = scale as usize;
+        (
+            [
+                cut(raw, (0, 0), (width, height)),
+                cut(raw, (40 * scale, height), (320 * scale, height)),
+            ],
+            scale == 1,
+        )
+    } else if width > 0
+        && width * 3 == height * 4
+        && raw.height.is_multiple_of(2)
+        && raw.rgba.len() == width * height * 8
     {
+        (
+            [
+                cut(raw, (0, 0), (width, height)),
+                cut(raw, (0, height), (width, height)),
+            ],
+            width == 256,
+        )
+    } else {
         return raw.clone();
-    }
-    let half = width * height * 4;
-    let mut screens = [&raw.rgba[..half], &raw.rgba[half..]];
-    if swapped {
-        screens.swap(0, 1);
-    }
-    // Copy `source` (w×h) scaled by whole `up` or averaged down by `down`
-    // into `canvas` (stride `cw` pixels) at (x, y).
+    };
+    let [first, second] = if swapped {
+        let [top, bottom] = screens;
+        [bottom, top]
+    } else {
+        screens
+    };
+    // Copy `source` scaled by whole `up` or averaged down by `down` into
+    // `canvas` (stride `cw` pixels) at (x, y).
     let place = |canvas: &mut [u8],
                  cw: usize,
-                 source: &[u8],
+                 (source, width, height): &Screen,
                  (x, y): (usize, usize),
                  up: usize,
                  down: usize| {
@@ -241,46 +307,52 @@ pub fn ds_screenshot(
             }
         }
     };
-    let (cw, ch, rgba) = match layout {
+    let (up, down) = match layout {
+        DsLayout::LargeAndSmall if native => (3, 3),
+        DsLayout::LargeAndSmall => (1, 3),
+        _ => (1, 1),
+    };
+    let (large, small) = (
+        (first.1 * up, first.2 * up),
+        (second.1 * up / down, second.2 * up / down),
+    );
+    let ((cw, ch), a, b) = match layout {
         DsLayout::SideBySide => {
-            let (cw, ch) = (width * 2, height);
-            let mut canvas = vec![0; cw * ch * 4];
-            place(&mut canvas, cw, screens[0], (0, 0), 1, 1);
-            place(&mut canvas, cw, screens[1], (width, 0), 1, 1);
-            (cw, ch, canvas)
+            let ch = large.1.max(small.1);
+            (
+                (large.0 + small.0, ch),
+                (0, (ch - large.1) / 2),
+                (large.0, (ch - small.1) / 2),
+            )
         }
         DsLayout::Stacked => {
-            let mut rgba = Vec::with_capacity(half * 2);
-            rgba.extend_from_slice(screens[0]);
-            rgba.extend_from_slice(screens[1]);
-            (width, height * 2, rgba)
+            let cw = large.0.max(small.0);
+            (
+                (cw, large.1 + small.1),
+                ((cw - large.0) / 2, 0),
+                ((cw - small.0) / 2, large.1),
+            )
         }
+        // The small screen is a third the size, bottom-aligned beside.
         DsLayout::LargeAndSmall => {
-            // The small screen is a third the size, bottom-aligned beside.
-            let up = if width == 256 { 3 } else { 1 };
-            let (main_w, main_h) = (width * up, height * up);
-            let (small_w, small_h) = (main_w / 3, main_h / 3);
-            let (cw, ch) = (main_w + small_w, main_h);
-            let mut canvas = vec![0; cw * ch * 4];
-            for alpha in canvas.iter_mut().skip(3).step_by(4) {
-                *alpha = 255;
-            }
-            place(&mut canvas, cw, screens[0], (0, 0), up, 1);
-            place(
-                &mut canvas,
-                cw,
-                screens[1],
-                (main_w, main_h - small_h),
-                up,
-                3,
-            );
-            (cw, ch, canvas)
+            let ch = large.1.max(small.1);
+            (
+                (large.0 + small.0, ch),
+                (0, ch - large.1),
+                (large.0, ch - small.1),
+            )
         }
     };
+    let mut canvas = vec![0; cw * ch * 4];
+    for alpha in canvas.iter_mut().skip(3).step_by(4) {
+        *alpha = 255;
+    }
+    place(&mut canvas, cw, &first, a, up, 1);
+    place(&mut canvas, cw, &second, b, up, down);
     Frame {
         width: cw as u32,
         height: ch as u32,
-        rgba,
+        rgba: canvas,
         smooth: raw.smooth,
     }
 }
@@ -830,6 +902,81 @@ mod tests {
         // The small screen, bottom right; black above it.
         assert_eq!(pixel(&large, 1000, 570), [0, 0, 255]);
         assert_eq!(pixel(&large, 1000, 10), [0, 0, 0]);
+    }
+
+    /// A 3DS frame as Azahar draws it: red top screen, blue bottom screen
+    /// centred under it, black beside the bottom one.
+    fn three_ds_frame(scale: u32) -> Frame {
+        let (width, half) = (400 * scale, 240 * scale);
+        let mut rgba = [255u8, 0, 0, 255].repeat((width * half) as usize);
+        for _ in 0..half {
+            rgba.extend([0u8, 0, 0, 255].repeat(40 * scale as usize));
+            rgba.extend([0u8, 0, 255, 255].repeat(320 * scale as usize));
+            rgba.extend([0u8, 0, 0, 255].repeat(40 * scale as usize));
+        }
+        Frame {
+            width,
+            height: half * 2,
+            rgba,
+            smooth: false,
+        }
+    }
+
+    #[test]
+    fn three_ds_frames_split_into_their_two_screens() {
+        let pixel = |bytes: &[u8], width: u32, x: u32, y: u32| {
+            bytes[((y * width + x) * 4) as usize..][..3].to_vec()
+        };
+        for scale in [1, 2] {
+            let raw = three_ds_frame(scale);
+            let shown = present_three_ds(&raw).unwrap();
+            assert_eq!(
+                shown.screens,
+                Some([(400 * scale, 240 * scale), (320 * scale, 240 * scale)])
+            );
+            assert_eq!(shown.smooth, scale > 1);
+            let bytes = shown.pixels.as_bytes();
+            let width = shown.pixels.width();
+            assert_eq!(pixel(bytes, width, 0, 0), [255, 0, 0]);
+            // The bottom screen now starts at the left edge.
+            assert_eq!(pixel(bytes, width, 0, 240 * scale), [0, 0, 255]);
+            assert_eq!(pixel(bytes, width, 319 * scale, 479 * scale), [0, 0, 255]);
+        }
+        let ds = Frame {
+            width: 256,
+            height: 384,
+            rgba: vec![0; 256 * 384 * 4],
+            smooth: false,
+        };
+        assert!(present_three_ds(&ds).is_none());
+    }
+
+    #[test]
+    fn three_ds_screenshots_follow_the_layout_and_swap() {
+        use crate::domain::core_settings::DsLayout;
+        let raw = three_ds_frame(1);
+        let pixel = |frame: &Frame, x: u32, y: u32| {
+            frame.rgba[((y * frame.width + x) * 4) as usize..][..3].to_vec()
+        };
+        // Stacked, not swapped, is what Azahar drew.
+        let stacked = ds_screenshot(&raw, DsLayout::Stacked, false);
+        assert_eq!(stacked.rgba, raw.rgba);
+        let swapped = ds_screenshot(&raw, DsLayout::Stacked, true);
+        assert_eq!((swapped.width, swapped.height), (400, 480));
+        assert_eq!(pixel(&swapped, 200, 0), [0, 0, 255]);
+        assert_eq!(pixel(&swapped, 10, 0), [0, 0, 0]);
+        assert_eq!(pixel(&swapped, 10, 300), [255, 0, 0]);
+        let side = ds_screenshot(&raw, DsLayout::SideBySide, false);
+        assert_eq!((side.width, side.height), (720, 240));
+        assert_eq!(pixel(&side, 399, 0), [255, 0, 0]);
+        assert_eq!(pixel(&side, 400, 0), [0, 0, 255]);
+        let large = ds_screenshot(&raw, DsLayout::LargeAndSmall, true);
+        assert_eq!((large.width, large.height), (960 + 400, 720));
+        assert_eq!(pixel(&large, 10, 10), [0, 0, 255]);
+        assert_eq!(pixel(&large, 1300, 700), [255, 0, 0]);
+        assert_eq!(pixel(&large, 1300, 10), [0, 0, 0]);
+        let upscaled = ds_screenshot(&three_ds_frame(2), DsLayout::LargeAndSmall, false);
+        assert_eq!((upscaled.width, upscaled.height), (800 + 213, 480));
     }
 
     #[test]

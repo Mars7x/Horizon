@@ -50,7 +50,7 @@ const DS_PAUSE_ACTIONS: [i32; 11] = [
 ];
 fn pause_actions(ds: bool, three_ds: bool) -> &'static [i32] {
     if three_ds {
-        &[0, 1, 4, 5, RETURN_TO_HORIZON]
+        &[0, 1, SCREEN_LAYOUT, SWAP_SCREENS, 4, 5, RETURN_TO_HORIZON]
     } else if ds {
         &DS_PAUSE_ACTIONS
     } else {
@@ -220,6 +220,12 @@ impl GbaPlayer {
             {
                 let coordinate =
                     |v: f32| ((v.clamp(0.0, 1.0) * 65534.0 - 32767.0).round() as i16) as u16;
+                // Azahar's frame has the 320-wide touch screen centred in 400.
+                let x = if game.three_ds {
+                    0.1 + 0.8 * x.clamp(0.0, 1.0)
+                } else {
+                    x
+                };
                 extra.pointer.store(
                     u64::from(coordinate(x))
                         | (u64::from(coordinate(y)) << 16)
@@ -1676,7 +1682,14 @@ impl GbaPlayer {
             {
                 0
             } else {
-                self.keyboard.get() | if self.pad_ready.get() { pad } else { 0 }
+                // Azahar reads L3 as the 3DS Home button and R3 as a touch;
+                // the keyboard's microphone key (L3 for DS) mustn't reach it.
+                let keyboard = if game.three_ds {
+                    self.keyboard.get() & !(1 << 14 | 1 << 15)
+                } else {
+                    self.keyboard.get()
+                };
+                keyboard | if self.pad_ready.get() { pad } else { 0 }
             };
             game.buttons.store(buttons, Ordering::Release);
         }
@@ -1815,7 +1828,12 @@ impl GbaPlayer {
         }
         let size = ui.window().size();
         let area = (f64::from(size.width.max(1)), f64::from(size.height.max(1)));
-        let [top, bottom] = layout.screens(swapped, area);
+        let sizes = if ui.get_player_three_ds() {
+            crate::domain::core_settings::DsLayout::THREE_DS_SCREENS
+        } else {
+            crate::domain::core_settings::DsLayout::DS_SCREENS
+        };
+        let [top, bottom] = layout.place(swapped, area, sizes);
         let fraction = |rect: crate::domain::core_settings::ScreenRect| crate::CardRect {
             x: (rect.x / area.0) as f32,
             y: (rect.y / area.1) as f32,
@@ -1978,10 +1996,11 @@ fn keyboard_button(text: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn three_ds_menu_skips_unavailable_state_and_ds_actions() {
-        assert_eq!(super::pause_actions(false, true), &[0, 1, 4, 5, 6]);
-        assert_eq!(super::pause_step(1, true, false, false, true), 4);
-        assert_eq!(super::pause_step(4, false, false, false, true), 1);
+    fn three_ds_menu_skips_unavailable_state_and_lid_actions() {
+        assert_eq!(super::pause_actions(false, true), &[0, 1, 8, 7, 4, 5, 6]);
+        assert_eq!(super::pause_step(1, true, false, false, true), 8);
+        assert_eq!(super::pause_step(7, true, false, false, true), 4);
+        assert_eq!(super::pause_step(4, false, false, false, true), 7);
         assert_eq!(super::pause_step(6, true, false, false, true), 0);
     }
 
@@ -2048,6 +2067,7 @@ mod tests {
                     playback: directory.join("playback.json"),
                     mgba: directory.join("mgba.json"),
                     ds: directory.join("melonds-ds.json"),
+                    three_ds: directory.join("azahar.json"),
                 },
             },
         );
@@ -2347,6 +2367,13 @@ mod tests {
         };
         // HORIZON_DS_FILTER=xbrz and HORIZON_TEST_WINDOW=3440x1440 match a
         // demanding real setup.
+        if let Ok(scale) = std::env::var("HORIZON_3DS_SCALE") {
+            std::fs::write(
+                directory.join("azahar.json"),
+                format!(r#"{{"resolution":{scale}}}"#),
+            )
+            .unwrap();
+        }
         if let Ok(filter) = std::env::var("HORIZON_DS_FILTER") {
             std::fs::write(
                 directory.join("melonds-ds.json"),
@@ -2382,6 +2409,7 @@ mod tests {
                     playback: directory.join("playback.json"),
                     mgba: directory.join("mgba.json"),
                     ds: directory.join("melonds-ds.json"),
+                    three_ds: directory.join("azahar.json"),
                 },
             },
         );
@@ -2496,9 +2524,49 @@ mod tests {
                 } else if stage == 2 && elapsed > Duration::from_secs(20) {
                     assert!(ui.get_player_paused());
                     snapshot("3ds-quick-menu.png");
-                    assert_eq!(pause_step(1, true, false, false, true), 4);
+                    assert_eq!(pause_step(1, true, false, false, true), SCREEN_LAYOUT);
                     live.choose(0);
                     three_ds_shot.set(3);
+                } else if stage == 3 && elapsed > Duration::from_secs(21) {
+                    // A touch on the bottom screen's left edge reaches
+                    // Azahar 40 pixels into its 400-wide frame.
+                    ui.invoke_player_touch(0.0, 0.75, true);
+                    let pointer = live
+                        .running
+                        .borrow()
+                        .as_ref()
+                        .unwrap()
+                        .ds_input
+                        .as_ref()
+                        .unwrap()
+                        .pointer
+                        .load(Ordering::Acquire);
+                    assert_eq!(pointer as u16 as i16, -26214);
+                    ui.invoke_player_touch(0.0, 0.75, false);
+                    three_ds_shot.set(4);
+                } else if (4..=7).contains(&stage)
+                    && elapsed > Duration::from_millis(21_000 + 600 * (stage - 3) as u64)
+                {
+                    // Each layout, then the first one swapped; the view ends
+                    // as it began.
+                    snapshot(&format!(
+                        "3ds-{}{}.png",
+                        ui.get_player_ds_layout().to_lowercase().replace(' ', "-"),
+                        if live.ds_swapped.get() {
+                            "-swapped"
+                        } else {
+                            ""
+                        }
+                    ));
+                    match stage {
+                        4 | 5 => live.step_layout(&ui, true),
+                        6 => {
+                            live.step_layout(&ui, true);
+                            live.swap_screens(&ui);
+                        }
+                        _ => live.swap_screens(&ui),
+                    }
+                    three_ds_shot.set(stage + 1);
                 }
             }
             if !normal_only
@@ -2563,6 +2631,7 @@ mod tests {
                     playback: Default::default(),
                     mgba: Default::default(),
                     ds: Default::default(),
+                    three_ds: Default::default(),
                 },
             },
         );
@@ -2681,6 +2750,7 @@ mod runtime_tests {
             playback: directory.join("playback.json"),
             mgba: directory.join("cores/mgba.json"),
             ds: directory.join("cores/melonds-ds.json"),
+            three_ds: directory.join("cores/azahar.json"),
         };
         let preferences = crate::domain::core_settings::CorePreferences {
             resume_last_state: false,
@@ -2830,6 +2900,7 @@ mod runtime_tests {
             playback: directory.join("playback.json"),
             mgba: directory.join("cores/mgba.json"),
             ds: directory.join("cores/melonds-ds.json"),
+            three_ds: directory.join("cores/azahar.json"),
         };
         let preferences = crate::domain::core_settings::CorePreferences {
             resume_last_state: false,
@@ -2970,6 +3041,7 @@ mod runtime_tests {
             playback: directory.join("playback.json"),
             mgba: directory.join("cores/mgba.json"),
             ds: directory.join("cores/melonds-ds.json"),
+            three_ds: directory.join("cores/azahar.json"),
         };
         let mut preferences = crate::domain::core_settings::CorePreferences::default();
         preferences.mgba.video_filter = serde_json::from_value(serde_json::Value::String(
@@ -3104,6 +3176,7 @@ mod runtime_tests {
             playback: directory.join("playback.json"),
             mgba: directory.join("cores/mgba.json"),
             ds: directory.join("cores/melonds-ds.json"),
+            three_ds: directory.join("cores/azahar.json"),
         };
         crate::persistence::core_settings::CoreSettingsStore::new(core_paths.clone())
             .write_fixture(preferences);

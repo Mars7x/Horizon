@@ -67,6 +67,23 @@ pub fn three_ds_core_path() -> PathBuf {
     }
 }
 
+/// Mods the user puts beside a game's saves: patch files (`.ips`, `.bps`,
+/// `.ups`) for cartridge systems, LayeredFS folders for 3DS.
+pub fn game_mods_directory(game: &Path) -> PathBuf {
+    game.join("mods")
+}
+/// Which of the game's mods are turned on.
+pub fn game_mods_state_path(game: &Path) -> PathBuf {
+    game.join("mods.json")
+}
+/// Where Azahar looks for a title's mods (`<user>/load/mods/<title ID>/`),
+/// assembled by Horizon from the enabled mod folders.
+pub fn three_ds_mods_target(game: &Path, title: u64) -> PathBuf {
+    three_ds_user_directory(game)
+        .join("load/mods")
+        .join(format!("{title:016X}"))
+}
+
 /// The identity of the 3DS file last verified for this game (see
 /// `gba_player::verify_3ds_file`).
 pub fn three_ds_verified_path(game: &Path) -> PathBuf {
@@ -107,6 +124,7 @@ pub struct CoreSettingsPaths {
     pub playback: PathBuf,
     pub mgba: PathBuf,
     pub ds: PathBuf,
+    pub three_ds: PathBuf,
 }
 
 const PROFILE_PICTURE_FILE: &str = "profile/pictures/custom.jxl";
@@ -287,6 +305,7 @@ pub fn core_settings_paths() -> Result<CoreSettingsPaths, DataPathError> {
         playback: config_file_path("playback.json")?,
         mgba: config_file_path("cores/mgba.json")?,
         ds: config_file_path("cores/melonds-ds.json")?,
+        three_ds: config_file_path("cores/azahar.json")?,
     })
 }
 

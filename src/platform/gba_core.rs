@@ -213,6 +213,7 @@ impl Core {
         audio: AudioBuffer,
         buttons: Arc<AtomicU16>,
         input: Arc<DsInput>,
+        resolution: u8,
     ) -> Result<Self, String> {
         Self::load_content(
             path,
@@ -220,7 +221,7 @@ impl Core {
             MgbaPreferences::default(),
             audio,
             buttons,
-            Some((input, directory, 1)),
+            Some((input, directory, resolution)),
             Some(content),
         )
     }
@@ -276,7 +277,13 @@ impl Core {
                 }
             })
             .flatten();
-        let scale = if hardware.is_some() { scale } else { 1 };
+        // DS upscales only with its GL context; Azahar draws with Vulkan at
+        // any of its resolutions.
+        let scale = if hardware.is_some() || three_ds {
+            scale
+        } else {
+            1
+        };
         HW_PROC.with(|cell| cell.set(hardware.as_ref().map(|h| h.gl.proc_address())));
         // SAFETY: only the application-packaged, pinned mGBA core is loaded;
         // the explicit development override is selected by data_paths.
@@ -905,7 +912,17 @@ extern "C" fn environment(command: u32, data: *mut c_void) -> bool {
                             b"citra_graphics_api" => Some(c"Vulkan"),
                             b"citra_use_libretro_save_path" => Some(c"LibRetro Default"),
                             b"citra_layout_option" => Some(c"default"),
-                            b"citra_resolution_factor" => Some(c"1"),
+                            b"citra_resolution_factor" => [c"1", c"2", c"3", c"4", c"5", c"6"]
+                                .get(usize::from(state.as_ref()?.scale.clamp(1, 6) - 1))
+                                .copied(),
+                            // The right stick is the C-stick only: its
+                            // default also drags a touchscreen cursor, and
+                            // R3 would touch. Touch is the mouse/pointer's.
+                            b"citra_analog_function" => Some(c"c_stick"),
+                            // One pointer path: the "mouse" option reads the
+                            // same pointer again.
+                            b"citra_enable_mouse_touchscreen" => Some(c"disabled"),
+                            b"citra_enable_touch_touchscreen" => Some(c"enabled"),
                             _ => None,
                         };
                     }
@@ -1476,6 +1493,10 @@ mod tests {
             Arc::clone(&audio),
             Arc::new(AtomicU16::new(0)),
             Arc::new(DsInput::default()),
+            std::env::var("HORIZON_3DS_SCALE")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(1),
         )
         .unwrap();
         assert!(!core.supports_states());

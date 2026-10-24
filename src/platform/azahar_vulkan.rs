@@ -468,10 +468,17 @@ impl Host {
                             .contains(vk::MemoryPropertyFlags::HOST_VISIBLE)
                 })
                 .collect();
+            // The CPU reads every frame back: memory the CPU caches is far
+            // faster to read than uncached (often device-local, read over
+            // PCIe) memory. Prefer cached, then not device-local, then
+            // coherent (which saves an invalidate).
             types.sort_by_key(|&index| {
-                !properties.memory_types[index as usize]
-                    .property_flags
-                    .contains(vk::MemoryPropertyFlags::HOST_COHERENT)
+                let flags = properties.memory_types[index as usize].property_flags;
+                (
+                    !flags.contains(vk::MemoryPropertyFlags::HOST_CACHED),
+                    flags.contains(vk::MemoryPropertyFlags::DEVICE_LOCAL),
+                    !flags.contains(vk::MemoryPropertyFlags::HOST_COHERENT),
+                )
             });
             let index = types
                 .into_iter()
@@ -668,20 +675,23 @@ impl Host {
                 return Err(error("readback visibility", value));
             }
             rgba.resize(bytes as usize, 0);
-            rgba.copy_from_slice(std::slice::from_raw_parts(
-                mapped.cast::<u8>(),
-                bytes as usize,
-            ));
-            device.unmap_memory(self.memory);
-        }
-        for pixel in rgba.as_chunks_mut::<4>().0 {
-            if matches!(
+            // One pass from the mapping: opaque RGBA, swizzled if needed.
+            let source = std::slice::from_raw_parts(mapped.cast::<u8>(), bytes as usize);
+            let bgra = matches!(
                 image.format,
                 vk::Format::B8G8R8A8_UNORM | vk::Format::B8G8R8A8_SRGB
-            ) {
-                pixel.swap(0, 2);
+            );
+            let pixels = rgba.as_chunks_mut::<4>().0.iter_mut();
+            if bgra {
+                for (pixel, from) in pixels.zip(source.as_chunks::<4>().0) {
+                    *pixel = [from[2], from[1], from[0], 255];
+                }
+            } else {
+                for (pixel, from) in pixels.zip(source.as_chunks::<4>().0) {
+                    *pixel = [from[0], from[1], from[2], 255];
+                }
             }
-            pixel[3] = 255;
+            device.unmap_memory(self.memory);
         }
         Ok(())
     }

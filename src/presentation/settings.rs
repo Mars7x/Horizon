@@ -192,11 +192,17 @@ impl SettingsController {
         }
         let mut next = self.core_values.get();
         match (self.page.borrow().view, row) {
-            (SettingsView::Cores, 2) => {
+            (SettingsView::Cores, 3) => {
                 next.freeze_when_unfocused = direction.unwrap_or(!next.freeze_when_unfocused)
             }
-            (SettingsView::Cores, 3) => {
+            (SettingsView::Cores, 4) => {
                 next.resume_last_state = direction.unwrap_or(!next.resume_last_state)
+            }
+            (SettingsView::Azahar, 0) => {
+                next.three_ds.layout = next.three_ds.layout.step(direction != Some(false))
+            }
+            (SettingsView::Azahar, 1) => {
+                next.three_ds.resolution = next.three_ds.resolution.step(direction != Some(false))
             }
             (SettingsView::MelonDs, 0) => {
                 next.ds.layout = next.ds.layout.step(direction != Some(false))
@@ -667,8 +673,10 @@ impl SettingsController {
                 } else if page.view == SettingsView::Appearance && page.selected == 14 {
                     drop(page);
                     self.set_ui_sounds_enabled(ui, action == UiAction::Right);
-                } else if matches!(page.view, SettingsView::Mgba | SettingsView::MelonDs)
-                    || (page.view == SettingsView::Cores && matches!(page.selected, 2 | 3))
+                } else if matches!(
+                    page.view,
+                    SettingsView::Mgba | SettingsView::MelonDs | SettingsView::Azahar
+                ) || (page.view == SettingsView::Cores && matches!(page.selected, 3 | 4))
                 {
                     let row = page.selected;
                     drop(page);
@@ -858,7 +866,7 @@ impl SettingsController {
                 return;
             }
             SettingsView::Cores => {
-                if matches!(selected, 2 | 3) {
+                if matches!(selected, 3 | 4) {
                     self.page.borrow_mut().selected = selected;
                     self.change_core(ui, selected, None);
                     return;
@@ -866,6 +874,7 @@ impl SettingsController {
                 let child = match selected {
                     0 => SettingsView::Mgba,
                     1 => SettingsView::MelonDs,
+                    2 => SettingsView::Azahar,
                     _ => return,
                 };
                 let mut page = self.page.borrow_mut();
@@ -883,6 +892,11 @@ impl SettingsController {
             }
             SettingsView::MelonDs => {
                 self.page.borrow_mut().selected = selected.clamp(0, 2);
+                self.change_core(ui, selected, None);
+                return;
+            }
+            SettingsView::Azahar => {
+                self.page.borrow_mut().selected = selected.clamp(0, 1);
                 self.change_core(ui, selected, None);
                 return;
             }
@@ -1352,6 +1366,7 @@ impl SettingsController {
             SettingsView::Cores => 6,
             SettingsView::Mgba => 7,
             SettingsView::MelonDs => 9,
+            SettingsView::Azahar => 13,
         });
         ui.set_settings_binding_open(self.capture.borrow().is_some());
         ui.set_settings_binding_title(
@@ -1467,6 +1482,10 @@ impl SettingsController {
             .into(),
         );
         ui.set_settings_ds_resolution(self.core_values.get().ds.resolution.label().into());
+        ui.set_settings_three_ds_layout(self.core_values.get().three_ds.layout.label().into());
+        ui.set_settings_three_ds_resolution(
+            self.core_values.get().three_ds.resolution.label().into(),
+        );
         ui.set_settings_core_freeze(self.core_values.get().freeze_when_unfocused);
         ui.set_settings_core_resume(self.core_values.get().resume_last_state);
         ui.set_settings_core_sunlight(i32::from(self.core_values.get().mgba.sunlight.level()));
@@ -1555,6 +1574,7 @@ fn settings_parent(view: SettingsView) -> Option<(SettingsView, i32)> {
         SettingsView::Cores => Some((SettingsView::Root, 3)),
         SettingsView::Mgba => Some((SettingsView::Cores, 0)),
         SettingsView::MelonDs => Some((SettingsView::Cores, 1)),
+        SettingsView::Azahar => Some((SettingsView::Cores, 2)),
         SettingsView::Appearance => Some((SettingsView::Root, 0)),
         SettingsView::Controller => Some((SettingsView::Root, 1)),
         SettingsView::MappingCores => Some((SettingsView::Controller, 2)),
@@ -1571,7 +1591,8 @@ fn settings_parent(view: SettingsView) -> Option<(SettingsView, i32)> {
 fn selection_count(view: SettingsView) -> i32 {
     match view {
         SettingsView::Root => 4,
-        SettingsView::Cores => 4,
+        SettingsView::Cores => 5,
+        SettingsView::Azahar => 2,
         SettingsView::Mgba => 5,
         SettingsView::MelonDs => 3,
         SettingsView::Appearance => 15,
@@ -1735,7 +1756,7 @@ mod editor_navigation_tests {
     fn refresh_row_is_included_only_with_saved_key() {
         assert_eq!(super::selection_count(SettingsView::Root), 4);
         assert_eq!(super::selection_count(SettingsView::Controller), 4);
-        assert_eq!(super::selection_count(SettingsView::Cores), 4);
+        assert_eq!(super::selection_count(SettingsView::Cores), 5);
         assert_eq!(super::selection_count(SettingsView::DsBindings), 10);
         assert_eq!(super::selection_count(SettingsView::Shortcuts), 6);
         assert_eq!(
@@ -1902,6 +1923,7 @@ mod core_runtime_tests {
                 playback: directory.join("playback.json"),
                 mgba: directory.join("cores/mgba.json"),
                 ds: directory.join("cores/melonds-ds.json"),
+                three_ds: directory.join("cores/azahar.json"),
             },
         );
         let weak = Rc::downgrade(&controller);
@@ -2059,8 +2081,32 @@ mod core_runtime_tests {
                             (ui.get_settings_view(), ui.get_settings_selection()),
                             (6, 1)
                         );
+                        // Azahar: its layout and resolution, then back to Cores.
                         tap(slint::platform::Key::DownArrow);
                         assert_eq!(ui.get_settings_selection(), 2);
+                        tap(slint::platform::Key::Return);
+                        assert_eq!(ui.get_settings_view(), 13);
+                        assert_eq!(ui.get_settings_three_ds_layout(), "Stacked");
+                        assert_eq!(ui.get_settings_three_ds_resolution(), "Native");
+                        tap(slint::platform::Key::RightArrow);
+                        progress.set(17);
+                    }
+                    17 => {
+                        assert_eq!(ui.get_settings_three_ds_layout(), "Large and small");
+                        tap(slint::platform::Key::DownArrow);
+                        assert_eq!(ui.get_settings_selection(), 1);
+                        tap(slint::platform::Key::RightArrow);
+                        progress.set(170);
+                    }
+                    170 => {
+                        assert_eq!(ui.get_settings_three_ds_resolution(), "2× (480p)");
+                        tap(slint::platform::Key::Escape);
+                        assert_eq!(
+                            (ui.get_settings_view(), ui.get_settings_selection()),
+                            (6, 2)
+                        );
+                        tap(slint::platform::Key::DownArrow);
+                        assert_eq!(ui.get_settings_selection(), 3);
                         assert!(ui.get_settings_core_freeze());
                         tap(slint::platform::Key::LeftArrow);
                         progress.set(11);
@@ -2068,7 +2114,7 @@ mod core_runtime_tests {
                     11 => {
                         assert!(!ui.get_settings_core_freeze());
                         tap(slint::platform::Key::DownArrow);
-                        assert_eq!(ui.get_settings_selection(), 3);
+                        assert_eq!(ui.get_settings_selection(), 4);
                         assert!(ui.get_settings_core_resume());
                         tap(slint::platform::Key::LeftArrow);
                         progress.set(13);
@@ -2097,7 +2143,7 @@ mod core_runtime_tests {
                         .unwrap();
                         std::fs::create_dir(output.join("playback.json")).unwrap();
                         live.activate(&ui, 3);
-                        live.activate(&ui, 2);
+                        live.activate(&ui, 3);
                         progress.set(12);
                     }
                     12 => {
@@ -2117,6 +2163,7 @@ mod core_runtime_tests {
                 playback: directory.join("saved-playback.json"),
                 mgba: directory.join("cores/mgba.json"),
                 ds: directory.join("cores/melonds-ds.json"),
+                three_ds: directory.join("cores/azahar.json"),
             },
         )
         .load()
@@ -2138,6 +2185,11 @@ mod core_runtime_tests {
             crate::domain::core_settings::VideoFilter::Lcd
         );
         assert_eq!(saved.ds.resolution.scale(), 2);
+        assert_eq!(saved.three_ds.resolution.scale(), 2);
+        assert_eq!(
+            saved.three_ds.layout,
+            crate::domain::core_settings::DsLayout::LargeAndSmall
+        );
     }
 }
 
@@ -2245,6 +2297,7 @@ mod mapping_runtime_tests {
                 playback: directory.join("playback.json"),
                 mgba: directory.join("cores/mgba.json"),
                 ds: directory.join("cores/melonds-ds.json"),
+                three_ds: directory.join("cores/azahar.json"),
             },
         );
         let snapshot = Rc::new(Cell::new(Some((1 << 8, 7))));

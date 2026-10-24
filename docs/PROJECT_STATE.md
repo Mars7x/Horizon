@@ -21,16 +21,16 @@ import and Ready. Completed setup is skipped; unfinished confirmed steps resume.
 | Library | Full-shell grid/sort/filter; Accept opens imported games in the embedded player |
 | Activity | Retained session totals, recent history and distinct lifetime counters |
 | Album | Horizon-owned screenshots/animated images, viewer and confirmed deletion |
-| Settings | Appearance; Controller → Button mapping and DS button mapping; Cores → mGBA and melonDS; Third-Party → SteamGridDB and Steam Account |
+| Settings | Appearance; Controller → Button mapping and DS button mapping; Cores → mGBA, melonDS and Azahar; Third-Party → SteamGridDB and Steam Account |
 | Player | GB/GBC/GBA and DS in a zoomed shell with quick menu, visual rewind, playback speed, four state slots and a crash-safe automatic resume point; DS layouts, swap, lid, blow and GPU internal resolution |
-| 3DS player | Initial native-resolution Vulkan playback, Circle Pad/C-stick, touch, audio, screenshots and isolated in-game saves; no rewind, save states or automatic resume yet |
+| 3DS player | Vulkan playback at Native to 6× internal resolution, DS-style screen layouts and swap, Circle Pad/C-stick, touch, audio, screenshots, LayeredFS mods and isolated in-game saves; no rewind, save states or automatic resume yet |
 | Profile | Local name/picture, Steam profile picture and read-only Steam friends |
 
 Utilities are **Album, Activity, Settings**, in that order.
 Steam account setup uses a SteamID64 and Web API key; interactive Steam login
 is not implemented. SteamGridDB is independent of Steam account features.
-Game options on +/Start/F10 provide save management, properties, persistent
-Hide/Unhide and confirmed ROM uninstall. Save management opens the save folder,
+Game options on +/Start/F10 provide save management, per-game mods, properties,
+persistent Hide/Unhide and confirmed ROM uninstall. Save management opens the save folder,
 backs up progress or explicitly resets battery saves and states with confirmation.
 ROM uninstall retains saves, states, captures and history.
 RetroAchievements is intended future work, not an available backend.

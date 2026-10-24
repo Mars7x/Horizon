@@ -8,7 +8,15 @@ second confirmation. Cancelling the picker leaves the library/setup unchanged.
 The chosen folder stays live. Horizon checks it again at startup and every
 10 seconds while running, on a worker, and adds new supported files silently.
 Files already imported at the same size are not reread, and a file changed in the
-last 5 seconds (still copying) waits for a later check.
+last 5 seconds (still copying) waits for a later check. New files are read
+smallest first and each is added as soon as it's hashed; Home and Library show
+what has arrived about every second. A folder of large 3DS cartridges takes
+minutes to hash (about 155 s for 50 GB on an external drive), so games arrive
+one by one rather than all at the end, and whatever finished stays imported if
+Horizon closes first; the next start continues with the rest. Each file's
+identity (device, inode, size, modification and change times) is recorded while
+it is hashed, and the import checks that identity just before committing it
+instead of reading the file a second time.
 
 A game whose files have all been deleted from the folder leaves Home and Library
 after the next complete check. It is retired, not deleted: its GameId, title,

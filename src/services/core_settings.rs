@@ -53,6 +53,7 @@ mod tests {
             playback: root.join("playback.json"),
             mgba: root.join("cores/mgba.json"),
             ds: root.join("cores/melonds-ds.json"),
+            three_ds: root.join("cores/azahar.json"),
         };
         let worker = CoreSettings::new(paths.clone(), worker::no_notify());
         let mut next = worker.results.recv().unwrap().unwrap();

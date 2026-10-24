@@ -5,8 +5,9 @@ import { FallbackCover } from "fallback-cover.slint";
 import { ActionButton } from "action-button.slint";
 import { ListRow, Surface } from "list-row.slint";
 import { HintBar } from "hint-bar.slint";
+import { ModRow } from "../models/mods.slint";
 
-// Floating game commands; details and save management use shared dialogs.
+// Floating game commands; details, saves and mods use shared dialogs.
 // Rust chooses placement, identity, focus and operations. The page stays visible.
 export component GameContextMenu inherits Rectangle {
     in property <bool> open: false;
@@ -22,6 +23,7 @@ export component GameContextMenu inherits Rectangle {
     in property <string> message;
     in property <string> details;
     in property <length> details-offset;
+    in property <[ModRow]> mods;
     out property <length> max-details-offset: max(0px, properties.preferred-height - 330px);
     out property <CardRect> popup-rect: { x: popup.x / 1px, y: popup.y / 1px, width: popup.width / 1px, height: popup.height / 1px };
     callback choose(int);
@@ -29,7 +31,7 @@ export component GameContextMenu inherits Rectangle {
     callback back();
     callback scroll(int);
     width: root.area-width; height: root.area-height;
-    visible: root.open || popup.opacity > 0.01 || properties-dialog.opacity > 0.01 || error-dialog.opacity > 0.01 || saves-dialog.opacity > 0.01;
+    visible: root.open || popup.opacity > 0.01 || properties-dialog.opacity > 0.01 || error-dialog.opacity > 0.01 || saves-dialog.opacity > 0.01 || mods-dialog.opacity > 0.01;
     background: transparent;
     private property <length> popup-rise: root.open && root.view == 0 ? 0px : Motion.dialog-rise / 2;
     animate popup-rise { duration: Motion.dialog-duration; easing: ease-out; }
@@ -52,9 +54,9 @@ export component GameContextMenu inherits Rectangle {
         background: Theme.surface-raised;
         drop-shadow-color: Theme.shadow.with-alpha(Theme.is-dark ? 0.42 : 0.18);
         drop-shadow-blur: 20px; drop-shadow-offset-y: 5px;
-        for label[index] in ["Manage save data", "Game properties", root.hidden-game ? "Unhide game" : "Hide game", "Uninstall game"] : ListRow {
+        for label[index] in ["Manage save data", "Manage mods", "Game properties", root.hidden-game ? "Unhide game" : "Hide game", "Uninstall game"] : ListRow {
             x: Metrics.spacing-sm;
-            y: Metrics.spacing-sm + index * (Metrics.compact-row-height + Metrics.spacing-xs) + (index == 3 ? Metrics.spacing-sm : 0px);
+            y: Metrics.spacing-sm + index * (Metrics.compact-row-height + Metrics.spacing-xs) + (index == 4 ? Metrics.spacing-sm : 0px);
             width: parent.width - Metrics.spacing-md;
             compact: true;
             title: label;
@@ -64,7 +66,7 @@ export component GameContextMenu inherits Rectangle {
             hovered => { root.hover-row(index); }
             activated => { root.choose(index); }
         }
-        Rectangle { x: Metrics.spacing-md; y: 164px; width: parent.width - Metrics.spacing-xl; height: 1px; background: Theme.divider; }
+        Rectangle { x: Metrics.spacing-md; y: Metrics.spacing-sm + 4 * (Metrics.compact-row-height + Metrics.spacing-xs); width: parent.width - Metrics.spacing-xl; height: 1px; background: Theme.divider; }
     }
     saves-dialog := ModalDialog {
         area-width: root.area-width; area-height: root.area-height;
@@ -102,6 +104,69 @@ export component GameContextMenu inherits Rectangle {
             x: Metrics.spacing-lg; y: 356px;
             width: parent.width - Metrics.spacing-xxl; height: 84px;
             text: root.message == "" ? "Backups stay in this game's save folder. Deleting save data requires confirmation." : root.message;
+            color: Theme.secondary-foreground; font-size: Typography.caption-size;
+            wrap: word-wrap; overflow: elide;
+        }
+    }
+    mods-dialog := ModalDialog {
+        area-width: root.area-width; area-height: root.area-height;
+        open: root.open && root.view == 6;
+        card-width: 504px; card-height: 500px;
+        dismissed => { root.back(); }
+        private property <length> step: Metrics.compact-row-height + Metrics.spacing-xs;
+        // Rows past the fifth scroll into view with the selection.
+        private property <length> scroll: max(0, min(root.selected - 4, root.mods.length + 2 - 5)) * self.step;
+        Text {
+            x: Metrics.spacing-lg; y: Metrics.spacing-lg;
+            width: parent.width - Metrics.spacing-xxl; height: 28px;
+            text: "Mods"; color: Theme.foreground;
+            font-size: Typography.heading-size; font-weight: Typography.heading-weight;
+        }
+        Text {
+            x: Metrics.spacing-lg; y: 58px;
+            width: parent.width - Metrics.spacing-xxl; height: 50px;
+            text: root.game.title + "\nMods that are on apply when the game starts";
+            color: Theme.secondary-foreground; font-size: Typography.caption-size;
+            wrap: word-wrap; overflow: elide;
+        }
+        Surface {
+            x: Metrics.spacing-lg; y: 120px;
+            width: parent.width - Metrics.spacing-xxl; height: 5 * step + Metrics.spacing-xs;
+            clip: true;
+            for row[index] in root.mods : ListRow {
+                x: Metrics.spacing-sm;
+                y: Metrics.spacing-xs + index * step - scroll;
+                animate y { duration: Motion.focus-duration; easing: ease-in-out; }
+                width: parent.width - Metrics.spacing-md;
+                compact: true; title: row.title; trailing-width: 72px;
+                focused: root.selected == index;
+                enabled: root.open && root.view == 6 && !root.busy;
+                hovered => { root.hover-row(index); }
+                activated => { root.choose(index); }
+                Text {
+                    x: parent.width - 72px; width: 56px; height: parent.height;
+                    horizontal-alignment: right; vertical-alignment: center;
+                    text: row.enabled ? "On" : "Off";
+                    color: row.enabled ? Theme.foreground : Theme.secondary-foreground;
+                    font-size: Typography.body-size; font-weight: Typography.emphasis-weight;
+                }
+            }
+            for label[index] in ["Open mods folder", "Back"] : ListRow {
+                x: Metrics.spacing-sm;
+                y: Metrics.spacing-xs + (root.mods.length + index) * step - scroll;
+                animate y { duration: Motion.focus-duration; easing: ease-in-out; }
+                width: parent.width - Metrics.spacing-md;
+                compact: true; title: label; trailing-width: Metrics.spacing-lg;
+                focused: root.selected == root.mods.length + index;
+                enabled: root.open && root.view == 6 && !root.busy;
+                hovered => { root.hover-row(root.mods.length + index); }
+                activated => { root.choose(root.mods.length + index); }
+            }
+        }
+        Text {
+            x: Metrics.spacing-lg; y: 396px;
+            width: parent.width - Metrics.spacing-xxl; height: 84px;
+            text: root.message;
             color: Theme.secondary-foreground; font-size: Typography.caption-size;
             wrap: word-wrap; overflow: elide;
         }

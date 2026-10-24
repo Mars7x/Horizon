@@ -14,7 +14,7 @@ timing, compact ListRows and shared Surface styling. The popup contains only act
 helper text or status caption. Properties, failures and uninstall confirmation
 use separate detail dialogs. The opening rise is a local offset from the cover
 anchor, so the first opening never animates from the screen origin.
-Up/Down selects Manage save data, Game properties, Hide/Unhide or Uninstall. A/Enter activates;
+Up/Down selects Manage save data, Manage mods, Game properties, Hide/Unhide or Uninstall. A/Enter activates;
 B/Escape or + backs out. Closing retains the background page’s selection, filter
 and scroll. Global Home closes options and performs its normal navigation reset.
 Reduced Motion presents modal changes immediately.
@@ -53,6 +53,30 @@ removal are reported without claiming that the reset completed. Save operations
 run on a joined worker while gameplay is closed. Back/Cancel closes the entire
 options flow rather than bringing back the floating popup. See
 [ADR 0230](adr/0230-manual-save-management.md).
+
+## Manage mods
+
+Manage mods lists the mods in the game's `mods/` folder, each On or Off, then
+Open mods folder and Back. Select turns a mod on or off; new mods start off.
+Choices are saved in the game's `mods.json` and apply the next time the game
+starts. Open mods folder creates the folder when missing and opens it through
+XDG OpenDirectory. More than five rows scroll with the selection.
+
+- Game Boy, Game Boy Color, GBA and DS mods are `.ips`, `.bps` or `.ups`
+  patches. Enabled ones apply in name order to a copy of the cartridge in
+  memory after it is read; the game file is never changed. BPS and UPS
+  patches check the cartridge's CRC32, so a patch for another version stops the
+  launch with its name. The imported identity check still runs on the
+  unpatched file.
+- 3DS mods are folders in Azahar's LayeredFS layout (`romfs/`, `exefs/`,
+  `code.ips`/`code.bps`, `exheader.bin`). At launch the enabled folders merge,
+  in name order with later files winning, into Azahar's mod folder for the
+  title (`core-data/Azahar/load/mods/<title ID>/`) as hard links, or copies
+  across filesystems. Horizon marks the folder it builds and rebuilds only that
+  one; a folder placed there by hand is used as it is and never replaced.
+
+Links and other special files in `mods/` are ignored. Patched games share the
+game's saves and states. See [ADR 0233](adr/0233-per-game-mods.md).
 
 ## Uninstall
 

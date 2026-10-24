@@ -119,6 +119,8 @@ export component SettingsPage inherits Rectangle {
     in property <string> ds-filter: "None";
     in property <string> ds-filter-note;
     in property <string> ds-resolution: "Native";
+    in property <string> three-ds-layout: "Stacked";
+    in property <string> three-ds-resolution: "Native";
     in property <int> core-sunlight;
     in property <string> core-feedback;
     callback core-decrease();
@@ -502,26 +504,35 @@ export component SettingsPage inherits Rectangle {
         SettingsRow {
             y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 2;
             width: parent.width;
-            title: "Freeze when unfocused";
-            subtitle: "Resume automatically when you return";
-            toggle: true;
-            checked: root.core-freeze;
-            enabled: root.view == 6 && root.core-ready;
+            title: "Azahar";
+            subtitle: "Nintendo 3DS";
+            trailing: "Open";
             focused: root.view == 6 && root.selection == 2;
             activated => { if (root.view == 6) { root.activate(2); } }
         }
         SettingsRow {
             y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 3;
             width: parent.width;
+            title: "Freeze when unfocused";
+            subtitle: "Resume automatically when you return";
+            toggle: true;
+            checked: root.core-freeze;
+            enabled: root.view == 6 && root.core-ready;
+            focused: root.view == 6 && root.selection == 3;
+            activated => { if (root.view == 6) { root.activate(3); } }
+        }
+        SettingsRow {
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 4;
+            width: parent.width;
             title: "Resume last state";
             subtitle: "Load the newest state when starting a game";
             toggle: true; checked: root.core-resume;
             enabled: root.view == 6 && root.core-ready;
-            focused: root.view == 6 && root.selection == 3;
-            activated => { if root.view == 6 { root.activate(3); } }
+            focused: root.view == 6 && root.selection == 4;
+            activated => { if root.view == 6 { root.activate(4); } }
         }
         Text {
-            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 4;
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 5;
             width: parent.width; height: 60px;
             text: root.core-feedback;
             color: Theme.secondary-foreground; font-size: Typography.caption-size; wrap: word-wrap;
@@ -654,6 +665,51 @@ export component SettingsPage inherits Rectangle {
         }
         Text {
             y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 3;
+            width: parent.width; height: 60px;
+            text: root.core-feedback;
+            color: Theme.secondary-foreground;
+            font-size: Typography.caption-size;
+            wrap: word-wrap;
+        }
+    }
+
+    azahar := TransitionLayer {
+        x: Metrics.page-margin;
+        rest-y: Metrics.page-header-height;
+        width: root.content-width;
+        height: root.height - Metrics.page-header-height;
+        opaque: true;
+        active: root.view == 13;
+        outgoing: view-transition.from-key == 13;
+        returning: root.view-back;
+        phase: view-transition.phase;
+        Breadcrumb {
+            x: 0px; y: 0px; width: parent.width;
+            section: "Cores"; page: "Azahar";
+            back => { if (root.view == 13) { root.go-back(); } }
+        }
+        SettingsRow {
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm;
+            width: parent.width;
+            title: "Screen layout";
+            subtitle: "Swap the screens from the quick menu or with L3";
+            trailing: root.three-ds-layout; value-forward: root.core-value-forward;
+            enabled: root.view == 13 && root.core-ready;
+            focused: root.view == 13 && root.selection == 0;
+            activated => { if (root.view == 13) { root.activate(0); } }
+        }
+        SettingsRow {
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 1;
+            width: parent.width;
+            title: "Internal resolution";
+            subtitle: "Sharper 3D, drawn on the graphics card";
+            trailing: root.three-ds-resolution; value-forward: root.core-value-forward;
+            enabled: root.view == 13 && root.core-ready;
+            focused: root.view == 13 && root.selection == 1;
+            activated => { if (root.view == 13) { root.activate(1); } }
+        }
+        Text {
+            y: Metrics.breadcrumb-height + Metrics.spacing-sm + (Metrics.list-row-height + Metrics.list-row-gap) * 2;
             width: parent.width; height: 60px;
             text: root.core-feedback;
             color: Theme.secondary-foreground;

@@ -17,8 +17,10 @@ data/
   library/library.sqlite3
   saves/<system>/<game>/      (gb, gbc, gba or nds)
     game.json
-    view.json                 (DS: remembered layout and swap)
+    view.json                 (DS and 3DS: remembered layout and swap)
     verified.json             (3DS: identity of the last verified cartridge)
+    mods/                     (the user's mods: patches, or 3DS LayeredFS folders)
+    mods.json                 (which mods are on)
     <game name>.sav
     save-reset                (explicit reset disables beside-ROM save import)
     backups/<game name>.previous.sav
@@ -40,6 +42,7 @@ config/
   playback.json
   cores/mgba.json
   cores/melonds-ds.json
+  cores/azahar.json
   integrations/steam.json
   integrations/steamgriddb.json
 cache/
@@ -99,7 +102,7 @@ data deletes only the current battery save and state tree; manual snapshots and
 previous battery backups are retained. No other application's files are scanned or deleted. The one exception is reading a same-named save beside a game file, in the folder the user chose for games, once, when Horizon has none (ADR 0219).
 
 `playback.json` owns shared focus freezing and automatic resume; `cores/mgba.json` owns only mGBA
-preferences and `cores/melonds-ds.json` only melonDS DS ones. Settings load/save on the existing worker. Each action commits one
+preferences, `cores/melonds-ds.json` only melonDS DS ones and `cores/azahar.json` only Azahar's. Settings load/save on the existing worker. Each action commits one
 owner's file atomically; a failed save does not update the published preferences.
 
 ## Save states

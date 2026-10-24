@@ -29,16 +29,30 @@ is not supported. Only the bundled pinned core can consume that descriptor.
 
 ## Controls and picture
 
-Initial playback uses native 400×480 combined screens, default arrangement and
-no filter. Controller D-pad and face/shoulder/Start/Select buttons retain the
+Azahar draws its default arrangement (the 400×240 top screen above the 320×240
+bottom one) with no filter; Horizon cuts out the two screens and places them
+like a DS game's. Settings → Cores → Azahar → Screen layout chooses Stacked
+(default), Side by side, or Large and small, keeping each screen's own shape.
+The quick menu's Screen layout and Swap screens, and L3, change them during
+play; as on the DS, the game remembers its layout and swap in `view.json` and
+then ignores the default. Screenshots show the screens as arranged. Internal
+resolution renders at Native or 2× to 6× (`cores/azahar.json`, next launch). Each frame is read back from the
+graphics card into CPU-cached memory, about 1 ms at Native and 4 ms at 4×; reading
+uncached device memory had cost up to 70 ms a frame and caused the stutter.
+Games still pause briefly the first time they compile a shader; Azahar keeps
+those in its shader cache.
+
+Controller D-pad and face/shoulder/Start/Select buttons retain the
 Nintendo mapping; left and right sticks drive Circle Pad and C-stick separately
 from D-pad. The global accept/cancel and X/Y layout swap still applies.
-Keyboard I/J/K/L drives Circle Pad, arrows drive D-pad; existing Z/X/C/V,
-A/S, Enter and Backspace bindings remain. Mouse/touch coordinates follow the
-actual contained image, excluding letterbox bars; Azahar maps its lower screen.
+The right stick is only the C-stick (Azahar's touch-cursor mode is off); L3
+swaps the screens and R3 does nothing. Keyboard I/J/K/L drives Circle Pad, arrows drive D-pad;
+existing Z/X/C/V, A/S, Enter and Backspace bindings remain. Mouse
+and touch work on the bottom screen wherever the layout puts it; Azahar reads
+it once, as a touch.
 
-Quick menu offers Continue, 1×/2× playback, Screenshot, Restart and Return to
-Horizon. 3DS rewind, manual states and automatic resume are deliberately unavailable
+Quick menu offers Continue, 1×/2× playback, Screen layout, Swap screens,
+Screenshot, Restart and Return to Horizon (no lid). 3DS rewind, manual states and automatic resume are deliberately unavailable
 in this first integration. In particular, Azahar's expensive state-size query
 must never run periodically during gameplay. Upstream manual state capability
 is not being described as unsupported by Azahar itself.
@@ -55,6 +69,9 @@ are independent. No existing external emulator save directory is touched.
 Azahar's own log lines carry their level (`<Warning>`, `<Error>`); routine ones
 (stubbed services, files a fresh console lacks) are logged at debug, its
 Vulkan renderer's errors stay visible.
+
+Mods in Azahar's LayeredFS layout are managed from the game menu; see
+[game options](GAME_OPTIONS.md#manage-mods).
 
 Some games require user-dumped system data; Horizon does not discover or obtain
 it. No 3DS system files or games are distributed. Compatibility is established

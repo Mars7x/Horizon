@@ -68,6 +68,54 @@ pub enum Command {
     RememberView(crate::services::game_storage::GameView),
 }
 
+/// How long the core's frames take, reported every five seconds at debug:
+/// the average, the slowest, and how many overran their share of real time
+/// (the cause of a stutter, when there is one).
+#[derive(Default)]
+struct FrameTiming {
+    frames: u32,
+    total: Duration,
+    slowest: Duration,
+    late: u32,
+    /// The longest wait between two frames starting (time outside the core).
+    gap: Duration,
+    previous: Option<Instant>,
+}
+impl FrameTiming {
+    fn record(&mut self, took: Duration, budget_seconds: f64) {
+        let started = Instant::now() - took;
+        if let Some(previous) = self.previous {
+            self.gap = self.gap.max(started.saturating_duration_since(previous));
+        }
+        self.previous = Some(started);
+        self.frames += 1;
+        self.total += took;
+        self.slowest = self.slowest.max(took);
+        if took.as_secs_f64() > budget_seconds {
+            self.late += 1;
+        }
+    }
+    fn report(&mut self, audio_frames: usize) {
+        if self.frames > 0 {
+            tracing::debug!(
+                frames = self.frames,
+                average_ms = format!(
+                    "{:.2}",
+                    self.total.as_secs_f64() * 1000.0 / f64::from(self.frames)
+                ),
+                slowest_ms = format!("{:.1}", self.slowest.as_secs_f64() * 1000.0),
+                late = self.late,
+                longest_gap_ms = format!("{:.1}", self.gap.as_secs_f64() * 1000.0),
+                audio_frames,
+                "core frame timing in the last 5 seconds"
+            );
+        }
+        let previous = self.previous;
+        *self = Self::default();
+        self.previous = previous;
+    }
+}
+
 /// Quick save and quick load use the first manual slot.
 pub const QUICK_SLOT: u8 = 1;
 
@@ -706,7 +754,11 @@ fn play(
         .as_ref()
         .map(crate::services::game_storage::GameFolder::view)
         .unwrap_or_default();
-    let ds_layout = ds.then(|| view.ds_layout.unwrap_or(preferences.ds.layout));
+    let ds_layout = if three_ds {
+        Some(view.ds_layout.unwrap_or(preferences.three_ds.layout))
+    } else {
+        ds.then(|| view.ds_layout.unwrap_or(preferences.ds.layout))
+    };
     // Something to look at while a large game loads: the state it resumes.
     let preview = early_folder
         .filter(|_| preferences.resume_last_state)
@@ -767,6 +819,14 @@ fn play(
         let (matched, core) = if let Some(file) = verified_file.as_mut() {
             let input = ds_input.clone().ok_or("3DS input is unavailable")?;
             let content = crate::platform::data_paths::cartridge_descriptor_path(file);
+            // Enabled mods go where Azahar looks for them before it starts.
+            if let Some(title) = crate::services::mods::three_ds_title(file) {
+                let applied =
+                    crate::services::mods::prepare_three_ds(&game_folder.directory, title)?;
+                if !applied.is_empty() {
+                    tracing::info!(count = applied.len(), "3DS mods enabled");
+                }
+            }
             // A 4 GiB cartridge takes seconds to hash: verify while it loads.
             let (verified, core) = thread::scope(|scope| {
                 let record =
@@ -779,6 +839,7 @@ fn play(
                     Arc::clone(&audio),
                     Arc::clone(&buttons),
                     input,
+                    preferences.three_ds.resolution.scale(),
                 );
                 (
                     check
@@ -794,11 +855,25 @@ fn play(
             }
             (true, core)
         } else {
+            // Patches apply to a copy in memory; the check is of the file.
+            let patched = match crate::services::mods::patch_cartridge(&game_folder.directory, &rom)
+            {
+                Ok(patched) => patched,
+                Err(_) if !rom_matches(&rom, sha256) => {
+                    failure = CHANGED_ROM.into();
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            if let Some((_, applied)) = &patched {
+                tracing::info!(count = applied.len(), "cartridge mods applied");
+            }
+            let content = patched.as_ref().map_or(rom.as_slice(), |(bytes, _)| bytes);
             thread::scope(|scope| {
                 let check = scope.spawn(|| rom_matches(&rom, sha256));
                 let core = Core::load_system(
                     if ds { &paths.ds_core } else { &paths.core },
-                    &rom,
+                    content,
                     mgba,
                     Arc::clone(&audio),
                     Arc::clone(&buttons),
@@ -853,7 +928,10 @@ fn play(
                     let ds_input = ds_input.clone();
                     let display = Arc::clone(&display);
                     move || {
-                        let view = ds_input.as_ref().filter(|_| ds).map(|input| &input.view);
+                        let view = ds_input
+                            .as_ref()
+                            .filter(|_| ds || three_ds)
+                            .map(|input| &input.view);
                         stage.run(mgba, view, &display, &frame, &*frame_ready)
                     }
                 })
@@ -924,6 +1002,8 @@ fn play(
     }
     let mut last_tick = Instant::now();
     let mut lid_closed = false;
+    let mut frame_timing = FrameTiming::default();
+    let pushed_total = std::cell::Cell::new(0usize);
     let mut view_writer: Option<JoinHandle<()>> = None;
     let mut audio_reader = crate::platform::gba_audio::AudioReader::new(
         Arc::clone(&audio),
@@ -1298,11 +1378,17 @@ fn play(
             }
             if !paused {
                 let before = audio.written();
+                let frame_started = Instant::now();
                 core.run_frame();
+                frame_timing.record(
+                    frame_started.elapsed(),
+                    1.0 / (fps * f64::from(speed.factor())),
+                );
                 if let Some(error) = core.take_error() {
                     return Err(error);
                 }
                 let pushed = audio.written().wrapping_sub(before);
+                pushed_total.set(pushed_total.get() + pushed);
                 let presented = present(&core);
                 let elapsed = Duration::from_secs_f64(1.0 / fps);
                 rewind_clock += elapsed;
@@ -1368,6 +1454,7 @@ fn play(
                     );
                 }
                 checkpoint_frames = emulated;
+                frame_timing.report(pushed_total.replace(0));
                 // Report audible audio trouble, so a hitch can be told apart
                 // from anything else.
                 let now = audio.problems();

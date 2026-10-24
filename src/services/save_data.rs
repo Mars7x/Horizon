@@ -12,12 +12,21 @@ use std::{
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
 pub fn folder(database: &Path, root: &Path, id: GameId) -> Result<GameFolder, String> {
+    folder_and_system(database, root, id).map(|(folder, _)| folder)
+}
+
+/// The game's folder and the system it plays on.
+pub fn folder_and_system(
+    database: &Path,
+    root: &Path,
+    id: GameId,
+) -> Result<(GameFolder, crate::services::rom_import::RomSystem), String> {
     let details = super::game_management::details(database, id).map_err(|e| e.to_string())?;
-    let mut sources = details.game.sources().iter().filter(|source| {
+    let mut sources = details.game.sources().iter().filter_map(|source| {
         crate::services::rom_import::RomSystem::from_source_id(source.source_id().as_str())
-            .is_some()
+            .map(|system| (source, system))
     });
-    let source = sources
+    let (source, system) = sources
         .next()
         .ok_or("This game has no supported save folder.")?;
     if sources.next().is_some() {
@@ -25,6 +34,7 @@ pub fn folder(database: &Path, root: &Path, id: GameId) -> Result<GameFolder, St
     }
     safe_path(root).map_err(|e| e.to_string())?;
     GameFolder::prepare(root, source, details.game.game().title().as_str())
+        .map(|folder| (folder, system))
         .map_err(|e| format!("Could not access this game's save folder: {e}"))
 }
 

@@ -124,6 +124,13 @@ impl FrameStage {
                     exact: None,
                     screens: Some(screens),
                 }
+            } else if let Some(three_ds) = ds_view
+                .is_some()
+                .then(|| super::gba_video::present_three_ds(&raw))
+                .flatten()
+            {
+                // Azahar draws no filter; Horizon only places its screens.
+                three_ds
             } else if let Some(view) = ds_view {
                 // Each screen is filtered at the size the layout shows it.
                 let (layout, swapped) = unpack_ds_view(view.load(Ordering::Acquire));

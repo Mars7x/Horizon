@@ -4,6 +4,8 @@ import { SaveStateRow } from "models/save-state.slint";
 export { SaveStateRow }
 import { RewindRow } from "models/rewind.slint";
 export { RewindRow }
+import { ModRow } from "models/mods.slint";
+export { ModRow }
 import { OnboardingPage } from "pages/onboarding.slint";
 import { GamePlayer } from "pages/game-player.slint";
 import { GameContextMenu } from "components/game-context-menu.slint";
@@ -221,6 +223,7 @@ export component AppWindow inherits Window {
     in property <string> game-menu-message;
     in property <string> game-menu-confirm-text;
     in property <length> game-menu-offset;
+    in property <[ModRow]> game-menu-mods;
     out property <length> game-menu-max-offset: game-menu.max-details-offset;
     callback game-menu-choose(int);
     callback game-menu-back();
@@ -327,6 +330,8 @@ export component AppWindow inherits Window {
     in property <string> settings-ds-filter: "None";
     in property <string> settings-ds-filter-note;
     in property <string> settings-ds-resolution: "Native";
+    in property <string> settings-three-ds-layout: "Stacked";
+    in property <string> settings-three-ds-resolution: "Native";
     in property <int> settings-core-sunlight: 0;
     in property <string> settings-core-feedback: "";
     callback settings-core-decrease();
@@ -915,6 +920,8 @@ export component AppWindow inherits Window {
                     ds-filter: root.settings-ds-filter;
                     ds-filter-note: root.settings-ds-filter-note;
                     ds-resolution: root.settings-ds-resolution;
+                    three-ds-layout: root.settings-three-ds-layout;
+                    three-ds-resolution: root.settings-three-ds-resolution;
                     core-color: root.settings-core-color;
                     core-palette: root.settings-core-palette;
                     core-border: root.settings-core-border;
@@ -1078,6 +1085,7 @@ export component AppWindow inherits Window {
                 selected: root.game-menu-selected; hidden-game: root.game-menu-hidden;
                 busy: root.game-menu-busy; message: root.game-menu-message;
                 details: root.game-menu-details; details-offset: root.game-menu-offset;
+                mods: root.game-menu-mods;
                 choose(index) => { root.game-menu-choose(index); }
                 hover-row(index) => { root.game-menu-focus(index); }
                 back => { root.game-menu-back(); }

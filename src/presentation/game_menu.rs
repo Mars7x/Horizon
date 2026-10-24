@@ -10,10 +10,11 @@ use crate::{
     input::{UiAction, UiActionEvent},
     services::{
         game_management::{self, GameDetails, ManagementError, UninstallOutcome},
+        mods::ModEntry,
         worker::{WorkerSender, spawn, worker_channel},
     },
 };
-use slint::ComponentHandle;
+use slint::{ComponentHandle, Model};
 use std::{
     cell::{Cell, RefCell},
     path::PathBuf,
@@ -25,6 +26,14 @@ enum Reply {
     Details(u64, Result<GameDetails, ManagementError>),
     Mutation(u64, Result<UninstallOutcome, ManagementError>),
     Save(u64, Result<String, String>),
+    Mods(u64, Result<(Vec<ModEntry>, bool, String), String>),
+}
+
+/// What the mods dialog asks its worker to do.
+enum ModsAction {
+    List,
+    Toggle(String, bool),
+    Open,
 }
 
 pub struct GameMenuController {
@@ -42,6 +51,18 @@ pub struct GameMenuController {
     sender: WorkerSender<Reply>,
     receiver: RefCell<Receiver<Reply>>,
     sound: CallbackSlot<dyn Fn(UiSoundCue)>,
+    mods: RefCell<Vec<ModEntry>>,
+    mods_model: Rc<slint::VecModel<crate::ModRow>>,
+}
+
+/// The last row the view can focus.
+fn last_row(view: i32, mods: usize) -> i32 {
+    match view {
+        0 => 4,
+        4 => 3,
+        6 => i32::try_from(mods).unwrap_or(i32::MAX - 2) + 1,
+        _ => 0,
+    }
 }
 
 impl GameMenuController {
@@ -70,7 +91,10 @@ impl GameMenuController {
             sender,
             receiver: RefCell::new(receiver),
             sound: RefCell::new(None),
+            mods: RefCell::new(Vec::new()),
+            mods_model: Rc::new(slint::VecModel::default()),
         });
+        ui.set_game_menu_mods(slint::ModelRc::from(controller.mods_model.clone()));
         drain.bind(&controller);
         let weak = Rc::downgrade(&controller);
         ui.on_game_menu_choose(move |index| {
@@ -83,9 +107,10 @@ impl GameMenuController {
             if let Some(controller) = weak.upgrade()
                 && let Some(ui) = controller.ui.upgrade()
                 && ui.get_game_menu_open()
-                && matches!(ui.get_game_menu_view(), 0 | 4)
+                && matches!(ui.get_game_menu_view(), 0 | 4 | 6)
                 && !ui.get_game_menu_busy()
-                && (0..4).contains(&index)
+                && (0..=last_row(ui.get_game_menu_view(), controller.mods.borrow().len()))
+                    .contains(&index)
             {
                 ui.set_game_menu_selected(index);
             }
@@ -246,14 +271,22 @@ impl GameMenuController {
                     self.cue(UiSoundCue::Ok);
                 }
                 1 => {
+                    self.mods.borrow_mut().clear();
+                    self.mods_model.set_vec(Vec::new());
+                    ui.set_game_menu_view(6);
+                    ui.set_game_menu_selected(0);
+                    self.cue(UiSoundCue::Ok);
+                    self.manage_mods(id, ModsAction::List);
+                }
+                2 => {
                     ui.set_game_menu_view(1);
                     ui.set_game_menu_offset(0.0);
                     self.cue(UiSoundCue::Ok);
                 }
-                2 => {
+                3 => {
                     self.mutate(id, false);
                 }
-                3 if self
+                4 if self
                     .details
                     .borrow()
                     .as_ref()
@@ -275,7 +308,7 @@ impl GameMenuController {
                     ui.set_game_menu_selected(0);
                     self.cue(UiSoundCue::Ok);
                 }
-                3 => self
+                4 => self
                     .error("Game details are unavailable. Reopen this menu before uninstalling."),
                 _ => {}
             },
@@ -307,7 +340,67 @@ impl GameMenuController {
                 1 => self.manage_saves(id, 2),
                 _ => {}
             },
+            6 => {
+                let count = self.mods.borrow().len();
+                match usize::try_from(index) {
+                    Ok(row) if row < count => {
+                        let entry = self.mods.borrow()[row].clone();
+                        self.manage_mods(id, ModsAction::Toggle(entry.name, !entry.enabled));
+                    }
+                    Ok(row) if row == count => self.manage_mods(id, ModsAction::Open),
+                    Ok(row) if row == count + 1 => self.back(),
+                    _ => {}
+                }
+            }
             _ => {}
+        }
+    }
+
+    fn manage_mods(&self, id: GameId, action: ModsAction) {
+        let Some(ui) = self.ui.upgrade() else { return };
+        let database = self.database.clone();
+        let saves = self.saves.clone();
+        let generation = self.next_generation();
+        let sender = self.sender.clone();
+        ui.set_game_menu_busy(true);
+        if matches!(action, ModsAction::List) {
+            ui.set_game_menu_message("Loading mods…".into());
+        }
+        let started = std::thread::Builder::new()
+            .name("mods".into())
+            .spawn(move || {
+                let result = (|| {
+                    let (folder, system) =
+                        crate::services::save_data::folder_and_system(&database, &saves, id)?;
+                    let three_ds = system == crate::services::rom_import::RomSystem::Nintendo3ds;
+                    let game = &folder.directory;
+                    let message = match action {
+                        ModsAction::List => String::new(),
+                        ModsAction::Toggle(name, enabled) => {
+                            crate::services::mods::set_enabled(game, &name, enabled)
+                                .map_err(|e| format!("Could not save the mod choice: {e}"))?;
+                            "Changes apply the next time the game starts.".into()
+                        }
+                        ModsAction::Open => {
+                            let directory = crate::services::mods::directory(game)
+                                .map_err(|e| format!("Could not prepare the mods folder: {e}"))?;
+                            crate::platform::launcher::open_directory(&directory)
+                                .map_err(|e| format!("Could not open the mods folder: {e}"))?;
+                            "Mods folder opened. Reopen this list after adding mods.".into()
+                        }
+                    };
+                    let mods = crate::services::mods::list(game, three_ds)
+                        .map_err(|e| format!("Could not read this game's mods: {e}"))?;
+                    Ok((mods, three_ds, message))
+                })();
+                let _ = sender.send(Reply::Mods(generation, result));
+            });
+        match started {
+            Ok(worker) => *self.mutation.borrow_mut() = Some(worker),
+            Err(_) => {
+                ui.set_game_menu_busy(false);
+                ui.set_game_menu_message("Could not start reading mods. Try again.".into());
+            }
         }
     }
 
@@ -441,6 +534,45 @@ impl GameMenuController {
                         }
                     }
                 }
+                Reply::Mods(generation, result) if generation == self.generation.get() => {
+                    ui.set_game_menu_busy(false);
+                    match result {
+                        Ok((mods, three_ds, message)) => {
+                            self.mods_model.set_vec(
+                                mods.iter()
+                                    .map(|entry| crate::ModRow {
+                                        title: entry.name.as_str().into(),
+                                        enabled: entry.enabled,
+                                    })
+                                    .collect::<Vec<_>>(),
+                            );
+                            let last = last_row(6, mods.len());
+                            *self.mods.borrow_mut() = mods;
+                            ui.set_game_menu_selected(ui.get_game_menu_selected().min(last));
+                            let message = if !message.is_empty() {
+                                message
+                            } else if self.mods_model.row_count() == 0 {
+                                if three_ds {
+                                    "No mods yet. Put each mod's folder (with romfs, exefs or code.ips inside) in the mods folder.".into()
+                                } else {
+                                    "No mods yet. Put .ips, .bps or .ups patches in the mods folder.".into()
+                                }
+                            } else {
+                                "Mods apply in name order; later ones win.".into()
+                            };
+                            ui.set_game_menu_message(message.into());
+                            if self.close_requested.replace(false)
+                                && let Err(error) = slint::quit_event_loop()
+                            {
+                                tracing::warn!(%error, "could not finish the requested close");
+                            }
+                        }
+                        Err(error) => {
+                            self.close_requested.set(false);
+                            ui.set_game_menu_message(error.into());
+                        }
+                    }
+                }
                 Reply::Mutation(generation, result) if generation == self.generation.get() => {
                     ui.set_game_menu_busy(false);
                     match result {
@@ -494,10 +626,13 @@ impl GameMenuController {
             UiAction::Up | UiAction::Down if ui.get_game_menu_view() == 1 => {
                 self.scroll(if event.action == UiAction::Up { -1 } else { 1 })
             }
-            UiAction::Up | UiAction::Down if matches!(ui.get_game_menu_view(), 0 | 4) => {
+            UiAction::Up | UiAction::Down if matches!(ui.get_game_menu_view(), 0 | 4 | 6) => {
                 let next = (ui.get_game_menu_selected()
                     + if event.action == UiAction::Up { -1 } else { 1 })
-                .clamp(0, 3);
+                .clamp(
+                    0,
+                    last_row(ui.get_game_menu_view(), self.mods.borrow().len()),
+                );
                 if next != ui.get_game_menu_selected() {
                     ui.set_game_menu_selected(next);
                     self.cue(UiSoundCue::Navigation);
@@ -663,17 +798,17 @@ mod placement_tests {
             height: 0.3,
         };
         assert_eq!(
-            popup_position(at(0.1, 0.2, 0.2), 1280.0, 720.0, (320.0, 228.0)),
+            popup_position(at(0.1, 0.2, 0.2), 1280.0, 720.0, (320.0, 280.0)),
             (396.0, 144.0)
         );
         assert_eq!(
-            popup_position(at(0.8, 0.8, 0.15), 1280.0, 720.0, (320.0, 228.0)),
-            (692.0, 476.0)
+            popup_position(at(0.8, 0.8, 0.15), 1280.0, 720.0, (320.0, 280.0)),
+            (692.0, 424.0)
         );
         for (width, height) in [(800.0, 600.0), (1280.0, 720.0), (3440.0, 1440.0)] {
-            let (x, y) = popup_position(at(0.99, 0.99, 0.2), width, height, (320.0, 228.0));
+            let (x, y) = popup_position(at(0.99, 0.99, 0.2), width, height, (320.0, 280.0));
             assert!(x >= 16.0 && x + 320.0 <= width - 16.0);
-            assert!(y >= 16.0 && y + 228.0 <= height - 16.0);
+            assert!(y >= 16.0 && y + 280.0 <= height - 16.0);
         }
     }
 }

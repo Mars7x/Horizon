@@ -80,7 +80,7 @@ export component GamePlayer inherits Rectangle {
     in property <int> focused;
     callback choose(int);
     callback touch(float, float, bool);
-    // A DS game: the frame holds the top screen above the bottom one, each
+    // A DS or 3DS game: the frame holds the top screen above the bottom one, each
     // `*-clip` pixels; `ds-top`/`ds-bottom` place them as fractions of the
     // player area. Changes (a swap, a new layout) animate.
     in property <bool> ds;
@@ -148,7 +148,8 @@ export component GamePlayer inherits Rectangle {
             visible: root.live;
             image-fit: fill;
             image-rendering: root.smooth ? ImageRendering.smooth : ImageRendering.pixelated;
-            // melonDS takes touch in its own stacked frame: the bottom half.
+            // The core takes touch in its own stacked frame: the bottom half
+            // (Rust moves a 3DS touch into its centred bottom screen).
             TouchArea {
                 enabled: root.phase == 2 && !root.paused && !root.busy && !root.failed;
                 moved => { root.touch(self.mouse-x / self.width, 0.5 + 0.5 * self.mouse-y / self.height, self.pressed); }
@@ -180,19 +181,6 @@ export component GamePlayer inherits Rectangle {
             image-rendering: self.exact
                 ? (root.progress >= 1.0 ? ImageRendering.pixelated : ImageRendering.smooth)
                 : (root.smooth ? ImageRendering.smooth : ImageRendering.pixelated);
-        }
-        if root.three-ds : TouchArea {
-            private property <float> aspect: root.frame.height > 0 ? root.frame.width / root.frame.height : 1;
-            width: min(picture.width, picture.height * self.aspect); height: self.width / self.aspect;
-            x: picture.x + (picture.width - self.width) / 2;
-            y: picture.y + (picture.height - self.height) / 2;
-            enabled: root.live && !root.paused && !root.busy && !root.failed;
-            moved => { root.touch(self.mouse-x / self.width, self.mouse-y / self.height, self.pressed); }
-            pointer-event(event) => {
-                if event.button == PointerEventButton.left {
-                    root.touch(self.mouse-x / self.width, self.mouse-y / self.height, event.kind == PointerEventKind.down);
-                } else if event.kind == PointerEventKind.cancel { root.touch(0, 0, false); }
-            }
         }
         // Loading: the resumed state's picture, blurred and dimmed (or
         // black), with a spinner. It's a layer of its own above the game, so
@@ -289,7 +277,7 @@ export component GamePlayer inherits Rectangle {
             height: root.height;
             shadow-strength: root.pause-reveal;
             open: root.paused && !root.rewind-open; busy: root.busy; ds: root.ds; ds-lid-closed: root.ds-lid-closed; ds-layout: root.ds-layout; ds-layout-forward: root.ds-layout-forward; speed: root.speed;
-            states-available: !root.three-ds;
+            states-available: !root.three-ds; lid-available: !root.three-ds;
             screenshot-preview: root.screenshot-preview;
             screenshot-visible: root.screenshot-visible;
             screenshot-sequence: root.screenshot-sequence;

@@ -56,7 +56,7 @@ See [ADR 0208](adr/0208-controller-remapping-and-playback-speed.md).
 
 ## Cores
 
-The Cores page contains the mGBA and melonDS entries and shared Freeze when unfocused and
+The Cores page contains the mGBA, melonDS and Azahar entries and shared Freeze when unfocused and
 Resume last state switches. Resume defaults on and loads the newest compatible
 manual or automatic state at launch. Off starts normally; exit still updates the
 automatic point. Manual slots remain separate.
@@ -88,10 +88,16 @@ above Native the row explains that Smooth is used to preserve sharper 3D. Swappi
 changed from the quick menu are remembered for that game, which then ignores
 this default.
 
+Cores → Azahar contains Screen layout (Stacked, Side by side, Large and small;
+default Stacked) and Internal resolution (Native, then 2× to 6× with their line
+counts; default Native). Higher values render the 3DS's 3D sharper on the
+graphics card. As on the DS, a layout or swap changed from the quick menu is
+remembered for that game.
+
 All preferences apply on the next game launch; the pages don't repeat this
 under their rows, which show only save errors. Shared focus freezing and resume are stored
 in `playback.json`; mGBA sunlight, filtering, colour correction, palette and border are stored in
-`cores/mgba.json`; the DS layout and filter in `cores/melonds-ds.json`. Old `cores.json` files are not loaded or migrated. Invalid
+`cores/mgba.json`; the DS layout and filter in `cores/melonds-ds.json`; the 3DS layout and resolution in `cores/azahar.json`. Old `cores.json` files are not loaded or migrated. Invalid
 files and failed writes preserve prior data and remain visible as errors.
 
 Left/Right turns switches off/on or adjusts sunlight. Select toggles a switch

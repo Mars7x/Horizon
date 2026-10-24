@@ -1930,6 +1930,7 @@ mod rom_import_tests {
             }),
             catalog: verified.then(|| "GBA catalog".into()),
             status: String::new(),
+            snapshot: None,
         }
     }
 

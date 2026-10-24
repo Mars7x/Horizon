@@ -199,6 +199,7 @@ mod tests {
                         catalog: None,
                         status: String::new(),
                         selected: true,
+                        snapshot: None,
                     }
                 })
                 .collect::<Vec<_>>();

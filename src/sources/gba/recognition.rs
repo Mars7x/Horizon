@@ -132,6 +132,39 @@ pub struct RomCandidate {
     pub catalog: Option<String>,
     pub status: String,
     pub selected: bool,
+    /// The file's identity while it was hashed: it hasn't changed since if
+    /// it still has this one (`rom_import::revalidate`), without re-reading.
+    pub snapshot: Option<FileSnapshot>,
+}
+
+/// A file's identity without reading it: device, inode, size, and
+/// modification and change times to the nanosecond. Rewriting or replacing
+/// the file changes its change time, which ordinary tools cannot set back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileSnapshot {
+    device: u64,
+    inode: u64,
+    size: u64,
+    modified: (i64, i64),
+    changed: (i64, i64),
+}
+impl FileSnapshot {
+    pub fn of(metadata: &fs::Metadata) -> Self {
+        use std::os::unix::fs::MetadataExt;
+        Self {
+            device: metadata.dev(),
+            inode: metadata.ino(),
+            size: metadata.len(),
+            modified: (metadata.mtime(), metadata.mtime_nsec()),
+            changed: (metadata.ctime(), metadata.ctime_nsec()),
+        }
+    }
+    pub fn read(path: &Path) -> Option<Self> {
+        fs::symlink_metadata(path)
+            .ok()
+            .filter(fs::Metadata::is_file)
+            .map(|m| Self::of(&m))
+    }
 }
 
 #[derive(Debug, Default)]
@@ -427,7 +460,26 @@ pub fn scan_skipping(
     catalogs: Option<&RomCatalogs>,
     skip: &dyn Fn(&Path, &fs::Metadata) -> bool,
 ) -> Result<RomScan, RomImportError> {
+    let (files, mut scan) = supported_files(folder, skip)?;
+    for (path, system, _) in files {
+        scan.candidates.push(read_candidate(path, system, catalogs));
+    }
+    scan.candidates.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(scan)
+}
+
+/// A supported file found by a walk: its path, system and size.
+pub type FoundFile = (PathBuf, RomSystem, u64);
+
+/// Walk `folder` without reading any game: the supported files `skip`
+/// leaves (with their system and size), and in the returned scan, every
+/// supported file seen and the count of others.
+pub fn supported_files(
+    folder: &Path,
+    skip: &dyn Fn(&Path, &fs::Metadata) -> bool,
+) -> Result<(Vec<FoundFile>, RomScan), RomImportError> {
     let mut scan = RomScan::default();
+    let mut files = Vec::new();
     let mut pending = vec![(folder.to_owned(), 0)];
     let mut visited = 0;
     while let Some((directory, depth)) = pending.pop() {
@@ -455,58 +507,70 @@ pub fn scan_skipping(
                 continue;
             }
             scan.seen.push(path.clone());
-            if skip(&path, &entry.metadata()?) {
+            let metadata = entry.metadata()?;
+            if skip(&path, &metadata) {
                 continue;
             }
-            let title = path
-                .file_stem()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned();
-            let mut candidate = RomCandidate {
-                path,
-                system,
-                title,
-                fingerprint: None,
-                catalog: None,
-                status: String::new(),
-                selected: false,
-            };
-            match read_fingerprint(&candidate.path) {
-                Ok((hash, color)) => {
-                    if system == RomSystem::GameBoy {
-                        candidate.system = classify(&hash, color, catalogs);
-                    }
-                    let catalog = catalogs.map(|c| c.get(candidate.system));
-                    let matches =
-                        catalog.and_then(|c| c.entries.get(&(hash.sha1.clone(), hash.size)));
-                    match matches {
-                        Some(names) if names.len() == 1 => {
-                            if let Some(title) = names.first() {
-                                candidate.title.clone_from(title);
-                            }
-                            candidate.catalog = catalog.map(|c| c.name.clone());
-                            candidate.status =
-                                "Exact catalog match · title and region from catalog".into();
-                            candidate.selected = true;
-                        }
-                        Some(_) => {
-                            candidate.status =
-                                "Ambiguous catalog match · filename only, unverified".into()
-                        }
-                        None => {
-                            candidate.status = "No exact match · filename only, unverified".into()
-                        }
-                    }
-                    candidate.fingerprint = Some(hash);
-                }
-                Err(error) => candidate.status = format!("Cannot import: {error}"),
-            }
-            scan.candidates.push(candidate);
+            files.push((path, system, metadata.len()));
         }
     }
-    scan.candidates.sort_by(|a, b| a.path.cmp(&b.path));
-    Ok(scan)
+    Ok((files, scan))
+}
+
+/// Read one supported file: hash it, recognise it in its system's catalog,
+/// and record its identity. A file that changed while it was read gets no
+/// fingerprint.
+pub fn read_candidate(
+    path: PathBuf,
+    system: RomSystem,
+    catalogs: Option<&RomCatalogs>,
+) -> RomCandidate {
+    let title = path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    let mut candidate = RomCandidate {
+        path,
+        system,
+        title,
+        fingerprint: None,
+        catalog: None,
+        status: String::new(),
+        selected: false,
+        snapshot: None,
+    };
+    let before = FileSnapshot::read(&candidate.path);
+    match read_fingerprint(&candidate.path) {
+        Ok(_) if before.is_none() || FileSnapshot::read(&candidate.path) != before => {
+            candidate.status = format!("Cannot import: {}", RomImportError::Changed);
+        }
+        Ok((hash, color)) => {
+            if system == RomSystem::GameBoy {
+                candidate.system = classify(&hash, color, catalogs);
+            }
+            let catalog = catalogs.map(|c| c.get(candidate.system));
+            let matches = catalog.and_then(|c| c.entries.get(&(hash.sha1.clone(), hash.size)));
+            match matches {
+                Some(names) if names.len() == 1 => {
+                    if let Some(title) = names.first() {
+                        candidate.title.clone_from(title);
+                    }
+                    candidate.catalog = catalog.map(|c| c.name.clone());
+                    candidate.status = "Exact catalog match · title and region from catalog".into();
+                    candidate.selected = true;
+                }
+                Some(_) => {
+                    candidate.status = "Ambiguous catalog match · filename only, unverified".into()
+                }
+                None => candidate.status = "No exact match · filename only, unverified".into(),
+            }
+            candidate.fingerprint = Some(hash);
+            candidate.snapshot = before;
+        }
+        Err(error) => candidate.status = format!("Cannot import: {error}"),
+    }
+    candidate
 }
 
 #[cfg(test)]

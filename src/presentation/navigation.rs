@@ -1169,6 +1169,7 @@ mod runtime_tests {
                 playback: directory.join("playback.json"),
                 mgba: directory.join("cores/mgba.json"),
                 ds: directory.join("cores/melonds-ds.json"),
+                three_ds: directory.join("cores/azahar.json"),
             },
         );
         let navigation = NavigationController::new(&ui, home, library, settings);
@@ -1305,7 +1306,7 @@ mod runtime_tests {
                         assert!(popup.x >= (game_rect.x + game_rect.width) * 1280.0 + 11.0);
                         assert!(popup.x + popup.width <= 1264.0 && popup.y + popup.height <= 704.0);
                         assert_eq!(popup.width, 320.0);
-                        assert_eq!(popup.height, 228.0);
+                        assert_eq!(popup.height, 280.0);
                         use slint::platform::WindowEvent;
                         ui.window().dispatch_event(WindowEvent::PointerMoved {
                             position: slint::LogicalPosition::new(popup.x + 24.0, popup.y + 136.0),
@@ -1324,6 +1325,59 @@ mod runtime_tests {
                         .unwrap();
                         navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Down));
                         navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Accept));
+                        assert_eq!(ui.get_game_menu_view(), 6);
+                        assert!(ui.get_game_menu_busy());
+                        progress.set(210);
+                    }
+                    210 if !ui.get_game_menu_busy() => {
+                        assert!(
+                            ui.get_game_menu_message().starts_with("No mods yet"),
+                            "{}",
+                            ui.get_game_menu_message()
+                        );
+                        assert_eq!(ui.get_game_menu_mods().row_count(), 0);
+                        let mods = crate::platform::data_paths::game_mods_directory(
+                            &save_fixture.directory,
+                        );
+                        std::fs::create_dir_all(&mods).unwrap();
+                        std::fs::write(mods.join("Translation.ips"), b"PATCHEOF").unwrap();
+                        back();
+                        assert!(!ui.get_game_menu_open());
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Menu));
+                        ui.invoke_game_menu_choose(1);
+                        progress.set(211);
+                    }
+                    211 if !ui.get_game_menu_busy() => {
+                        let rows = ui.get_game_menu_mods();
+                        assert_eq!(rows.row_count(), 1);
+                        assert!(!rows.row_data(0).unwrap().enabled, "new mods start off");
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Accept));
+                        progress.set(212);
+                    }
+                    212 if !ui.get_game_menu_busy() => {
+                        assert!(ui.get_game_menu_mods().row_data(0).unwrap().enabled);
+                        assert!(
+                            crate::services::mods::list(&save_fixture.directory, false).unwrap()[0]
+                                .enabled
+                        );
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Down));
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Down));
+                        assert_eq!(ui.get_game_menu_selected(), 2, "focus stops at Back");
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Down));
+                        assert_eq!(ui.get_game_menu_selected(), 2);
+                        let image = ui.window().take_snapshot().unwrap();
+                        image::save_buffer(
+                            output.join("game-mods.png"),
+                            image.as_bytes(),
+                            image.width(),
+                            image.height(),
+                            image::ColorType::Rgba8,
+                        )
+                        .unwrap();
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Accept));
+                        assert!(!ui.get_game_menu_open());
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Menu));
+                        ui.invoke_game_menu_choose(2);
                         assert_eq!(ui.get_game_menu_view(), 1);
                         progress.set(22);
                     }
@@ -1417,6 +1471,7 @@ mod runtime_tests {
                         navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Menu));
                         navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Down));
                         navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Down));
+                        navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Down));
                         navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Accept));
                         progress.set(23);
                     }
@@ -1430,7 +1485,7 @@ mod runtime_tests {
                         assert_eq!(ui.get_library_total_count(), 1);
                         navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Menu));
                         assert!(ui.get_game_menu_hidden());
-                        ui.invoke_game_menu_choose(2);
+                        ui.invoke_game_menu_choose(3);
                         progress.set(24);
                     }
                     24 if !ui.get_game_menu_open() => {
@@ -1446,7 +1501,7 @@ mod runtime_tests {
                         progress.set(25);
                     }
                     25 if ui.get_game_menu_details().contains("SHA-256") => {
-                        ui.invoke_game_menu_choose(3);
+                        ui.invoke_game_menu_choose(4);
                         assert_eq!(ui.get_game_menu_view(), 2);
                         assert_eq!(ui.get_game_menu_selected(), 0);
                         progress.set(26);
@@ -1468,7 +1523,7 @@ mod runtime_tests {
                         progress.set(261);
                     }
                     261 if ui.get_game_menu_details().contains("SHA-256") => {
-                        ui.invoke_game_menu_choose(3);
+                        ui.invoke_game_menu_choose(4);
                         navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Right));
                         navigation.handle_action(&ui, UiActionEvent::fresh(UiAction::Accept));
                         progress.set(27);

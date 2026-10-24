@@ -7,6 +7,73 @@ pub struct CorePreferences {
     pub resume_last_state: bool,
     pub mgba: MgbaPreferences,
     pub ds: DsPreferences,
+    pub three_ds: ThreeDsPreferences,
+}
+
+/// Azahar preferences: how Horizon arranges the two screens and the
+/// resolution 3D is drawn at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ThreeDsPreferences {
+    pub layout: DsLayout,
+    pub resolution: ThreeDsResolution,
+}
+impl Default for ThreeDsPreferences {
+    /// Stacked, as on the console (and as Azahar draws them).
+    fn default() -> Self {
+        Self {
+            layout: DsLayout::Stacked,
+            resolution: ThreeDsResolution::default(),
+        }
+    }
+}
+
+/// How many times the 3DS's own resolution (400×240 above, 320×240 below)
+/// Azahar draws at, on the graphics card.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "u8", into = "u8")]
+pub struct ThreeDsResolution(u8);
+impl ThreeDsResolution {
+    pub const MAX: u8 = 6;
+    pub const fn scale(self) -> u8 {
+        self.0
+    }
+    pub fn step(self, forward: bool) -> Self {
+        Self(if forward {
+            if self.0 >= Self::MAX { 1 } else { self.0 + 1 }
+        } else if self.0 <= 1 {
+            Self::MAX
+        } else {
+            self.0 - 1
+        })
+    }
+    pub fn label(self) -> String {
+        if self.0 == 1 {
+            "Native".into()
+        } else {
+            format!("{}× ({}p)", self.0, u32::from(self.0) * 240)
+        }
+    }
+}
+impl Default for ThreeDsResolution {
+    fn default() -> Self {
+        Self(1)
+    }
+}
+impl TryFrom<u8> for ThreeDsResolution {
+    type Error = &'static str;
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        if (1..=Self::MAX).contains(&value) {
+            Ok(Self(value))
+        } else {
+            Err("3DS resolution must be 1 to 6")
+        }
+    }
+}
+impl From<ThreeDsResolution> for u8 {
+    fn from(value: ThreeDsResolution) -> Self {
+        value.0
+    }
 }
 impl Default for CorePreferences {
     fn default() -> Self {
@@ -15,6 +82,7 @@ impl Default for CorePreferences {
             resume_last_state: true,
             mgba: MgbaPreferences::default(),
             ds: DsPreferences::default(),
+            three_ds: ThreeDsPreferences::default(),
         }
     }
 }
@@ -125,35 +193,63 @@ impl DsLayout {
             .copied()
             .unwrap_or_default()
     }
-    /// Where the top and bottom screens go in an `area` (any units), fitted
-    /// and centred, keeping each screen's 4:3 shape. `swapped` exchanges the
-    /// screens' places (in Large and small, the bottom screen becomes large).
+    /// The DS's two 256×192 screens.
+    pub const DS_SCREENS: [(f64, f64); 2] = [(256.0, 192.0), (256.0, 192.0)];
+    /// The 3DS's 400×240 top screen and 320×240 bottom one.
+    pub const THREE_DS_SCREENS: [(f64, f64); 2] = [(400.0, 240.0), (320.0, 240.0)];
+
+    /// Where the DS's top and bottom screens go in an `area` (any units).
     pub fn screens(self, swapped: bool, area: (f64, f64)) -> [ScreenRect; 2] {
-        // Group size in screen-widths: (width, height), and each screen's
-        // place within it as (x, y, scale) in those units, first screen first.
-        let screen = |x: f64, y: f64, scale: f64| (x, y, scale);
+        self.place(swapped, area, Self::DS_SCREENS)
+    }
+
+    /// Where a top and bottom screen of `sizes` go in an `area` (any
+    /// units), fitted and centred, keeping their shapes. `swapped` puts the
+    /// bottom screen first (in Large and small, it becomes the large one).
+    pub fn place(self, swapped: bool, area: (f64, f64), sizes: [(f64, f64); 2]) -> [ScreenRect; 2] {
+        let [a, b] = if swapped { [sizes[1], sizes[0]] } else { sizes };
+        // The group's size and each screen's (x, y, scale) within it, in
+        // screen pixels, first screen first.
         let (group, first, second) = match self {
-            Self::SideBySide => ((2.0, 0.75), screen(0.0, 0.0, 1.0), screen(1.0, 0.0, 1.0)),
-            Self::Stacked => ((1.0, 1.5), screen(0.0, 0.0, 1.0), screen(0.0, 0.75, 1.0)),
-            // The small screen sits beside the large one, level with its bottom.
-            Self::LargeAndSmall => (
-                (4.0 / 3.0, 0.75),
-                screen(0.0, 0.0, 1.0),
-                screen(1.0, 0.5, 1.0 / 3.0),
-            ),
+            Self::SideBySide => {
+                let height = a.1.max(b.1);
+                (
+                    (a.0 + b.0, height),
+                    (0.0, (height - a.1) / 2.0, 1.0),
+                    (a.0, (height - b.1) / 2.0, 1.0),
+                )
+            }
+            Self::Stacked => {
+                let width = a.0.max(b.0);
+                (
+                    (width, a.1 + b.1),
+                    ((width - a.0) / 2.0, 0.0, 1.0),
+                    ((width - b.0) / 2.0, a.1, 1.0),
+                )
+            }
+            // The small screen, a third the size, sits beside the large one,
+            // level with its bottom.
+            Self::LargeAndSmall => {
+                let height = a.1.max(b.1 / 3.0);
+                (
+                    (a.0 + b.0 / 3.0, height),
+                    (0.0, height - a.1, 1.0),
+                    (a.0, height - b.1 / 3.0, 1.0 / 3.0),
+                )
+            }
         };
         let scale = (area.0 / group.0).min(area.1 / group.1).max(0.0);
         let (left, top) = (
             (area.0 - group.0 * scale) / 2.0,
             (area.1 - group.1 * scale) / 2.0,
         );
-        let place = |(x, y, size): (f64, f64, f64)| ScreenRect {
+        let place = |(x, y, size): (f64, f64, f64), (width, height): (f64, f64)| ScreenRect {
             x: left + x * scale,
             y: top + y * scale,
-            width: size * scale,
-            height: size * 0.75 * scale,
+            width: width * size * scale,
+            height: height * size * scale,
         };
-        let (first, second) = (place(first), place(second));
+        let (first, second) = (place(first, a), place(second, b));
         if swapped {
             [second, first]
         } else {
@@ -378,6 +474,32 @@ mod ds_layout_tests {
             rect.width.round() as i64,
             rect.height.round() as i64,
         )
+    }
+
+    #[test]
+    fn three_ds_layouts_keep_each_screens_shape() {
+        let screens = DsLayout::THREE_DS_SCREENS;
+        let area = (1920.0, 1080.0);
+        // Stacked: the narrower bottom screen is centred under the top one.
+        let [top, bottom] = DsLayout::Stacked.place(false, area, screens);
+        assert_eq!(rounded(top), (510, 0, 900, 540));
+        assert_eq!(rounded(bottom), (600, 540, 720, 540));
+        let [top, bottom] = DsLayout::Stacked.place(true, area, screens);
+        assert_eq!(rounded(bottom), (600, 0, 720, 540));
+        assert_eq!(rounded(top), (510, 540, 900, 540));
+        // Side by side: 720 wide in screen pixels, 1920 / 720 = 2.67×.
+        let [top, bottom] = DsLayout::SideBySide.place(false, area, screens);
+        assert_eq!(rounded(top), (0, 220, 1067, 640));
+        assert_eq!(rounded(bottom), (1067, 220, 853, 640));
+        // Large and small, swapped: the touch screen is the large one.
+        let [top, bottom] = DsLayout::LargeAndSmall.place(true, area, screens);
+        // 320 + 400 / 3 screen pixels across: the width is what limits it.
+        assert!((bottom.width + top.width - 1920.0).abs() < 1e-9);
+        assert!((bottom.width / bottom.height - 4.0 / 3.0).abs() < 1e-9);
+        assert!((top.width / top.height - 5.0 / 3.0).abs() < 1e-9);
+        assert!((top.height * 3.0 - bottom.height).abs() < 1e-9);
+        assert!((top.y + top.height - (bottom.y + bottom.height)).abs() < 1e-9);
+        assert_eq!(ThreeDsPreferences::default().layout, DsLayout::Stacked);
     }
 
     #[test]

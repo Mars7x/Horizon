@@ -1,7 +1,7 @@
 //! Folder import coordination; cartridge formats belong to the source adapter.
 pub use crate::sources::gba::recognition::{
-    RomCandidate, RomCatalog, RomCatalogs, RomFingerprint, RomImportError, RomScan, RomSystem,
-    fingerprint, scan, scan_skipping,
+    FileSnapshot, RomCandidate, RomCatalog, RomCatalogs, RomFingerprint, RomImportError, RomScan,
+    RomSystem, fingerprint, scan, scan_skipping,
 };
 use std::{
     collections::HashSet,
@@ -43,15 +43,57 @@ pub fn scan_folder_for_new(
     })
 }
 
+/// The bundled catalogs, with a chosen one replacing its system's.
+pub fn catalogs(catalog: Option<RomCatalog>) -> Result<RomCatalogs, RomImportError> {
+    let catalogs = RomCatalogs::bundled()?;
+    Ok(match catalog {
+        Some(catalog) => catalogs.with(catalog),
+        None => catalogs,
+    })
+}
+
+/// Files to read, and every supported file seen (see `new_files`).
+pub type NewFiles = (Vec<(PathBuf, RomSystem)>, Vec<PathBuf>);
+
+/// The files `scan_folder_for_new` would read, listed without reading any,
+/// smallest first (so most games appear quickly), and every supported file
+/// seen. Read each with `read_new` and add it as it's ready.
+pub fn new_files(
+    folder: &Path,
+    imported: &HashSet<(PathBuf, u64)>,
+    now: SystemTime,
+) -> Result<NewFiles, RomImportError> {
+    let (mut files, scan) =
+        crate::sources::gba::recognition::supported_files(folder, &|path, metadata| {
+            imported.contains(&(path.to_owned(), metadata.len()))
+                || metadata.modified().is_ok_and(|modified| {
+                    now.duration_since(modified).is_ok_and(|age| age < SETTLE)
+                })
+        })?;
+    files.sort_by(|a, b| a.2.cmp(&b.2).then_with(|| a.0.cmp(&b.0)));
+    Ok((
+        files
+            .into_iter()
+            .map(|(path, system, _)| (path, system))
+            .collect(),
+        scan.seen,
+    ))
+}
+
+/// One file from `new_files`, read and selected as `scan_folder` would.
+pub fn read_new(path: PathBuf, system: RomSystem, catalogs: &RomCatalogs) -> RomCandidate {
+    let mut candidate =
+        crate::sources::gba::recognition::read_candidate(path, system, Some(catalogs));
+    candidate.selected = candidate.fingerprint.is_some();
+    candidate
+}
+
 fn scan_folder_skipping(
     folder: &Path,
     catalog: Option<RomCatalog>,
     skip: &dyn Fn(&Path, &std::fs::Metadata) -> bool,
 ) -> Result<RomScan, RomImportError> {
-    let mut catalogs = RomCatalogs::bundled()?;
-    if let Some(catalog) = catalog {
-        catalogs = catalogs.with(catalog);
-    }
+    let catalogs = catalogs(catalog)?;
     let mut result = scan_skipping(folder, Some(&catalogs), skip)?;
     for candidate in &mut result.candidates {
         candidate.selected = candidate.fingerprint.is_some();
@@ -59,10 +101,13 @@ fn scan_folder_skipping(
     Ok(result)
 }
 
-/// Recheck the selected bytes before a transaction, with no partial writes.
+/// The selected files are still the ones that were hashed, just before a
+/// transaction: each still has the identity it had while it was read
+/// (`FileSnapshot`), so they aren't read again.
 pub fn revalidate(candidates: &[RomCandidate]) -> Result<(), RomImportError> {
     for candidate in candidates.iter().filter(|c| c.selected) {
-        if candidate.fingerprint.as_ref() != Some(&fingerprint(&candidate.path)?) {
+        if candidate.snapshot.is_none() || FileSnapshot::read(&candidate.path) != candidate.snapshot
+        {
             return Err(RomImportError::Changed);
         }
     }
@@ -245,6 +290,40 @@ mod tests {
             .unwrap();
         assert_eq!(repository.list_games().unwrap().len(), 1);
         drop(repository);
+        fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod incremental_tests {
+    use super::*;
+    use std::fs;
+    #[test]
+    fn new_files_come_smallest_first_and_are_read_one_at_a_time() {
+        let dir = std::env::temp_dir().join(format!("horizon-incremental-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("Large.gba"), [1u8; 4096]).unwrap();
+        fs::write(dir.join("Small.gba"), [2u8; 192]).unwrap();
+        fs::write(dir.join("notes.txt"), b"not a game").unwrap();
+        let later = SystemTime::now() + Duration::from_secs(60);
+        let (files, seen) = new_files(&dir, &HashSet::new(), later).unwrap();
+        assert_eq!(seen.len(), 2);
+        let names: Vec<_> = files
+            .iter()
+            .map(|(path, _)| path.file_name().unwrap().to_owned())
+            .collect();
+        assert_eq!(names, ["Small.gba", "Large.gba"]);
+        let catalogs = catalogs(None).unwrap();
+        let candidate = read_new(files[0].0.clone(), files[0].1, &catalogs);
+        assert!(candidate.selected && candidate.snapshot.is_some());
+        revalidate(std::slice::from_ref(&candidate)).unwrap();
+        // Changed after it was read: refused, without reading it again.
+        fs::write(dir.join("Small.gba"), [3u8; 192]).unwrap();
+        assert!(revalidate(std::slice::from_ref(&candidate)).is_err());
+        // Already imported files aren't listed.
+        let imported = HashSet::from([(dir.join("Large.gba"), 4096)]);
+        let (files, _) = new_files(&dir, &imported, later).unwrap();
+        assert_eq!(files.len(), 1);
         fs::remove_dir_all(dir).unwrap();
     }
 }

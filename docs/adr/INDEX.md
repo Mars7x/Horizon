@@ -46,6 +46,8 @@
 
 | [0231](0231-azahar-vulkan-playback.md) | Initial Azahar playback through Vulkan |
 | [0232](0232-3ds-verified-file-identity.md) | Verified 3DS file identity: skip re-hashing an unchanged cartridge |
+| [0233](0233-per-game-mods.md) | Per-game mods: cartridge patches and 3DS LayeredFS folders |
+| [0234](0234-3ds-resolution-and-input.md) | 3DS internal resolution, DS-style screen layouts, cached readback and single-purpose input |
 
 Earlier decisions and their supporting phase notes are in
 [history](../history/INDEX.md). Their numbered identifiers remain reserved.
