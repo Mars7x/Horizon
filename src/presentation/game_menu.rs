@@ -415,6 +415,16 @@ impl GameMenuController {
                 match usize::try_from(index) {
                     Ok(row) if row < count => {
                         let entry = self.mods.borrow()[row].clone();
+                        // The switch moves now (and animates); the reply
+                        // confirms it, or moves it back if the choice failed.
+                        self.mods_model.set_row_data(
+                            row,
+                            crate::ModRow {
+                                title: entry.name.as_str().into(),
+                                enabled: !entry.enabled,
+                            },
+                        );
+                        self.cue(UiSoundCue::Ok);
                         self.manage_mods(id, ModsAction::Toggle(entry.name, !entry.enabled));
                     }
                     Ok(row) if row == count => self.manage_mods(id, ModsAction::Open),
@@ -422,6 +432,35 @@ impl GameMenuController {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Show `mods`, changing rows in place when only their switches differ,
+    /// so a switch animates instead of its row being rebuilt.
+    fn show_mods(&self, mods: &[ModEntry]) {
+        let row = |entry: &ModEntry| crate::ModRow {
+            title: entry.name.as_str().into(),
+            enabled: entry.enabled,
+        };
+        let same_mods = self.mods_model.row_count() == mods.len()
+            && self
+                .mods_model
+                .iter()
+                .zip(mods)
+                .all(|(shown, entry)| shown.title.as_str() == entry.name);
+        if !same_mods {
+            self.mods_model
+                .set_vec(mods.iter().map(row).collect::<Vec<_>>());
+            return;
+        }
+        for (index, entry) in mods.iter().enumerate() {
+            if self
+                .mods_model
+                .row_data(index)
+                .is_none_or(|shown| shown.enabled != entry.enabled)
+            {
+                self.mods_model.set_row_data(index, row(entry));
+            }
         }
     }
 
@@ -609,14 +648,7 @@ impl GameMenuController {
                     ui.set_game_menu_busy(false);
                     match result {
                         Ok((mods, message)) => {
-                            self.mods_model.set_vec(
-                                mods.iter()
-                                    .map(|entry| crate::ModRow {
-                                        title: entry.name.as_str().into(),
-                                        enabled: entry.enabled,
-                                    })
-                                    .collect::<Vec<_>>(),
-                            );
+                            self.show_mods(&mods);
                             *self.mods.borrow_mut() = mods;
                             if let Some(last) = self.last_row(MODS) {
                                 ui.set_game_menu_selected(ui.get_game_menu_selected().min(last));
@@ -633,6 +665,8 @@ impl GameMenuController {
                         }
                         Err(error) => {
                             self.close_requested.set(false);
+                            // A switch moved ahead of a failed save goes back.
+                            self.show_mods(&self.mods.borrow());
                             self.error(&error);
                         }
                     }

@@ -20,7 +20,7 @@ data/
     view.json                 (DS and 3DS: remembered layout and swap)
     verified.json             (3DS: identity of the last verified cartridge)
     mods/                     (3DS: the user's LayeredFS mod folders)
-    mods.json                 (3DS: which mods are on)
+    mods.json                 (3DS: which mods are turned off)
     <game name>.sav
     save-reset                (explicit reset disables beside-ROM save import)
     backups/<game name>.previous.sav

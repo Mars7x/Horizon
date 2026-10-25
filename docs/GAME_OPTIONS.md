@@ -64,8 +64,9 @@ run on a joined worker while gameplay is closed. See
 
 3DS games only, the one system Horizon applies mods to. The page lists the mod
 folders in the game's `mods/` folder, each with an on/off switch, then Open mods
-folder. Select switches a mod; new mods start off. Choices are saved in the
-game's `mods.json` and apply the next time the game starts. Open mods folder
+folder. A mod put in the folder is on; Select switches it, and the switch moves
+at once. The mods turned off are saved in the game's `mods.json`, and changes
+apply the next time the game starts. Open mods folder
 creates the folder when missing and opens it through XDG OpenDirectory. Rows
 past the bottom scroll with the selection.
 

@@ -154,6 +154,7 @@ modules:
 
   - name: azahar-core
     # Approved 3DS core; Vulkan only. No Qt/SDL frontend or surface is used.
+    # Pinned source plus one patch (patches/, ADR 0238).
     buildsystem: simple
     build-commands:
       - >-
@@ -170,6 +171,10 @@ modules:
         tag: '2126.2'
         commit: 219d743a1e698101fe1ab8bef43e6563126c3c27
         # Recursive submodules are pinned by the superproject; keep enabled.
+      # Horizon's one Azahar change: the libretro core can turn on Azahar's
+      # existing async shader compilation (ADR 0238).
+      - type: patch
+        path: patches/azahar-async-shader-option.patch
       - type: file
         path: ../LICENSES/Azahar-third-party.txt
         dest-filename: Horizon-Azahar-notices.txt

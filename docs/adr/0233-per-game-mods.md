@@ -4,7 +4,8 @@ Status: Accepted, for 3DS games only. Players wanted translations, fixes and
 texture packs without editing their game files.
 
 Each game folder has a `mods/` folder the user fills, and `mods.json` records
-which mods are on; new mods start off. Manage mods in game options lists them,
+which mods are off; a mod put in the folder is on, since adding it is already
+the choice to use it. Manage mods in game options lists them,
 switches them and opens the folder. It appears only for 3DS games; no other
 system takes mods. There is no download, catalog or archive extraction.
 

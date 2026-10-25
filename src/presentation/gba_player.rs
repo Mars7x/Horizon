@@ -2459,6 +2459,11 @@ mod tests {
         let shots = Cell::new(0u32);
         let shot_directory = directory.clone();
         let normal_only = std::env::var_os("HORIZON_DS_NORMAL_ONLY").is_some();
+        // When fast-forward starts (HORIZON_DS_FAST_AT seconds, default 8).
+        let fast_at = std::env::var("HORIZON_DS_FAST_AT")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(8);
         let run_seconds = std::env::var("HORIZON_DS_RUN_SECONDS")
             .ok()
             .and_then(|value| value.parse::<u64>().ok())
@@ -2504,7 +2509,12 @@ mod tests {
             }
             assert!(!ui.get_player_failed(), "{}", ui.get_player_message());
             let elapsed = started.elapsed();
-            if three_ds {
+            // HORIZON_3DS_PLAY: just play, pressing A for a moment every two
+            // seconds (through menus and intros into gameplay), to measure.
+            if three_ds && std::env::var_os("HORIZON_3DS_PLAY").is_some() {
+                let press = elapsed.as_millis() % 2000 < 200 && elapsed > Duration::from_secs(4);
+                live.keyboard("z", false, press);
+            } else if three_ds {
                 let stage = three_ds_shot.get();
                 let snapshot = |name: &str| {
                     let pixels = ui.window().take_snapshot().unwrap();
@@ -2613,7 +2623,7 @@ mod tests {
                 }
             }
             if !normal_only
-                && elapsed > Duration::from_secs(8)
+                && elapsed > Duration::from_secs(fast_at)
                 && current_speed(&ui) == PlaybackSpeed::Normal
             {
                 eprintln!("DS fast-forward: 2x");

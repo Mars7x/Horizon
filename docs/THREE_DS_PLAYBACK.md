@@ -1,8 +1,12 @@
 # Nintendo 3DS playback
 
-Horizon bundles unmodified Azahar 2126.2, pinned to
+Horizon bundles Azahar 2126.2, pinned to
 `219d743a1e698101fe1ab8bef43e6563126c3c27`, built with Vulkan enabled and
-OpenGL/software rendering disabled. Vulkan 1.1 or newer is required. Existing
+OpenGL/software rendering disabled, with one patch: its libretro core can turn
+on Azahar's own asynchronous shader compilation, which Horizon does
+([ADR 0238](adr/0238-azahar-async-shaders.md)). A game's new effects then no
+longer stop the frame while their shaders compile (one may be missing for a
+moment instead), and each game's shader cache keeps them for later. Vulkan 1.1 or newer is required. Existing
 mGBA and melonDS renderers keep their current behavior. No additional Flatpak
 permissions, standalone emulator, keys, system-file manager or CIA installer
 are introduced.
@@ -42,8 +46,8 @@ is shown at (exact halvings, then one linear step) and only that is read back,
 into CPU-cached memory. Screenshots read the full frame. At 6× this keeps 60
 frames a second where reading every 27 MB frame managed about 50
 ([ADR 0235](adr/0235-3ds-gpu-viewport-readback.md)).
-Games still pause briefly the first time they compile a shader; Azahar keeps
-those in its shader cache.
+Remaining one-frame pauses (tens of milliseconds, the same at every
+resolution) are the game loading or setting up a scene inside Azahar.
 
 Controller D-pad and face/shoulder/Start/Select buttons retain the
 Nintendo mapping; left and right sticks drive Circle Pad and C-stick separately

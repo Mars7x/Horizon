@@ -389,10 +389,10 @@ impl Core {
                     let mut bytes = Vec::new();
                     std::fs::File::open(path)
                         .map_err(|_| "Could not inspect the core build")?
-                        .take(64 * 1024 * 1024 + 1)
+                        .take(128 * 1024 * 1024 + 1)
                         .read_to_end(&mut bytes)
                         .map_err(|_| "Could not inspect the core build")?;
-                    if bytes.len() > 64 * 1024 * 1024 {
+                    if bytes.len() > 128 * 1024 * 1024 {
                         return Err("Core build is too large".into());
                     }
                     let digest: String = ring::digest::digest(&ring::digest::SHA256, &bytes)
@@ -1024,6 +1024,10 @@ extern "C" fn environment(command: u32, data: *mut c_void) -> bool {
                             // same pointer again.
                             b"citra_enable_mouse_touchscreen" => Some(c"disabled"),
                             b"citra_enable_touch_touchscreen" => Some(c"enabled"),
+                            // New shaders compile in the background instead
+                            // of stopping the frame (Horizon's Azahar patch,
+                            // ADR 0238); the shader cache keeps them.
+                            b"citra_async_shader_compilation" => Some(c"enabled"),
                             _ => None,
                         };
                     }

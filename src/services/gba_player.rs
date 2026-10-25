@@ -80,8 +80,15 @@ struct FrameTiming {
     /// The longest wait between two frames starting (time outside the core).
     gap: Duration,
     previous: Option<Instant>,
+    /// Handing frames to the screen (for a GPU core, reading them back).
+    shown: Duration,
+    slowest_shown: Duration,
 }
 impl FrameTiming {
+    fn record_shown(&mut self, took: Duration) {
+        self.shown += took;
+        self.slowest_shown = self.slowest_shown.max(took);
+    }
     fn record(&mut self, took: Duration, budget_seconds: f64) {
         let started = Instant::now() - took;
         if let Some(previous) = self.previous {
@@ -93,6 +100,10 @@ impl FrameTiming {
         self.slowest = self.slowest.max(took);
         if took.as_secs_f64() > budget_seconds {
             self.late += 1;
+        }
+        // A stutter, logged when it happens so it lines up with the core's own log.
+        if took > Duration::from_millis(30) {
+            tracing::debug!(ms = took.as_millis() as u64, "slow core frame");
         }
     }
     fn report(&mut self, audio_frames: usize) {
@@ -106,6 +117,11 @@ impl FrameTiming {
                 slowest_ms = format!("{:.1}", self.slowest.as_secs_f64() * 1000.0),
                 late = self.late,
                 longest_gap_ms = format!("{:.1}", self.gap.as_secs_f64() * 1000.0),
+                handoff_ms = format!(
+                    "{:.2}",
+                    self.shown.as_secs_f64() * 1000.0 / f64::from(self.frames)
+                ),
+                slowest_handoff_ms = format!("{:.1}", self.slowest_shown.as_secs_f64() * 1000.0),
                 audio_frames,
                 "core frame timing in the last 5 seconds"
             );
@@ -1388,7 +1404,9 @@ fn play(
                 }
                 let pushed = audio.written().wrapping_sub(before);
                 pushed_total.set(pushed_total.get() + pushed);
+                let handoff = Instant::now();
                 let presented = present(&core);
+                frame_timing.record_shown(handoff.elapsed());
                 let elapsed = Duration::from_secs_f64(1.0 / fps);
                 rewind_clock += elapsed;
                 rewind_since += elapsed;

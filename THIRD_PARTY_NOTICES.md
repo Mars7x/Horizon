@@ -402,9 +402,12 @@ reproduction command are maintained in `scripts/generate-hash-catalog.py`.
 
 ## Azahar and Vulkan
 
-Nintendo 3DS playback uses unmodified [Azahar 2126.2](https://github.com/azahar-emu/azahar/tree/219d743a1e698101fe1ab8bef43e6563126c3c27),
+Nintendo 3DS playback uses [Azahar 2126.2](https://github.com/azahar-emu/azahar/tree/219d743a1e698101fe1ab8bef43e6563126c3c27),
 GPL-2.0-or-later, built from the pinned source and recursive submodules with
-Vulkan enabled and OpenGL disabled. [Upstream notices](LICENSES/Azahar-third-party.txt)
+Vulkan enabled and OpenGL disabled, and one Horizon modification:
+[a patch](flatpak/patches/azahar-async-shader-option.patch) (2026-10-24) that
+lets the libretro core enable Azahar's existing asynchronous shader compilation.
+The modified file carries a notice of the change. [Upstream notices](LICENSES/Azahar-third-party.txt)
 retain its source/dependency notices and the MIT libretro Vulkan ABI header
 (RetroArch team, 2010–2020), translated in `src/platform/azahar_vulkan.rs`.
 The inventory includes notices for disabled upstream components. Distribution

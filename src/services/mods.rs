@@ -19,9 +19,15 @@ pub struct ModEntry {
     pub enabled: bool,
 }
 
+/// The mods turned off; every other mod in the folder is on.
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct ModsState {
+    disabled: BTreeSet<String>,
+    /// The first format listed the mods turned on, when new mods started
+    /// off. Mods are on by default now, so those choices already hold; the
+    /// field is read and dropped on the next write.
+    #[serde(skip_serializing)]
     enabled: BTreeSet<String>,
 }
 
@@ -51,8 +57,8 @@ pub fn directory(game: &Path) -> io::Result<PathBuf> {
     Ok(mods)
 }
 
-/// The game's mods, in the order they apply. New mods start off: a mod
-/// changes the game only once the user turns it on.
+/// The game's mods, in the order they apply. A mod put in the folder is on
+/// until the user turns it off.
 pub fn list(game: &Path) -> io::Result<Vec<ModEntry>> {
     let mods = data_paths::game_mods_directory(game);
     let state = read_state(game);
@@ -73,7 +79,7 @@ pub fn list(game: &Path) -> io::Result<Vec<ModEntry>> {
         // Files aren't mods; links could reach outside the mods folder.
         if entry.file_type()?.is_dir() {
             entries.push(ModEntry {
-                enabled: state.enabled.contains(&name),
+                enabled: !state.disabled.contains(&name),
                 name,
             });
         }
@@ -86,9 +92,9 @@ pub fn list(game: &Path) -> io::Result<Vec<ModEntry>> {
 pub fn set_enabled(game: &Path, name: &str, enabled: bool) -> io::Result<()> {
     let mut state = read_state(game);
     if enabled {
-        state.enabled.insert(name.to_owned());
+        state.disabled.remove(name);
     } else {
-        state.enabled.remove(name);
+        state.disabled.insert(name.to_owned());
     }
     write_state(game, &state)
 }
@@ -217,7 +223,7 @@ mod tests {
     }
 
     #[test]
-    fn folders_are_listed_off_by_default_and_remembered() {
+    fn folders_are_listed_on_by_default_and_remembered() {
         let game = temp("listing");
         let mods = directory(&game).unwrap();
         fs::create_dir_all(mods.join("B Second")).unwrap();
@@ -227,11 +233,25 @@ mod tests {
         let listed = list(&game).unwrap();
         let names: Vec<_> = listed.iter().map(|entry| entry.name.as_str()).collect();
         assert_eq!(names, ["A First", "B Second"]);
-        assert!(listed.iter().all(|entry| !entry.enabled));
-        set_enabled(&game, "B Second", true).unwrap();
-        assert!(list(&game).unwrap()[1].enabled);
+        assert!(
+            listed.iter().all(|entry| entry.enabled),
+            "new mods start on"
+        );
         set_enabled(&game, "B Second", false).unwrap();
         assert!(!list(&game).unwrap()[1].enabled);
+        assert!(list(&game).unwrap()[0].enabled);
+        set_enabled(&game, "B Second", true).unwrap();
+        assert!(list(&game).unwrap()[1].enabled);
+        // The first format (mods turned on) still reads: every mod is on.
+        fs::write(
+            data_paths::game_mods_state_path(&game),
+            br#"{"enabled": ["A First"]}"#,
+        )
+        .unwrap();
+        assert!(list(&game).unwrap().iter().all(|entry| entry.enabled));
+        set_enabled(&game, "A First", false).unwrap();
+        assert!(!list(&game).unwrap()[0].enabled);
+        assert!(list(&game).unwrap()[1].enabled);
         fs::remove_dir_all(game).unwrap();
     }
 
@@ -246,10 +266,7 @@ mod tests {
         fs::write(mods.join("Base/romfs/data/only-base.bin"), "kept").unwrap();
         let title = 0x0004_0000_0016_4800;
         let target = data_paths::three_ds_mods_target(&game, title);
-        assert!(prepare_three_ds(&game, title).unwrap().is_empty());
-        assert!(!target.exists());
-        set_enabled(&game, "Base", true).unwrap();
-        set_enabled(&game, "Override", true).unwrap();
+        // On by default: both merge at the next launch.
         assert_eq!(
             prepare_three_ds(&game, title).unwrap(),
             ["Base", "Override"]

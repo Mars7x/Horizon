@@ -1,0 +1,58 @@
+Horizon: let the libretro core enable Azahar's asynchronous shader compilation.
+
+Azahar 2126.2 implements async_shader_compilation (Vulkan pipelines are built
+on worker threads instead of stalling the frame) and its Qt and Android
+frontends expose it, but the libretro core never reads it. This adds a
+citra_async_shader_compilation core option (default disabled, as upstream) and
+applies it with the other graphics options. Horizon sets it to enabled.
+
+Modified 2026-10-24 for Horizon. GPL-2.0-or-later, as the rest of Azahar.
+
+diff --git a/src/citra_libretro/core_settings.cpp b/src/citra_libretro/core_settings.cpp
+index 53fb164..bcc9e2d 100644
+--- a/src/citra_libretro/core_settings.cpp
++++ b/src/citra_libretro/core_settings.cpp
+@@ -59,6 +59,8 @@ static constexpr const char* use_hw_shader = citra_setting(BaseKeys::use_hw_shad
+ static constexpr const char* use_shader_jit = citra_setting(BaseKeys::use_shader_jit);
+ static constexpr const char* shaders_accurate_mul = citra_setting(BaseKeys::shaders_accurate_mul);
+ static constexpr const char* use_disk_shader_cache = citra_setting(BaseKeys::use_disk_shader_cache);
++static constexpr const char* async_shader_compilation =
++    citra_setting(BaseKeys::async_shader_compilation);
+ static constexpr const char* resolution_factor = citra_setting(BaseKeys::resolution_factor);
+ static constexpr const char* texture_filter = citra_setting(BaseKeys::texture_filter);
+ static constexpr const char* texture_sampling = citra_setting(BaseKeys::texture_sampling);
+@@ -356,6 +358,23 @@ static constexpr retro_core_option_v2_definition option_definitions[] = {
+         },
+         config::enabled
+     },
++    // Added by Horizon (2026-10-24): expose Azahar's existing asynchronous
++    // shader compilation setting to libretro frontends.
++    {
++        config::graphics::async_shader_compilation,
++        "Async Shader Compilation",
++        "Async Shaders",
++        "Compile new shaders in the background instead of pausing for them. "
++        "Removes stutter when a game first shows an effect; it may briefly be missing.",
++        nullptr,
++        config::category::graphics,
++        {
++            { config::enabled, "Enabled" },
++            { config::disabled, "Disabled" },
++            { nullptr, nullptr }
++        },
++        config::disabled
++    },
+     {
+         config::graphics::resolution_factor,
+         "Internal Resolution",
+@@ -974,6 +993,10 @@ static void ParseGraphicsOptions(void) {
+         LibRetro::FetchVariable(config::graphics::use_disk_shader_cache, config::enabled) ==
+         config::enabled;
+ 
++    Settings::values.async_shader_compilation =
++        LibRetro::FetchVariable(config::graphics::async_shader_compilation, config::disabled) ==
++        config::enabled;
++
+     auto resolution = LibRetro::FetchVariable(config::graphics::resolution_factor, "1");
+     Settings::values.resolution_factor = std::stoi(resolution);
+ 

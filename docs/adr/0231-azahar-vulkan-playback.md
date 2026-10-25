@@ -1,6 +1,8 @@
 # ADR 0231: Initial Azahar playback through Vulkan
 
-Status: Accepted by explicit user direction for 3DS support and Vulkan.
+Status: Accepted by explicit user direction for 3DS support and Vulkan. The
+"unmodified source" rule is amended by [ADR 0238](0238-azahar-async-shaders.md),
+which adds one patch.
 
 ## Decision
 

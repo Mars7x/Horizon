@@ -51,6 +51,7 @@
 | [0235](0235-3ds-gpu-viewport-readback.md) | 3DS GPU viewport readback: shrink shown frames on the GPU before reading them |
 | [0236](0236-game-options-panel.md) | Game options panel: the quick menu’s mirror at the right edge |
 | [0237](0237-3ds-save-states.md) | 3DS save states: slots and resume point, no rewind or background states |
+| [0238](0238-azahar-async-shaders.md) | Azahar async shader compilation: Horizon’s one core patch |
 
 Earlier decisions and their supporting phase notes are in
 [history](../history/INDEX.md). Their numbered identifiers remain reserved.
