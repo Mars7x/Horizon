@@ -136,6 +136,10 @@ pub struct GbaPlayer {
     worker_paused: Cell<bool>,
     stage: Cell<PlayerStage>,
     stage_since: Cell<Instant>,
+    /// Measurements: shown frames whose top screen changed, and the last
+    /// one's sampled hash (a game drawing 30 frames a second repeats each).
+    #[cfg(test)]
+    distinct: Cell<(u64, u64)>,
     /// When Return to Horizon started saving, until the collapse begins.
     exit_since: Cell<Option<Instant>>,
     /// Called by the game worker when a frame is ready (see `show_frame`).
@@ -192,6 +196,8 @@ impl GbaPlayer {
             worker_paused: Cell::new(false),
             stage: Cell::new(PlayerStage::Waiting),
             stage_since: Cell::new(Instant::now()),
+            #[cfg(test)]
+            distinct: Cell::new((0, 0)),
             exit_since: Cell::new(None),
             frame_ready: std::cell::OnceCell::new(),
             last_shown: Cell::new(None),
@@ -1370,6 +1376,22 @@ impl GbaPlayer {
         let (width, height) = frame.exact.unwrap_or_default();
         ui.set_player_exact_width(width as i32);
         ui.set_player_exact_height(height as i32);
+        #[cfg(test)]
+        {
+            // Every 61st pixel of the top screen (all of it for one screen).
+            let rows = frame
+                .screens
+                .map_or(frame.pixels.height(), |[top, _]| top.1);
+            let top = &frame.pixels.as_bytes()[..(frame.pixels.width() * rows) as usize * 4];
+            let hash = top
+                .chunks(61 * 4)
+                .fold(0xcbf2_9ce4_8422_2325u64, |hash, chunk| {
+                    (hash ^ u64::from(u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])))
+                        .wrapping_mul(0x100_0000_01b3)
+                });
+            let (count, last) = self.distinct.get();
+            self.distinct.set((count + u64::from(hash != last), hash));
+        }
         // The worker built Slint's buffer: no copy here.
         ui.set_player_frame(Image::from_rgba8(frame.pixels));
         ui.set_player_has_frame(true);
@@ -1379,6 +1401,15 @@ impl GbaPlayer {
         if since.elapsed() >= Duration::from_secs(1) {
             let frames_per_second =
                 (self.shown.get() - before) as f64 / since.elapsed().as_secs_f64();
+            #[cfg(test)]
+            {
+                let (count, last) = self.distinct.get();
+                tracing::debug!(
+                    changed_per_second = count as f64 / since.elapsed().as_secs_f64(),
+                    "game frames whose top screen changed"
+                );
+                self.distinct.set((0, last));
+            }
             tracing::debug!(frames_per_second, "game frames shown");
             self.shown_report.set((Instant::now(), self.shown.get()));
             // The window may only learn its monitor after it appears, or move.
