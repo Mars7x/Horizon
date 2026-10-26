@@ -152,12 +152,13 @@ pub struct ControllerPreferences {
     pub shortcuts: Shortcuts,
 }
 
-pub const SHORTCUT_NAMES: [&str; 5] = [
+pub const SHORTCUT_NAMES: [&str; 6] = [
     "Fast-forward",
     "Quick save",
     "Quick load",
     "Screenshot",
     "Rewind",
+    "Quick menu",
 ];
 
 /// In-game shortcuts, shared by every system: one or two controller buttons
@@ -167,7 +168,7 @@ pub const SHORTCUT_NAMES: [&str; 5] = [
 /// Fast-forward works while held; the others act once per press.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "SavedShortcuts", into = "Vec<Vec<u8>>")]
-pub struct Shortcuts([u16; 5]);
+pub struct Shortcuts([u16; 6]);
 
 /// Keep the original single-button/null settings readable when adding pairs.
 /// Writes always use the current list-of-buttons format.
@@ -195,9 +196,11 @@ impl TryFrom<SavedShortcuts> for Shortcuts {
 
 impl Default for Shortcuts {
     /// Both triggers fast-forward: a pair, so either trigger alone still
-    /// reaches the game (the DS microphone is the left trigger).
+    /// reaches the game (the DS microphone is the left trigger). Select and
+    /// Start together open the quick menu, for systems such as SteamOS's Game
+    /// Mode where the Guide button belongs to the system.
     fn default() -> Self {
-        Self([1 << 12 | 1 << 13, 0, 0, 0, 0])
+        Self([1 << 12 | 1 << 13, 0, 0, 0, 0, Self::QUICK_MENU_DEFAULT])
     }
 }
 impl TryFrom<Vec<Vec<u8>>> for Shortcuts {
@@ -207,9 +210,18 @@ impl TryFrom<Vec<Vec<u8>>> for Shortcuts {
         if rows.len() == 4 {
             rows.push(Vec::new());
         }
-        let mut masks = [0u16; 5];
+        // Nor a Quick menu one: it gets Select + Start unless either is taken.
+        if rows.len() == 5 {
+            let taken = |bit: u8| rows.iter().any(|row| row.contains(&bit));
+            rows.push(if taken(2) || taken(3) {
+                Vec::new()
+            } else {
+                vec![3, 2]
+            });
+        }
+        let mut masks = [0u16; 6];
         if rows.len() != masks.len() {
-            return Err("Shortcuts have five rows");
+            return Err("Shortcuts have six rows");
         }
         for (mask, row) in masks.iter_mut().zip(&rows) {
             if row.len() > 2 || row.iter().any(|v| !SOURCES.contains(v)) {
@@ -247,6 +259,9 @@ impl Shortcuts {
     pub const QUICK_LOAD: usize = 2;
     pub const SCREENSHOT: usize = 3;
     pub const REWIND: usize = 4;
+    pub const QUICK_MENU: usize = 5;
+    /// Select (libretro 2) and Start (3), held together.
+    const QUICK_MENU_DEFAULT: u16 = 1 << 2 | 1 << 3;
     /// `row`'s buttons, in `SOURCES` order (none, one or two).
     pub fn buttons(self, row: usize) -> Vec<u8> {
         let mask = self.0.get(row).copied().unwrap_or(0);
@@ -387,14 +402,16 @@ mod tests {
         assert_eq!(old.shortcuts.buttons(Shortcuts::QUICK_LOAD), vec![9]);
         assert_eq!(old.shortcuts.buttons(Shortcuts::SCREENSHOT), vec![0]);
         let saved = serde_json::to_string(&old).unwrap();
-        assert!(saved.contains(r#""shortcuts":[[13],[],[9],[0],[]]"#));
+        // Older files gain the Quick menu default when its buttons are free.
+        assert!(saved.contains(r#""shortcuts":[[13],[],[9],[0],[],[3,2]]"#));
         assert_eq!(
             serde_json::from_str::<ControllerPreferences>(&saved).unwrap(),
             old
         );
-        // The reported configuration keeps its right-trigger binding.
+        // The reported configuration keeps its right-trigger binding (and
+        // gains the free Select + Start quick menu).
         let reported: Shortcuts = serde_json::from_str("[13,null,null,null]").unwrap();
-        assert_eq!(reported.mask(), 1 << 13);
+        assert_eq!(reported.mask(), 1 << 13 | 1 << 3 | 1 << 2);
         // Legacy data still goes through the same validation as button pairs.
         for invalid in ["[13,null,null]", "[13,13,null,null]", "[4,null,null,null]"] {
             assert!(serde_json::from_str::<Shortcuts>(invalid).is_err());
@@ -427,10 +444,18 @@ mod tests {
             map.assign(Shortcuts::QUICK_LOAD, 1 << 9 | 1 << 1 | 1 << 8),
             map
         );
-        assert_eq!(map.clear(Shortcuts::QUICK_SAVE).mask(), 0);
+        assert_eq!(map.clear(Shortcuts::QUICK_SAVE).mask(), 1 << 3 | 1 << 2);
         let round: Vec<Vec<u8>> = defaults.into();
         assert_eq!(Shortcuts::try_from(round).unwrap(), defaults);
         assert!(Shortcuts::try_from(vec![vec![12, 13], vec![13], vec![], vec![]]).is_err());
+        // Select + Start opens the quick menu; either alone reaches the game.
+        assert_eq!(defaults.buttons(Shortcuts::QUICK_MENU), vec![3, 2]);
+        assert_eq!(defaults.withheld(1 << 3), 0);
+        assert!(defaults.held(Shortcuts::QUICK_MENU, 1 << 2 | 1 << 3));
+        // A five-row file that already uses Start keeps it; no quick menu.
+        let taken: Shortcuts = serde_json::from_str("[[12,13],[3],[],[],[]]").unwrap();
+        assert_eq!(taken.buttons(Shortcuts::QUICK_SAVE), vec![3]);
+        assert!(!taken.is_set(Shortcuts::QUICK_MENU));
         let old: ControllerPreferences = serde_json::from_str(r#"{"swap_confirm":false}"#).unwrap();
         assert_eq!(old.shortcuts, Shortcuts::default());
     }

@@ -55,7 +55,7 @@ The shared append-only catalog and historical SQLite identities remain intact.
 
 There is no Shop, external launcher integration, Steam screenshot/achievement
 integration, host command execution, dedicated session or compositor support.
-Normal Wayland, fullscreen, scaling, SDL input, desktop portals and application
+Normal Wayland (X11 only without Wayland, as in SteamOS Game Mode), fullscreen, scaling, SDL input, desktop portals and application
 lifecycle handling remain. Linux x86_64 and aarch64 remain targets; compatibility
 requires real builds and core-by-core assessment when cores are introduced.
 

@@ -21,6 +21,7 @@
     "--share=ipc",
     "--share=network",
     "--socket=wayland",
+    "--socket=fallback-x11",
     "--filesystem=xdg-run/pipewire-0",
     "--device=dri",
     "--device=input",

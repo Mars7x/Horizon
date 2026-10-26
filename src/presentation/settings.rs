@@ -1758,7 +1758,7 @@ mod editor_navigation_tests {
         assert_eq!(super::selection_count(SettingsView::Controller), 4);
         assert_eq!(super::selection_count(SettingsView::Cores), 5);
         assert_eq!(super::selection_count(SettingsView::DsBindings), 10);
-        assert_eq!(super::selection_count(SettingsView::Shortcuts), 6);
+        assert_eq!(super::selection_count(SettingsView::Shortcuts), 7);
         assert_eq!(
             super::settings_parent(SettingsView::MelonDs),
             Some((SettingsView::Cores, 1))
@@ -2493,10 +2493,14 @@ mod mapping_runtime_tests {
                             (ui.get_settings_view(), ui.get_settings_selection()),
                             (5, 2)
                         );
-                        // Shortcuts: same page, five rows, X clears one.
+                        // Shortcuts: same page, six rows, X clears one.
                         ui.invoke_settings_activate(3);
                         assert_eq!(ui.get_settings_view(), 11);
-                        assert_eq!(ui.get_settings_binding_rows().row_count(), 5);
+                        assert_eq!(ui.get_settings_binding_rows().row_count(), 6);
+                        assert_eq!(
+                            ui.get_settings_binding_rows().row_data(5).unwrap().title,
+                            "Quick menu"
+                        );
                         // A pair: both held, then let go.
                         snapshot.set(Some((0, 7)));
                         ui.invoke_settings_activate(1);

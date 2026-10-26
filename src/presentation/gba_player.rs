@@ -1089,6 +1089,7 @@ impl GbaPlayer {
             Shortcuts::QUICK_LOAD,
             Shortcuts::SCREENSHOT,
             Shortcuts::REWIND,
+            Shortcuts::QUICK_MENU,
         ] {
             if pressed & (1 << row) != 0 {
                 self.shortcut(ui, row);
@@ -1133,6 +1134,10 @@ impl GbaPlayer {
             Shortcuts::SCREENSHOT => Command::Screenshot,
             Shortcuts::REWIND => {
                 self.open_rewind(ui);
+                return;
+            }
+            Shortcuts::QUICK_MENU => {
+                self.pause();
                 return;
             }
             _ => return,

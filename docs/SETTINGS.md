@@ -34,7 +34,9 @@ focus.
 
 Shortcuts is the same page for in-game shortcuts shared by every system:
 Fast-forward (hold; both triggers together by default), Quick save, Quick load,
-Screenshot and Rewind (not set by default). Each takes one button or two pressed
+Screenshot, Rewind (not set by default) and Quick menu (Select + Start together
+by default, for SteamOS Game Mode and other systems that keep the Guide button
+for themselves). Each takes one button or two pressed
 together: hold them, then let go (more than two asks again). X clears a row. A
 one-button shortcut's button is held back from games; a pair's buttons still
 reach the game alone and are held back only while the whole pair is down, so
@@ -42,7 +44,9 @@ the DS microphone (left trigger) keeps working. A button serves one shortcut:
 giving it to another clears the first. Restore defaults restores the triggers.
 Earlier single-button/null shortcut files retain their assignments; the next
 settings save writes them in the current format that also supports pairs.
-Four-row files retain their shortcuts and gain an unset Rewind row.
+Four-row files retain their shortcuts and gain an unset Rewind row; five-row
+files gain Quick menu on Select + Start when neither button is already used,
+otherwise unset.
 
 Mappings apply to all controllers after family normalization, independently of
 keyboard gameplay. Swap Select and Back exchanges mapped gameplay A/B and X/Y; the rows

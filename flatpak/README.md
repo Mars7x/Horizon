@@ -27,6 +27,7 @@ remove development fetch requirements. These release gates are not complete.
 | --- | --- |
 | IPC and DRI | Windowing/rendering |
 | Wayland socket | Normal desktop UI |
+| X11 fallback socket | Only without Wayland: SteamOS Game Mode (gamescope's Xwayland) |
 | Input devices | SDL controller navigation |
 | Network | Steam profile/friends and independent SteamGridDB |
 | PipeWire runtime socket | UI sounds and Album audio |

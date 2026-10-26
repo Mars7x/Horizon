@@ -30,8 +30,9 @@ recognition is separate from Steam account services.
 
 During [GBA playback](GBA_PLAYBACK.md), held buttons and key releases drive the
 core independently of menu repeats. Keyboard: arrows move, Z/X are A/B, A/S are
-L/R, Enter is Start and Backspace is Select. Escape/F10 or Guide opens Pause;
-stick clicks never do. Shortcuts: Tab held fast-forwards, F5 quick saves, F8 quick loads
+L/R, Enter is Start and Backspace is Select. Escape/F10 or Guide opens Pause, as
+does the controller's Quick menu shortcut (Select + Start together by default),
+for SteamOS Game Mode, where Steam keeps the Guide button; stick clicks never do. Shortcuts: Tab held fast-forwards, F5 quick saves, F8 quick loads
 and F12 takes a screenshot; F6 opens rewind. Controller shortcuts are set in Settings →
 Controller → Shortcuts (one button, or a pair such as the default both triggers
 for fast-forward); a single shortcut button never reaches the game, a pair's

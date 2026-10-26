@@ -52,6 +52,7 @@
 | [0236](0236-game-options-panel.md) | Game options panel: the quick menu’s mirror at the right edge |
 | [0237](0237-3ds-save-states.md) | 3DS save states: slots and resume point, no rewind or background states |
 | [0238](0238-azahar-async-shaders.md) | Azahar async shader compilation: Horizon’s one core patch |
+| [0239](0239-steamos-game-mode.md) | SteamOS Game Mode: X11 fallback socket and Select + Start quick menu |
 
 Earlier decisions and their supporting phase notes are in
 [history](../history/INDEX.md). Their numbered identifiers remain reserved.
